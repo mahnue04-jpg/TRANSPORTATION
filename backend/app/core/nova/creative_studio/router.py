@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -345,6 +345,7 @@ class BudgetConfirmIn(BaseModel):
     confirmed: bool = True
     acknowledged_estimate_usd: float | None = None
     note: str = Field(default="", max_length=500)
+    quote_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 @router.get("/projects/{project_id}/preflight")
@@ -377,6 +378,7 @@ def confirm_project_render_budget(
             confirmed=payload.confirmed,
             acknowledged_estimate_usd=payload.acknowledged_estimate_usd,
             note=payload.note,
+            quote_fingerprint=payload.quote_fingerprint,
         )
     except CreativeStudioError as exc:
         _raise(exc)
@@ -1572,6 +1574,100 @@ def accept_project_voice_license(
         raise
 
 
+class GenovaImageApprovalIn(BaseModel):
+    asset_id: str | None = None
+
+
+@router.get("/projects/{project_id}/genova-narration")
+def genova_narration_readiness(project_id: str, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).genova_narration_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/projects/{project_id}/genova-narration-approval")
+def approve_genova_narration(project_id: str, payload: GenovaImageApprovalIn, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_narration_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/genova-narration-upload")
+async def upload_genova_narration(
+    project_id: str,
+    file: UploadFile = File(...),
+    script: str = Form(..., min_length=1, max_length=10000),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        data = await file.read(32 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_narration(user.user_id, project_id, data, script, content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    finally:
+        await file.close()
+
+
+@router.post("/projects/{project_id}/genova-image-upload")
+async def upload_genova_image(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise CreativeStudioError("INVALID_IMAGE", "Declare a PNG, JPEG, or WebP image type.", http_status=422)
+        data = await file.read(8 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_presenter_image(
+            user.user_id, project_id, data, file.filename or "presenter.png", content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/projects/{project_id}/genova-image-approval")
+def approve_genova_image(
+    project_id: str,
+    payload: GenovaImageApprovalIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_presenter_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/genova-avatar-readiness")
+def genova_avatar_readiness(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-only Genova provider preflight, no generation or billing."""
+    _require_owner(user)
+    try:
+        return get_service(db).genova_avatar_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assemble/walking-presenter-proof")
 def assemble_walking_presenter_proof(
     project_id: str,
@@ -1677,3 +1773,4 @@ def export_project(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+

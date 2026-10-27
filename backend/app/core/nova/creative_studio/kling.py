@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -277,3 +278,119 @@ class FalKlingLipSyncProvider(FalKlingVideoProvider):
                 task_id=token or None,
                 message="Kling LipSync could not proceed. Keep the saved task and review fal usage before retrying.",
             )
+
+
+# Kling AI Avatar v2 Standard takes a verified presenter image and prerecorded
+# audio. Keep it separate from local montage and from 5s image-to-motion routes.
+AVATAR_MODEL = "fal-ai/kling-video/ai-avatar/v2/standard"
+AVATAR_TOKEN_PREFIX = "fal-kling-avatar-v2:"
+
+
+class FalKlingAvatarProvider(FalKlingLipSyncProvider):
+    """Owner-gated, queued talking-avatar generation; no implicit paid calls."""
+
+    provider_id = "fal_kling_avatar_v2"
+
+    def _validate_task(self, task):
+        """fal tracks endpoint jobs under the owner/app, not the model path."""
+        request_id = task.get("request_id")
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", request_id):
+            raise _SafeKlingError("Missing fal avatar request id.")
+        base = "/fal-ai/kling-video/requests/" + request_id
+        for key in ("status_url", "response_url"):
+            value = task.get(key)
+            if not isinstance(value, str):
+                raise _SafeKlingError("Missing fal avatar queue tracking URL.")
+            url = urllib.parse.urlsplit(value)
+            if (url.scheme != "https" or url.netloc != "queue.fal.run"
+                    or url.path != base + ("/status" if key == "status_url" else "")
+                    or url.query or url.fragment):
+                raise _SafeKlingError("Invalid fal avatar queue tracking URL.")
+
+    @staticmethod
+    def validate_avatar_input(*, image_url, audio_url, prompt=""):
+        image = str(image_url or "").strip()
+        audio = str(audio_url or "").strip()
+        # Fal's API accepts hosted URLs or base64 image/audio URIs.
+        if not (image.startswith("https://") or image.startswith("data:image/")):
+            raise _SafeKlingError("Approved presenter image must be accessible to fal.")
+        if not (audio.startswith("https://") or audio.startswith("data:audio/")):
+            raise _SafeKlingError("Approved narration must be accessible to fal.")
+        return {
+            "image_url": image,
+            "audio_url": audio,
+            "prompt": str(prompt or "Natural business presenter speaking to camera")[:1200],
+            "enable_safety_checker": True,
+        }
+
+    def generate_avatar(self, *, image_url, audio_url, prompt="", resume_task_id=None,
+                        persist_task_before_poll=True):
+        result = {"provider": self.provider_id, "model": AVATAR_MODEL,
+                  "asset_generated": False, "url": None,
+                  "generation_mode": "talking_avatar", "watermark_free": False}
+        state = self.status()
+        token = str(resume_task_id or "").strip()
+        # Turning paid generation off must not strand a previously saved task.
+        # A valid resume token permits GET-only recovery while a key is present.
+        if state.status != AVAILABLE and (not token or not self._key()):
+            return dict(result, status=state.status, message=state.message)
+        task_validated = False
+        submission_attempted = False
+        request_id = None
+        try:
+            if token:
+                if not token.startswith(AVATAR_TOKEN_PREFIX) or len(token) > 4000:
+                    raise _SafeKlingError("This saved task does not belong to Kling AI Avatar.")
+                task = json.loads(base64.urlsafe_b64decode(token[len(AVATAR_TOKEN_PREFIX):]))
+                self._validate_task(task)
+                task_validated = True
+                request_id = task["request_id"]
+            else:
+                payload = self.validate_avatar_input(
+                    image_url=image_url, audio_url=audio_url, prompt=prompt)
+                submission_attempted = True
+                submitted = self._request_json("POST", QUEUE + AVATAR_MODEL, payload=payload)
+                task = {key: submitted.get(key) for key in
+                        ("request_id", "status_url", "response_url")}
+                self._validate_task(task)
+                task_validated = True
+                request_id = task["request_id"]
+                token = AVATAR_TOKEN_PREFIX + base64.urlsafe_b64encode(
+                    json.dumps(task).encode()).decode()
+                if persist_task_before_poll:
+                    return dict(result, status="PROCESSING", task_id=token,
+                                message="Kling avatar task queued; save the reference before polling.")
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                status = self._request_json("GET", task["status_url"])
+                stage = str(status.get("status") or "").upper()
+                if stage == "COMPLETED":
+                    if status.get("error"):
+                        return dict(result, status=ERROR, task_id=token,
+                                    message="Kling avatar failed; inspect fal usage before retrying.")
+                    output = self._request_json("GET", task["response_url"])
+                    url = (output.get("video") or {}).get("url")
+                    if not isinstance(url, str) or not url.startswith("https://"):
+                        return dict(result, status=ERROR, task_id=token,
+                                    message="Kling avatar returned no video.")
+                    saved = self._save_remote_video(url)
+                    return dict(result, status="GENERATED", task_id=token,
+                                asset_generated=True, url=saved,
+                                message="Kling avatar video saved for owner review.")
+                if stage not in {"IN_QUEUE", "IN_PROGRESS"}:
+                    return dict(result, status="PROCESSING", task_id=token,
+                                message="Keep saved avatar task for status review.")
+                time.sleep(5)
+            return dict(result, status="PROCESSING", task_id=token,
+                        message="Kling avatar still processing; resume existing request.")
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError, AttributeError):
+            if task_validated and token:
+                return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
+                            can_resubmit=False,
+                            message="Avatar status or download was interrupted. Resume the saved task; no replacement was submitted.")
+            return dict(result, status=ERROR, task_id=None, can_resubmit=False,
+                        submission_uncertain=submission_attempted,
+                        message=("Avatar submission could not be confirmed. Check fal request history before starting another render."
+                                 if submission_attempted else
+                                 "Kling avatar input or saved task is invalid. No new request was submitted."))
+

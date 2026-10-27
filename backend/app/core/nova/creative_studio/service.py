@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import math
+import subprocess
 from pathlib import Path
 import tempfile
 import time
@@ -703,6 +707,13 @@ class CreativeStudioService(ShortDramaMixin):
                 duration_seconds = float(duration) if duration is not None else None
             except (TypeError, ValueError):
                 duration_seconds = None
+
+            # The 30s offline montage is PREVIEW_ONLY on purpose. The headshot
+            # cleanup must not delete it or its file.
+            render_mode = str(meta.get("render_mode") or "")
+            pipeline = str(meta.get("pipeline") or "")
+            if render_mode == "offline_montage_not_lipsync" or pipeline == "offline_title_card_fallback":
+                continue
 
             is_old_headshot = asset.kind == "presenter_video" and presenter_mode in {"", "head", "headshot"}
             is_preview_only = quality_state in {"PREVIEW_ONLY", "DEMO_READY_WITH_PROVIDER_WATERMARK"}
@@ -1764,9 +1775,35 @@ class CreativeStudioService(ShortDramaMixin):
         meta = dict(project.metadata or {})
         confirmation = meta.get("budget_confirmation") or {}
         quote["project_id"] = project_id
-        quote["owner_budget_confirmed"] = bool(confirmation.get("confirmed"))
+        quote["quote_fingerprint"] = self._render_quote_fingerprint(project, quote)
+        quote["owner_budget_confirmed"] = self._budget_confirmation_matches(confirmation, quote)
         quote["confirmation"] = confirmation or None
         return quote
+
+    def _render_quote_fingerprint(self, project, quote) -> str:
+        scope = {"project_id": project.id, "duration": project.duration_target,
+                 "production": (project.metadata or {}).get("production_settings"),
+                 "image": (project.metadata or {}).get("approved_genova_image_asset_id"),
+                 "narration": (project.metadata or {}).get("approved_genova_narration"),
+                 "scripts": [a.content for a in self.store.list_assets(project.id, project.owner_id) if a.kind == "presenter_script"],
+                 "scenes": [s.as_dict() for s in self.store.list_scenes(project.id, project.owner_id)],
+                 "currency": quote.get("currency"), "estimate": quote.get("estimated_total_usd"),
+                 "items": quote.get("line_items"), "providers": quote.get("providers"), "balance": quote.get("balance")}
+        return hashlib.sha256(json.dumps(scope, sort_keys=True, default=str).encode()).hexdigest()
+
+    @staticmethod
+    def _budget_confirmation_matches(confirmation, quote) -> bool:
+        try:
+            estimate = float(quote["estimated_total_usd"])
+            acknowledged = float(confirmation["acknowledged_estimate_usd"])
+            expires = datetime.fromisoformat(confirmation["expires_at"])
+            return bool(confirmation.get("confirmed") is True
+                        and confirmation.get("quote_fingerprint") == quote.get("quote_fingerprint")
+                        and expires > datetime.now(timezone.utc)
+                        and math.isfinite(estimate) and estimate > 0
+                        and math.isfinite(acknowledged) and acknowledged >= estimate)
+        except (KeyError, TypeError, ValueError):
+            return False
 
     def confirm_render_budget(
         self,
@@ -1776,6 +1813,7 @@ class CreativeStudioService(ShortDramaMixin):
         confirmed: bool,
         acknowledged_estimate_usd: float | None = None,
         note: str = "",
+        quote_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         quote = self.preflight_quote(owner_id, project_id)
@@ -1786,6 +1824,22 @@ class CreativeStudioService(ShortDramaMixin):
                 "Local motion / offline assembly may still run without provider charges.",
                 http_status=422,
             )
+        if confirmed:
+            if quote_fingerprint != quote["quote_fingerprint"]:
+                raise CreativeStudioError("STALE_RENDER_QUOTE", "Project or quote changed. Run preflight and review it again.", http_status=422)
+            from app.core.nova.creative_studio.studio_checkout import public_pricing
+            ceiling = float(public_pricing()["internal_render_cost_ceiling_usd"])
+            estimate = float(quote["estimated_total_usd"])
+            try:
+                acknowledged = float(acknowledged_estimate_usd)
+            except (TypeError, ValueError):
+                acknowledged = float("nan")
+            if not (math.isfinite(estimate) and 0 < estimate <= ceiling
+                    and math.isfinite(acknowledged) and estimate <= acknowledged <= ceiling):
+                raise CreativeStudioError("INVALID_RENDER_BUDGET", "A finite estimate within the render ceiling must be reviewed and acknowledged.", http_status=422)
+            reported_balance = quote.get("balance", {}).get("amount")
+            if reported_balance is None or float(reported_balance) < estimate:
+                raise CreativeStudioError("INSUFFICIENT_REPORTED_BALANCE", "The reviewed balance must cover the estimate. Nova does not purchase credits.", http_status=422)
         meta = dict(project.metadata or {})
         meta["budget_confirmation"] = {
             "confirmed": bool(confirmed),
@@ -1793,11 +1847,13 @@ class CreativeStudioService(ShortDramaMixin):
             "quote_estimated_total_usd": quote.get("estimated_total_usd"),
             "note": str(note or "")[:500],
             "confirmed_at": _now() if confirmed else None,
+            "quote_fingerprint": quote["quote_fingerprint"] if confirmed else None,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat() if confirmed else None,
         }
         project.metadata = meta
         project.updated_at = _now()
         self.store.save_project(project)
-        return {"project_id": project_id, "budget_confirmation": meta["budget_confirmation"], "quote": quote}
+        return {"project_id": project_id, "budget_confirmation": meta["budget_confirmation"], "quote": self.preflight_quote(owner_id, project_id)}
 
     def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str) -> None:
         from app.core.nova.creative_studio.flags import (
@@ -1817,12 +1873,15 @@ class CreativeStudioService(ShortDramaMixin):
         ):
             return
         project = self._project_or_404(owner_id, project_id)
-        confirmation = (project.metadata or {}).get("budget_confirmation") or {}
-        if confirmation.get("confirmed") is True:
+        quote = self.preflight_quote(owner_id, project_id)
+        from app.core.nova.creative_studio.studio_checkout import public_pricing
+        ceiling = float(public_pricing()["internal_render_cost_ceiling_usd"])
+        if (quote.get("paid_render_allowed") is True and quote.get("owner_budget_confirmed") is True
+                and float(quote["estimated_total_usd"]) <= ceiling):
             return
         raise CreativeStudioError(
             "BUDGET_CONFIRMATION_REQUIRED",
-            "Owner budget confirmation is required before paid Creative Studio provider renders. "
+            "A current, matching owner budget confirmation is required before paid Creative Studio provider renders. "
             "Run preflight, review the estimate, then confirm. No automatic purchases.",
             http_status=422,
         )
@@ -1995,55 +2054,216 @@ class CreativeStudioService(ShortDramaMixin):
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
 
-    def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
-        """Prefer project Genova full-body stills; fall back to known media-root plates."""
-        preferred_names = (
-            "nova-c4edd02f88a04f7081a79a18fd98a935.png",
-            "nova-18f6ccddce0249f7a77e696c808fdf89.png",
-        )
-        assets = [
-            asset
-            for asset in self.store.list_assets(project_id, owner_id)
-            if asset.kind == "image"
-            and asset.url
-            and str(asset.status or "").upper() == "GENERATED"
-        ]
+    def upload_genova_presenter_image(self, owner_id: str, project_id: str, data: bytes, filename: str, *, content_type: str | None = None) -> dict[str, Any]:
+        """Save an owner-scoped local image candidate; no provider calls or implicit approval."""
+        from io import BytesIO
+        from PIL import Image, UnidentifiedImageError
+        self._project_or_404(owner_id, project_id)
+        if not data or len(data) > 8 * 1024 * 1024:
+            raise CreativeStudioError("INVALID_IMAGE", "Image must be between 1 byte and 8 MB.", http_status=422)
+        try:
+            with Image.open(BytesIO(data)) as im:
+                if im.format not in {"PNG", "JPEG", "WEBP"}:
+                    raise ValueError("Unsupported image format")
+                expected_mime = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}[im.format]
+                if content_type is not None and content_type != expected_mime:
+                    raise ValueError("Image content does not match its declared type")
+                if im.width < 256 or im.height < 256 or im.width * im.height > 20_000_000:
+                    raise ValueError("Invalid image dimensions")
+                im.verify()
+            with Image.open(BytesIO(data)) as im:
+                clean = im.convert("RGB")
+                root, prefix = _creative_media_root_and_prefix()
+                root.mkdir(parents=True, exist_ok=True)
+                name = new_id("genova_upload") + ".png"
+                path = root / name
+                clean.save(path, "PNG")
+        except (UnidentifiedImageError, ValueError, OSError, Image.DecompressionBombError):
+            raise CreativeStudioError("INVALID_IMAGE", "Upload a valid PNG, JPEG, or WebP image (minimum 256px).", http_status=422)
+        asset = self._save_text_asset(owner_id=owner_id, project_id=project_id,
+            kind="image", title="Uploaded presenter image (owner review)",
+            content="Owner-uploaded presenter candidate; NOT automatically approved",
+            status="GENERATED", url=prefix.rstrip("/") + "/" + name,
+            metadata={"source": "owner_upload", "approval_required": True})
+        return {"asset": asset.as_dict(), "approved": False}
 
-        def _is_genova(asset: CreativeAsset) -> bool:
-            content = str(asset.content or "").lower()
-            return (
-                "genova presenter v2" in content
-                or (
-                    ("black woman" in content or "african american woman" in content)
-                    and "presenter" in content
-                )
-            )
+    def upload_genova_narration(self, owner_id: str, project_id: str, data: bytes, script: str, *, content_type: str) -> dict[str, Any]:
+        """Import local audio and a new script revision, without approving or generating."""
+        project = self._project_or_404(owner_id, project_id)
+        script = str(script or "").strip()
+        suffix = {"audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav"}.get(content_type)
+        if not suffix or not data or len(data) > 32 * 1024 * 1024 or not 0 < len(script) <= 10000:
+            raise CreativeStudioError("INVALID_NARRATION", "Choose WAV or MP3 audio under 32 MB and provide its script (up to 10,000 characters).", http_status=422)
+        root, prefix = _creative_media_root_and_prefix()
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="nova-narration-") as temporary:
+            source = Path(temporary) / ("narration" + suffix)
+            source.write_bytes(data)
+            duration = self._validate_genova_narration_file(source, project)
+            try:
+                subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-f", suffix[1:],
+                                "-i", str(source), "-map", "0:a", "-f", "null", "-"],
+                               capture_output=True, check=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                raise CreativeStudioError("INVALID_NARRATION", "Narration could not be decoded completely. Choose a playable WAV or MP3 file.", http_status=422) from None
+            name = new_id("genova_narration_upload") + suffix
+            (root / name).write_bytes(data)
+        self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="presenter_script",
+            title="Imported narration script", content=script, status="GENERATED")
+        asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="audio",
+            title="Imported narration (owner review)", content=script, status="GENERATED",
+            url=prefix.rstrip("/") + "/" + name,
+            metadata={"source": "owner_audio_upload", "approval_required": True,
+                      "duration_seconds": round(duration, 3), "license_status": "AMBER"})
+        return {"asset": asset.as_dict(), "approved": False, "paid_request_submitted": False}
 
-        scored: list[tuple[int, Path]] = []
-        for asset in assets:
-            path = _resolve_creative_media_url(asset.url)
+    def set_genova_presenter_approval(self, owner_id: str, project_id: str, asset_id: str | None) -> dict[str, Any]:
+        """Persist an owner-approved generated image ID, never a client-supplied path."""
+        project = self._project_or_404(owner_id, project_id)
+        if asset_id:
+            asset = next((a for a in self.store.list_assets(project_id, owner_id)
+                          if a.id == asset_id and a.kind == "image"
+                          and str(a.status or "").upper() == "GENERATED"), None)
+            path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
             if path is None or not path.is_file():
-                continue
-            name = path.name.lower()
-            score = 0
-            if name in preferred_names:
-                score += 100
-            if _is_genova(asset):
-                score += 50
-            if name.startswith("nova-") and name.endswith(".png"):
-                score += 5
-            if score:
-                scored.append((score, path))
-        if scored:
-            scored.sort(key=lambda item: item[0], reverse=True)
-            return scored[0][1]
+                raise CreativeStudioError("INVALID_PRESENTER", "Select an available generated image from this project.", http_status=422)
+        meta = dict(project.metadata or {})
+        if asset_id:
+            meta["approved_genova_image_asset_id"] = asset_id
+        else:
+            meta.pop("approved_genova_image_asset_id", None)
+        project.metadata = meta
+        project.updated_at = _now()
+        self.store.save_project(project)
+        return {"project_id": project_id, "approved_asset_id": asset_id, "approved": bool(asset_id)}
 
-        root, _prefix = _creative_media_root_and_prefix()
-        for name in preferred_names:
-            candidate = root / name
-            if candidate.is_file():
-                return candidate
-        return None
+    def _validate_genova_narration_file(self, path: Path, project: CreativeProject) -> float:
+        try:
+            probe = subprocess.run(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", path.suffix.lower().lstrip("."), "-show_entries", "format=duration:stream=codec_type",
+                                    "-of", "json", str(path)], capture_output=True, text=True, check=True, timeout=10)
+            details = json.loads(probe.stdout)
+            duration = float(details["format"]["duration"])
+            kinds = [s.get("codec_type") for s in details.get("streams", [])]
+            if (not math.isfinite(duration) or not 0 < duration <= min(180, float(project.duration_target or 30))
+                    or "audio" not in kinds or "video" in kinds):
+                raise ValueError("Invalid narration duration or stream")
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            raise CreativeStudioError("INVALID_NARRATION", "Narration must be playable audio within the project duration allowance.", http_status=422) from None
+        return duration
+
+    def _genova_narration_snapshot(self, owner_id: str, project_id: str, asset_id: str) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        assets = self.store.list_assets(project_id, owner_id)
+        asset = next((a for a in assets if a.id == asset_id and a.kind == "audio"
+                      and str(a.status or "").upper() == "GENERATED"), None)
+        if asset is None or not str(asset.content or "").strip():
+            raise CreativeStudioError("INVALID_NARRATION", "Select saved narration with its script from this project.", http_status=422)
+        path, _mime, _name = self.open_asset_file(owner_id, project_id, asset_id)
+        if path.suffix.lower() not in {".wav", ".mp3"} or not 0 < path.stat().st_size <= 32 * 1024 * 1024:
+            raise CreativeStudioError("INVALID_NARRATION", "Select available WAV or MP3 narration under 32 MB.", http_status=422)
+        scripts = [a for a in assets if a.kind == "presenter_script" and str(a.content or "").strip()]
+        script = " ".join(str(asset.content).split())
+        current_script = " ".join(str(scripts[-1].content).split()) if scripts else script
+        if script != current_script:
+            raise CreativeStudioError("NARRATION_SCRIPT_MISMATCH", "Saved narration does not match the latest presenter script. Review the script and narration together.", http_status=422)
+        duration = self._validate_genova_narration_file(path, project)
+        return {"asset_id": asset.id, "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "script_sha256": hashlib.sha256(script.encode()).hexdigest(), "duration_seconds": round(duration, 3)}
+
+    def set_genova_narration_approval(self, owner_id: str, project_id: str, asset_id: str | None) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        snapshot = self._genova_narration_snapshot(owner_id, project_id, asset_id) if asset_id else None
+        meta = dict(project.metadata or {})
+        if snapshot:
+            meta["approved_genova_narration"] = dict(snapshot, approved_at=_now())
+        else:
+            meta.pop("approved_genova_narration", None)
+        project.metadata = meta
+        project.updated_at = _now()
+        self.store.save_project(project)
+        return {"project_id": project_id, "approved": bool(snapshot), "approved_asset_id": asset_id if snapshot else None,
+                "paid_request_submitted": False}
+
+    def genova_narration_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        project = self._project_or_404(owner_id, project_id)
+        approval = (project.metadata or {}).get("approved_genova_narration") or {}
+        approved = False
+        reason = "Listen to saved narration, then approve it explicitly. No generation is started."
+        if approval.get("asset_id"):
+            try:
+                current = self._genova_narration_snapshot(owner_id, project_id, approval["asset_id"])
+                approved = all(approval.get(key) == value for key, value in current.items())
+                reason = "Approved narration matches the saved audio and script." if approved else "Narration changed; review and approve it again."
+            except CreativeStudioError as exc:
+                reason = exc.message
+        candidates = []
+        assets = self.store.list_assets(project_id, owner_id)
+        scripts = [a for a in assets if a.kind == "presenter_script" and str(a.content or "").strip()]
+        latest_script = " ".join(str(scripts[-1].content).split()) if scripts else None
+        for asset in assets:
+            if asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED" or not asset.url:
+                continue
+            try:
+                path, _mime, _name = self.open_asset_file(owner_id, project_id, asset.id)
+                if path.suffix.lower() in {".wav", ".mp3"}:
+                    candidates.append({"asset_id": asset.id, "title": str(asset.title or "Narration")[:100],
+                                       "filename": "genova-narration" + path.suffix.lower(),
+                                       "matches_saved_script": latest_script is None or " ".join(str(asset.content or "").split()) == latest_script})
+            except CreativeStudioError:
+                continue
+        return {"project_id": project_id, "approved": approved,
+                "approved_asset_id": approval.get("asset_id") if approved else None,
+                "candidate_audio": list(reversed(candidates[-12:])), "message": reason, "paid_request_submitted": False}
+
+    def genova_avatar_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Read-only owner-scoped preflight. Never invokes or charges a provider."""
+        from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
+
+        self._project_or_404(owner_id, project_id)
+        project = self._project_or_404(owner_id, project_id)
+        presenter = self._resolve_genova_presenter_image(owner_id, project_id)
+        approved_id = str((project.metadata or {}).get("approved_genova_image_asset_id") or "")
+        image_assets = [a for a in self.store.list_assets(project_id, owner_id)
+                        if a.kind == "image" and a.url and str(a.status or "").upper() == "GENERATED"]
+        provider = FalKlingAvatarProvider().status()
+        narration = self.genova_narration_readiness(owner_id, project_id)
+        budget = self.preflight_quote(owner_id, project_id)
+        return {
+            "project_id": project_id,
+            "mode": "PREVIEW_PREFLIGHT_ONLY",
+            "provider": "fal_kling_avatar_v2",
+            "provider_status": provider.status,
+            "provider_configured": provider.configured,
+            "approved_presenter_image_found": bool(approved_id and presenter),
+            "generated_image_assets_in_project": len(image_assets),
+            "candidate_images": [{"asset_id": a.id, "title": str(a.title or "Image")[:100]}
+                                 for a in image_assets if (lambda p: p is not None and p.is_file())(_resolve_creative_media_url(a.url))][:12],
+            "candidate_images_are_approved": bool(approved_id and presenter),
+            "approved_image_asset_id": approved_id if presenter else None,
+            "presenter_image_next_step": ("Approved Genova image located." if presenter else
+                 "Project has images but none match approved Genova presenter criteria." if image_assets else
+                 "No generated image assets in this project; add or generate an approved Genova image."),
+            "approved_narration_audio_found": narration["approved"],
+            "approved_narration_asset_id": narration["approved_asset_id"],
+            "narration_next_step": narration["message"],
+            "budget_confirmation_valid": budget["owner_budget_confirmed"],
+            "budget_enforcement_ready": False,
+            "can_generate": False,
+            "reason": "Narration approval is checked against saved media and script. Per-request provider cost enforcement is not connected; paid Genova generation remains blocked.",
+            "paid_request_submitted": False,
+        }
+
+    def _resolve_genova_presenter_image(self, owner_id: str, project_id: str) -> Path | None:
+        """Use only an available image explicitly approved for this owner's project."""
+        project = self._project_or_404(owner_id, project_id)
+        approved_id = str((project.metadata or {}).get("approved_genova_image_asset_id") or "")
+        if not approved_id:
+            return None
+        asset = next((a for a in self.store.list_assets(project_id, owner_id)
+                      if a.id == approved_id and a.kind == "image"
+                      and str(a.status or "").upper() == "GENERATED"), None)
+        path = _resolve_creative_media_url(asset.url) if asset and asset.url else None
+        return path if path is not None and path.is_file() else None
 
     @serialized_media
     def render_walking_presenter_proof(
@@ -2204,6 +2424,17 @@ class CreativeStudioService(ShortDramaMixin):
         scenes = self.store.list_scenes(project_id, owner_id)
         if not scenes:
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard first.", http_status=422)
+        assets = self.store.list_assets(project_id, owner_id)
+        saved_scripts = [asset for asset in assets if asset.kind == "presenter_script" and str(asset.content or "").strip()]
+        selected_script = saved_scripts[-1].content if saved_scripts else None
+        approved_audio_path = None
+        if (project.metadata or {}).get("approved_genova_narration"):
+            narration_state = self.genova_narration_readiness(owner_id, project_id)
+            if not narration_state["approved"]:
+                raise CreativeStudioError("NARRATION_APPROVAL_REQUIRED", narration_state["message"], http_status=422)
+            approved_audio = next(asset for asset in assets if asset.id == narration_state["approved_asset_id"])
+            selected_script = approved_audio.content
+            approved_audio_path, _mime, _filename = self.open_asset_file(owner_id, project_id, approved_audio.id)
         output_dir, public_prefix = _creative_media_root_and_prefix()
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
@@ -2214,6 +2445,8 @@ class CreativeStudioService(ShortDramaMixin):
             rendered = render_walking_commercial_30s(
                 output_mp4=output_path,
                 scenes=[scene.as_dict() for scene in scenes],
+                script=selected_script,
+                approved_narration_path=approved_audio_path,
                 license_status=self._project_voice_license(owner_id, project_id),
                 presenter_image=presenter_image,
             )
@@ -2258,6 +2491,14 @@ class CreativeStudioService(ShortDramaMixin):
             "provider_clearance": cleared,
             "publish_ready": False,
         }
+        # A generated playable MP4 is not necessarily an acceptable commercial.
+        # Explicitly classify missing presenter-image fallback as preview only.
+        if str(rendered.get("visual_mode") or "") == "illustrated_fallback":
+            video_metadata["quality_state"] = "PREVIEW_ONLY_ILLUSTRATED"
+            video_metadata["presenter_used"] = False
+            video_metadata["body_lipsync"] = False
+            video_metadata["publish_ready"] = False
+            video_metadata["illustrated_fallback"] = True
         video_metadata["commercial_complete"] = commercial_complete_allowed(video_metadata)
         audio_asset = self._save_text_asset(
             owner_id=owner_id,
@@ -2270,7 +2511,7 @@ class CreativeStudioService(ShortDramaMixin):
                 "provider_result": rendered.get("narration") or {},
                 "paid_provider_charges": False,
                 "lip_sync": True,
-                "natural_female_voice": True,
+                "natural_female_voice": bool((rendered.get("narration") or {}).get("natural_female_voice")),
             },
             url=audio_url,
         )
@@ -2669,3 +2910,4 @@ def get_service(db=None) -> CreativeStudioService:
     if db is not None:
         return CreativeStudioService(get_db_store(db))
     return CreativeStudioService()
+

@@ -61,12 +61,15 @@
         <form id="staging-register-form" class="grid hidden" autocomplete="off">
           <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
           <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <label><input type="checkbox" class="studio-password-visibility" data-target="staging-register-password" /> Show new test password</label>
           <button type="submit">Create separate test account</button>
         </form>
       </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <label><input type="checkbox" class="studio-password-visibility" data-target="login-password" /> Show password</label>
+        <p class="hint">Staging uses separate test accounts. Your production password may not work here. Forgot your test password? Create a new disposable test account with a different test email; never reuse your production password.</p>
         <button type="submit">Sign in</button>
       </form>
     </section>
@@ -86,7 +89,20 @@
         <button type="button" id="select-second-commercial" class="secondary">Select Second Commercial</button>
         <button type="button" id="accept-voice-license" class="secondary">Accept voice license</button>
         <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
+        <button type="button" id="check-genova-avatar-readiness" class="secondary">Check Genova professional presenter readiness (free)</button>
       </div>
+      <section aria-label="Genova image approval"><h3>Approve Genova presenter image</h3><p class="hint">Choose one existing image from this project. Approval is saved to this project only; no paid generation.</p><div class="actions wrap"><label>Upload a local presenter image (PNG/JPEG/WebP, up to 8 MB)<input id="genova-image-file" type="file" accept="image/png,image/jpeg,image/webp" /></label><button type="button" id="genova-upload-image" class="secondary">Upload image (free)</button><button type="button" id="genova-load-images" class="secondary">Show existing presenter images</button><button type="button" id="genova-revoke-image" class="secondary">Remove approval</button></div><div id="genova-image-choices" role="status" aria-live="polite"></div></section>
+      <section aria-label="Genova narration approval">
+        <h3>Review and approve Genova narration</h3>
+        <p class="hint">Import a voice recording with its exact script. This saves a new presenter script revision and keeps earlier assets. Review and approval follow separately.</p>
+        <label>Narration recording (WAV or MP3, up to 32 MB)<input id="genova-narration-file" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" /></label>
+        <label>Exact words in the recording<textarea id="genova-narration-script" maxlength="10000" rows="4"></textarea></label>
+        <button type="button" id="genova-upload-narration" class="secondary">Import narration and script (free)</button>
+        <p class="hint">Download and listen to saved narration before approving it. Approval applies to this project's exact audio and saved presenter script. Changing either requires another review. No generation or payment starts here.</p>
+        <div class="actions wrap"><button type="button" id="genova-load-narration" class="secondary">Show saved narration</button><button type="button" id="genova-revoke-narration" class="secondary">Remove narration approval</button></div>
+        <div id="genova-narration-choices" role="status" aria-live="polite"></div>
+      </section>
+      <div id="genova-avatar-readiness-result" class="hint" role="status" aria-live="polite">Professional presenter test is not activated. Run the free readiness check to see missing requirements.</div>
       <details class="studio-details">
         <summary>Optional · 5s preview &amp; montage fallback</summary>
         <p class="hint">PREVIEW_ONLY fallback. Presenter NOT USED. Title cards and local eSpeak narration only. This is not the 30s presenter pipeline and cannot be marked commercially complete. Put a verified first-party link in the TikTok/Instagram profile Website field. Captions are not clickable.</p>
@@ -339,6 +355,15 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
-  <script src="/static/nova-creative/creative.js?v=studio-auth-download-20261022"></script>
+  <script>
+    document.querySelectorAll(".studio-password-visibility").forEach(function (control) {
+      control.addEventListener("change", function () {
+        var field = document.getElementById(control.dataset.target);
+        if (field) field.type = control.checked ? "text" : "password";
+      });
+    });
+  </script>
+  <script src="/static/nova-creative/creative.js?v=genova-narration-import-20261026"></script>
 </body>
 </html>
+
