@@ -109,10 +109,10 @@ def write_six_scene_caption_draft(lines: list[str], output: Path) -> Path:
         safe = " ".join(line.split())
         if len(safe) > 350:
             raise CommercialAssemblyError("caption_line_too_long")
-        cues.append(f"{index}\\n{timestamp((index - 1) * 5)} --> {timestamp(index * 5)}\\n{safe}\\n")
+        cues.append(f"{index}\n{timestamp((index - 1) * 5)} --> {timestamp(index * 5)}\n{safe}\n")
     output = Path(output)
     if output.suffix.lower() != ".srt":
         raise CommercialAssemblyError("srt_extension_required")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\\n".join(cues) + "\\n", encoding="utf-8")
+    output.write_text("\n".join(cues) + "\n", encoding="utf-8")
     return output
