@@ -290,7 +290,8 @@ def _view(selected: dict[str, Any], priced: dict[str, Any], reservation: dict[st
         "output_class": "provider_backed_30s" if authorized else "not_authorized",
         "offline_demo_fallback": "separate_route",
         "uses_local_montage": False,
-        "paid_provider_charges": False,
+        "paid_provider_charges": None if posts or _ambiguous_posts(reservation) else False,
+        "charge_status": "potential_charge_unverified" if posts or _ambiguous_posts(reservation) else "no_provider_post",
         "provider_posts": posts,
         "credentials": credentials,
         "activation": {
@@ -504,7 +505,8 @@ def validate_provider_commercial_30s_resume(service, owner_id: str, project_id: 
         "problems": problems,
         "reservation_id": reservation.get("reservation_id"),
         "provider_posts": posts,
-        "paid_provider_charges": False,
+        "paid_provider_charges": None if posts or _ambiguous_posts(reservation) else False,
+        "charge_status": "potential_charge_unverified" if posts or _ambiguous_posts(reservation) else "no_provider_post",
         "download_ready": download_ready,
         "saved": True,
     }
@@ -609,6 +611,8 @@ def submit_provider_commercial_30s(
         resume = str(shot.get("motion_task_id") or "").strip()
         if not resume:
             shot["post_attempted"] = True
+            existing["paid_provider_charges"] = None
+            existing["charge_status"] = "potential_charge_unverified"
             persist()
             result = motion_provider.generate(
                 brief={
@@ -656,7 +660,8 @@ def submit_provider_commercial_30s(
         view = _view(selected, priced, existing, [])
         view["status"] = "PROCESSING"
         view["message"] = "Motion tasks are saved. Resume them before lip-sync. No duplicate post was made."
-        view["paid_provider_charges"] = False
+        view["paid_provider_charges"] = None
+        view["charge_status"] = "potential_charge_unverified"
         view["render_mode"] = "fal_kling_motion_then_lipsync"
         view["offline_demo_fallback"] = False
         return view
@@ -674,6 +679,8 @@ def submit_provider_commercial_30s(
         audio_url = str(shot.get("audio_url") or narration_url)
         if not resume:
             shot["lipsync_post_attempted"] = True
+            existing["paid_provider_charges"] = None
+            existing["charge_status"] = "potential_charge_unverified"
             persist()
             result = lipsync_provider.generate_lipsync(
                 video_url=shot["saved_url"],
@@ -706,7 +713,8 @@ def submit_provider_commercial_30s(
     complete = all(shot.get("lipsync_url") for shot in existing["shots"])
     if complete:
         existing["status"] = "generated"
-        existing["paid_provider_charges"] = False
+        existing["paid_provider_charges"] = None
+        existing["charge_status"] = "potential_charge_unverified"
         persist()
     view = _view(selected, priced, existing, [])
     view["status"] = "GENERATED" if complete else "PROCESSING"
@@ -716,7 +724,8 @@ def submit_provider_commercial_30s(
     view["uses_local_montage"] = False
     view["true_ai_motion_synthesis"] = complete
     view["provider_lip_sync"] = complete
-    view["paid_provider_charges"] = False
+    view["paid_provider_charges"] = None
+    view["charge_status"] = "potential_charge_unverified"
     view["pipeline"] = "provider_commercial_30s"
     view["message"] = (
         "Provider-backed 30s motion and synced narration are saved."
