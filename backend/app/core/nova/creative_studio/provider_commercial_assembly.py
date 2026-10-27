@@ -90,3 +90,29 @@ def assemble_saved_scenes(scene_paths: list[Path], output: Path) -> dict:
     finally:
         if staged.exists():
             staged.unlink()
+
+
+def write_six_scene_caption_draft(lines: list[str], output: Path) -> Path:
+    """Prepare a 30s SRT sidecar using fixed 5s scene slots (NOT speech-aligned).
+
+    The output must undergo human review and measured speech timing before it
+    may be labeled synchronized or commercially ready.
+    """
+    if len(lines) != 6 or any(not isinstance(line, str) or not line.strip() for line in lines):
+        raise CommercialAssemblyError("six_caption_lines_required")
+
+    def timestamp(seconds: int) -> str:
+        return f"00:00:{seconds:02d},000"
+
+    cues = []
+    for index, line in enumerate(lines, 1):
+        safe = " ".join(line.split())
+        if len(safe) > 350:
+            raise CommercialAssemblyError("caption_line_too_long")
+        cues.append(f"{index}\\n{timestamp((index - 1) * 5)} --> {timestamp(index * 5)}\\n{safe}\\n")
+    output = Path(output)
+    if output.suffix.lower() != ".srt":
+        raise CommercialAssemblyError("srt_extension_required")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\\n".join(cues) + "\\n", encoding="utf-8")
+    return output
