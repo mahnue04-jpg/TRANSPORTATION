@@ -775,3 +775,72 @@ def submit_provider_commercial_30s(
         else "Lip-sync tasks are saved. Resume them instead of posting again."
     )
     return view
+
+
+def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id: str) -> dict[str, Any]:
+    """Owner-scoped, non-billable composition of six *locally saved* lip-sync clips.
+
+    Never downloads remote provider URLs or submits generation jobs. Captioned
+    release is deliberately separate and must pass QC before becoming customer-ready.
+    """
+    from pathlib import Path
+
+    from app.core.nova.creative_studio.provider_commercial_assembly import (
+        CommercialAssemblyError,
+        assemble_saved_scenes,
+    )
+    from app.core.nova.creative_studio.providers import (
+        _creative_media_root_and_prefix,
+        _resolve_creative_media_url,
+    )
+
+    project = service._project_or_404(owner_id, project_id)
+    reservation = _load(project)
+    if not reservation or reservation.get("status") not in {"scenes_ready", "assembled_uncaptioned"}:
+        return {"status": "BLOCKED", "reason": "scenes_not_ready", "provider_posts": 0}
+    shots = reservation.get("shots") or []
+    if len(shots) != SHOT_COUNT or [shot.get("index") for shot in shots] != list(range(1, SHOT_COUNT + 1)):
+        return {"status": "BLOCKED", "reason": "invalid_scene_order"}
+    existing_id = reservation.get("final_assembly_asset_id")
+    if existing_id:
+        try:
+            path, _, _ = service.open_asset_file(owner_id, project_id, existing_id)
+            if path.is_file():
+                return {"status": "ASSEMBLED_UNCAPTIONED", "asset_id": existing_id,
+                        "final_mp4_verified": True, "captions_verified": False, "idempotent_replay": True}
+        except Exception:
+            return {"status": "BLOCKED", "reason": "existing_output_missing_manual_review"}
+    paths = []
+    for shot in shots:
+        url = str(shot.get("lipsync_url") or "")
+        path = _resolve_creative_media_url(url) if url else None
+        if path is None or not path.is_file():
+            return {"status": "BLOCKED", "reason": "provider_scene_not_saved_locally",
+                    "shot_index": shot.get("index")}
+        paths.append(Path(path))
+    root, prefix = _creative_media_root_and_prefix()
+    root.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "", str(reservation.get("reservation_id") or ""))
+    if not safe_name:
+        return {"status": "BLOCKED", "reason": "invalid_reservation_id"}
+    output = root / f"nova-provider-commercial-{safe_name}.mp4"
+    try:
+        assembled = assemble_saved_scenes(paths, output)
+    except (CommercialAssemblyError, OSError, ValueError):
+        return {"status": "BLOCKED", "reason": "offline_assembly_failed"}
+    asset = service._save_text_asset(
+        owner_id=owner_id, project_id=project_id, kind="video",
+        title="Genova 30s commercial (uncaptioned QC preview)",
+        content="Offline assembled preview; captions and final customer acceptance pending",
+        status="QC_PENDING",
+        url=f"{prefix}/{output.name}",
+        metadata={"source": "provider_commercial_30s", "scene_count": SHOT_COUNT,
+                  "duration_seconds": assembled["duration_seconds"],
+                  "captions_verified": False, "customer_ready": False},
+    )
+    reservation["final_assembly_asset_id"] = asset.id
+    reservation["status"] = "assembled_uncaptioned"
+    _save_reservation(service, project, reservation)
+    return {"status": "ASSEMBLED_UNCAPTIONED", "asset_id": asset.id,
+            "final_mp4_verified": True, "captions_verified": False,
+            "customer_ready": False, "provider_posts": 0}
