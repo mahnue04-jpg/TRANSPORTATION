@@ -828,6 +828,16 @@ def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id:
         assembled = assemble_saved_scenes(paths, output)
     except (CommercialAssemblyError, OSError, ValueError):
         return {"status": "BLOCKED", "reason": "offline_assembly_failed"}
+    # open_asset_file(part="captions") serves an SRT beside the MP4.
+    # Scene-slot captions are drafts, not verified speech-synchronized captions.
+    from app.core.nova.creative_studio.provider_commercial_assembly import write_six_scene_caption_draft
+    try:
+        write_six_scene_caption_draft(
+            [str(shot.get("voiceover_text") or "") for shot in shots],
+            output.with_suffix(".srt"),
+        )
+    except (CommercialAssemblyError, OSError, ValueError):
+        return {"status": "BLOCKED", "reason": "caption_draft_failed"}
     asset = service._save_text_asset(
         owner_id=owner_id, project_id=project_id, kind="video",
         title="Genova 30s commercial (uncaptioned QC preview)",
@@ -836,7 +846,8 @@ def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id:
         url=f"{prefix}/{output.name}",
         metadata={"source": "provider_commercial_30s", "scene_count": SHOT_COUNT,
                   "duration_seconds": assembled["duration_seconds"],
-                  "captions_verified": False, "customer_ready": False},
+                  "captions_verified": False, "caption_draft_available": True,
+                  "customer_ready": False},
     )
     reservation["final_assembly_asset_id"] = asset.id
     reservation["status"] = "assembled_uncaptioned"
