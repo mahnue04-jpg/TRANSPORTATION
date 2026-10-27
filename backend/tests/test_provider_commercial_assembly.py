@@ -134,3 +134,18 @@ def test_real_ffmpeg_six_scenes_have_audio_and_playable_duration(tmp_path):
     assert 29.0 <= measured["duration_seconds"] <= 31.0
     assert measured["has_audio"] and measured["has_video"]
     assert result["captions_verified"] is False
+
+
+def test_draft_srt_has_six_five_second_cues(tmp_path):
+    lines = [f"Genova scene {i}" for i in range(1, 7)]
+    path = assembly.write_six_scene_caption_draft(lines, tmp_path / "draft.srt")
+    body = path.read_text(encoding="utf-8")
+    assert body.count(" --> ") == 6
+    assert "00:00:00,000 --> 00:00:05,000" in body
+    assert "00:00:25,000 --> 00:00:30,000" in body
+    assert "Genova scene 6" in body
+
+
+def test_srt_refuses_missing_scene_text(tmp_path):
+    with pytest.raises(assembly.CommercialAssemblyError, match="six_caption_lines_required"):
+        assembly.write_six_scene_caption_draft(["One"] * 5 + [""], tmp_path / "bad.srt")
