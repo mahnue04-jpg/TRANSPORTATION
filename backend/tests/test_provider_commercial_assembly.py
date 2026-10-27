@@ -96,3 +96,41 @@ def test_final_duration_check_rejects_incorrect_render(tmp_path, monkeypatch):
         assembly.assemble_saved_scenes(files, output)
     assert not output.exists()
     assert not (tmp_path / "invalid.assembling.mp4").exists()
+
+
+@pytest.mark.slow
+def test_real_ffmpeg_six_scenes_have_audio_and_playable_duration(tmp_path):
+    """Use only locally synthesized colors and sine tones, no provider or network."""
+    import shutil
+    import subprocess
+    from app.core.nova.creative_studio.walking_presenter import _ffmpeg
+
+    try:
+        ffmpeg = _ffmpeg()
+    except Exception:
+        pytest.skip("FFmpeg binary is not available")
+    if not shutil.which("ffprobe"):
+        pytest.skip("ffprobe is not available")
+    clips = []
+    for i in range(6):
+        clip = tmp_path / f"synthetic-{i}.mp4"
+        cmd = [
+            ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", f"color=c=blue:s=160x90:r=12:d=5",
+            "-f", "lavfi", "-i", f"sine=frequency={400 + 40 * i}:sample_rate=48000:duration=5",
+            "-shortest", "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", str(clip),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        if result.returncode != 0:
+            pytest.skip("Local FFmpeg cannot encode the synthetic fixtures")
+        clips.append(clip)
+
+    output = tmp_path / "finished-30s.mp4"
+    result = assembly.assemble_saved_scenes(clips, output)
+    measured = assembly.probe_mp4(output)
+    assert result["status"] == "ASSEMBLED_UNCAPTIONED"
+    assert output.stat().st_size > 1000
+    assert 29.0 <= measured["duration_seconds"] <= 31.0
+    assert measured["has_audio"] and measured["has_video"]
+    assert result["captions_verified"] is False
