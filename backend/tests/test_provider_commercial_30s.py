@@ -381,3 +381,52 @@ def test_atomic_claim_only_one_winner_for_simultaneous_requests(ready, monkeypat
     assert sorted(outcomes) == [False, True]
     assert state["successful_claims"] == 1
     assert state["metadata"]["provider_commercial_30s_reservation"]["submission_claimed"] is True
+
+
+def test_db_atomic_reservation_claim_rejects_stale_second_worker(tmp_path):
+    """SQLite-backed CAS: two separate DB sessions cannot claim the same snapshot.
+
+    This is a real SQL conditional-update check, with no paid/provider calls.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.core.nova.creative_studio.db_models import NovaCreativeProject
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'claims.sqlite'}")
+    NovaCreativeProject.__table__.create(bind=engine)
+    initial = {"provider_commercial_30s_reservation": {
+        "reservation_id": "test-reservation",
+        "status": "reserved",
+        "submission_claimed": False,
+    }}
+    with Session(engine) as setup:
+        setup.add(NovaCreativeProject(
+            id="cas-project", owner_id="cas-owner", title="Synthetic 30s",
+            project_type="short_video", platform="generic",
+            objective="", audience="", tone="", duration_target=30,
+            status="draft", brand_profile_id=None, brief_id=None,
+            metadata_json=json.dumps(initial, ensure_ascii=True),
+            created_at="2026-10-27T00:00:00Z", updated_at="2026-10-27T00:00:00Z",
+        ))
+        setup.commit()
+
+    next_state = json.loads(json.dumps(initial))
+    next_state["provider_commercial_30s_reservation"]["submission_claimed"] = True
+    next_state["provider_commercial_30s_reservation"]["status"] = "submitting"
+    with Session(engine) as first, Session(engine) as second:
+        a = DbCreativeStudioStore(first)
+        b = DbCreativeStudioStore(second)
+        assert a.compare_and_swap_project_metadata(
+            "cas-project", "cas-owner", initial, next_state
+        ) is True
+        assert b.compare_and_swap_project_metadata(
+            "cas-project", "cas-owner", initial, next_state
+        ) is False
+        assert b.compare_and_swap_project_metadata(
+            "cas-project", "different-owner", next_state, initial
+        ) is False
+        saved = b.get_project("cas-project", "cas-owner")
+        assert saved.metadata["provider_commercial_30s_reservation"]["submission_claimed"] is True
+    engine.dispose()
