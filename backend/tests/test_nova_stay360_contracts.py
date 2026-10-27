@@ -16,7 +16,14 @@ if str(_TESTS) not in sys.path:
 from stay360_support import anonymous_client, assert_clean, client_for, reset_stay360_store, user
 from stay360_support import HARBOR_TENANT
 
-from app.core.nova.stay360.constants import BLUEPRINT_NOTE, DESCRIPTOR, PRODUCT_NAME
+from app.core.nova.stay360.constants import (
+    BLUEPRINT_NOTE,
+    BLUEPRINT_TITLE,
+    BLUEPRINT_VERSION,
+    DESCRIPTOR,
+    DOCUMENT_TITLE,
+    PRODUCT_NAME,
+)
 from app.core.nova.stay360.errors import Stay360ProviderBlocked, reject_external_provider
 from app.core.nova.stay360.fixtures import assert_synthetic_fixtures, public_guest_labels, sensitive_corpus
 from app.core.nova.stay360.locales import CATALOGS, locale_keys
@@ -60,10 +67,26 @@ def test_locale_catalogs_share_keys_and_keep_the_product_name():
 
 def test_slice_note_records_the_missing_blueprint():
     note = (PACKAGE / "SLICE.md").read_text(encoding="utf-8")
+    coverage = (PACKAGE / "BLUEPRINT_COVERAGE.md").read_text(encoding="utf-8")
     assert PRODUCT_NAME in note
     assert DESCRIPTOR in note
     assert BLUEPRINT_NOTE in note
-    assert "NOT implemented" in note
+    assert "Those titles are different." in note
+    assert DOCUMENT_TITLE in note
+    assert "Not implemented" in coverage
+    assert "Section titles are not in the repository" in coverage
+    for section in (
+        "Hotel guest and reservation data model",
+        "Parking",
+        "Concierge",
+        "Guest services",
+        "Room inventory safeguards",
+        "Family and events",
+        "Marketing",
+        "Itinerary",
+    ):
+        assert section in coverage
+    assert "nine of the 26" in coverage
     for section in (
         "parking",
         "concierge",
@@ -99,6 +122,14 @@ def test_public_meta_locales_and_page_contract():
     body = meta.json()
     assert body["product_name"] == PRODUCT_NAME
     assert body["descriptor"] == DESCRIPTOR
+    assert body["document_title"] == DOCUMENT_TITLE
+    assert body["blueprint_title"] == BLUEPRINT_TITLE
+    assert body["blueprint_version"] == BLUEPRINT_VERSION
+    assert body["blueprint_section_count"] == 26
+    assert body["blueprint_source_in_repo"] is False
+    assert body["product_name"] != body["blueprint_title"]
+    assert body["blueprint_title"] not in body["document_title"]
+    assert body["blueprint_version"] not in body["document_title"]
     assert body["synthetic_only"] is True
     assert body["network_providers"] == "disabled"
     assert body["payment_capture"] is False
@@ -130,7 +161,11 @@ def test_public_meta_locales_and_page_contract():
     html = page.text
     assert PRODUCT_NAME in html
     assert DESCRIPTOR in html
-    assert "Hospitality &amp; Travel Master Blueprint v1.1 (26 sections) is not in the repo" in html
+    title = html.split("<title>", 1)[1].split("</title>", 1)[0]
+    assert title == DOCUMENT_TITLE
+    assert BLUEPRINT_TITLE not in title
+    assert "Hospitality &amp; Travel Master Blueprint, version 1.1. This is not the product title." in html
+    assert "Those titles are different." in html
     assert 'src="/static/nova-stay360/stay360.js"' in html
     keys = set()
     for part in html.split('data-i18n="')[1:]:
@@ -142,6 +177,9 @@ def test_public_meta_locales_and_page_contract():
         assert "https://" not in source
         assert "http://" not in source
         assert "innerHTML" not in source
+    assert 'text("dashboard.rooms_not_ready"), counts.rooms_not_ready' in script
+    assert 'text("readiness.not_ready"), counts.rooms_not_ready' not in script
+    assert 'document.title = product + " \\u2014 " + descriptor' in script
     assert "/api/nova/stay360/dashboard" in script
     assert "/api/nova/stay360/arrivals/refresh" in script
     assert "mobile-check-in" in script

@@ -120,6 +120,11 @@ class GuestPrearrivalResponse(_Strict):
 class MetaResponse(_Strict):
     product_name: str
     descriptor: str
+    document_title: str
+    blueprint_title: str
+    blueprint_version: Literal["1.1"]
+    blueprint_section_count: Literal[26]
+    blueprint_source_in_repo: Literal[False]
     slice_id: str
     synthetic_only: Literal[True]
     fixture_clock_date: str

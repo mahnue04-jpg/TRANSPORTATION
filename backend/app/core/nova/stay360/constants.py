@@ -4,15 +4,26 @@ from __future__ import annotations
 
 PRODUCT_NAME = "AMICOR Nova Stay360"
 DESCRIPTOR = "Intelligent Hospitality Operations"
+DOCUMENT_TITLE = f"{PRODUCT_NAME} — {DESCRIPTOR}"
 SLICE_ID = "guest-prearrival-room-readiness"
 
 FIXTURE_DATE = "2026-10-26"
 FIXTURE_TIMEZONE = "America/Chicago"
 
+# The approved product title and the source blueprint title are different.
+# Issue #391 retired the working label "AMICOR Nova Hospitality & Travel".
+BLUEPRINT_TITLE = "Hospitality & Travel Master Blueprint"
+BLUEPRINT_VERSION = "1.1"
+BLUEPRINT_SECTION_COUNT = 26
+BLUEPRINT_SOURCE_IN_REPO = False
+
 BLUEPRINT_NOTE = (
-    "Hospitality & Travel Master Blueprint v1.1 (26 sections) is not in the repo, "
-    "so later sections (parking, concierge, guest services, inventory safeguards, "
-    "family/events, marketing, itinerary) are NOT implemented."
+    f"The product title is {PRODUCT_NAME}. "
+    f"The source document title is {BLUEPRINT_TITLE} version {BLUEPRINT_VERSION} "
+    f"({BLUEPRINT_SECTION_COUNT} sections) and that document is not in the repo. "
+    "Those titles are different. Sections not implemented: "
+    "parking, concierge, guest services, inventory safeguards, "
+    "family/events, marketing, itinerary."
 )
 
 NOT_IMPLEMENTED = (

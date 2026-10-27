@@ -141,9 +141,14 @@ function localeResponse() {
   return jsonResponse(200, {
     strings: {
       "nav.dashboard": "Hotel dashboard",
+      "dashboard.rooms_not_ready": "Not ready, cleaning, or blocked",
+      "readiness.not_ready": "Not ready",
+      "readiness.ready": "Ready",
+      "table.reference": "Reference",
+      "nav.arrivals": "Arrivals",
+      "table.eligibility": "Check-in",
       "errors.forbidden": "This role cannot open that Stay360 action.",
       "checkin.confirmation": "Confirmation code",
-      "table.reference": "Reference",
       "nav.checkin": "Mobile check-in",
       "checkin.no_door_access": "No door access",
       "checkin.no_payment": "No payment",
@@ -211,6 +216,8 @@ test("refresh and check-in use the token in the field and the board follows the 
   const dashboardCall = ui.requests.find((call) => call.url === "/api/nova/stay360/dashboard");
   assert.equal(dashboardCall.options.headers.Authorization, "Bearer harbor-token");
   assert.ok(texts(ui.nodes.arrivals).includes("A. Lane"));
+  assert.ok(texts(ui.nodes.counts).includes("Not ready, cleaning, or blocked"));
+  assert.equal(texts(ui.nodes.counts).includes("Not ready"), false);
 
   ui.nodes.token.value = "cedar-token";
   ui.nodes["refresh-arrivals"].listeners.click();

@@ -17,6 +17,11 @@
         nodes[i].textContent = strings[key];
       }
     }
+    var product = strings["product.name"];
+    var descriptor = strings["product.descriptor"];
+    if (product && descriptor) {
+      document.title = product + " \u2014 " + descriptor;
+    }
   }
 
   function token() {
@@ -122,7 +127,7 @@
       [text("table.reference"), counts.reservations],
       [text("nav.arrivals"), counts.arrivals_today],
       [text("readiness.ready"), counts.rooms_ready],
-      [text("readiness.not_ready"), counts.rooms_not_ready],
+      [text("dashboard.rooms_not_ready"), counts.rooms_not_ready],
       [text("table.eligibility"), counts.eligible_check_in],
       [text("nav.checkin"), counts.simulated_checked_in],
     ]);
