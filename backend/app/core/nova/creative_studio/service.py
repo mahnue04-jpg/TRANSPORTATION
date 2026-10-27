@@ -193,6 +193,8 @@ class CreativeStudioService(ShortDramaMixin):
                 "paid_providers_default_off": True,
                 "publish_default_off": True,
                 "approved_60s_commercial_unchanged": True,
+                "coral_voice_spend_max_usd": 0.10,
+                "coral_voice_only_safeguard": True,
             },
         }
 
@@ -1107,6 +1109,19 @@ class CreativeStudioService(ShortDramaMixin):
         }
 
     def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None, voice: str | None = None, presenter: bool = False) -> dict[str, Any]:
+        from app.core.nova.creative_studio.flags import voice_provider_live_enabled
+        from app.core.nova.creative_studio.providers import resolve_studio_voice
+        from app.core.nova.creative_studio.voice_spend_safeguard import (
+            CORAL_VOICE,
+            METADATA_KEY,
+            VoiceSpendBlocked,
+            build_reservation,
+            evaluate_coral_request,
+            mark_charged,
+            mark_released,
+            safeguard_status,
+        )
+
         project = self._project_or_404(owner_id, project_id)
         if project.project_type == "short_drama":
             return self.generate_drama_voices(owner_id, project_id)
@@ -1124,13 +1139,112 @@ class CreativeStudioService(ShortDramaMixin):
                     if asset.kind == "voiceover":
                         text = asset.content
                         break
+            if not text:
+                for asset in reversed(assets):
+                    if asset.kind == "presenter_script" and str(asset.content or "").strip():
+                        text = asset.content
+                        break
         text = _repair_guided_demo_copy(text)
-        voice_args = {"script": text or "No voiceover script available."}
-        if voice:
-            voice_args['voice'] = voice
+        # Professional 30s commercial path defaults to Coral under the voice spend safeguard.
+        resolved_voice = resolve_studio_voice(voice or CORAL_VOICE, presenter=True)
+
+        meta = dict(project.metadata or {})
+        existing_spend = dict(meta.get(METADATA_KEY) or {})
+        evaluation = evaluate_coral_request(
+            owner_id=owner_id,
+            project_id=project_id,
+            script=text,
+            voice=resolved_voice,
+            include_whisper=bool(presenter),
+            existing=existing_spend,
+        )
+        spend_gate = safeguard_status(existing_spend)
+        spend_gate["evaluation"] = {
+            "code": evaluation.get("code"),
+            "allowed": evaluation.get("allowed"),
+            "estimated_usd": evaluation.get("estimated_usd"),
+            "max_usd": evaluation.get("max_usd"),
+            "reuse_existing": evaluation.get("reuse_existing"),
+            "message": evaluation.get("message"),
+        }
+
+        if evaluation.get("reuse_existing") and evaluation.get("existing_asset_id"):
+            prior = next(
+                (
+                    item
+                    for item in self.store.list_assets(project_id, owner_id)
+                    if item.id == evaluation["existing_asset_id"]
+                ),
+                None,
+            )
+            if prior is not None and prior.url:
+                self._finish_job(
+                    job,
+                    status=str(prior.status or "GENERATED"),
+                    message="Reused saved Coral narration; duplicate paid request blocked.",
+                    asset_ids=[prior.id],
+                    provider=voice_provider().provider_id,
+                )
+                return {
+                    "job": job.as_dict(),
+                    "asset": prior.as_dict(),
+                    "provider": {
+                        "status": prior.status,
+                        "message": evaluation["message"],
+                        "url": prior.url,
+                        "asset_generated": True,
+                        "voice": resolved_voice,
+                        "reused": True,
+                    },
+                    "url": prior.url,
+                    "spend_safeguard": spend_gate,
+                    "paid_request_submitted": False,
+                }
+
+        # Paid path: enforce the Coral ceiling before any provider call.
+        if voice_provider_live_enabled():
+            if not evaluation.get("allowed"):
+                self._finish_job(
+                    job,
+                    status="ERROR",
+                    message=str(evaluation.get("message") or "Coral narration spend blocked."),
+                    asset_ids=[],
+                    provider=voice_provider().provider_id,
+                )
+                raise CreativeStudioError(
+                    str(evaluation.get("code") or "CORAL_SPEND_BLOCKED"),
+                    str(evaluation.get("message") or "Coral narration spend blocked."),
+                    http_status=422,
+                )
+            try:
+                reservation = build_reservation(evaluation, reserved_at=_now())
+            except VoiceSpendBlocked as exc:
+                self._finish_job(job, status="ERROR", message=exc.message, asset_ids=[], provider=voice_provider().provider_id)
+                raise CreativeStudioError(exc.code, exc.message, http_status=422) from exc
+            meta[METADATA_KEY] = reservation
+            project.metadata = meta
+            project.updated_at = _now()
+            self.store.save_project(project)
+
+        voice_args = {"script": text or "No voiceover script available.", "voice": resolved_voice}
         if presenter:
-            voice_args['presenter'] = True
-        result = voice_provider().generate(**voice_args)
+            voice_args["presenter"] = True
+        try:
+            result = voice_provider().generate(**voice_args)
+        except Exception as exc:
+            if voice_provider_live_enabled():
+                meta = dict(self._project_or_404(owner_id, project_id).metadata or {})
+                meta[METADATA_KEY] = mark_released(
+                    meta.get(METADATA_KEY) or {},
+                    released_at=_now(),
+                    reason=str(exc),
+                )
+                project = self._project_or_404(owner_id, project_id)
+                project.metadata = meta
+                project.updated_at = _now()
+                self.store.save_project(project)
+            raise
+
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
@@ -1140,11 +1254,53 @@ class CreativeStudioService(ShortDramaMixin):
             title="Voice generation result",
             content=text or "",
             status="PROVIDER_CONFIG_REQUIRED" if status == CONFIG_REQUIRED else status,
-            metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
+            metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}, "voice": resolved_voice},
             url=generated_url,
         )
+
+        paid_submitted = False
+        if voice_provider_live_enabled() and result.get("asset_generated") and generated_url:
+            project = self._project_or_404(owner_id, project_id)
+            meta = dict(project.metadata or {})
+            meta[METADATA_KEY] = mark_charged(
+                meta.get(METADATA_KEY) or {},
+                asset_id=asset.id,
+                charged_at=_now(),
+            )
+            project.metadata = meta
+            project.updated_at = _now()
+            self.store.save_project(project)
+            paid_submitted = True
+        elif voice_provider_live_enabled() and not result.get("asset_generated"):
+            project = self._project_or_404(owner_id, project_id)
+            meta = dict(project.metadata or {})
+            meta[METADATA_KEY] = mark_released(
+                meta.get(METADATA_KEY) or {},
+                released_at=_now(),
+                reason=str(result.get("message") or status),
+            )
+            project.metadata = meta
+            project.updated_at = _now()
+            self.store.save_project(project)
+
+        spend_gate = safeguard_status(dict((self._project_or_404(owner_id, project_id).metadata or {}).get(METADATA_KEY) or {}))
+        spend_gate["evaluation"] = {
+            "code": evaluation.get("code"),
+            "allowed": evaluation.get("allowed"),
+            "estimated_usd": evaluation.get("estimated_usd"),
+            "max_usd": evaluation.get("max_usd"),
+            "reuse_existing": False,
+            "message": evaluation.get("message"),
+        }
         self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=voice_provider().provider_id)
-        return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
+        return {
+            "job": job.as_dict(),
+            "asset": asset.as_dict(),
+            "provider": result,
+            "url": generated_url,
+            "spend_safeguard": spend_gate,
+            "paid_request_submitted": paid_submitted,
+        }
 
     @serialized_media
     def assemble_final_promo(self, owner_id: str, project_id: str) -> dict[str, Any]:
@@ -2218,6 +2374,7 @@ class CreativeStudioService(ShortDramaMixin):
     def genova_avatar_readiness(self, owner_id: str, project_id: str) -> dict[str, Any]:
         """Read-only owner-scoped preflight. Never invokes or charges a provider."""
         from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
+        from app.core.nova.creative_studio.voice_spend_safeguard import METADATA_KEY, safeguard_status
 
         self._project_or_404(owner_id, project_id)
         project = self._project_or_404(owner_id, project_id)
@@ -2228,6 +2385,7 @@ class CreativeStudioService(ShortDramaMixin):
         provider = FalKlingAvatarProvider().status()
         narration = self.genova_narration_readiness(owner_id, project_id)
         budget = self.preflight_quote(owner_id, project_id)
+        voice_spend = safeguard_status(dict((project.metadata or {}).get(METADATA_KEY) or {}))
         return {
             "project_id": project_id,
             "mode": "PREVIEW_PREFLIGHT_ONLY",
@@ -2247,9 +2405,15 @@ class CreativeStudioService(ShortDramaMixin):
             "approved_narration_asset_id": narration["approved_asset_id"],
             "narration_next_step": narration["message"],
             "budget_confirmation_valid": budget["owner_budget_confirmed"],
-            "budget_enforcement_ready": False,
+            "budget_enforcement_ready": bool(voice_spend.get("budget_enforcement_ready")),
+            "voice_spend_safeguard": voice_spend,
             "can_generate": False,
-            "reason": "Narration approval is checked against saved media and script. Per-request provider cost enforcement is not connected; paid Genova generation remains blocked.",
+            "reason": (
+                "Coral voice-only spend safeguard is connected (one narration ≤ $0.10, duplicates blocked). "
+                "Paid Genova/Kling/image/video generation remains blocked until separately authorized."
+                if voice_spend.get("budget_enforcement_ready")
+                else "Per-request Coral voice spend enforcement is not ready; paid Genova generation remains blocked."
+            ),
             "paid_request_submitted": False,
         }
 

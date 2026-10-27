@@ -88,7 +88,9 @@ def test_genova_readiness_is_read_only(monkeypatch):
     assert result["provider_status"] == "DISABLED"
     assert result["can_generate"] is False
     assert result["paid_request_submitted"] is False
-    assert result["budget_enforcement_ready"] is False
+    # Voice-only Coral spend ceiling is connected; Kling/avatar generate stays blocked.
+    assert result["budget_enforcement_ready"] is True
+    assert result["voice_spend_safeguard"]["max_usd"] == 0.10
 
 
 def test_genova_readiness_enforces_project_ownership():
