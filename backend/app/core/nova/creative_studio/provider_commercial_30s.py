@@ -612,6 +612,18 @@ def submit_provider_commercial_30s(
         view["submission_authorized"] = False
         return view
 
+    # A single DB-backed request may claim the reservation. Fail closed for
+    # in-memory stores or a concurrently claimed job; never post on uncertainty.
+    if not _atomic_claim_reservation(service, owner_id, project_id, expected_status="reserved"):
+        view = _view(selected, priced, existing, ["submission_claim_unavailable"])
+        view["submission_authorized"] = False
+        return view
+    project = service._project_or_404(owner_id, project_id)
+    existing = _load(project)
+    if not existing or not existing.get("submission_claimed"):
+        view = _view(selected, priced, existing, ["submission_claim_unavailable"])
+        view["submission_authorized"] = False
+        return view
     existing["owner_submit_authorized"] = True
     existing["status"] = "processing"
     existing["paid_provider_charges"] = False
