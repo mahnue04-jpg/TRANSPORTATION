@@ -430,3 +430,44 @@ def test_db_atomic_reservation_claim_rejects_stale_second_worker(tmp_path):
         saved = b.get_project("cas-project", "cas-owner")
         assert saved.metadata["provider_commercial_30s_reservation"]["submission_claimed"] is True
     engine.dispose()
+
+
+def test_offline_assembly_registers_owner_scoped_mp4_and_srt(ready, monkeypatch, tmp_path):
+    """No provider/network calls; validates saved MP4 + draft SRT access rights."""
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+    from app.core.nova.creative_studio import provider_commercial_assembly as assembly
+    from app.core.nova.creative_studio import providers
+
+    svc, owner, project_id = ready
+    reserved = svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    assert reserved["reserved"]
+    project = svc._project_or_404(owner, project_id)
+    reservation = project.metadata["provider_commercial_30s_reservation"]
+    root = tmp_path / "media"
+    root.mkdir()
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (root, "/media/nova-creative"))
+    for shot in reservation["shots"]:
+        clip = root / f"synthetic-{shot['index']}.mp4"
+        clip.write_bytes(b"offline-synthetic-video")
+        shot["lipsync_url"] = "/media/nova-creative/" + clip.name
+    reservation["status"] = "scenes_ready"
+    svc.store.save_project(project)
+
+    def offline_assemble(paths, output):
+        assert len(paths) == 6
+        Path(output).write_bytes(b"offline-assembled-preview")
+        return {"duration_seconds": 30.0}
+
+    monkeypatch.setattr(assembly, "assemble_saved_scenes", offline_assemble)
+    outcome = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert outcome["status"] == "ASSEMBLED_UNCAPTIONED"
+    assert outcome["captions_verified"] is False
+    video, video_type, _ = svc.open_asset_file(owner, project_id, outcome["asset_id"])
+    captions, caption_type, _ = svc.open_asset_file(owner, project_id, outcome["asset_id"], part="captions")
+    assert video.suffix == ".mp4" and video.is_file()
+    assert captions.suffix == ".srt" and captions.is_file()
+    assert captions.read_text().count(" --> ") == 6
+    with pytest.raises(CreativeStudioError):
+        svc.open_asset_file("wrong-owner", project_id, outcome["asset_id"])
+    repeat = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert repeat["idempotent_replay"] is True
