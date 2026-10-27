@@ -197,11 +197,16 @@ def stay360_prearrival(
 
 @api.post("/arrivals/refresh", response_model=ArrivalRefreshResult)
 def stay360_refresh_arrivals(
+    request: Request,
     response: Response,
     _payload: ArrivalRefreshRequest | None = None,
     actor: Stay360Actor = Depends(require_actor),
 ) -> ArrivalRefreshResult:
-    return _call(lambda: get_service().refresh_arrivals(actor), response, (actor.email,))
+    def run() -> ArrivalRefreshResult:
+        _guard_query(request, frozenset())
+        return get_service().refresh_arrivals(actor)
+
+    return _call(run, response, (actor.email,))
 
 
 @api.get("/rooms", response_model=list[RoomView])
@@ -222,24 +227,30 @@ def stay360_rooms(
 def stay360_housekeeping(
     room_number: str,
     payload: HousekeepingUpdate,
+    request: Request,
     response: Response,
     actor: Stay360Actor = Depends(require_actor),
 ) -> HousekeepingResult:
-    return _call(
-        lambda: get_service().update_housekeeping(actor, room_number, payload.status),
-        response,
-        (actor.email,),
-    )
+    def run() -> HousekeepingResult:
+        _guard_query(request, frozenset())
+        return get_service().update_housekeeping(actor, room_number, payload.status)
+
+    return _call(run, response, (actor.email,))
 
 
 @api.post("/reservations/{reference}/mobile-check-in", response_model=MobileCheckInResult)
 def stay360_mobile_check_in(
     reference: str,
+    request: Request,
     response: Response,
     _payload: MobileCheckInRequest | None = None,
     actor: Stay360Actor = Depends(require_actor),
 ) -> MobileCheckInResult:
-    return _call(lambda: get_service().simulate_check_in(actor, reference), response, (actor.email,))
+    def run() -> MobileCheckInResult:
+        _guard_query(request, frozenset())
+        return get_service().simulate_check_in(actor, reference)
+
+    return _call(run, response, (actor.email,))
 
 
 router.include_router(api)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -163,6 +165,62 @@ def test_denied_roles_unenrolled_orgs_and_anonymous_calls_cannot_read_operations
     assert provider.status_code == 422
     listed = staff.get("/api/nova/stay360/reservations/STAY-HLI-1008")
     assert listed.json()["check_in_status"] == "not_checked_in"
+
+
+def test_identity_query_params_do_not_mutate_refresh_housekeeping_or_check_in():
+    staff = client_for(user("staff-harbor", "staff", HARBOR_TENANT))
+    secret_email = "guest-casey@example.invalid"
+    secret_phone = "+1-555-010-CRH2001"
+    secret_name = "Casey Rowan Reed"
+
+    before = staff.get("/api/nova/stay360/reservations/STAY-HLI-1001").json()
+    refresh = staff.post(
+        "/api/nova/stay360/arrivals/refresh",
+        params={"email": secret_email},
+        json={},
+    )
+    assert refresh.status_code == 422
+    assert refresh.json()["detail"]["code"] == "sensitive_lookup_rejected"
+    assert secret_email not in refresh.text
+    after = staff.get("/api/nova/stay360/reservations/STAY-HLI-1001").json()
+    assert after["arrival_status"] == before["arrival_status"]
+    assert_clean(refresh.json())
+
+    housekeeping = staff.post(
+        "/api/nova/stay360/rooms/214/housekeeping",
+        params={"phone": secret_phone},
+        json={"status": "in_progress"},
+    )
+    assert housekeeping.status_code == 422
+    assert housekeeping.json()["detail"]["code"] == "sensitive_lookup_rejected"
+    assert secret_phone not in housekeeping.text
+    room = next(item for item in staff.get("/api/nova/stay360/rooms").json() if item["room_number"] == "214")
+    assert room["housekeeping_status"] == "dirty"
+    assert_clean(housekeeping.json())
+
+    checkin = staff.post(
+        "/api/nova/stay360/reservations/STAY-HLI-1008/mobile-check-in",
+        params={"legal_name": secret_name},
+        json={},
+    )
+    assert checkin.status_code == 422
+    assert checkin.json()["detail"]["code"] == "sensitive_lookup_rejected"
+    assert secret_name not in checkin.text
+    drew = staff.get("/api/nova/stay360/reservations/STAY-HLI-1008").json()
+    assert drew["check_in_status"] == "not_checked_in"
+    assert_clean(checkin.json())
+
+
+def test_dashboard_script_uses_the_current_token_and_clears_the_previous_hotel():
+    node = shutil.which("node")
+    script = Path(__file__).resolve().parent / "stay360_dashboard_behavior.test.cjs"
+    completed = subprocess.run(
+        [node, "--test", str(script)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_lookup_reference_must_match_the_contract_shape():

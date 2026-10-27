@@ -23,6 +23,27 @@
     return window.sessionStorage.getItem("stay360.token") || "";
   }
 
+  function rememberToken() {
+    var value = document.getElementById("token").value.trim();
+    if (value) {
+      window.sessionStorage.setItem("stay360.token", value);
+    } else {
+      window.sessionStorage.removeItem("stay360.token");
+    }
+    return value;
+  }
+
+  function clearOperationalView() {
+    document.getElementById("hotel-name").textContent = "\u2014";
+    document.getElementById("fixture-date").textContent = "\u2014";
+    clearNode(document.getElementById("counts"));
+    clearNode(document.getElementById("arrivals"));
+    clearNode(document.getElementById("rooms"));
+    clearNode(document.getElementById("lookup-result"));
+    clearNode(document.getElementById("checkin-result"));
+    document.getElementById("arrivals-empty").hidden = false;
+  }
+
   function setStatus(message) {
     document.getElementById("session-status").textContent = message || "";
   }
@@ -144,6 +165,7 @@
       renderRooms(dashboard.rooms || []);
       setStatus(text("nav.dashboard"));
     }).catch(function (error) {
+      clearOperationalView();
       setStatus(error.message);
     });
   }
@@ -159,26 +181,33 @@
     });
   }
 
+  var savedToken = window.sessionStorage.getItem("stay360.token") || "";
+  if (savedToken) {
+    document.getElementById("token").value = savedToken;
+  }
   document.getElementById("locale").value = locale;
   document.getElementById("locale").addEventListener("change", function (event) {
     loadLocale(event.target.value);
   });
   document.getElementById("load-dashboard").addEventListener("click", function () {
-    window.sessionStorage.setItem("stay360.token", document.getElementById("token").value.trim());
+    rememberToken();
     loadDashboard();
   });
   document.getElementById("clear-token").addEventListener("click", function () {
     window.sessionStorage.removeItem("stay360.token");
     document.getElementById("token").value = "";
+    clearOperationalView();
     setStatus("");
   });
   document.getElementById("refresh-arrivals").addEventListener("click", function () {
+    rememberToken();
     request("/api/nova/stay360/arrivals/refresh", { method: "POST", body: {} })
       .then(function () { return loadDashboard(); })
       .catch(function (error) { setStatus(error.message); });
   });
   document.getElementById("lookup-form").addEventListener("submit", function (event) {
     event.preventDefault();
+    rememberToken();
     var reference = document.getElementById("lookup-reference").value.trim();
     request("/api/nova/stay360/reservations/" + encodeURIComponent(reference))
       .then(function (row) {
@@ -197,6 +226,7 @@
   });
   document.getElementById("housekeeping-form").addEventListener("submit", function (event) {
     event.preventDefault();
+    rememberToken();
     var room = document.getElementById("room-number").value.trim();
     var status = document.getElementById("housekeeping-status").value;
     request("/api/nova/stay360/rooms/" + encodeURIComponent(room) + "/housekeeping", {
@@ -210,6 +240,7 @@
   });
   document.getElementById("checkin-form").addEventListener("submit", function (event) {
     event.preventDefault();
+    rememberToken();
     var reference = document.getElementById("checkin-reference").value.trim();
     request("/api/nova/stay360/reservations/" + encodeURIComponent(reference) + "/mobile-check-in", {
       method: "POST",
@@ -217,10 +248,12 @@
     }).then(function (result) {
       fillDefinition(document.getElementById("checkin-result"), [
         [text("table.reference"), result.reservation_reference],
+        [text("checkin.confirmation"), result.confirmation_code],
         [text("nav.checkin"), result.check_in_status],
         [text("checkin.no_door_access"), result.door_access],
         [text("checkin.no_payment"), String(result.payment_captured)],
       ]);
+      return loadDashboard();
     }).catch(function (error) {
       var denied = error.payload && error.payload.detail && error.payload.detail.result;
       fillDefinition(document.getElementById("checkin-result"), [
