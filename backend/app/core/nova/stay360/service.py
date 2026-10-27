@@ -10,6 +10,7 @@ from .constants import (
     ADMIN_TRANSITIONS,
     DESCRIPTOR,
     FIXTURE_DATE,
+    PARKING_TRANSITIONS,
     PRODUCT_NAME,
     STAFF_TRANSITIONS,
 )
@@ -23,6 +24,8 @@ from .schemas import (
     GuestPrearrivalResponse,
     HousekeepingResult,
     MobileCheckInResult,
+    ParkingAssignment,
+    ParkingListResponse,
     ReservationListResponse,
     ReservationView,
     RoomView,
@@ -31,6 +34,7 @@ from .store import STORE
 
 REFERENCE_RE = re.compile(r"^STAY-[A-Z0-9]+(?:-[A-Z0-9]+)+$")
 ROOM_RE = re.compile(r"^[0-9]{3}$")
+STALL_RE = re.compile(r"^P[0-9]{2}$")
 NOT_FOUND = "That reservation reference was not found for this hotel."
 
 
@@ -354,6 +358,67 @@ class Stay360Service:
             )
 
         return self.store.write(write)
+
+    def list_parking(self, actor: Stay360Actor) -> ParkingListResponse:
+        def read(tenants: dict) -> ParkingListResponse:
+            tenant = tenants[actor.tenant_id]
+            stalls = [_parking_view(tenant, code, stall) for code, stall in sorted(tenant["stalls"].items())]
+            if actor.kind == "guest":
+                stalls = [row for row in stalls if _guest_owns(tenant, actor.user_id, row.reservation_reference)]
+            return ParkingListResponse(
+                synthetic=True,
+                gate_access="not_issued",
+                payment_captured=False,
+                stalls=stalls,
+            )
+
+        return self.store.read(read)
+
+    def update_parking(self, actor: Stay360Actor, stall_code: str, status: str) -> ParkingAssignment:
+        _require_hotel(actor)
+        cleaned = str(stall_code or "").strip().upper()
+        if not STALL_RE.match(cleaned):
+            raise Stay360Error(422, "invalid_stall", "Stall codes use the synthetic P-code pattern.")
+
+        def write(tenants: dict) -> ParkingAssignment:
+            tenant = tenants[actor.tenant_id]
+            stall = tenant["stalls"].get(cleaned)
+            if stall is None:
+                raise Stay360Error(404, "stall_not_found", "That stall was not found for this hotel.")
+            current = stall["status"]
+            if status not in PARKING_TRANSITIONS[current]:
+                raise Stay360Error(
+                    409,
+                    "invalid_parking_transition",
+                    "That stall status change is not allowed.",
+                )
+            stall["status"] = status
+            return _parking_view(tenant, cleaned, stall)
+
+        return self.store.write(write)
+
+
+def _guest_owns(tenant: dict, user_id: str, reference: str) -> bool:
+    for reservation in tenant["reservations"]:
+        if reservation["reference"] == reference:
+            return reservation["guest_user_id"] == user_id
+    return False
+
+
+def _parking_view(tenant: dict, code: str, stall: dict) -> ParkingAssignment:
+    reservation = next(
+        row for row in tenant["reservations"] if row["reference"] == stall["reservation_reference"]
+    )
+    guest = tenant["guests"][reservation["guest_user_id"]]
+    return ParkingAssignment(
+        stall_code=code,
+        reservation_reference=reservation["reference"],
+        guest_label=guest["guest_label"],
+        vehicle_label=stall["vehicle_label"],
+        status=stall["status"],
+        gate_access="not_issued",
+        payment_captured=False,
+    )
 
 
 def get_service() -> Stay360Service:

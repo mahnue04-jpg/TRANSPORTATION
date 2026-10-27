@@ -99,13 +99,29 @@ def _room(status: str) -> dict[str, str]:
     return {"housekeeping_status": status}
 
 
-def _tenant(tenant_id: str, hotel_name: str, guests: list[dict], reservations: list[dict], rooms: dict) -> dict:
+def _stall(reservation_reference: str, vehicle_label: str, status: str = "assigned") -> dict[str, str]:
+    return {
+        "reservation_reference": reservation_reference,
+        "vehicle_label": vehicle_label,
+        "status": status,
+    }
+
+
+def _tenant(
+    tenant_id: str,
+    hotel_name: str,
+    guests: list[dict],
+    reservations: list[dict],
+    rooms: dict,
+    stalls: dict,
+) -> dict:
     return {
         "tenant_id": tenant_id,
         "hotel_name": hotel_name,
         "guests": {guest["guest_user_id"]: guest for guest in guests},
         "reservations": reservations,
         "rooms": rooms,
+        "stalls": stalls,
     }
 
 
@@ -210,6 +226,14 @@ def build_state() -> dict[str, dict]:
                 "221": _room("inspected"),
                 "230": _room("inspected"),
             },
+            {
+                "P12": _stall("STAY-HLI-1001", "Blue sedan"),
+                "P04": _stall("STAY-HLI-1008", "Gray coupe", "occupied"),
+                "P18": _stall("STAY-HLI-1002", "Green wagon"),
+                "P21": _stall("STAY-HLI-1015", "White hatchback"),
+                "P07": _stall("STAY-HLI-1019", "Red compact"),
+                "P09": _stall("STAY-HLI-1022", "Tan sedan"),
+            },
         ),
         CEDAR_TENANT: _tenant(
             CEDAR_TENANT,
@@ -217,6 +241,7 @@ def build_state() -> dict[str, dict]:
             cedar_guests,
             cedar_reservations,
             {"214": _room("inspected")},
+            {"P12": _stall("STAY-CRH-2001", "Silver wagon")},
         ),
     }
     assert_synthetic_fixtures(state)
@@ -262,6 +287,16 @@ def assert_synthetic_fixtures(state: dict | None = None) -> None:
                 raise RuntimeError("reservation room is not in the tenant")
             if reservation["arrival"]["carrier_label"] not in {"Fixture Air", "Fixture Road"}:
                 raise RuntimeError("arrival carrier must stay on the in-process fixture")
+        references = {reservation["reference"] for reservation in tenant["reservations"]}
+        for code, stall in tenant["stalls"].items():
+            if len(code) != 3 or not code.startswith("P") or not code[1:].isdigit():
+                raise RuntimeError("stall codes stay on the synthetic P-code pattern")
+            if stall["reservation_reference"] not in references:
+                raise RuntimeError("stall reservation is not in the tenant")
+            if any(char.isdigit() for char in stall["vehicle_label"]):
+                raise RuntimeError("vehicle labels stay descriptive and omit plate numbers")
+            if stall["status"] not in {"assigned", "occupied", "released"}:
+                raise RuntimeError("stall status is outside the synthetic set")
 
 
 def sensitive_corpus() -> tuple[str, ...]:

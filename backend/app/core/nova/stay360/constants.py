@@ -21,13 +21,20 @@ BLUEPRINT_NOTE = (
     f"The product title is {PRODUCT_NAME}. "
     f"The source document title is {BLUEPRINT_TITLE} version {BLUEPRINT_VERSION} "
     f"({BLUEPRINT_SECTION_COUNT} sections) and that document is not in the repo. "
-    "Those titles are different. Sections not implemented: "
-    "parking, concierge, guest services, inventory safeguards, "
+    "Those titles are different. The parking stall assignment is included. "
+    "Sections not implemented: "
+    "concierge, guest services, inventory safeguards, "
     "family/events, marketing, itinerary."
 )
 
+PARKING_STATUSES = ("assigned", "occupied", "released")
+PARKING_TRANSITIONS = {
+    "assigned": frozenset({"occupied"}),
+    "occupied": frozenset({"released"}),
+    "released": frozenset({"assigned"}),
+}
+
 NOT_IMPLEMENTED = (
-    "parking",
     "concierge",
     "guest_services",
     "inventory_safeguards",

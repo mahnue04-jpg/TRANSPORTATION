@@ -91,6 +91,11 @@ function boot(fetchImpl) {
     "checkin-form",
     "checkin-reference",
     "checkin-result",
+    "parking",
+    "parking-empty",
+    "parking-form",
+    "stall-code",
+    "parking-status",
   ].forEach((id) => {
     nodes[id] = createNode(id);
   });

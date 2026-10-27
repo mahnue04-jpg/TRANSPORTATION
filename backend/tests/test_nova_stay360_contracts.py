@@ -137,7 +137,6 @@ def test_public_meta_locales_and_page_contract():
     assert body["door_access"] == "not_issued"
     assert body["blueprint_note"] == BLUEPRINT_NOTE
     assert body["not_implemented"] == [
-        "parking",
         "concierge",
         "guest_services",
         "inventory_safeguards",
@@ -202,6 +201,8 @@ def test_openapi_lists_the_slice_routes_and_rejects_secret_fields():
         "/api/nova/stay360/rooms",
         "/api/nova/stay360/rooms/{room_number}/housekeeping",
         "/api/nova/stay360/reservations/{reference}/mobile-check-in",
+        "/api/nova/stay360/parking",
+        "/api/nova/stay360/parking/{stall_code}/status",
     }
     assert expected <= paths
     with pytest.raises(ValidationError):

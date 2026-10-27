@@ -29,6 +29,8 @@ from .constants import (
 from .errors import Stay360Error
 from .locales import catalog, locale_keys
 from .privacy import assert_safe
+from pydantic import ValidationError
+
 from .schemas import (
     ArrivalRefreshRequest,
     ArrivalRefreshResult,
@@ -41,6 +43,9 @@ from .schemas import (
     MetaResponse,
     MobileCheckInRequest,
     MobileCheckInResult,
+    ParkingAssignment,
+    ParkingListResponse,
+    ParkingStatusUpdate,
     ReservationListResponse,
     ReservationView,
     RoomView,
@@ -259,6 +264,51 @@ def stay360_mobile_check_in(
     def run() -> MobileCheckInResult:
         _guard_query(request, frozenset())
         return get_service().simulate_check_in(actor, reference)
+
+    return _call(run, response, (actor.email,))
+
+
+@api.get("/parking", response_model=ParkingListResponse)
+def stay360_parking(
+    request: Request,
+    response: Response,
+    actor: Stay360Actor = Depends(require_actor),
+) -> ParkingListResponse:
+    def load() -> ParkingListResponse:
+        _guard_query(request, frozenset())
+        return get_service().list_parking(actor)
+
+    return _call(load, response, (actor.email,))
+
+
+@api.post("/parking/{stall_code}/status", response_model=ParkingAssignment)
+async def stay360_parking_status(
+    stall_code: str,
+    request: Request,
+    response: Response,
+    actor: Stay360Actor = Depends(require_actor),
+) -> ParkingAssignment:
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = None
+    if not isinstance(raw, dict) or set(raw) != {"status"}:
+        payload = None
+    else:
+        try:
+            payload = ParkingStatusUpdate.model_validate(raw)
+        except ValidationError:
+            payload = None
+
+    def run() -> ParkingAssignment:
+        _guard_query(request, frozenset())
+        if payload is None:
+            raise Stay360Error(
+                422,
+                "request_rejected",
+                "That Stay360 request was rejected.",
+            )
+        return get_service().update_parking(actor, stall_code, payload.status)
 
     return _call(run, response, (actor.email,))
 
