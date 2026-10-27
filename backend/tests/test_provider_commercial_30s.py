@@ -332,7 +332,10 @@ def test_authorized_submit_posts_once_and_resume_does_not_duplicate(ready, monke
     assert third["render_mode"] == "fal_kling_motion_then_lipsync"
     assert [item[0] for item in calls].count("motion") == 6
     assert [item[0] for item in calls].count("lipsync") == 6
-    assert third["paid_provider_charges"] is False
+    assert third["paid_provider_charges"] is None
+    assert third["charge_status"] == "potential_charge_unverified"
+    assert first["paid_provider_charges"] is None
+    assert first["charge_status"] == "potential_charge_unverified"
 
 
 def test_ambiguous_post_does_not_submit_again(ready, monkeypatch):
