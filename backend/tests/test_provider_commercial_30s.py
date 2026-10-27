@@ -335,3 +335,49 @@ def test_default_30s_route_stays_offline_even_when_reserved(ready, monkeypatch):
     with pytest.raises(CreativeStudioError) as exc:
         svc.render_walking_commercial_30s(owner, project_id)
     assert exc.value.code == "TEST_STOP"
+
+
+def test_atomic_claim_only_one_winner_for_simultaneous_requests(ready, monkeypatch):
+    """No real provider calls: two contenders can claim the same held job only once.
+
+    Uses a locked fake compare-and-swap to check the orchestration contract.
+    A separate SQLite/Postgres integration test is still required before paid use.
+    """
+    import copy
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.core.nova.creative_studio.provider_commercial_30s import _atomic_claim_reservation
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    original = copy.deepcopy(svc._project_or_404(owner, project_id).metadata)
+    state = {"metadata": original, "successful_claims": 0}
+    lock = threading.Lock()
+
+    def snapshot(_owner, _project):
+        assert (_owner, _project) == (owner, project_id)
+        project = copy.copy(svc._project_or_404(owner, project_id))
+        with lock:
+            project.metadata = copy.deepcopy(state["metadata"])
+        return project
+
+    def compare_and_swap(_project, _owner, expected, replacement):
+        assert (_owner, _project) == (owner, project_id)
+        with lock:
+            if state["metadata"] != expected:
+                return False
+            state["metadata"] = copy.deepcopy(replacement)
+            state["successful_claims"] += 1
+            return True
+
+    monkeypatch.setattr(svc, "_project_or_404", snapshot)
+    monkeypatch.setattr(svc.store, "compare_and_swap_project_metadata", compare_and_swap, raising=False)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(
+            lambda _: _atomic_claim_reservation(svc, owner, project_id, expected_status="reserved"),
+            range(2),
+        ))
+    assert sorted(outcomes) == [False, True]
+    assert state["successful_claims"] == 1
+    assert state["metadata"]["provider_commercial_30s_reservation"]["submission_claimed"] is True
