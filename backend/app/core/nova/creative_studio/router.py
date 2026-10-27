@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -1596,6 +1596,26 @@ def approve_genova_narration(project_id: str, payload: GenovaImageApprovalIn, us
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+
+
+@router.post("/projects/{project_id}/genova-narration-upload")
+async def upload_genova_narration(
+    project_id: str,
+    file: UploadFile = File(...),
+    script: str = Form(..., min_length=1, max_length=10000),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        data = await file.read(32 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_narration(user.user_id, project_id, data, script, content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    finally:
+        await file.close()
 
 
 @router.post("/projects/{project_id}/genova-image-upload")

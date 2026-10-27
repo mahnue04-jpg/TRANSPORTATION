@@ -4,9 +4,33 @@
   var activeProjectId = localStorage.getItem(activeProjectKey) || null;
   var activeBrandId = null;
   var projectRowsCache = [];
+  var activeProjectRevision = 0;
+  var presenterScriptProjectId = null;
+  var presenterSavedScriptValue = null;
 
   function setActiveProjectId(value) {
-    activeProjectId = value || null;
+    var next = value || null;
+    if (activeProjectId !== next) {
+      activeProjectRevision += 1;
+      presenterScriptProjectId = null;
+      presenterSavedScriptValue = null;
+      ["presenter-script", "genova-narration-script", "genova-image-file", "genova-narration-file"].forEach(function (id) {
+        if ($(id)) $(id).value = "";
+      });
+      if ($("presenter-script")) $("presenter-script").disabled = true;
+      ["genova-image-choices", "genova-narration-choices"].forEach(function (id) {
+        if ($(id)) $(id).textContent = "Load the saved choices for this project to review them.";
+      });
+      if ($("asset-list")) $("asset-list").textContent = "Loading the selected project's assets...";
+      renderProductionReadiness(null);
+      if ($("genova-avatar-readiness-result")) $("genova-avatar-readiness-result").textContent = "Run the free readiness check for the selected project.";
+      if ($("check-genova-avatar-readiness")) $("check-genova-avatar-readiness").disabled = false;
+      ["save-presenter-script", "generate-presenter-voice", "preview-talking-presenter"].forEach(function (id) {
+        if ($(id)) $(id).disabled = true;
+      });
+      renderPreflight(null);
+    }
+    activeProjectId = next;
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
@@ -69,6 +93,7 @@
     var button = $("check-genova-avatar-readiness");
     if (!target || !button) return;
     var projectId = activeProjectId;
+    var revision = activeProjectRevision;
     if (!projectId) {
       target.textContent = "Select an AMICOR 30-second project first. No provider request made.";
       return;
@@ -77,6 +102,7 @@
     target.textContent = "Checking saved presenter and provider settings (no paid generation)...";
     try {
       var state = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/genova-avatar-readiness");
+      if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
       target.textContent =
         "Genova image: " + (state.approved_presenter_image_found ? "found" : "not found") +
         " | Kling: " + (state.provider_status || "unknown") +
@@ -91,8 +117,9 @@
         (state.presenter_image_next_step ? " Image guidance: " + state.presenter_image_next_step : "") +
         (state.narration_next_step ? " Narration: " + state.narration_next_step : "");
     } catch (err) {
+      if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
       target.textContent = "Genova readiness check unavailable: " + (err && err.message ? err.message : "unknown error");
-    } finally { button.disabled = false; }
+    } finally { if (activeProjectRevision === revision) button.disabled = false; }
   }
 
   var genovaReadinessButton = $("check-genova-avatar-readiness");
@@ -102,9 +129,11 @@
     var target = $("genova-image-choices");
     if (!target || !activeProjectId) { if (target) target.textContent = "Select a project first."; return; }
     target.textContent = "Loading project images...";
+    var p = activeProjectId;
+    var revision = activeProjectRevision;
     try {
-      var p = activeProjectId;
       var state = await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-avatar-readiness");
+      if (activeProjectId !== p || activeProjectRevision !== revision) return;
       target.textContent = "";
       var selected = document.createElement("p");
       selected.textContent = state.approved_image_asset_id ? "Approved image: " + state.approved_image_asset_id : "No image approved yet.";
@@ -119,15 +148,17 @@
         button.textContent = state.approved_image_asset_id === item.asset_id ? "Approved" : "Approve this image";
         button.disabled = state.approved_image_asset_id === item.asset_id;
         button.addEventListener("click", async function () {
+          if (activeProjectId !== p || activeProjectRevision !== revision) return;
           if (!window.confirm("Approve this project image as Genova presenter?")) return;
           button.disabled = true;
           try {
             await api("/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-image-approval", {
               method: "PUT", body: JSON.stringify({asset_id: item.asset_id})
             });
-            await genovaImageChoices();
-            await checkGenovaAvatarReadiness();
-          } catch (error) { target.textContent = "Approval failed: " + error.message; }
+            if (activeProjectId === p && activeProjectRevision === revision) {
+              await genovaImageChoices(); await checkGenovaAvatarReadiness();
+            }
+          } catch (error) { if (activeProjectRevision === revision) { target.textContent = "Approval failed: " + error.message; button.disabled = false; } }
         });
         var thumb = document.createElement("img");
         thumb.alt = "Candidate image: " + (item.title || item.asset_id);
@@ -158,7 +189,7 @@
         wrapper.appendChild(thumb); wrapper.appendChild(label); wrapper.appendChild(button); target.appendChild(wrapper);
       });
       if (!(state.candidate_images || []).length) target.appendChild(document.createTextNode("No eligible generated image assets in this project."));
-    } catch (error) { target.textContent = "Could not load images: " + error.message; }
+    } catch (error) { if (activeProjectRevision === revision) target.textContent = "Could not load images: " + error.message; }
   }
   var genovaUpload = $("genova-upload-image");
   async function genovaNarrationChoices() {
@@ -177,7 +208,7 @@
         listen.textContent = "Download narration to review";
         listen.addEventListener("click", async function () {
           if (activeProjectId !== p) return;
-          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", "genova-narration.wav"); }
+          try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", item.filename || "genova-narration.wav"); }
           catch (error) { showBanner(error.message, false); }
         });
         var approve = document.createElement("button"); approve.type = "button"; approve.className = "secondary";
@@ -196,6 +227,32 @@
       if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
     } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
   }
+  var narrationUpload = $("genova-upload-narration");
+  if (narrationUpload) narrationUpload.addEventListener("click", async function () {
+    var p = activeProjectId;
+    var input = $("genova-narration-file");
+    var file = input && input.files && input.files[0];
+    var script = ($("genova-narration-script").value || "").trim();
+    if (!p || !file || !script) { showBanner("Select a project, recording and its exact script first.", false); return; }
+    if (!file.size || file.size > 32 * 1024 * 1024) { showBanner("Choose audio under 32 MB.", false); return; }
+    narrationUpload.disabled = true;
+    try {
+      var form = new FormData(); form.append("file", file); form.append("script", script);
+      var shared = session();
+      var path = "/api/nova/creative/projects/" + encodeURIComponent(p) + "/genova-narration-upload";
+      var response = shared && shared.authFetch
+        ? await shared.authFetch(path, {method: "POST", body: form})
+        : await fetch(path, {method: "POST", headers: {"Authorization": "Bearer " + token()}, body: form});
+      if (!response.ok) {
+        var detail = await response.json().catch(function () { return {}; });
+        throw new Error(typeof detail.detail === "string" ? detail.detail : "Upload rejected (" + response.status + ")");
+      }
+      if (activeProjectId !== p) return;
+      showBanner("Narration and script imported. Listen and approve separately. No generation started.", true);
+      await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); await refreshAssets();
+    } catch (error) { if (activeProjectId === p) showBanner("Narration import failed: " + error.message, false); }
+    finally { narrationUpload.disabled = false; }
+  });
   var narrationLoad = $("genova-load-narration");
   if (narrationLoad) narrationLoad.addEventListener("click", genovaNarrationChoices);
   var narrationRevoke = $("genova-revoke-narration");
@@ -399,6 +456,27 @@
     }
     return { fileName: fileName, mime: mime };
   }
+  function downloadProjectPackage(exported) {
+    var formats = {markdown: {mime: "text/markdown", suffix: ".md"}, json: {mime: "application/json", suffix: ".json"}};
+    var format = exported && formats[exported.format];
+    if (!format || typeof exported.content !== "string" || !exported.content.trim()) {
+      throw new Error("Export did not return a supported, non-empty project package.");
+    }
+    var project = exported.package && exported.package.project;
+    var stem = String(project && project.title || "nova-project").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0,80) || "nova-project";
+    var fileName = stem + format.suffix;
+    var objectUrl = URL.createObjectURL(new Blob([exported.content], {type: format.mime + ";charset=utf-8"}));
+    var link = document.createElement("a");
+    link.href = objectUrl; link.download = fileName;
+    document.body.appendChild(link);
+    try { link.click(); }
+    finally {
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1500);
+    }
+    return fileName;
+  }
+
   async function downloadBrandedImage(imageUrl, fileStem) {
     var artwork = await loadImage(imageUrl);
     var logo = await loadImage("/static/branding/amicor-logo-full.png");
@@ -995,6 +1073,25 @@
     return matches.length ? matches[matches.length - 1] : null;
   }
 
+  function syncPresenterScript(detail) {
+    var editor = $("presenter-script");
+    if (!editor) return;
+    var saved = latestAsset(detail.assets || [], "presenter_script", function (row) {
+      return !!String(row.content || "").trim();
+    });
+    var text = saved ? String(saved.content) : "";
+    var firstLoad = presenterScriptProjectId !== activeProjectId;
+    if (firstLoad || editor.value === presenterSavedScriptValue) editor.value = text;
+    presenterScriptProjectId = activeProjectId;
+    presenterSavedScriptValue = text;
+    editor.disabled = false;
+    if (firstLoad) {
+      ["save-presenter-script", "generate-presenter-voice", "preview-talking-presenter"].forEach(function (id) {
+        if ($(id)) $(id).disabled = false;
+      });
+    }
+  }
+
   function renderProductionReadiness(detail) {
     var target = $("production-readiness");
     if (!target) return;
@@ -1044,7 +1141,10 @@
       presenterMeta.presenter_mode === "full_body" &&
       presenterMeta.captions_burned_in === true
     );
+    var illustratedPreview = finalVideoMeta.illustrated_fallback === true || finalVideoMeta.visual_mode === "illustrated_fallback";
+    var localPlatePreview = finalVideoMeta.motion_engine === "local_plate_walk_illusion" || finalVideoMeta.visual_mode === "genova_photoreal_plate";
     var offlinePreview = !!(
+      illustratedPreview || localPlatePreview ||
       finalVideoMeta.render_mode === "offline_montage_not_lipsync" ||
       finalVideoMeta.pipeline === "offline_title_card_fallback" ||
       (String(finalVideoMeta.quality_state || "").toUpperCase() === "PREVIEW_ONLY" && finalVideoMeta.presenter_used === false)
@@ -1075,7 +1175,7 @@
     var checks = [
       { label: "Presenter", ok: presenterReady, note: presenterState, action: "preview-talking-presenter", actionLabel: presenter ? "Regenerate presenter" : "Create presenter" },
       { label: "Presenter captions", ok: presenterCaptionsReady, note: presenterCaptionsReady ? (bodyCaptionedReady ? "Burned in" : "Not required yet") : "Finalize full-body captions", action: "finalize-presenter-captions", actionLabel: "Finalize presenter captions" },
-      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build the 30s presenter pipeline. The offline montage is preview only." : (offlinePreview ? "PREVIEW_ONLY title cards. Presenter NOT USED." : (finalIsSlideshow ? "Blocked: still slideshow" : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))), action: (offlinePreview || !finalVideo || !finalVideo.url) ? "build-walking-commercial" : "build-final-promo", actionLabel: (offlinePreview || !finalVideo || !finalVideo.url) ? "Build 30s presenter" : "Build Final Promo" },
+      { label: "Final video", ok: commercialCandidate, note: !finalVideo || !finalVideo.url ? "Build the 30s presenter pipeline. The offline montage is preview only." : (illustratedPreview ? "PREVIEW_ONLY illustrated fallback. Real presenter motion is not verified." : (localPlatePreview ? "PREVIEW_ONLY local image animation. Real presenter motion is not verified." : (offlinePreview ? "PREVIEW_ONLY title cards. Presenter NOT USED." : (finalIsSlideshow ? "Blocked: still slideshow" : (!finalIsMp4 ? "Need MP4 export" : (finalCaptionsOk ? "Motion MP4 ready for owner review" : "Need captions / subtitle track")))))), action: (offlinePreview || !finalVideo || !finalVideo.url) ? "build-walking-commercial" : "build-final-promo", actionLabel: (offlinePreview || !finalVideo || !finalVideo.url) ? "Build 30s presenter" : "Build Final Promo" },
       { label: "Commercial complete", ok: commerciallyComplete, note: commerciallyComplete ? "Real motion, lip-sync, clean narration, and provider clearance are on file." : "Held until real motion, lip-sync, clean narration, and provider/license clearance.", action: "build-walking-commercial", actionLabel: "Build 30s presenter" },
       { label: "Nova click destination", ok: clickReady, note: clickUrl ? (String(clickUrl) + (clickReady ? " verified" : " not yet verified")) : "Prepare the profile Website link. Captions are not clickable.", action: "prepare-nova-links", actionLabel: "Prepare Nova links" },
       { label: "Thumbnail / artwork", ok: !!(artwork && artwork.url), note: artwork && artwork.url ? "Ready" : "Generate image", action: "generate-image", actionLabel: "Generate image" },
@@ -1308,8 +1408,12 @@
       renderProductionReadiness(null);
       return;
     }
-    var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId));
+    var selectedProject = activeProjectId;
+    var revision = activeProjectRevision;
+    var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selectedProject));
+    if (activeProjectId !== selectedProject || activeProjectRevision !== revision) return;
     var project = detail.project || {};
+    if ($("presenter-script")) syncPresenterScript(detail);
     var production = (project.metadata && project.metadata.production_settings) || {};
     if ($("project-title")) $("project-title").value = project.title || "";
     if ($("project-type") && project.project_type) $("project-type").value = project.project_type;
@@ -1352,9 +1456,11 @@
           row.metadata.render_mode === "offline_montage_not_lipsync" ||
           row.metadata.pipeline === "offline_title_card_fallback"
         );
-        var videoLabel = offlineMontage
+        var illustratedPreview = row.metadata && (row.metadata.illustrated_fallback === true || row.metadata.visual_mode === "illustrated_fallback");
+        var localAnimation = row.metadata && (row.metadata.motion_engine === "local_plate_walk_illusion" || row.metadata.visual_mode === "genova_photoreal_plate");
+        var videoLabel = illustratedPreview ? "Download illustrated preview" : (localAnimation ? "Download local animation preview" : (offlineMontage
           ? "Download offline montage"
-          : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"));
+          : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"))));
         var filePath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
           : "";
@@ -1374,6 +1480,9 @@
             escapeHtml(filePath + "?part=captions") + "\" data-download-name=\"nova-captions.srt\">Download captions</button>")
           : "";
         var licenseNote = "";
+        if (illustratedPreview || localAnimation) {
+          licenseNote = "<p class=\"hint\">PREVIEW_ONLY. " + (illustratedPreview ? "Illustrated fallback." : "Local image animation.") + " Real presenter motion and professional lip-sync are not verified.</p>";
+        }
         if (offlineMontage) {
           var license = String((row.metadata && row.metadata.license_status) || "AMBER");
           var clearance = (row.metadata && row.metadata.narration && row.metadata.narration.commercial_use) ||
@@ -1391,12 +1500,16 @@
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
           : "";
+        var audioName = /\.mp3(?:$|\?)/i.test(row.url) ? "nova-voice.mp3" : "nova-voice.wav";
         var audioControl = audioPath
           ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
-            escapeHtml(audioPath) + "\" data-download-name=\"nova-voice.wav\">Download voice</button>")
+            escapeHtml(audioPath) + "\" data-download-name=\"" + audioName + "\">Download voice</button>")
           : ("<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
-        media = "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
-          escapeHtml(row.url) + "\"></audio></div>" + audioControl;
+        var privateAudio = (row.metadata || {}).source === "owner_audio_upload";
+        media = privateAudio
+          ? "<p class=\"hint\">Private recording. Download voice to listen, then use the narration approval section.</p>" + audioControl
+          : "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
+            escapeHtml(row.url) + "\"></audio></div>" + audioControl;
       }
       return "<div class=\"item\"><strong>" + escapeHtml(row.title) + "</strong>" +
         "<span class=\"badge\">" + escapeHtml(row.status) + "</span>" +
@@ -1682,12 +1795,15 @@
         return;
       }
       runPreflightBtn.disabled = true;
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
       try {
-        var quote = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/preflight");
+        var quote = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/preflight");
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
         renderPreflight(quote);
         showBanner("Preflight complete. No provider charges were made.", true);
       } catch (err) {
-        showBanner(err.message || "Preflight failed.", false);
+        if (activeProjectRevision === revision) showBanner(err.message || "Preflight failed.", false);
       } finally {
         runPreflightBtn.disabled = false;
       }
@@ -1701,19 +1817,24 @@
         return;
       }
       confirmBudgetBtn.disabled = true;
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
+      var quote = latestPreflight;
       try {
-        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/budget-confirm", {
+        var body = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/budget-confirm", {
           method: "POST",
           body: JSON.stringify({
             confirmed: true,
-            acknowledged_estimate_usd: latestPreflight.estimated_total_usd,
-            quote_fingerprint: latestPreflight.quote_fingerprint,
+            acknowledged_estimate_usd: quote.estimated_total_usd,
+            quote_fingerprint: quote.quote_fingerprint,
             note: "Owner confirmed preflight estimate before paid render."
           })
         });
-        renderPreflight(body.quote || latestPreflight);
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
+        renderPreflight(body.quote || quote);
         showBanner("Budget confirmation saved for this project. Still no automatic purchases.", true);
       } catch (err) {
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
         showBanner(err.message || "Budget confirmation failed.", false);
         confirmBudgetBtn.disabled = false;
       }
@@ -2403,7 +2524,13 @@
       showBanner("Create or select a project first.", false);
       return;
     }
+    if (presenterScriptProjectId !== activeProjectId) {
+      showBanner("Wait for this project's saved script to load before continuing.", false);
+      return;
+    }
     var payload = presenterPayload();
+    var projectId = activeProjectId;
+    var revision = activeProjectRevision;
     if (!payload.script) {
       showBanner("Enter the presenter script first.", false);
       return;
@@ -2418,10 +2545,11 @@
     button.disabled = true;
     showBanner(messages[kind][0], true);
     try {
-      var body = await api("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/" + endpoint, {
+      var body = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/" + endpoint, {
         method: "POST",
         body: JSON.stringify(payload)
       });
+      if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
       renderOutput(body);
       var status = body && (body.status || (body.provider && body.provider.status));
       if (status === "CONFIG_REQUIRED") {
@@ -2431,9 +2559,9 @@
       }
       await refreshAssets();
     } catch (err) {
-      showBanner(err.message || "Presenter action failed.", false);
+      if (activeProjectRevision === revision) showBanner(err.message || "Presenter action failed.", false);
     } finally {
-      button.disabled = false;
+      if (activeProjectRevision === revision) button.disabled = false;
     }
   }
 
@@ -2504,7 +2632,13 @@
         if (action === "video" && body.status === "PROCESSING" && body.job) {
           body = await waitForScene(selectedProjectId, body.job.id);
         }
-        renderOutput(body);
+        var exportFileName = null;
+        if (action === "export") {
+          exportFileName = downloadProjectPackage(body && body.export);
+          $("output").textContent = body.export.content;
+        } else {
+          renderOutput(body);
+        }
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
         if (providerStatus === "PROCESSING") {
@@ -2515,7 +2649,7 @@
             providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
           showBanner(providerMessage || (action + " generation failed."), false);
         } else {
-          showBanner(meta.ok, true);
+          showBanner(exportFileName ? ("Downloaded " + exportFileName) : meta.ok, true);
         }
         await refreshAssets();
         await refreshProjects();
@@ -2529,4 +2663,5 @@
 
   boot();
 })();
+
 

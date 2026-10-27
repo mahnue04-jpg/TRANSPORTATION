@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -336,19 +337,18 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
         )
 
     def _validate_task(self, task):
-        """Restrict saved avatar queue URLs to this model and request id."""
+        """fal tracks endpoint jobs under the owner/app, not the model path."""
         request_id = task.get("request_id")
-        if not isinstance(request_id, str) or not request_id or len(request_id) > 200:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", request_id):
             raise _SafeKlingError("Missing fal avatar request id.")
-        prefix = "/" + AVATAR_MODEL + "/requests/"
+        base = "/fal-ai/kling-video/requests/" + request_id
         for key in ("status_url", "response_url"):
             value = task.get(key)
             if not isinstance(value, str):
                 raise _SafeKlingError("Missing fal avatar queue tracking URL.")
             url = urllib.parse.urlsplit(value)
             if (url.scheme != "https" or url.netloc != "queue.fal.run"
-                    or not url.path.startswith(prefix)
-                    or request_id not in url.path.split("/")
+                    or url.path != base + ("/status" if key == "status_url" else "")
                     or url.query or url.fragment):
                 raise _SafeKlingError("Invalid fal avatar queue tracking URL.")
 
@@ -374,23 +374,33 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
                   "asset_generated": False, "url": None,
                   "generation_mode": "talking_avatar", "watermark_free": False}
         state = self.status()
-        if state.status != AVAILABLE:
+        token = str(resume_task_id or "").strip()
+        # Turning paid generation off must not strand a previously saved task.
+        # A valid resume token permits GET-only recovery while a key is present.
+        if state.status != AVAILABLE and (not token or not self._key()):
             reason = "credential_missing" if not state.configured else "live_flag_off"
             return dict(result, status=state.status, message=state.message, block_reason=reason)
-        token = str(resume_task_id or "").strip()
+        task_validated = False
+        submission_attempted = False
+        request_id = None
         try:
             if token:
                 if not token.startswith(AVATAR_TOKEN_PREFIX) or len(token) > 4000:
                     raise _SafeKlingError("This saved task does not belong to Kling AI Avatar.")
                 task = json.loads(base64.urlsafe_b64decode(token[len(AVATAR_TOKEN_PREFIX):]))
                 self._validate_task(task)
+                task_validated = True
+                request_id = task["request_id"]
             else:
                 payload = self.validate_avatar_input(
                     image_url=image_url, audio_url=audio_url, prompt=prompt)
+                submission_attempted = True
                 submitted = self._request_json("POST", QUEUE + AVATAR_MODEL, payload=payload)
                 task = {key: submitted.get(key) for key in
                         ("request_id", "status_url", "response_url")}
                 self._validate_task(task)
+                task_validated = True
+                request_id = task["request_id"]
                 token = AVATAR_TOKEN_PREFIX + base64.urlsafe_b64encode(
                     json.dumps(task).encode()).decode()
                 if persist_task_before_poll:
@@ -420,19 +430,27 @@ class FalKlingAvatarProvider(FalKlingLipSyncProvider):
             return dict(result, status="PROCESSING", task_id=token,
                         message="Kling avatar still processing; resume existing request.")
         except _SafeKlingError as exc:
+            if task_validated and token:
+                return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
+                            can_resubmit=False,
+                            message="Avatar status or download was interrupted. Resume the saved task; no replacement was submitted.")
             message = str(exc)
             return dict(
                 result,
                 status=ERROR,
-                task_id=token or None,
-                message=message,
+                task_id=None,
+                can_resubmit=False,
+                submission_uncertain=submission_attempted,
                 block_reason=_avatar_block_reason(message),
+                message=message,
             )
-        except (RuntimeError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-            return dict(
-                result,
-                status=ERROR,
-                task_id=token or None,
-                message="Kling avatar request could not proceed; check setup and Fal usage.",
-                block_reason="provider_error",
-            )
+        except (RuntimeError, ValueError, TypeError, KeyError, OSError, AttributeError):
+            if task_validated and token:
+                return dict(result, status="PROCESSING", task_id=token, request_id=request_id,
+                            can_resubmit=False,
+                            message="Avatar status or download was interrupted. Resume the saved task; no replacement was submitted.")
+            return dict(result, status=ERROR, task_id=None, can_resubmit=False,
+                        submission_uncertain=submission_attempted,
+                        message=("Avatar submission could not be confirmed. Check fal request history before starting another render."
+                                 if submission_attempted else
+                                 "Kling avatar input or saved task is invalid. No new request was submitted."))

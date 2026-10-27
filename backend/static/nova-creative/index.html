@@ -94,6 +94,10 @@
       <section aria-label="Genova image approval"><h3>Approve Genova presenter image</h3><p class="hint">Choose one existing image from this project. Approval is saved to this project only; no paid generation.</p><div class="actions wrap"><label>Upload a local presenter image (PNG/JPEG/WebP, up to 8 MB)<input id="genova-image-file" type="file" accept="image/png,image/jpeg,image/webp" /></label><button type="button" id="genova-upload-image" class="secondary">Upload image (free)</button><button type="button" id="genova-load-images" class="secondary">Show existing presenter images</button><button type="button" id="genova-revoke-image" class="secondary">Remove approval</button></div><div id="genova-image-choices" role="status" aria-live="polite"></div></section>
       <section aria-label="Genova narration approval">
         <h3>Review and approve Genova narration</h3>
+        <p class="hint">Import a voice recording with its exact script. This saves a new presenter script revision and keeps earlier assets. Review and approval follow separately.</p>
+        <label>Narration recording (WAV or MP3, up to 32 MB)<input id="genova-narration-file" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" /></label>
+        <label>Exact words in the recording<textarea id="genova-narration-script" maxlength="10000" rows="4"></textarea></label>
+        <button type="button" id="genova-upload-narration" class="secondary">Import narration and script (free)</button>
         <p class="hint">Download and listen to saved narration before approving it. Approval applies to this project's exact audio and saved presenter script. Changing either requires another review. No generation or payment starts here.</p>
         <div class="actions wrap"><button type="button" id="genova-load-narration" class="secondary">Show saved narration</button><button type="button" id="genova-revoke-narration" class="secondary">Remove narration approval</button></div>
         <div id="genova-narration-choices" role="status" aria-live="polite"></div>
@@ -359,7 +363,7 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=studio-provider-audit-20261026"></script>
+  <script src="/static/nova-creative/creative.js?v=genova-narration-import-20261026"></script>
 </body>
 </html>
 
