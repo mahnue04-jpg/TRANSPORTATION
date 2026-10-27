@@ -454,6 +454,27 @@
     }
     return { fileName: fileName, mime: mime };
   }
+  function downloadProjectPackage(exported) {
+    var formats = {markdown: {mime: "text/markdown", suffix: ".md"}, json: {mime: "application/json", suffix: ".json"}};
+    var format = exported && formats[exported.format];
+    if (!format || typeof exported.content !== "string" || !exported.content.trim()) {
+      throw new Error("Export did not return a supported, non-empty project package.");
+    }
+    var project = exported.package && exported.package.project;
+    var stem = String(project && project.title || "nova-project").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0,80) || "nova-project";
+    var fileName = stem + format.suffix;
+    var objectUrl = URL.createObjectURL(new Blob([exported.content], {type: format.mime + ";charset=utf-8"}));
+    var link = document.createElement("a");
+    link.href = objectUrl; link.download = fileName;
+    document.body.appendChild(link);
+    try { link.click(); }
+    finally {
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1500);
+    }
+    return fileName;
+  }
+
   async function downloadBrandedImage(imageUrl, fileStem) {
     var artwork = await loadImage(imageUrl);
     var logo = await loadImage("/static/branding/amicor-logo-full.png");
@@ -2607,7 +2628,13 @@
         if (action === "video" && body.status === "PROCESSING" && body.job) {
           body = await waitForScene(selectedProjectId, body.job.id);
         }
-        renderOutput(body);
+        var exportFileName = null;
+        if (action === "export") {
+          exportFileName = downloadProjectPackage(body && body.export);
+          $("output").textContent = body.export.content;
+        } else {
+          renderOutput(body);
+        }
         var providerStatus = body && body.provider && body.provider.status;
         var providerMessage = body && body.provider && body.provider.message;
         if (providerStatus === "PROCESSING") {
@@ -2618,7 +2645,7 @@
             providerStatus && providerStatus !== "GENERATED" && providerStatus !== "AVAILABLE") {
           showBanner(providerMessage || (action + " generation failed."), false);
         } else {
-          showBanner(meta.ok, true);
+          showBanner(exportFileName ? ("Downloaded " + exportFileName) : meta.ok, true);
         }
         await refreshAssets();
         await refreshProjects();
