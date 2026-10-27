@@ -1894,6 +1894,31 @@
     });
   }
 
+  var providerAssemblyButton = $("assemble-provider-commercial-offline");
+  if (providerAssemblyButton) {
+    providerAssemblyButton.addEventListener("click", async function () {
+      providerAssemblyButton.disabled = true;
+      var resultBox = $("provider-commercial-assembly-result");
+      try {
+        var projectId = await ensureSecondCommercialSelected();
+        if (!projectId) {
+          if (resultBox) resultBox.textContent = "Select an owner Studio project first.";
+          return;
+        }
+        var result = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) +
+          "/provider-commercial-30s/assemble-offline", {method:"POST"});
+        if (resultBox) resultBox.textContent = result.status === "ASSEMBLED_UNCAPTIONED"
+          ? "Saved uncaptioned QC preview. Open project assets for owner-scoped MP4 download; captions and final acceptance are still pending."
+          : "Assembly not ready: " + (result.reason || "check saved local provider scenes") + ". No provider request submitted.";
+      } catch (err) {
+        if (resultBox) resultBox.textContent = "Assembly unavailable; no provider request submitted. " +
+          String(err && err.message || err);
+      } finally {
+        providerAssemblyButton.disabled = false;
+      }
+    });
+  }
+
   var walkingCommercialButton = $("build-walking-commercial-30s");
   if (walkingCommercialButton) {
     walkingCommercialButton.addEventListener("click", function () {
