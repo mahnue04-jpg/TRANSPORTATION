@@ -747,26 +747,31 @@ def submit_provider_commercial_30s(
                 shot["lipsync_url"] = str(result["url"])
             persist()
 
-    complete = all(shot.get("lipsync_url") for shot in existing["shots"])
-    if complete:
-        existing["status"] = "generated"
+    # Six video URLs are scene-generation evidence, not a finished commercial.
+    # Final mux/concatenation, ffprobe duration, captions, and durable MP4 download
+    # must be verified separately before claiming the 30-second deliverable.
+    scenes_ready = all(shot.get("lipsync_url") for shot in existing["shots"])
+    if scenes_ready:
+        existing["status"] = "scenes_ready"
         existing["paid_provider_charges"] = None
         existing["charge_status"] = "potential_charge_unverified"
         persist()
     view = _view(selected, priced, existing, [])
-    view["status"] = "GENERATED" if complete else "PROCESSING"
+    view["status"] = "SCENES_READY" if scenes_ready else "PROCESSING"
     view["render_mode"] = "fal_kling_motion_then_lipsync"
-    view["output_class"] = "provider_backed_30s"
+    view["output_class"] = "provider_scenes_pending_final_assembly"
     view["offline_demo_fallback"] = False
     view["uses_local_montage"] = False
-    view["true_ai_motion_synthesis"] = complete
-    view["provider_lip_sync"] = complete
+    view["true_ai_motion_synthesis"] = scenes_ready
+    view["provider_lip_sync"] = scenes_ready
+    view["final_mp4_verified"] = False
+    view["final_mp4_url"] = None
     view["paid_provider_charges"] = None
     view["charge_status"] = "potential_charge_unverified"
     view["pipeline"] = "provider_commercial_30s"
     view["message"] = (
-        "Provider-backed 30s motion and synced narration are saved."
-        if complete
+        "Six synchronized scenes reported ready. Final 30-second MP4 assembly, captions, and downloadable artifact still require verification."
+        if scenes_ready
         else "Lip-sync tasks are saved. Resume them instead of posting again."
     )
     return view
