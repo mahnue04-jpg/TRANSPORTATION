@@ -38,6 +38,15 @@ jobs:
       - name: Run owner-only no-provider Studio integration tests
         working-directory: backend
         run: |
-          python -m pytest -q \
+          python -m pytest -ra -vv --tb=short \
             tests/test_provider_commercial_30s.py \
-            tests/test_provider_commercial_assembly.py
+            tests/test_provider_commercial_assembly.py \
+            > studio-guarded-pytest.log 2>&1 || { cat studio-guarded-pytest.log; exit 1; }
+          cat studio-guarded-pytest.log
+      - name: Retain sanitized pytest results for failed checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: creative-studio-guarded-pytest-report
+          path: backend/studio-guarded-pytest.log
+          retention-days: 3
