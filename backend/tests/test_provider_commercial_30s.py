@@ -355,9 +355,11 @@ def test_atomic_claim_only_one_winner_for_simultaneous_requests(ready, monkeypat
     state = {"metadata": original, "successful_claims": 0}
     lock = threading.Lock()
 
+    original_lookup = svc._project_or_404
+
     def snapshot(_owner, _project):
         assert (_owner, _project) == (owner, project_id)
-        project = copy.copy(svc._project_or_404(owner, project_id))
+        project = copy.copy(original_lookup(owner, project_id))
         with lock:
             project.metadata = copy.deepcopy(state["metadata"])
         return project
