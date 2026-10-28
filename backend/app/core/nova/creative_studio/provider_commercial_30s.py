@@ -805,9 +805,13 @@ def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id:
     if existing_id:
         try:
             path, _, _ = service.open_asset_file(owner_id, project_id, existing_id)
-            if path.is_file():
+            # An existing video alone is insufficient: its draft-caption sidecar
+            # must also survive restart before claiming a reusable preview.
+            captions, _, _ = service.open_asset_file(owner_id, project_id, existing_id, part="captions")
+            if path.is_file() and path.stat().st_size > 0 and captions.is_file() and captions.stat().st_size > 0:
                 return {"status": "ASSEMBLED_UNCAPTIONED", "asset_id": existing_id,
-                        "final_mp4_verified": True, "captions_verified": False, "idempotent_replay": True}
+                        "final_mp4_verified": True, "captions_verified": False,
+                        "caption_draft_available": True, "idempotent_replay": True}
         except Exception:
             return {"status": "BLOCKED", "reason": "existing_output_missing_manual_review"}
     paths = []
