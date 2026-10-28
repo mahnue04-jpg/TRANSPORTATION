@@ -471,3 +471,39 @@ def test_offline_assembly_registers_owner_scoped_mp4_and_srt(ready, monkeypatch,
         svc.open_asset_file("wrong-owner", project_id, outcome["asset_id"])
     repeat = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
     assert repeat["idempotent_replay"] is True
+
+
+def test_offline_assembly_rejects_missing_local_scene_without_provider_calls(ready, monkeypatch, tmp_path):
+    """Missing scene files cannot create or claim a customer-ready video."""
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+    from app.core.nova.creative_studio import providers
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    project = svc._project_or_404(owner, project_id)
+    reservation = project.metadata["provider_commercial_30s_reservation"]
+    root = tmp_path / "media"
+    root.mkdir()
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (root, "/media/nova-creative"))
+    for shot in reservation["shots"]:
+        shot["lipsync_url"] = f"/media/nova-creative/never-saved-{shot['index']}.mp4"
+    reservation["status"] = "scenes_ready"
+    svc.store.save_project(project)
+    _forbid_posts(monkeypatch)
+    result = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "provider_scene_not_saved_locally"
+    assert result["provider_posts"] == 0
+    assert not any(asset.kind == "video" for asset in svc.store.list_assets(project_id, owner))
+
+
+def test_assembly_does_not_create_asset_for_unready_reservation(ready, monkeypatch):
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    _forbid_posts(monkeypatch)
+    result = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "scenes_not_ready"
+    assert result["provider_posts"] == 0
