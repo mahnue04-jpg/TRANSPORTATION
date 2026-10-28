@@ -2459,6 +2459,11 @@ class CreativeStudioService(ShortDramaMixin):
 
         return reserve_provider_commercial_30s(self, owner_id, project_id, price_card)
 
+    def assemble_provider_commercial_30s_offline(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        from app.core.nova.creative_studio.provider_commercial_30s import assemble_provider_commercial_30s_offline
+
+        return assemble_provider_commercial_30s_offline(self, owner_id, project_id)
+
     def validate_provider_commercial_30s_resume(self, owner_id: str, project_id: str) -> dict[str, Any]:
         from app.core.nova.creative_studio.provider_commercial_30s import validate_provider_commercial_30s_resume
 

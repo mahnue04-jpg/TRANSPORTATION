@@ -230,6 +230,32 @@ class DbCreativeStudioStore:
         self.db.refresh(orm)
         return self._project_from_orm(orm)
 
+    def compare_and_swap_project_metadata(
+        self, project_id: str, owner_id: str, expected_metadata: dict[str, Any], new_metadata: dict[str, Any]
+    ) -> bool:
+        """Atomically replace owner-scoped metadata only if unchanged.
+
+        Used to claim a billable job *before* contacting providers. Unlike
+        save_project(), the conditional UPDATE prevents two workers from both
+        claiming the same persisted reservation snapshot.
+        """
+        from sqlalchemy import update
+
+        stmt = (
+            update(NovaCreativeProject)
+            .where(
+                NovaCreativeProject.id == project_id,
+                NovaCreativeProject.owner_id == owner_id,
+                NovaCreativeProject.metadata_json == _dumps(expected_metadata),
+            )
+            .values(metadata_json=_dumps(new_metadata))
+        )
+        result = self.db.execute(stmt)
+        changed = result.rowcount == 1
+        self.db.commit()
+        self.db.expire_all()
+        return changed
+
     def get_project(self, project_id: str, owner_id: str) -> CreativeProject | None:
         orm = (
             self.db.query(NovaCreativeProject)

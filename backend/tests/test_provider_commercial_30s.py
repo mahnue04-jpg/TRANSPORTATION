@@ -279,60 +279,24 @@ def test_submit_does_not_post_without_authorization_or_flags(ready, monkeypatch)
     assert gated["offline_demo_fallback"] is False
 
 
-def test_authorized_submit_posts_once_and_resume_does_not_duplicate(ready, monkeypatch):
+def test_in_memory_paid_submit_fails_closed_without_atomic_store(ready, monkeypatch):
+    """Test stores cannot silently bypass the database's atomic claim gate."""
     svc, owner, project_id = ready
     svc.reserve_provider_commercial_30s(owner, project_id, _card())
     monkeypatch.setenv("FAL_KEY", "test-only")
     monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "kling")
     monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
     monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "true")
-    calls = []
-
-    def motion(self, *, brief):
-        kind = "motion-resume" if brief.get("resume_task_id") else "motion"
-        calls.append((kind, brief["shot_index"]))
-        if kind == "motion":
-            return {"status": "PROCESSING", "task_id": f"motion-{brief['shot_index']}", "asset_generated": False}
-        return {
-            "status": "GENERATED",
-            "task_id": brief["resume_task_id"],
-            "url": f"/media/nova-creative/motion-{brief['shot_index']}.mp4",
-            "asset_generated": True,
-            "provider": "fal_kling_video",
-        }
-
-    def lipsync(self, *, video_url, audio_url, resume_task_id=None):
-        kind = "lipsync-resume" if resume_task_id else "lipsync"
-        calls.append((kind, video_url))
-        if kind == "lipsync":
-            return {"status": "PROCESSING", "task_id": f"lip-{video_url}", "asset_generated": False}
-        return {
-            "status": "GENERATED",
-            "task_id": resume_task_id,
-            "url": "/media/nova-creative/lipsync.mp4",
-            "asset_generated": True,
-            "provider": "fal_kling_lipsync",
-        }
-
-    monkeypatch.setattr(FalKlingVideoProvider, "generate", motion)
-    monkeypatch.setattr(FalKlingLipSyncProvider, "generate_lipsync", lipsync)
-    first = svc.render_walking_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert first["provider_posts"] == 6
-    assert [item[0] for item in calls] == ["motion"] * 6
-    assert first["status"] == "PROCESSING"
-    assert first["uses_local_montage"] is False
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Paid provider POST attempted without durable atomic claim")
+    monkeypatch.setattr(FalKlingVideoProvider, "generate", forbidden)
+    monkeypatch.setattr(FalKlingLipSyncProvider, "generate_lipsync", forbidden)
+    first = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
     second = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert second["provider_posts"] == 12
-    assert [item[0] for item in calls].count("motion") == 6
-    assert [item[0] for item in calls].count("lipsync") == 6
-    third = svc.submit_provider_commercial_30s(owner, project_id, authorize_provider_submit=True)
-    assert third["provider_posts"] == 12
-    assert third["status"] == "GENERATED"
-    assert third["provider_lip_sync"] is True
-    assert third["render_mode"] == "fal_kling_motion_then_lipsync"
-    assert [item[0] for item in calls].count("motion") == 6
-    assert [item[0] for item in calls].count("lipsync") == 6
-    assert third["paid_provider_charges"] is False
+    assert first["submission_authorized"] is False
+    assert second["submission_authorized"] is False
+    assert "submission_claim_unavailable" in first["blockers"]
+    assert first["provider_posts"] == second["provider_posts"] == 0
 
 
 def test_ambiguous_post_does_not_submit_again(ready, monkeypatch):
@@ -371,3 +335,177 @@ def test_default_30s_route_stays_offline_even_when_reserved(ready, monkeypatch):
     with pytest.raises(CreativeStudioError) as exc:
         svc.render_walking_commercial_30s(owner, project_id)
     assert exc.value.code == "TEST_STOP"
+
+
+def test_atomic_claim_only_one_winner_for_simultaneous_requests(ready, monkeypatch):
+    """No real provider calls: two contenders can claim the same held job only once.
+
+    Uses a locked fake compare-and-swap to check the orchestration contract.
+    A separate SQLite/Postgres integration test is still required before paid use.
+    """
+    import copy
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.core.nova.creative_studio.provider_commercial_30s import _atomic_claim_reservation
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    original = copy.deepcopy(svc._project_or_404(owner, project_id).metadata)
+    state = {"metadata": original, "successful_claims": 0}
+    lock = threading.Lock()
+
+    original_lookup = svc._project_or_404
+
+    def snapshot(_owner, _project):
+        assert (_owner, _project) == (owner, project_id)
+        project = copy.copy(original_lookup(owner, project_id))
+        with lock:
+            project.metadata = copy.deepcopy(state["metadata"])
+        return project
+
+    def compare_and_swap(_project, _owner, expected, replacement):
+        assert (_owner, _project) == (owner, project_id)
+        with lock:
+            if state["metadata"] != expected:
+                return False
+            state["metadata"] = copy.deepcopy(replacement)
+            state["successful_claims"] += 1
+            return True
+
+    monkeypatch.setattr(svc, "_project_or_404", snapshot)
+    monkeypatch.setattr(svc.store, "compare_and_swap_project_metadata", compare_and_swap, raising=False)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(
+            lambda _: _atomic_claim_reservation(svc, owner, project_id, expected_status="reserved"),
+            range(2),
+        ))
+    assert sorted(outcomes) == [False, True]
+    assert state["successful_claims"] == 1
+    assert state["metadata"]["provider_commercial_30s_reservation"]["submission_claimed"] is True
+
+
+def test_db_atomic_reservation_claim_rejects_stale_second_worker(tmp_path):
+    """SQLite-backed CAS: two separate DB sessions cannot claim the same snapshot.
+
+    This is a real SQL conditional-update check, with no paid/provider calls.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.core.nova.creative_studio.db_models import NovaCreativeProject
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'claims.sqlite'}")
+    NovaCreativeProject.__table__.create(bind=engine)
+    initial = {"provider_commercial_30s_reservation": {
+        "reservation_id": "test-reservation",
+        "status": "reserved",
+        "submission_claimed": False,
+    }}
+    with Session(engine) as setup:
+        setup.add(NovaCreativeProject(
+            id="cas-project", owner_id="cas-owner", title="Synthetic 30s",
+            project_type="short_video", platform="generic",
+            objective="", audience="", tone="", duration_target=30,
+            status="draft", brand_profile_id=None, brief_id=None,
+            metadata_json=json.dumps(initial, ensure_ascii=True),
+            created_at="2026-10-27T00:00:00Z", updated_at="2026-10-27T00:00:00Z",
+        ))
+        setup.commit()
+
+    next_state = json.loads(json.dumps(initial))
+    next_state["provider_commercial_30s_reservation"]["submission_claimed"] = True
+    next_state["provider_commercial_30s_reservation"]["status"] = "submitting"
+    with Session(engine) as first, Session(engine) as second:
+        a = DbCreativeStudioStore(first)
+        b = DbCreativeStudioStore(second)
+        assert a.compare_and_swap_project_metadata(
+            "cas-project", "cas-owner", initial, next_state
+        ) is True
+        assert b.compare_and_swap_project_metadata(
+            "cas-project", "cas-owner", initial, next_state
+        ) is False
+        assert b.compare_and_swap_project_metadata(
+            "cas-project", "different-owner", next_state, initial
+        ) is False
+        saved = b.get_project("cas-project", "cas-owner")
+        assert saved.metadata["provider_commercial_30s_reservation"]["submission_claimed"] is True
+    engine.dispose()
+
+
+def test_offline_assembly_registers_owner_scoped_mp4_and_srt(ready, monkeypatch, tmp_path):
+    """No provider/network calls; validates saved MP4 + draft SRT access rights."""
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+    from app.core.nova.creative_studio import provider_commercial_assembly as assembly
+    from app.core.nova.creative_studio import providers
+
+    svc, owner, project_id = ready
+    reserved = svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    assert reserved["reserved"]
+    project = svc._project_or_404(owner, project_id)
+    reservation = project.metadata["provider_commercial_30s_reservation"]
+    root = tmp_path / "media"
+    root.mkdir()
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (root, "/media/nova-creative"))
+    for shot in reservation["shots"]:
+        clip = root / f"synthetic-{shot['index']}.mp4"
+        clip.write_bytes(b"offline-synthetic-video")
+        shot["lipsync_url"] = "/media/nova-creative/" + clip.name
+    reservation["status"] = "scenes_ready"
+    svc.store.save_project(project)
+
+    def offline_assemble(paths, output):
+        assert len(paths) == 6
+        Path(output).write_bytes(b"offline-assembled-preview")
+        return {"duration_seconds": 30.0}
+
+    monkeypatch.setattr(assembly, "assemble_saved_scenes", offline_assemble)
+    outcome = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert outcome["status"] == "ASSEMBLED_UNCAPTIONED"
+    assert outcome["captions_verified"] is False
+    video, video_type, _ = svc.open_asset_file(owner, project_id, outcome["asset_id"])
+    captions, caption_type, _ = svc.open_asset_file(owner, project_id, outcome["asset_id"], part="captions")
+    assert video.suffix == ".mp4" and video.is_file()
+    assert captions.suffix == ".srt" and captions.is_file()
+    assert captions.read_text().count(" --> ") == 6
+    with pytest.raises(CreativeStudioError):
+        svc.open_asset_file("wrong-owner", project_id, outcome["asset_id"])
+    repeat = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert repeat["idempotent_replay"] is True
+
+
+def test_offline_assembly_rejects_missing_local_scene_without_provider_calls(ready, monkeypatch, tmp_path):
+    """Missing scene files cannot create or claim a customer-ready video."""
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+    from app.core.nova.creative_studio import providers
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    project = svc._project_or_404(owner, project_id)
+    reservation = project.metadata["provider_commercial_30s_reservation"]
+    root = tmp_path / "media"
+    root.mkdir()
+    monkeypatch.setattr(providers, "_creative_media_root_and_prefix", lambda: (root, "/media/nova-creative"))
+    for shot in reservation["shots"]:
+        shot["lipsync_url"] = f"/media/nova-creative/never-saved-{shot['index']}.mp4"
+    reservation["status"] = "scenes_ready"
+    svc.store.save_project(project)
+    _forbid_posts(monkeypatch)
+    result = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "provider_scene_not_saved_locally"
+    assert result["provider_posts"] == 0
+    assert not any(asset.kind == "video" for asset in svc.store.list_assets(project_id, owner))
+
+
+def test_assembly_does_not_create_asset_for_unready_reservation(ready, monkeypatch):
+    from app.core.nova.creative_studio import provider_commercial_30s as commercial
+
+    svc, owner, project_id = ready
+    svc.reserve_provider_commercial_30s(owner, project_id, _card())
+    _forbid_posts(monkeypatch)
+    result = commercial.assemble_provider_commercial_30s_offline(svc, owner, project_id)
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "scenes_not_ready"
+    assert result["provider_posts"] == 0

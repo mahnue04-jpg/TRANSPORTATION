@@ -1745,6 +1745,21 @@ def provider_commercial_30s_reserve(
         raise
 
 
+@router.post("/projects/{project_id}/provider-commercial-30s/assemble-offline")
+def provider_commercial_30s_assemble_offline(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Assemble existing saved scenes only; no paid provider submission."""
+    _require_owner(user)
+    try:
+        return get_service(db).assemble_provider_commercial_30s_offline(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/provider-commercial-30s/resume")
 def provider_commercial_30s_resume(
     project_id: str,

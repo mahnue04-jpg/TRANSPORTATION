@@ -88,6 +88,31 @@ def _save_reservation(service, project, reservation: dict[str, Any]) -> None:
     service.store.save_project(project)
 
 
+def _atomic_claim_reservation(service, owner_id: str, project_id: str, *, expected_status: str) -> bool:
+    """Claim a reserved job once, across DB-backed concurrent requests.
+
+    A failed or unavailable conditional update refuses any billable work. Recovery
+    from an interrupted claim is deliberately manual until provider reconciliation.
+    """
+    store = service.store
+    claim = getattr(store, "compare_and_swap_project_metadata", None)
+    if not callable(claim):
+        return False
+    project = service._project_or_404(owner_id, project_id)
+    before = json.loads(json.dumps(project.metadata or {}))
+    reservation = before.get("provider_commercial_30s_reservation")
+    if not isinstance(reservation, dict) or reservation.get("status") != expected_status:
+        return False
+    if reservation.get("owner_submit_authorized") or reservation.get("submission_claimed"):
+        return False
+    after = json.loads(json.dumps(before))
+    next_reservation = after["provider_commercial_30s_reservation"]
+    next_reservation["submission_claimed"] = True
+    next_reservation["status"] = "submitting"
+    next_reservation["charge_status"] = "no_provider_post"
+    return bool(claim(project_id, owner_id, before, after))
+
+
 def _provider_status() -> dict[str, Any]:
     from app.core.nova.creative_studio.kling import FalKlingLipSyncProvider, FalKlingVideoProvider
 
@@ -290,7 +315,8 @@ def _view(selected: dict[str, Any], priced: dict[str, Any], reservation: dict[st
         "output_class": "provider_backed_30s" if authorized else "not_authorized",
         "offline_demo_fallback": "separate_route",
         "uses_local_montage": False,
-        "paid_provider_charges": False,
+        "paid_provider_charges": None if posts or _ambiguous_posts(reservation) else False,
+        "charge_status": "potential_charge_unverified" if posts or _ambiguous_posts(reservation) else "no_provider_post",
         "provider_posts": posts,
         "credentials": credentials,
         "activation": {
@@ -504,7 +530,8 @@ def validate_provider_commercial_30s_resume(service, owner_id: str, project_id: 
         "problems": problems,
         "reservation_id": reservation.get("reservation_id"),
         "provider_posts": posts,
-        "paid_provider_charges": False,
+        "paid_provider_charges": None if posts or _ambiguous_posts(reservation) else False,
+        "charge_status": "potential_charge_unverified" if posts or _ambiguous_posts(reservation) else "no_provider_post",
         "download_ready": download_ready,
         "saved": True,
     }
@@ -585,6 +612,18 @@ def submit_provider_commercial_30s(
         view["submission_authorized"] = False
         return view
 
+    # A single DB-backed request may claim the reservation. Fail closed for
+    # in-memory stores or a concurrently claimed job; never post on uncertainty.
+    if not _atomic_claim_reservation(service, owner_id, project_id, expected_status="reserved"):
+        view = _view(selected, priced, existing, ["submission_claim_unavailable"])
+        view["submission_authorized"] = False
+        return view
+    project = service._project_or_404(owner_id, project_id)
+    existing = _load(project)
+    if not existing or not existing.get("submission_claimed"):
+        view = _view(selected, priced, existing, ["submission_claim_unavailable"])
+        view["submission_authorized"] = False
+        return view
     existing["owner_submit_authorized"] = True
     existing["status"] = "processing"
     existing["paid_provider_charges"] = False
@@ -609,6 +648,8 @@ def submit_provider_commercial_30s(
         resume = str(shot.get("motion_task_id") or "").strip()
         if not resume:
             shot["post_attempted"] = True
+            existing["paid_provider_charges"] = None
+            existing["charge_status"] = "potential_charge_unverified"
             persist()
             result = motion_provider.generate(
                 brief={
@@ -656,7 +697,8 @@ def submit_provider_commercial_30s(
         view = _view(selected, priced, existing, [])
         view["status"] = "PROCESSING"
         view["message"] = "Motion tasks are saved. Resume them before lip-sync. No duplicate post was made."
-        view["paid_provider_charges"] = False
+        view["paid_provider_charges"] = None
+        view["charge_status"] = "potential_charge_unverified"
         view["render_mode"] = "fal_kling_motion_then_lipsync"
         view["offline_demo_fallback"] = False
         return view
@@ -674,6 +716,8 @@ def submit_provider_commercial_30s(
         audio_url = str(shot.get("audio_url") or narration_url)
         if not resume:
             shot["lipsync_post_attempted"] = True
+            existing["paid_provider_charges"] = None
+            existing["charge_status"] = "potential_charge_unverified"
             persist()
             result = lipsync_provider.generate_lipsync(
                 video_url=shot["saved_url"],
@@ -703,24 +747,115 @@ def submit_provider_commercial_30s(
                 shot["lipsync_url"] = str(result["url"])
             persist()
 
-    complete = all(shot.get("lipsync_url") for shot in existing["shots"])
-    if complete:
-        existing["status"] = "generated"
-        existing["paid_provider_charges"] = False
+    # Six video URLs are scene-generation evidence, not a finished commercial.
+    # Final mux/concatenation, ffprobe duration, captions, and durable MP4 download
+    # must be verified separately before claiming the 30-second deliverable.
+    scenes_ready = all(shot.get("lipsync_url") for shot in existing["shots"])
+    if scenes_ready:
+        existing["status"] = "scenes_ready"
+        existing["paid_provider_charges"] = None
+        existing["charge_status"] = "potential_charge_unverified"
         persist()
     view = _view(selected, priced, existing, [])
-    view["status"] = "GENERATED" if complete else "PROCESSING"
+    view["status"] = "SCENES_READY" if scenes_ready else "PROCESSING"
     view["render_mode"] = "fal_kling_motion_then_lipsync"
-    view["output_class"] = "provider_backed_30s"
+    view["output_class"] = "provider_scenes_pending_final_assembly"
     view["offline_demo_fallback"] = False
     view["uses_local_montage"] = False
-    view["true_ai_motion_synthesis"] = complete
-    view["provider_lip_sync"] = complete
-    view["paid_provider_charges"] = False
+    view["true_ai_motion_synthesis"] = scenes_ready
+    view["provider_lip_sync"] = scenes_ready
+    view["final_mp4_verified"] = False
+    view["final_mp4_url"] = None
+    view["paid_provider_charges"] = None
+    view["charge_status"] = "potential_charge_unverified"
     view["pipeline"] = "provider_commercial_30s"
     view["message"] = (
-        "Provider-backed 30s motion and synced narration are saved."
-        if complete
+        "Six synchronized scenes reported ready. Final 30-second MP4 assembly, captions, and downloadable artifact still require verification."
+        if scenes_ready
         else "Lip-sync tasks are saved. Resume them instead of posting again."
     )
     return view
+
+
+def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id: str) -> dict[str, Any]:
+    """Owner-scoped, non-billable composition of six *locally saved* lip-sync clips.
+
+    Never downloads remote provider URLs or submits generation jobs. Captioned
+    release is deliberately separate and must pass QC before becoming customer-ready.
+    """
+    from pathlib import Path
+
+    from app.core.nova.creative_studio.provider_commercial_assembly import (
+        CommercialAssemblyError,
+        assemble_saved_scenes,
+    )
+    from app.core.nova.creative_studio.providers import (
+        _creative_media_root_and_prefix,
+        _resolve_creative_media_url,
+    )
+
+    project = service._project_or_404(owner_id, project_id)
+    reservation = _load(project)
+    if not reservation or reservation.get("status") not in {"scenes_ready", "assembled_uncaptioned"}:
+        return {"status": "BLOCKED", "reason": "scenes_not_ready", "provider_posts": 0}
+    shots = reservation.get("shots") or []
+    if len(shots) != SHOT_COUNT or [shot.get("index") for shot in shots] != list(range(1, SHOT_COUNT + 1)):
+        return {"status": "BLOCKED", "reason": "invalid_scene_order"}
+    existing_id = reservation.get("final_assembly_asset_id")
+    if existing_id:
+        try:
+            path, _, _ = service.open_asset_file(owner_id, project_id, existing_id)
+            # An existing video alone is insufficient: its draft-caption sidecar
+            # must also survive restart before claiming a reusable preview.
+            captions, _, _ = service.open_asset_file(owner_id, project_id, existing_id, part="captions")
+            if path.is_file() and path.stat().st_size > 0 and captions.is_file() and captions.stat().st_size > 0:
+                return {"status": "ASSEMBLED_UNCAPTIONED", "asset_id": existing_id,
+                        "final_mp4_verified": True, "captions_verified": False,
+                        "caption_draft_available": True, "idempotent_replay": True}
+        except Exception:
+            return {"status": "BLOCKED", "reason": "existing_output_missing_manual_review"}
+    paths = []
+    for shot in shots:
+        url = str(shot.get("lipsync_url") or "")
+        path = _resolve_creative_media_url(url) if url else None
+        if path is None or not path.is_file():
+            return {"status": "BLOCKED", "reason": "provider_scene_not_saved_locally",
+                    "shot_index": shot.get("index"), "provider_posts": 0}
+        paths.append(Path(path))
+    root, prefix = _creative_media_root_and_prefix()
+    root.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "", str(reservation.get("reservation_id") or ""))
+    if not safe_name:
+        return {"status": "BLOCKED", "reason": "invalid_reservation_id"}
+    output = root / f"nova-provider-commercial-{safe_name}.mp4"
+    try:
+        assembled = assemble_saved_scenes(paths, output)
+    except (CommercialAssemblyError, OSError, ValueError):
+        return {"status": "BLOCKED", "reason": "offline_assembly_failed"}
+    # open_asset_file(part="captions") serves an SRT beside the MP4.
+    # Scene-slot captions are drafts, not verified speech-synchronized captions.
+    from app.core.nova.creative_studio.provider_commercial_assembly import write_six_scene_caption_draft
+    try:
+        write_six_scene_caption_draft(
+            [str(shot.get("voiceover_text") or "") for shot in shots],
+            output.with_suffix(".srt"),
+        )
+    except (CommercialAssemblyError, OSError, ValueError):
+        return {"status": "BLOCKED", "reason": "caption_draft_failed"}
+    asset = service._save_text_asset(
+        owner_id=owner_id, project_id=project_id, kind="video",
+        title="Genova 30s commercial (uncaptioned QC preview)",
+        content="Offline assembled preview; captions and final customer acceptance pending",
+        status="QC_PENDING",
+        url=f"{prefix}/{output.name}",
+        metadata={"source": "provider_commercial_30s", "scene_count": SHOT_COUNT,
+                  "duration_seconds": assembled["duration_seconds"],
+                  "captions_verified": False, "caption_draft_available": True,
+                  "customer_ready": False},
+    )
+    reservation["final_assembly_asset_id"] = asset.id
+    reservation["status"] = "assembled_uncaptioned"
+    _save_reservation(service, project, reservation)
+    return {"status": "ASSEMBLED_UNCAPTIONED", "asset_id": asset.id,
+            "final_mp4_verified": True, "captions_verified": False,
+            "customer_ready": False, "provider_posts": 0}
