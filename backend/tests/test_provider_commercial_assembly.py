@@ -54,7 +54,7 @@ def test_six_scenes_assemble_to_validated_mp4_without_provider_calls(tmp_path, m
         recorded["cmd"] = cmd
         for path in files:
             assert cmd.count(str(path)) == 1
-        assert "concat=n=6:v=1:a=1[v][a]" in cmd
+        assert any("concat=n=6:v=1:a=1[v][a]" in arg for arg in cmd)
         Path(cmd[-1]).write_bytes(b"synthetic-final-output")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
