@@ -1,0 +1,43 @@
+name: Creative Studio guarded commercial tests
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/core/nova/creative_studio/**'
+      - 'backend/tests/test_provider_commercial_30s.py'
+      - 'backend/tests/test_provider_commercial_assembly.py'
+      - '.github/workflows/studio-guarded-commercial-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guarded-commercial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NOVA_CREATIVE_VIDEO_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_KLING_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_IMAGE_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_VOICE_LIVE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install system video test dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pytest
+      - name: Run owner-only no-provider Studio integration tests
+        working-directory: backend
+        run: |
+          python -m pytest -q \
+            tests/test_provider_commercial_30s.py \
+            tests/test_provider_commercial_assembly.py
