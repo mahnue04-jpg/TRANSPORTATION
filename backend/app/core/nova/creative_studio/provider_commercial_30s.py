@@ -820,7 +820,7 @@ def assemble_provider_commercial_30s_offline(service, owner_id: str, project_id:
         path = _resolve_creative_media_url(url) if url else None
         if path is None or not path.is_file():
             return {"status": "BLOCKED", "reason": "provider_scene_not_saved_locally",
-                    "shot_index": shot.get("index")}
+                    "shot_index": shot.get("index"), "provider_posts": 0}
         paths.append(Path(path))
     root, prefix = _creative_media_root_and_prefix()
     root.mkdir(parents=True, exist_ok=True)
