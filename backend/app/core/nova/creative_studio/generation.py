@@ -318,6 +318,22 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"[A-Za-z0-9']+", text or ""))
 
 
+def _reviewed_content_pack(*, topic: str, script: str | None, platform: str,
+                           duration: int, style: str) -> dict[str, Any]:
+    """Non-advertising planning preserves reviewed words instead of inventing a lesson."""
+    script = str(script or "").strip()
+    if not script:
+        raise ValueError("Save the exact lesson narration before generating educational planning.")
+    title = str(topic or "Reviewed lesson").strip()
+    return {"hook": script.splitlines()[0], "title": title, "short_script": script,
+            "voiceover_script": script, "subtitle_caption_text": script,
+            "long_caption": title, "short_caption": title, "hashtags": [], "cta": "",
+            "shot_list": ["Depict the saved lesson narration in order; review visual accuracy."],
+            "image_prompt": f"Educational thumbnail for {title}. {style}. Depict the lesson accurately; no unrelated product advertising or invented logos.",
+            "duration_target": duration, "platform": platform, "status_label": "GENERATED",
+            "media_generated": False, "owner_review_required": True}
+
+
 def generate_content_pack(
     *,
     topic: str,
@@ -329,7 +345,12 @@ def generate_content_pack(
     duration_target: int | None = None,
     brand_name: str = "AMICOR",
     brand_tagline: str = "",
+    reviewed_script: str | None = None,
+    content_mode: str = "marketing",
 ) -> dict[str, Any]:
+    if content_mode != "marketing":
+        return _reviewed_content_pack(topic=topic, script=reviewed_script, platform=platform,
+                                      duration=int(duration_target or 30), style=tone)
     topic = str(topic or "").strip()
     audience = str(audience or "general audience").strip()
     objective = str(objective or "awareness").strip()
@@ -422,10 +443,38 @@ def assemble_short_video(
     tone: str,
     cta: str,
     brand_name: str = "AMICOR",
+    reviewed_script: str | None = None,
+    content_mode: str = "marketing",
 ) -> dict[str, Any]:
     duration = int(duration_target)
     if duration not in DURATIONS:
         raise ValueError(f"Unsupported duration_target; allowed: {DURATIONS}")
+    if content_mode != "marketing":
+        pack = _reviewed_content_pack(topic=topic, script=reviewed_script, platform=platform,
+                                      duration=duration, style=style)
+        # These are planning estimates, never verified speech/caption timings.
+        sentences = re.split(r"(?<=[.!?])\s+", pack["voiceover_script"])
+        count = min(3 if duration == 15 else 6, len(sentences))
+        groups = [" ".join(sentences[i * len(sentences) // count:(i + 1) * len(sentences) // count])
+                  for i in range(count)]
+        total_words = sum(len(line.split()) for line in groups)
+        scenes, elapsed = [], 0.0
+        for index, line in enumerate(groups, 1):
+            seconds = (duration - elapsed if index == count else
+                       round(duration * len(line.split()) / total_words, 3))
+            elapsed += seconds
+            scenes.append({"index": index, "heading": f"Lesson beat {index}",
+                           "description": line,
+                           "visual_prompt": f"Scene {index} of {count}. Topic: {topic}. Style: {style}. Depict only this lesson beat: {line}. Keep characters consistent; no unrelated advertising.",
+                           "voiceover_text": line, "subtitle_text": line,
+                           "duration_seconds": seconds, "transition_note": "Gentle cut",
+                           "music_mood_note": "Quiet optional underscore; speech stays clear"})
+        return {"full_script": "\n\n".join(groups), "scenes": scenes,
+                "captions": pack["short_caption"], "hashtags": [], "final_cta": "",
+                "recommended_duration": duration, "music_mood_note": "Optional, low volume",
+                "transition_note": "Gentle cuts", "status_label": "GENERATED",
+                "media_generated": False, "video_provider_status": "CONFIG_REQUIRED",
+                "timing_verified": False, "owner_review_required": True}
     pack = generate_content_pack(
         topic=topic,
         audience=audience,
