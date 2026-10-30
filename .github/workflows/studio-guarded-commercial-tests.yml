@@ -9,6 +9,7 @@ on:
       - 'backend/tests/test_studio_content_import.py'
       - 'backend/static/nova-creative/**'
       - 'tools/check_content_import_offline.py'
+      - 'tools/check_drama_assembly_offline.py'
       - '.github/workflows/studio-guarded-commercial-tests.yml'
   workflow_dispatch:
 
@@ -42,6 +43,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt
           python -m pip install pytest
+      - name: Check six-scene dialogue assembly without providers
+        run: python3 tools/check_drama_assembly_offline.py
       - name: Run owner-only no-provider Studio integration tests
         working-directory: backend
         run: |
