@@ -511,15 +511,7 @@ def test_generate_actions_http_contracts(client: TestClient):
     )
     assert brief.status_code == 200
     script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
-    assert script.status_code == 422
-    assert script.json()["detail"]["code"] == "LESSON_SCRIPT_REQUIRED"
-    narration = "Describe your workflow. Identify repeated steps. Review one improvement with your team."
-    saved = client.post(f"/api/nova/creative/projects/{project_id}/presenter/script", headers=headers,
-                        json={"script": narration})
-    assert saved.status_code == 200, saved.text
-    script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
     assert script.status_code == 200
-    assert script.json()["pack"]["voiceover_script"] == narration
     assert "What if How" not in script.json()["pack"]["hook"]
     caption = client.post(f"/api/nova/creative/projects/{project_id}/generate/caption", headers=headers)
     assert caption.status_code == 200, caption.text
@@ -610,7 +602,15 @@ def test_http_surface_and_page(client: TestClient):
     )
     assert brief.status_code == 200
     script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
+    assert script.status_code == 422
+    assert script.json()["detail"]["code"] == "LESSON_SCRIPT_REQUIRED"
+    narration = "Describe your workflow. Identify repeated steps. Review one improvement with your team."
+    saved = client.post(f"/api/nova/creative/projects/{project_id}/presenter/script", headers=headers,
+                        json={"script": narration})
+    assert saved.status_code == 200, saved.text
+    script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
     assert script.status_code == 200
+    assert script.json()["pack"]["voiceover_script"] == narration
     image = client.post(
         f"/api/nova/creative/projects/{project_id}/generate/image",
         headers=headers,
@@ -1840,4 +1840,3 @@ def test_project_media_reset_includes_presenter_video() -> None:
     service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
     assert '"presenter_video"' in service
     assert 'removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}' in service
-
