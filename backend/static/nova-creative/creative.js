@@ -14,7 +14,7 @@
       activeProjectRevision += 1;
       presenterScriptProjectId = null;
       presenterSavedScriptValue = null;
-      ["presenter-script", "genova-narration-script", "genova-image-file", "genova-narration-file"].forEach(function (id) {
+      ["presenter-script", "genova-narration-script", "genova-image-file", "genova-narration-file", "finished-video-file"].forEach(function (id) {
         if ($(id)) $(id).value = "";
       });
       if ($("presenter-script")) $("presenter-script").disabled = true;
@@ -227,6 +227,33 @@
       if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
     } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
   }
+  var finishedVideoUpload = $("import-finished-video");
+  if (finishedVideoUpload) finishedVideoUpload.addEventListener("click", async function () {
+    var p = activeProjectId, revision = activeProjectRevision;
+    var input = $("finished-video-file");
+    var file = input && input.files && input.files[0];
+    if (!p || !file) { showBanner("Select a project and a finished MP4 first.", false); return; }
+    if (!file.size || file.size > 128 * 1024 * 1024) { showBanner("Choose an MP4 under 128 MB.", false); return; }
+    finishedVideoUpload.disabled = true;
+    try {
+      var form = new FormData(); form.append("file", file);
+      var shared = session();
+      var path = "/api/nova/creative/projects/" + encodeURIComponent(p) + "/finished-video-upload";
+      var response = shared && shared.authFetch
+        ? await shared.authFetch(path, {method: "POST", body: form})
+        : await fetch(path, {method: "POST", headers: {"Authorization": "Bearer " + token()}, body: form});
+      if (!response.ok) {
+        var detail = await response.json().catch(function () { return {}; });
+        throw new Error(typeof detail.detail === "string" ? detail.detail : ((detail.detail && detail.detail.message) || "Upload rejected (" + response.status + ")"));
+      }
+      if (activeProjectId !== p || activeProjectRevision !== revision) return;
+      input.value = "";
+      await refreshAssets();
+      showBanner("Finished video saved. No generation started. Review it in the asset list before publishing.", true);
+    } catch (error) {
+      if (activeProjectId === p && activeProjectRevision === revision) showBanner("Video import failed: " + error.message, false);
+    } finally { finishedVideoUpload.disabled = false; }
+  });
   var narrationUpload = $("genova-upload-narration");
   if (narrationUpload) narrationUpload.addEventListener("click", async function () {
     var p = activeProjectId;
@@ -2688,5 +2715,6 @@
 
   boot();
 })();
+
 
 
