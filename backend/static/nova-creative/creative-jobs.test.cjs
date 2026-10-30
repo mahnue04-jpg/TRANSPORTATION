@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/creative.js', 'utf8');
+const briefSync = source.slice(source.indexOf('  function syncContentBrief('), source.indexOf('  function updateActiveProjectLabel('));
 const polling = source.slice(source.indexOf('  async function waitForScene('), source.indexOf('  async function waitForFinalPromo('));
 
 function selectionContext(extra = {}) {
@@ -165,7 +166,7 @@ test('saved motion failures render the provider reason safely after a project re
   const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('  async function waitForScene('));
   // refreshAssets is followed by event registration; isolate its declaration.
   const end = refresh.indexOf('\n  $("reset-project-media")');
-  vm.runInContext(escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
+  vm.runInContext(briefSync + escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
   await ctx.refreshAssets();
   const html = elements['asset-list'].innerHTML;
   assert.match(html, /insufficient credits/);
@@ -494,7 +495,7 @@ test('offline asset markup downloads through a button and never puts the file AP
       }],
     }),
   });
-  vm.runInContext(escape + memoryNotice + failure + labels.slice(0, end), ctx);
+  vm.runInContext(briefSync + escape + memoryNotice + failure + labels.slice(0, end), ctx);
   await ctx.refreshAssets();
   const html = elements["asset-list"].innerHTML;
   assert.match(html, /asset-auth-download/);
