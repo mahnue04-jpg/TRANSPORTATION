@@ -463,6 +463,21 @@ class CreativeStudioService(ShortDramaMixin):
         )
         return self.store.save_asset(asset)
 
+    def _planning_content_options(self, owner_id: str, project) -> dict[str, Any]:
+        if project.project_type != "explainer":
+            return {}
+        scripts = [asset for asset in self.store.list_assets(project.id, owner_id)
+                   if asset.kind == "presenter_script" and str(asset.content or "").strip()]
+        if not scripts:
+            raise CreativeStudioError("LESSON_SCRIPT_REQUIRED",
+                "Save the exact lesson narration with Save Presenter Script before generating explainer planning.",
+                http_status=422)
+        script = scripts[-1].content
+        safety = screen_creative_text(script, project.objective, project.audience)
+        if safety["decision"] == BLOCK:
+            raise CreativeStudioError("SAFETY_BLOCK", safety["message"], http_status=422)
+        return {"content_mode": "reviewed", "reviewed_script": script}
+
     def generate_script(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         if project.project_type == "short_drama":
@@ -473,8 +488,10 @@ class CreativeStudioService(ShortDramaMixin):
         safety = screen_creative_text(topic, project.objective, project.audience)
         if safety["decision"] == BLOCK:
             raise CreativeStudioError("SAFETY_BLOCK", safety["message"], http_status=422)
+        planning_options = self._planning_content_options(owner_id, project)
         job = self._start_job(owner_id, project_id, "script")
         pack = generate_content_pack(
+            **planning_options,
             topic=topic,
             audience=(brief.audience if brief and brief.audience else project.audience),
             objective=(brief.objective if brief and brief.objective else project.objective),
@@ -503,8 +520,10 @@ class CreativeStudioService(ShortDramaMixin):
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
         topic = (brief.topic if brief else project.title)
+        planning_options = self._planning_content_options(owner_id, project)
         job = self._start_job(owner_id, project_id, "caption")
         pack = generate_content_pack(
+            **planning_options,
             topic=topic,
             audience=project.audience or (brief.audience if brief else ""),
             objective=project.objective or (brief.objective if brief else ""),
@@ -532,8 +551,10 @@ class CreativeStudioService(ShortDramaMixin):
         duration = int(project.duration_target or 30)
         if duration not in DURATIONS:
             duration = 30
+        planning_options = self._planning_content_options(owner_id, project)
         job = self._start_job(owner_id, project_id, "storyboard")
         assembly = assemble_short_video(
+            **planning_options,
             topic=(brief.topic if brief else project.title),
             audience=project.audience or (brief.audience if brief else "general audience"),
             platform=project.platform,
@@ -603,16 +624,28 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError("INVALID_INPUT", f"aspect_ratio must be one of {IMAGE_ASPECTS}")
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
+        planning_options = self._planning_content_options(owner_id, project)
+        if project.project_type == "short_drama":
+            _, plan = self._drama_plan(owner_id, project_id)
+            cast = "; ".join(f"{row['name']}: {row['description']}" for row in plan['characters'])
+            pack = {"image_prompt": (
+                f"Story thumbnail for {project.title}. Follow the saved visual style: {plan['setting']} "
+                f"Cast: {cast}. Opening story beat: {plan['lines'][0]['text']} "
+                "Keep character designs and setting consistent. No unrelated product advertising, "
+                "invented logos or watermarks."
+            )}
+        else:
+            pack = generate_content_pack(
+                **planning_options,
+                topic=(brief.topic if brief else project.title),
+                audience=project.audience,
+                objective=project.objective,
+                tone=project.tone or (brand.tone if brand else "clear"),
+                platform=project.platform,
+                cta=(brief.cta if brief and brief.cta else "Learn more."),
+                brand_name=brand.business_name if brand else "AMICOR",
+            )
         job = self._start_job(owner_id, project_id, "image_prompt")
-        pack = generate_content_pack(
-            topic=(brief.topic if brief else project.title),
-            audience=project.audience,
-            objective=project.objective,
-            tone=project.tone or (brand.tone if brand else "clear"),
-            platform=project.platform,
-            cta=(brief.cta if brief and brief.cta else "Learn more."),
-            brand_name=brand.business_name if brand else "AMICOR",
-        )
         prompt = f"{pack['image_prompt']} Aspect ratio {aspect_ratio}."
         asset = self._save_text_asset(
             owner_id=owner_id,
@@ -2053,6 +2086,45 @@ class CreativeStudioService(ShortDramaMixin):
             "license_status": "GREEN" if accepted else "AMBER",
             "voice_license_acceptance": meta["voice_license_acceptance"],
         }
+
+    @serialized_media
+    def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str) -> dict[str, Any]:
+        """Archive an existing video, without changing scripts, approvals, or provider gates."""
+        from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES, validate_video
+        self._project_or_404(owner_id, project_id)
+        if content_type != "video/mp4" or not data or len(data) > MAX_VIDEO_BYTES:
+            raise CreativeStudioError("INVALID_VIDEO", "Choose an MP4 between 1 byte and 128 MB.", http_status=422)
+        digest = hashlib.sha256(data).hexdigest()
+        for existing in self.store.list_assets(project_id, owner_id):
+            meta = existing.metadata or {}
+            if meta.get("source") == "owner_video_import" and meta.get("sha256") == digest:
+                path = _resolve_creative_media_url(existing.url)
+                if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+                    return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
+        root, prefix = _creative_media_root_and_prefix()
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="nova-video-import-") as temporary:
+            path = Path(temporary) / "upload.mp4"
+            path.write_bytes(data)
+            try:
+                measured = validate_video(path)
+            except ValueError as exc:
+                raise CreativeStudioError("INVALID_VIDEO", str(exc), http_status=422) from exc
+            name = new_id("imported_video") + ".mp4"
+            target = root / name
+            target.write_bytes(data)
+        try:
+            asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="video",
+                title="Imported finished video (owner review)", content="Existing MP4 imported without generation.",
+                status="GENERATED", url=prefix.rstrip("/") + "/" + name,
+                metadata={**measured, "source": "owner_video_import", "sha256": digest,
+                    "publish_ready": False, "commercial_complete": False, "owner_review_required": True,
+                    "captions_verified": False, "lip_sync_verified": False,
+                    "provider_clearance_verified": False, "paid_request_submitted": False})
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+        return {"asset": asset.as_dict(), "reused": False, "paid_request_submitted": False}
 
     def upload_genova_presenter_image(self, owner_id: str, project_id: str, data: bytes, filename: str, *, content_type: str | None = None) -> dict[str, Any]:
         """Save an owner-scoped local image candidate; no provider calls or implicit approval."""

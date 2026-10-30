@@ -351,6 +351,12 @@
         <button type="button" id="reset-project-media" class="secondary">Clear all generated media from this project</button>
         <button type="button" id="clear-failed-video-assets" class="secondary">Clear failed video attempts</button>
       </div>
+      <section aria-label="Import finished video">
+        <h3>Save an existing finished video</h3>
+        <p class="hint">Import your completed MP4 into this project without generating or buying media. Import preserves existing scripts and approvals. Check narration, captions, licensing and publishing approval separately.</p>
+        <label>Finished MP4 (H.264/AAC, up to 128 MB and 120 seconds)<input id="finished-video-file" type="file" accept="video/mp4,.mp4" /></label>
+        <button type="button" id="import-finished-video" class="secondary">Import finished video (free)</button>
+      </section>
       <div id="asset-list" class="list"></div>
     </section>
   </main>
@@ -365,7 +371,8 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=genova-narration-import-20261026"></script>
+  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope"></script>
 </body>
 </html>
+
 
