@@ -2,7 +2,8 @@
 
 Run: python3 tools/check_drama_assembly_offline.py
 Requires ffmpeg, ffprobe and Pillow. Loads the exact assembly method AST;
-only storage, job bookkeeping and encoder discovery are test adapters.
+Storage, job bookkeeping and encoder invocation are test adapters; the
+production memory-headroom watchdog is not covered by this harness.
 Colored fixture clips and tones are not AI animation or verified narration.
 """
 import ast
