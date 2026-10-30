@@ -61,9 +61,11 @@ def _creative_media_root_and_prefix() -> tuple[Path, str]:
         prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or "/media/nova-creative").rstrip("/")
         return root, prefix
 
-    persistent_parent = Path("/data/onboarding_docs")
-    if persistent_parent.exists():
-        return persistent_parent / "nova_creative_media", "/media/nova-creative"
+    # Render may mount /data without creating onboarding_docs. Check the mount itself.
+    # Preserve the established subdirectory for existing media on that disk.
+    persistent_mount = Path("/data")
+    if persistent_mount.is_mount():
+        return persistent_mount / "onboarding_docs" / "nova_creative_media", "/media/nova-creative"
 
     root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
     return root, "/static/generated/nova-creative"
