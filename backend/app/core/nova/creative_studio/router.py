@@ -1618,6 +1618,28 @@ async def upload_genova_narration(
         await file.close()
 
 
+@router.post("/projects/{project_id}/finished-video-upload")
+async def import_finished_video(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES
+    from starlette.concurrency import run_in_threadpool
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        data = await file.read(MAX_VIDEO_BYTES + 1)
+        return await run_in_threadpool(get_service(db).import_finished_video,
+            user.user_id, project_id, data, content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    finally:
+        await file.close()
+
+
 @router.post("/projects/{project_id}/genova-image-upload")
 async def upload_genova_image(
     project_id: str,
