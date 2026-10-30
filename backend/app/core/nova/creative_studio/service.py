@@ -625,17 +625,27 @@ class CreativeStudioService(ShortDramaMixin):
         brief = self._brief_for(owner_id, project)
         brand = self._brand_for(owner_id, project)
         planning_options = self._planning_content_options(owner_id, project)
+        if project.project_type == "short_drama":
+            _, plan = self._drama_plan(owner_id, project_id)
+            cast = "; ".join(f"{row['name']}: {row['description']}" for row in plan['characters'])
+            pack = {"image_prompt": (
+                f"Story thumbnail for {project.title}. Follow the saved visual style: {plan['setting']} "
+                f"Cast: {cast}. Opening story beat: {plan['lines'][0]['text']} "
+                "Keep character designs and setting consistent. No unrelated product advertising, "
+                "invented logos or watermarks."
+            )}
+        else:
+            pack = generate_content_pack(
+                **planning_options,
+                topic=(brief.topic if brief else project.title),
+                audience=project.audience,
+                objective=project.objective,
+                tone=project.tone or (brand.tone if brand else "clear"),
+                platform=project.platform,
+                cta=(brief.cta if brief and brief.cta else "Learn more."),
+                brand_name=brand.business_name if brand else "AMICOR",
+            )
         job = self._start_job(owner_id, project_id, "image_prompt")
-        pack = generate_content_pack(
-            **planning_options,
-            topic=(brief.topic if brief else project.title),
-            audience=project.audience,
-            objective=project.objective,
-            tone=project.tone or (brand.tone if brand else "clear"),
-            platform=project.platform,
-            cta=(brief.cta if brief and brief.cta else "Learn more."),
-            brand_name=brand.business_name if brand else "AMICOR",
-        )
         prompt = f"{pack['image_prompt']} Aspect ratio {aspect_ratio}."
         asset = self._save_text_asset(
             owner_id=owner_id,

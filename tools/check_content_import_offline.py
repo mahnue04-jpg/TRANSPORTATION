@@ -158,6 +158,37 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()),[])
 
 class StoryStyleTests(unittest.TestCase):
+    def test_story_thumbnail_uses_saved_cast_setting_and_dialogue(self):
+        for setting in ['Gentle 2D cartoon orchard.', 'Realistic community garden drama.']:
+            with self.subTest(setting=setting):
+                svc = Service(Path('.'))
+                svc.project.project_type = 'short_drama'
+                svc.project.title = 'Sharing apples'
+                plan = {'setting': setting, 'characters': [
+                    {'name': 'Pip', 'description': 'Orange fox with blue scarf'},
+                    {'name': 'Luna', 'description': 'Lavender rabbit'}],
+                    'lines': [{'text': 'We have four apples.'}]}
+                svc._drama_plan = lambda *args: (svc.project, plan)
+                result = svc.generate_image_prompt('owner', 'project', aspect_ratio='16:9')
+                prompt = result['asset']['content']
+                for expected in [setting, 'Pip', 'Luna', 'Orange fox', 'four apples', '16:9']:
+                    self.assertIn(expected, prompt)
+                self.assertNotIn('Educational thumbnail', prompt)
+                self.assertNotIn('getamicor.com', prompt)
+                self.assertNotIn('business operations', prompt)
+                self.assertFalse(result['asset']['metadata']['media_generated'])
+                self.assertIsNone(result['url'])
+
+    def test_story_thumbnail_requires_a_saved_plan_before_starting_job(self):
+        svc = Service(Path('.'))
+        svc.project.project_type = 'short_drama'
+        def missing(*args):
+            raise Error('DRAMA_PLAN_REQUIRED', 'Save cast and dialogue first.', http_status=422)
+        svc._drama_plan = missing
+        with self.assertRaises(Error):
+            svc.generate_image_prompt('owner', 'project')
+        self.assertEqual(svc.jobs, [])
+
     def test_resaving_legacy_plan_rebuilds_prompts_without_editing_dialogue(self):
         tree = ast.parse((ROOT/'backend/app/core/nova/creative_studio/drama.py').read_text())
         parser = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'parse_plan')
