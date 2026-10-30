@@ -7,6 +7,7 @@
   var activeProjectRevision = 0;
   var presenterScriptProjectId = null;
   var presenterSavedScriptValue = null;
+  var briefProjectId = null;
 
   function setActiveProjectId(value) {
     var next = value || null;
@@ -14,6 +15,10 @@
       activeProjectRevision += 1;
       presenterScriptProjectId = null;
       presenterSavedScriptValue = null;
+      briefProjectId = null;
+      ["brief-topic", "brief-cta", "brief-style"].forEach(function (id) {
+        if ($(id)) { $(id).value = ""; $(id).disabled = true; }
+      });
       ["presenter-script", "genova-narration-script", "genova-image-file", "genova-narration-file", "finished-video-file"].forEach(function (id) {
         if ($(id)) $(id).value = "";
       });
@@ -34,6 +39,17 @@
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
+  }
+
+  function syncContentBrief(detail, projectId, revision) {
+    if (activeProjectId !== projectId || activeProjectRevision !== revision ||
+        !detail.project || detail.project.id !== projectId) return;
+    if (briefProjectId === projectId) return; // Keep unsaved edits during asset refreshes.
+    var brief = detail.brief || {};
+    [["brief-topic", "topic"], ["brief-cta", "cta"], ["brief-style", "style"]].forEach(function (pair) {
+      if ($(pair[0])) { $(pair[0]).value = brief[pair[1]] || ""; $(pair[0]).disabled = false; }
+    });
+    briefProjectId = projectId;
   }
 
   function updateActiveProjectLabel() {
@@ -1440,6 +1456,7 @@
     var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selectedProject));
     if (activeProjectId !== selectedProject || activeProjectRevision !== revision) return;
     var project = detail.project || {};
+    syncContentBrief(detail, selectedProject, revision);
     if ($("presenter-script")) syncPresenterScript(detail);
     var production = (project.metadata && project.metadata.production_settings) || {};
     if ($("project-title")) $("project-title").value = project.title || "";
@@ -2538,11 +2555,17 @@
       showBanner("Create or select a project first.", false);
       return;
     }
+    if (briefProjectId !== activeProjectId) {
+      showBanner("Wait for the selected project's saved brief to load before saving.", false);
+      return;
+    }
+    var briefRequestProjectId = activeProjectId;
+    var briefRequestRevision = activeProjectRevision;
     try {
       var row = await api("/api/nova/creative/briefs", {
         method: "POST",
         body: JSON.stringify({
-          project_id: activeProjectId,
+          project_id: briefRequestProjectId,
           topic: $("brief-topic").value.trim(),
           cta: $("brief-cta").value.trim(),
           style: $("brief-style").value.trim(),
@@ -2552,6 +2575,7 @@
           duration_target: Number($("project-duration").value)
         })
       });
+      if (activeProjectId !== briefRequestProjectId || activeProjectRevision !== briefRequestRevision) return;
       showBanner("Brief saved.", true);
       renderOutput(row);
     } catch (err) {
