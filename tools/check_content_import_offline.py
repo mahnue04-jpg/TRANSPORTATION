@@ -158,6 +158,26 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()),[])
 
 class StoryStyleTests(unittest.TestCase):
+    def test_resaving_legacy_plan_rebuilds_prompts_without_editing_dialogue(self):
+        tree = ast.parse((ROOT/'backend/app/core/nova/creative_studio/drama.py').read_text())
+        parser = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'parse_plan')
+        voices = next(n for n in tree.body if isinstance(n, ast.Assign) and
+                      any(isinstance(t, ast.Name) and t.id == 'VOICES' for t in n.targets))
+        scope = dict(ns, hashlib=hashlib, json=json)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[voices, parser], type_ignores=[])),
+                     'drama.py', 'exec'), scope)
+        payload = {'setting': 'Gentle 2D cartoon orchard.', 'characters': [
+            {'name': 'Pip', 'description': 'Orange fox', 'voice': 'nova'},
+            {'name': 'Luna', 'description': 'Lavender rabbit', 'voice': 'onyx'}],
+            'dialogue': 'Pip: One apple.\nLuna: Two apples.'}
+        current = scope['parse_plan'](payload)
+        legacy = {k: v for k, v in current.items() if k not in {'revision', 'visual_prompt_version'}}
+        legacy_revision = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()[:20]
+        self.assertEqual(current['visual_prompt_version'], 2)
+        self.assertNotEqual(current['revision'], legacy_revision)
+        self.assertEqual(current['dialogue'], payload['dialogue'])
+        self.assertEqual(scope['parse_plan'](payload)['revision'], current['revision'])
+
     def test_saved_story_style_is_not_overridden_by_live_action(self):
         tree = ast.parse((ROOT/'backend/app/core/nova/creative_studio/drama.py').read_text())
         mixin = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'ShortDramaMixin')
