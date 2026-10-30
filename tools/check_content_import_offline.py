@@ -157,4 +157,34 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.svc.import_finished_video('owner','project',self.data,content_type='video/mp4')
         self.assertEqual(list(self.root.iterdir()),[])
 
+class StoryStyleTests(unittest.TestCase):
+    def test_saved_story_style_is_not_overridden_by_live_action(self):
+        tree = ast.parse((ROOT/'backend/app/core/nova/creative_studio/drama.py').read_text())
+        mixin = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'ShortDramaMixin')
+        method = next(n for n in mixin.body if isinstance(n, ast.FunctionDef) and n.name == 'save_drama_plan')
+        scope = dict(ns, parse_plan=lambda payload: payload)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[method], type_ignores=[])),
+                     str(ROOT/'backend/app/core/nova/creative_studio/drama.py'), 'exec'), scope)
+        for setting in ['Original gentle 2D cartoon in a sunny orchard.',
+                        'Family-friendly realistic drama in a community garden.']:
+            with self.subTest(setting=setting):
+                svc = Service(Path('.'))
+                svc.project.project_type = 'short_drama'
+                svc.list_jobs = lambda *args: []
+                svc.get_project = lambda *args: svc.project.as_dict()
+                lines = [{'speaker': 'Pip' if i % 2 == 0 else 'Luna',
+                          'text': f'Count apple {i + 1}.'} for i in range(6)]
+                plan = {'setting': setting, 'characters': [
+                    {'name': 'Pip', 'description': 'Orange fox with blue scarf'},
+                    {'name': 'Luna', 'description': 'Lavender rabbit with green overalls'}],
+                    'revision': 'test', 'lines': lines, 'dialogue': 'Saved dialogue'}
+                scope['save_drama_plan'](svc, 'owner', 'project', plan)
+                self.assertEqual(len(svc.scenes), 6)
+                for scene, line in zip(svc.scenes, lines):
+                    self.assertIn(setting, scene.visual_prompt)
+                    self.assertNotIn('Cinematic realistic live-action', scene.visual_prompt)
+                    self.assertIn('Orange fox with blue scarf', scene.visual_prompt)
+                    self.assertEqual(scene.voiceover_text, line['text'])
+                    self.assertEqual(scene.subtitle_text, f"{line['speaker']}: {line['text']}")
+
 if __name__=='__main__': unittest.main(verbosity=2)
