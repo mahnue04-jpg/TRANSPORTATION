@@ -323,6 +323,11 @@ def test_thirty_second_commercial_rejects_missing_presenter(tmp_path, monkeypatc
         {"title": "No approved presenter", "project_type": "short_video", "platform": "TikTok", "duration_target": 30},
     )
     svc.generate_storyboard("owner-351", project["id"])
+    # A different available presenter is not acceptable: only the source
+    # image used by the approved 60-second video can be used.
+    from PIL import Image
+
+    Image.new("RGB", (360, 640), (60, 70, 90)).save(tmp_path / "nova-unapproved-presenter.png")
     with pytest.raises(CreativeStudioError) as exc:
         svc.render_walking_commercial_30s("owner-351", project["id"])
     assert exc.value.code == "PRESENTER_IMAGE_REQUIRED"
