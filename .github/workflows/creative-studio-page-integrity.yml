@@ -1,0 +1,42 @@
+name: Creative Studio page integrity
+
+on:
+  pull_request:
+    paths:
+      - "backend/static/nova-creative/index.html"
+      - ".github/workflows/creative-studio-page-integrity.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/static/nova-creative/index.html"
+      - ".github/workflows/creative-studio-page-integrity.yml"
+  workflow_dispatch:
+
+jobs:
+  page-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject truncated or missing Creative Studio HTML
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          page = Path("backend/static/nova-creative/index.html")
+          html = page.read_text(encoding="utf-8")
+          required = (
+              "<!DOCTYPE html>", "<html", "<head>", "<body>",
+              "Creative Studio", 'id="project-list"', 'id="asset-list"',
+              'id="build-walking-commercial-30s"',
+              "/static/nova-creative/creative.js", "</main>", "</body>", "</html>"
+          )
+          missing = [item for item in required if item not in html]
+          assert len(html) >= 10000, f"Studio page truncated: {len(html)} characters"
+          assert not missing, f"Studio page missing critical content: {missing}"
+          assert html.index("<body>") < html.index('id="project-list"')
+          assert re.search(r"<header\\b", html), "Missing header"
+          assert re.search(r"<main\\b", html), "Missing main application"
+          print("Studio page integrity passed")
+          PY
