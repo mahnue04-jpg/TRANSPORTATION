@@ -38,9 +38,12 @@ JS = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf
 def test_amicor_pronunciation_is_canonical_for_speech_but_branded_in_captions():
     spoken = canonical_spoken_script(DEFAULT_SCRIPT)
     captions = caption_script(DEFAULT_SCRIPT)
-    assert "AH-mih-kor" in spoken
+    assert "Ammy Core" in spoken
+    assert "AMICOR" not in spoken
     assert "AMICOR" in captions
-    assert "AH-mih-kor" not in captions
+    assert "Ammy Core" not in captions
+    assert canonical_spoken_script("Meet AMICOR Nova.") == "Meet Ammy Core Nova."
+    assert caption_script("Meet Ammy Core Nova.") == "Meet AMICOR Nova."
 
 
 def test_word_aligned_cues_cover_every_script_word():
