@@ -114,6 +114,14 @@ def extract_weather_location(text: str) -> str | None:
         match = re.search(pattern, value)
         if match:
             candidate = _clean(match.group(1)).rstrip("?!.")
+            # Spoken requests often finish with a time phrase or Nova's name.
+            # Keep those conversational suffixes out of the geocoder city query.
+            for _ in range(3):
+                candidate = re.sub(
+                    r"(?i)[,\s]*(?:(?:mrs\.?\s+)?nova|please|today|tonight|right now|currently)[,\s]*$",
+                    "",
+                    candidate,
+                ).strip(" ,?!.")
             if candidate and candidate.lower() not in {"the", "today", "tomorrow"}:
                 return candidate
     return None

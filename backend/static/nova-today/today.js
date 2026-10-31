@@ -164,13 +164,16 @@
     var response;
     try {
       response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
-    } catch (_) {
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        throw new Error("Nova took too long to respond. Please try again.");
+      }
       throw new Error("Network error. Saved work was not changed.");
     }
     var body = null;
     try { body = await response.json(); } catch (_) {}
     if (response.status === 401) throw new Error("Session expired. Sign in again.");
-    if (response.status === 403) throw new Error("Access denied.");
+    if (response.status === 403) throw new Error(errorText(body, "Access denied."));
     if (response.status === 404) throw new Error("Not found / unavailable.");
     if (response.status >= 500) throw new Error("Temporary system error.");
     if (!response.ok) throw new Error(errorText(body, "Request failed."));
@@ -693,34 +696,71 @@
     box.classList.toggle("hidden", !box.innerHTML);
   }
 
+  var brainBusy = false;
   async function runBrain(event) {
     event.preventDefault();
+    if (brainBusy) return;
+    function askError(message) {
+      $("brain-output").textContent = message;
+      setVoiceStatus(message);
+      showBanner(message);
+    }
     if (!token()) {
-      showBanner("Sign in to ask Mrs. Nova Brain.");
+      askError("Sign in to ask Mrs. Nova Brain.");
       $("login-form").classList.remove("hidden");
       return;
     }
     var question = $("ask-input").value.trim();
     if (!question) {
-      showBanner("Type a question or use the microphone.");
+      askError("Type a question or use the microphone.");
       return;
     }
-    var result = await api("/api/nova/today/ask", {
-      method: "POST",
-      body: JSON.stringify({
-        question: question,
-        action_id: selectedActionId || null,
-        source_ref_id: selectedSourceRefId || null
-      })
-    });
-    var answer = result.answer || "No response from Mrs. Nova Brain.";
-    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + answer;
-    renderBrainSources(result.sources || [], result.source_href || "");
-    $("ask-input").value = "";
-    $("ask-input").focus();
-    speakNova(answer);
-    showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
-    await refresh();
+    var form = $("ask-form");
+    var submit = form.querySelector('[type="submit"]');
+    var controller = new AbortController();
+    var timeout = window.setTimeout(function () { controller.abort(); }, 45000);
+    brainBusy = true;
+    form.setAttribute("aria-busy", "true");
+    if (submit) { submit.disabled = true; submit.textContent = "Working…"; }
+    hideBanner();
+    stopNovaSpeaking();
+    renderBrainSources([], "");
+    $("brain-output").textContent = "Nova is working on your question…";
+    setVoiceStatus("Nova is working on your question…");
+    var answered = false;
+    try {
+      var result = await api("/api/nova/today/ask", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          question: question,
+          action_id: selectedActionId || null,
+          source_ref_id: selectedSourceRefId || null
+        })
+      });
+      if (!result || !result.answer) throw new Error("No response from Mrs. Nova Brain. Please try again.");
+      var answer = result.answer;
+      $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + answer;
+      renderBrainSources(result.sources || [], result.source_href || "");
+      // Preserve a new question typed while this answer was in flight.
+      if ($("ask-input").value.trim() === question) $("ask-input").value = "";
+      $("ask-input").focus();
+      setVoiceStatus("Nova answered.");
+      speakNova(answer);
+      showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
+      answered = true;
+    } catch (err) {
+      askError(err.message || String(err));
+    } finally {
+      window.clearTimeout(timeout);
+      brainBusy = false;
+      form.setAttribute("aria-busy", "false");
+      if (submit) { submit.disabled = false; submit.textContent = "Ask Nova"; }
+    }
+    if (answered) {
+      // A dashboard failure must not hide an answer that already succeeded.
+      refresh().catch(function (err) { showBanner("Nova answered, but the dashboard could not refresh: " + (err.message || String(err))); });
+    }
   }
   async function decide(actionId, kind) {
     var path = "/api/nova/today/actions/" + encodeURIComponent(actionId) + "/" + kind;
