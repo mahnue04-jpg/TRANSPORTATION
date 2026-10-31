@@ -2208,7 +2208,40 @@ class CreativeStudioService(ShortDramaMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
-        presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
+        # The 60s production demo's motion clip came from source image
+        # casset_12a81236461c. Pin it only for explicitly configured AMICOR
+        # demo projects; this endpoint also serves unrelated tenant projects.
+        import os
+
+        pinned_projects = {
+            value.strip()
+            for value in os.getenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", "").split(",")
+            if value.strip()
+        }
+        if project_id in pinned_projects:
+            presenter_image = output_dir / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+        else:
+            # Other projects may only use their own generated image assets.
+            # Never silently borrow the AMICOR owner's global presenter plate.
+            candidates = [
+                asset for asset in self.store.list_assets(project_id, owner_id)
+                if asset.kind == "image"
+                and asset.url
+                and str(asset.status or "").upper() == "GENERATED"
+            ]
+            presenter_image = None
+            for asset in candidates:
+                candidate = _resolve_creative_media_url(asset.url)
+                if candidate is not None and candidate.is_file():
+                    presenter_image = candidate
+                    break
+        if presenter_image is None or not presenter_image.is_file():
+            raise CreativeStudioError(
+                "PRESENTER_IMAGE_REQUIRED",
+                "The selected project presenter image is unavailable. Restore or select "
+                "the approved presenter before rendering; no illustration will be substituted.",
+                http_status=422,
+            )
         job = self._start_job(owner_id, project_id, "walking_commercial_30s")
         try:
             rendered = render_walking_commercial_30s(
@@ -2223,6 +2256,20 @@ class CreativeStudioService(ShortDramaMixin):
         except Exception as exc:
             self._finish_job(job, status="ERROR", message=str(exc)[:500], asset_ids=[], provider="nova_walking_commercial")
             raise CreativeStudioError("WALKING_COMMERCIAL_FAILED", str(exc)[:500], http_status=422) from exc
+
+        if rendered.get("illustrated_fallback") or rendered.get("visual_mode") != "genova_photoreal_plate":
+            self._finish_job(
+                job,
+                status="ERROR",
+                message="Approved Nova presenter was not used; refusing the substitute rendering.",
+                asset_ids=[],
+                provider="nova_walking_commercial",
+            )
+            raise CreativeStudioError(
+                "PRESENTER_IMAGE_REQUIRED",
+                "The 30-second render did not use the approved Nova presenter image.",
+                http_status=422,
+            )
 
         if not (rendered.get("validation") or {}).get("ok"):
             self._finish_job(
