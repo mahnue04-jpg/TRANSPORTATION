@@ -365,3 +365,29 @@ def test_thirty_second_commercial_rejects_truncated_narration(tmp_path, monkeypa
         )
     assert exc.value.code == "NARRATION_TOO_LONG"
     assert not (tmp_path / "not-created.mp4").exists()
+
+
+def test_amicor_phonetic_words_reach_neural_tts_without_changing_captions(tmp_path, monkeypatch):
+    """Offline contract: neural TTS receives phonetics while captions retain AMICOR."""
+    import sys
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import walking_presenter
+
+    calls = []
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, *, rate):
+            calls.append((text, voice, rate))
+
+        async def save(self, target):
+            Path(target).write_bytes(b"fake-audio" * 30)
+
+    monkeypatch.setitem(sys.modules, "edge_tts", SimpleNamespace(Communicate=FakeCommunicate))
+    monkeypatch.setattr(walking_presenter, "probe_duration_seconds", lambda _path: 5.0)
+    result = walking_presenter.synthesize_female_narration(
+        "Welcome to AMICOR Nova.", tmp_path / "sample.wav", voice="en-US-JennyNeural"
+    )
+    assert calls == [("Welcome to Ammy Core Nova.", "en-US-JennyNeural", "+0%")]
+    assert result["spoken_script"] == "Welcome to Ammy Core Nova."
+    assert result["caption_script"] == "Welcome to AMICOR Nova."
+    assert result["paid_provider_charges"] is False
