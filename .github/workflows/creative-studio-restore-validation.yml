@@ -1,0 +1,39 @@
+name: Creative Studio restored client validation
+
+on:
+  pull_request:
+    paths:
+      - "backend/static/nova-creative/**"
+      - ".github/workflows/creative-studio-restore-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  restored-studio:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify full client startup functions exist and JavaScript parses
+        run: |
+          node --check static/nova-creative/creative.js
+          python - <<'PY'
+          from pathlib import Path
+          js = Path("static/nova-creative/creative.js").read_text()
+          html = Path("static/nova-creative/index.html").read_text()
+          assert len(js) > 50000, "Creative Studio client is truncated"
+          for required in ("function boot(", "function refreshProjects(", "function refreshAssets(", "function setSignedIn("):
+              assert required in js, "Missing Studio function: " + required
+          assert "creative.js" in html and "<main" in html and "</html>" in html
+          PY
+      - name: Install backend test requirements
+        run: python -m pip install -r requirements.txt
+      - name: Run Creative Studio regression tests (no paid providers)
+        run: python -m pytest tests/test_nova_creative_studio.py tests/test_nova_creative_scene_jobs.py tests/test_nova_creative_issue_344.py tests/test_nova_creative_offline_commercial.py tests/test_presenter_media.py -q
