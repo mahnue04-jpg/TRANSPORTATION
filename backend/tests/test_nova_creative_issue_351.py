@@ -291,6 +291,7 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     Image.new("RGB", (360, 640), (30, 50, 80)).save(
         tmp_path / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
     )
+    monkeypatch.setenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", project["id"])
     rendered = svc.render_walking_commercial_30s("owner-351", project["id"])
     assert rendered["milestone"] == "30s_walking_commercial"
     assert rendered["lip_sync"] is True
@@ -328,6 +329,7 @@ def test_thirty_second_commercial_rejects_missing_presenter(tmp_path, monkeypatc
     from PIL import Image
 
     Image.new("RGB", (360, 640), (60, 70, 90)).save(tmp_path / "nova-unapproved-presenter.png")
+    monkeypatch.setenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", project["id"])
     with pytest.raises(CreativeStudioError) as exc:
         svc.render_walking_commercial_30s("owner-351", project["id"])
     assert exc.value.code == "PRESENTER_IMAGE_REQUIRED"
