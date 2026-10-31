@@ -23,8 +23,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          page = Path("backend/static/nova-creative/index.html")
+                    page = Path("backend/static/nova-creative/index.html")
           html = page.read_text(encoding="utf-8")
           required = (
               "<!DOCTYPE html>", "<html", "<head>", "<body>",
@@ -36,7 +35,7 @@ jobs:
           assert len(html) >= 10000, f"Studio page truncated: {len(html)} characters"
           assert not missing, f"Studio page missing critical content: {missing}"
           assert html.index("<body>") < html.index('id="project-list"')
-          assert re.search(r"<header\\b", html), "Missing header"
-          assert re.search(r"<main\\b", html), "Missing main application"
+          assert "<header" in html, "Missing header"
+          assert "<main" in html, "Missing main application"
           print("Studio page integrity passed")
           PY
