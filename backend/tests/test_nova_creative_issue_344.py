@@ -243,3 +243,26 @@ def test_local_motion_path_exists_for_gated_providers():
     assert "local_motion_not_slideshow" in source
     assert "burn_captions_and_cta_fade" in source
     assert "getamicor.com" in source
+
+def test_voice_budget_guard_does_not_use_fal_balance(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "fal")
+    monkeypatch.setenv("FAL_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", "-3.16")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("voice-owner-344", {
+        "title": "Voice budget guard test", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    svc.confirm_render_budget("voice-owner-344", pid, confirmed=True, acknowledged_estimate_usd=2.04)
+    # This authorizes the voice path only; it does not call the provider.
+    svc.require_budget_confirmation_for_paid("voice-owner-344", pid, provider="voice")
+    try:
+        svc.require_budget_confirmation_for_paid("voice-owner-344", pid)
+        assert False, "fal-dependent general paid render should remain blocked"
+    except CreativeStudioError as exc:
+        assert exc.code == "PROVIDER_FUNDING_UNVERIFIED"
