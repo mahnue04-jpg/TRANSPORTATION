@@ -17,6 +17,11 @@ def test_extract_name_statement_and_recall_profile(tmp_path, monkeypatch):
 def test_extract_location_and_weather_location():
     assert live_tools.extract_location_statement("I live in Minneapolis, Minnesota.") == "Minneapolis, Minnesota"
     assert live_tools.extract_weather_location("What's the weather in Minneapolis?") == "Minneapolis"
+    assert live_tools.extract_weather_location("what is the weather in Minneapolis today Mrs Nova") == "Minneapolis"
+    assert live_tools.extract_weather_location("Weather in Minneapolis, Minnesota today, Mrs. Nova?") == "Minneapolis, Minnesota"
+    assert live_tools.extract_weather_location("Weather in Nova Scotia?") == "Nova Scotia"
+    assert live_tools.extract_weather_location("Weather in Villanova?") == "Villanova"
+    assert live_tools.extract_weather_location("Weather for New York right now please?") == "New York"
 
 
 def test_rank_news_query_extraction():
