@@ -15,6 +15,22 @@
 </head>
 <body>
   <div id="studio-mobile-recovery" role="status">AMICOR Nova Creative Studio is loading. If the controls do not appear, <a href="/nova">open Nova Home</a> or try Safari directly. Your saved projects have not been deleted by this page.</div>
+  <script>
+    // The fallback is a diagnostic only; remove it as soon as normal HTML renders.
+    (function () {
+      function clearFallback() {
+        var el = document.getElementById("studio-mobile-recovery");
+        if (el && document.querySelector(".studio-header") && document.querySelector(".studio-main")) {
+          el.parentNode.removeChild(el);
+        }
+      }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", clearFallback, { once: true });
+      } else {
+        clearFallback();
+      }
+    })();
+  </script>
   <header class="studio-header">
     <div class="amicor-brand-lockup">
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
