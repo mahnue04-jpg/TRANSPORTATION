@@ -115,7 +115,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y espeak-ng
           pytest tests/test_nova_creative_studio.py tests/test_nova_creative_scene_jobs.py tests/test_nova_creative_issue_344.py tests/test_nova_creative_offline_commercial.py tests/test_presenter_media.py -q
-          pytest tests/test_nova_creative_issue_351.py::test_thirty_second_commercial_rejects_missing_presenter -q
+          pytest tests/test_nova_creative_issue_351.py::test_thirty_second_commercial_rejects_missing_presenter tests/test_nova_creative_issue_351.py::test_thirty_second_commercial_rejects_truncated_narration -q
           node --test static/nova-creative/creative-jobs.test.cjs
 
       - name: Run Nova cross-page discovery and status evidence regression
