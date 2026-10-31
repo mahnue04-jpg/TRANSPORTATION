@@ -285,6 +285,12 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     )
     svc.generate_storyboard("owner-351", project["id"])
     svc.accept_voice_license("owner-351", project["id"], accepted=True, note="Owner accepted for #351")
+    # An approved presenter plate must exist: never silently render an unrelated cartoon.
+    from PIL import Image
+
+    Image.new("RGB", (360, 640), (30, 50, 80)).save(
+        tmp_path / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+    )
     rendered = svc.render_walking_commercial_30s("owner-351", project["id"])
     assert rendered["milestone"] == "30s_walking_commercial"
     assert rendered["lip_sync"] is True
@@ -304,3 +310,20 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     assert probe["video_codec"] in {"h264", "avc1"}
     assert probe["audio_codec"] in {"aac", "mp4a"}
     assert video.with_suffix(".srt").is_file()
+
+
+def test_thirty_second_commercial_rejects_missing_presenter(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project(
+        "owner-351",
+        {"title": "No approved presenter", "project_type": "short_video", "platform": "TikTok", "duration_target": 30},
+    )
+    svc.generate_storyboard("owner-351", project["id"])
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.render_walking_commercial_30s("owner-351", project["id"])
+    assert exc.value.code == "PRESENTER_IMAGE_REQUIRED"
+    assert not list(tmp_path.glob("nova-walk-commercial-30s-*.mp4"))
