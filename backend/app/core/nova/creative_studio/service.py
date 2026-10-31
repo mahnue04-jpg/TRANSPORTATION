@@ -2209,6 +2209,13 @@ class CreativeStudioService(ShortDramaMixin):
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
         presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
+        if presenter_image is None:
+            raise CreativeStudioError(
+                "PRESENTER_IMAGE_REQUIRED",
+                "The approved Nova presenter image is missing. Restore or select the approved image "
+                "before rendering the 30-second commercial; no substitute presenter will be used.",
+                http_status=422,
+            )
         job = self._start_job(owner_id, project_id, "walking_commercial_30s")
         try:
             rendered = render_walking_commercial_30s(
@@ -2223,6 +2230,20 @@ class CreativeStudioService(ShortDramaMixin):
         except Exception as exc:
             self._finish_job(job, status="ERROR", message=str(exc)[:500], asset_ids=[], provider="nova_walking_commercial")
             raise CreativeStudioError("WALKING_COMMERCIAL_FAILED", str(exc)[:500], http_status=422) from exc
+
+        if rendered.get("illustrated_fallback") or rendered.get("visual_mode") != "genova_photoreal_plate":
+            self._finish_job(
+                job,
+                status="ERROR",
+                message="Approved Nova presenter was not used; refusing the substitute rendering.",
+                asset_ids=[],
+                provider="nova_walking_commercial",
+            )
+            raise CreativeStudioError(
+                "PRESENTER_IMAGE_REQUIRED",
+                "The 30-second render did not use the approved Nova presenter image.",
+                http_status=422,
+            )
 
         if not (rendered.get("validation") or {}).get("ok"):
             self._finish_job(
