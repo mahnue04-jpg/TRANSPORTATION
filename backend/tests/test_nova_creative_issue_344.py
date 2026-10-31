@@ -66,7 +66,7 @@ def test_budget_confirmation_blocks_when_paid_not_allowed(monkeypatch):
     quote = svc.preflight_quote("owner-344", project["id"])
     assert quote["paid_render_allowed"] is False
     acknowledgement = svc.confirm_render_budget(
-        "owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=1.0
+        "owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"]
     )
     assert acknowledgement["budget_confirmation"]["confirmed"] is True
     assert svc.preflight_quote("owner-344", project["id"])["owner_budget_confirmed"] is True
