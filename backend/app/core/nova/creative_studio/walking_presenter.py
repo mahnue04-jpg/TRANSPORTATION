@@ -31,8 +31,10 @@ _WALK_ENCODER_HEADROOM = 48 * MIB
 _WALK_ENCODE_RESERVE = 32 * MIB
 _WALK_CHUNK_SECONDS = 4.0
 
-# Spoken form for TTS; captions keep the brand spelling AMICOR.
-AMICOR_SPOKEN = "AH-mih-kor"
+# TTS input is deliberately phonetic: two ordinary words give the neural voice
+# a stable AM-ee-core reading instead of the incorrect AH-mih-kor. Captions
+# and visible branding must always retain the canonical spelling AMICOR.
+AMICOR_SPOKEN = "Ammy Core"
 DEFAULT_SCRIPT = (
     "Meet AMICOR Nova — your AI workspace for everyday business work."
 )
