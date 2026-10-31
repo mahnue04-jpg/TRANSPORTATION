@@ -23,13 +23,13 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-                    page = Path("backend/static/nova-creative/index.html")
+          page = Path("backend/static/nova-creative/index.html")
           html = page.read_text(encoding="utf-8")
           required = (
-              "<!DOCTYPE html>", "<html", "<head>", "<body>",
-              "Creative Studio", 'id="project-list"', 'id="asset-list"',
-              'id="build-walking-commercial-30s"',
-              "/static/nova-creative/creative.js", "</main>", "</body>", "</html>"
+          "<!DOCTYPE html>", "<html", "<head>", "<body>",
+          "Creative Studio", 'id="project-list"', 'id="asset-list"',
+          'id="build-walking-commercial-30s"',
+          "/static/nova-creative/creative.js", "</main>", "</body>", "</html>"
           )
           missing = [item for item in required if item not in html]
           assert len(html) >= 10000, f"Studio page truncated: {len(html)} characters"
