@@ -2208,19 +2208,38 @@ class CreativeStudioService(ShortDramaMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
-        # The approved 60s production demo's presenter video
-        # nova-da25e10f80924d6ca99e62a04c9eb346.mp4 was generated from this
-        # exact image (asset casset_12a81236461c). Do not pick a different
-        # project image by a fuzzy "Genova" description: that caused mismatched
-        # 30s/60s presenters even when the renderer returned HTTP 200.
-        output_dir, _ = _creative_media_root_and_prefix()
-        presenter_image = output_dir / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
-        if not presenter_image.is_file():
+        # The 60s production demo's motion clip came from source image
+        # casset_12a81236461c. Pin it only for explicitly configured AMICOR
+        # demo projects; this endpoint also serves unrelated tenant projects.
+        import os
+
+        pinned_projects = {
+            value.strip()
+            for value in os.getenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", "").split(",")
+            if value.strip()
+        }
+        if project_id in pinned_projects:
+            presenter_image = output_dir / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+        else:
+            # Other projects may only use their own generated image assets.
+            # Never silently borrow the AMICOR owner's global presenter plate.
+            candidates = [
+                asset for asset in self.store.list_assets(project_id, owner_id)
+                if asset.kind == "image"
+                and asset.url
+                and str(asset.status or "").upper() == "GENERATED"
+            ]
+            presenter_image = None
+            for asset in candidates:
+                candidate = _resolve_creative_media_url(asset.url)
+                if candidate is not None and candidate.is_file():
+                    presenter_image = candidate
+                    break
+        if presenter_image is None or not presenter_image.is_file():
             raise CreativeStudioError(
                 "PRESENTER_IMAGE_REQUIRED",
-                "The original 60-second Nova presenter source image is unavailable. "
-                "Restore that exact approved image before rendering the 30-second commercial; "
-                "no alternate presenter or illustration will be used.",
+                "The selected project presenter image is unavailable. Restore or select "
+                "the approved presenter before rendering; no illustration will be substituted.",
                 http_status=422,
             )
         job = self._start_job(owner_id, project_id, "walking_commercial_30s")
