@@ -287,3 +287,30 @@ def test_budget_acknowledgement_requires_matching_quote():
         acknowledged_estimate_usd=quote["estimated_total_usd"],
     )
     assert result["budget_confirmation"]["confirmed"] is True
+
+def test_voice_guard_rejects_project_quote_above_approved_amount(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("quote-guard-owner", {
+        "title": "Budget guard regression", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("quote-guard-owner", pid)
+    svc.confirm_render_budget(
+        "quote-guard-owner", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    # Model an increased preflight quote after approval without calling providers.
+    original = svc.preflight_quote
+    def increased_quote(owner_id, project_id):
+        revised = dict(original(owner_id, project_id))
+        revised["estimated_total_usd"] += 1.0
+        return revised
+    monkeypatch.setattr(svc, "preflight_quote", increased_quote)
+    try:
+        svc.require_budget_confirmation_for_paid("quote-guard-owner", pid, provider="voice")
+        assert False, "expected BUDGET_REAPPROVAL_REQUIRED"
+    except CreativeStudioError as exc:
+        assert exc.code == "BUDGET_REAPPROVAL_REQUIRED"
