@@ -332,3 +332,31 @@ def test_thirty_second_commercial_rejects_missing_presenter(tmp_path, monkeypatc
         svc.render_walking_commercial_30s("owner-351", project["id"])
     assert exc.value.code == "PRESENTER_IMAGE_REQUIRED"
     assert not list(tmp_path.glob("nova-walk-commercial-30s-*.mp4"))
+
+
+def test_thirty_second_commercial_rejects_truncated_narration(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio import walking_presenter
+
+    monkeypatch.setattr(walking_presenter, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(walking_presenter, "_prepare_presenter_plate", lambda *_a, **_kw: (None, None))
+    monkeypatch.setattr(
+        walking_presenter,
+        "synthesize_female_narration",
+        lambda *_a, **_kw: {"wav_path": str(tmp_path / "fake.wav"), "duration_seconds": 35.45},
+    )
+    with pytest.raises(walking_presenter.WalkingPresenterError) as exc:
+        walking_presenter._render_walking_core(
+            output_mp4=tmp_path / "not-created.mp4",
+            script="AMICOR Nova is your business assistant.",
+            voice="en-US-JennyNeural",
+            min_seconds=28.0,
+            max_seconds=32.0,
+            target_seconds=30.0,
+            fps=6,
+            width=270,
+            height=480,
+            milestone="30s_walking_commercial",
+            render_mode="local_walking_commercial_30s",
+        )
+    assert exc.value.code == "NARRATION_TOO_LONG"
+    assert not (tmp_path / "not-created.mp4").exists()
