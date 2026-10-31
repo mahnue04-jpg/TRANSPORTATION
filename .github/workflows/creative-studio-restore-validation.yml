@@ -1,0 +1,60 @@
+name: Creative Studio restored client validation
+
+on:
+  pull_request:
+    paths:
+      - "backend/static/nova-creative/**"
+      - ".github/workflows/creative-studio-restore-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  restored-studio:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify full client startup functions exist and JavaScript parses
+        run: |
+          node --check static/nova-creative/creative.js
+          python - <<'PY'
+          from pathlib import Path
+          js = Path("static/nova-creative/creative.js").read_text()
+          html = Path("static/nova-creative/index.html").read_text()
+          assert len(js) > 50000, "Creative Studio client is truncated"
+          for required in ("function boot(", "function refreshProjects(", "function refreshAssets(", "function setSignedIn("):
+              assert required in js, "Missing Studio function: " + required
+          assert "creative.js" in html and "<main" in html and "</html>" in html
+          PY
+      - name: Install backend test requirements
+        run: python -m pip install -r requirements.txt
+      - name: Run Creative Studio regression tests (no paid providers)
+        run: python -m pytest tests/test_nova_creative_studio.py tests/test_nova_creative_scene_jobs.py tests/test_nova_creative_issue_344.py tests/test_nova_creative_offline_commercial.py tests/test_presenter_media.py -q
+      - name: Browser smoke test repaired Studio (isolated, no account)
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          python -m http.server 8765 --directory . > /tmp/studio-http.log 2>&1 &
+          node - <<'JS'
+          const {chromium} = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({headless:true});
+            const page = await browser.newPage({viewport:{width:390,height:844}, isMobile:true, hasTouch:true});
+            const errors = [];
+            page.on('pageerror', err => errors.push(err.message));
+            await page.goto('http://127.0.0.1:8765/static/nova-creative/index.html', {waitUntil:'domcontentloaded'});
+            await page.locator('.studio-header h1').waitFor({state:'visible'});
+            await page.locator('#sign-in-toggle').waitFor({state:'visible'});
+            if (!await page.locator('body').isVisible()) throw Error('Studio body not visible');
+            if (errors.length) throw Error('JavaScript startup errors: ' + errors.join(' | '));
+            console.log('Studio mobile browser render and startup smoke passed');
+            await browser.close();
+          })().catch(error => {console.error(error);process.exit(1)});
+          JS
