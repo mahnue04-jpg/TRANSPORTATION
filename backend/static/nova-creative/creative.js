@@ -1469,7 +1469,7 @@
     });
     el.innerHTML = lines.map(function (line) { return "<div>" + escapeHtml(line) + "</div>"; }).join("");
     if (confirmBtn) {
-      confirmBtn.disabled = !quote.paid_render_allowed || !!quote.owner_budget_confirmed;
+      confirmBtn.disabled = !!quote.owner_budget_confirmed;
     }
   }
 
@@ -1510,7 +1510,7 @@
           })
         });
         renderPreflight(body.quote || latestPreflight);
-        showBanner("Budget confirmation saved for this project. Still no automatic purchases.", true);
+        showBanner("Budget acknowledgement saved. Paid rendering remains blocked until provider funding/readiness is verified; no purchases made.", true);
       } catch (err) {
         showBanner(err.message || "Budget confirmation failed.", false);
         confirmBudgetBtn.disabled = false;
