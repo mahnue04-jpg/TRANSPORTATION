@@ -1464,6 +1464,10 @@
       "Owner budget confirmed: " + (quote.owner_budget_confirmed ? "yes" : "no"),
       "Auto purchase/top-up: off"
     ];
+    if (!quote.paid_render_allowed) {
+      lines.push("Paid renders remain blocked until provider readiness and funding are verified.");
+      lines.push("Budget acknowledgement only records your consent; it does not start generation.");
+    }
     (quote.line_items || []).forEach(function (item) {
       lines.push("- " + item.label + ": $" + String(item.estimated_usd));
     });
