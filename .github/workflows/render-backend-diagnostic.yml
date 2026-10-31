@@ -98,6 +98,15 @@ jobs:
       - name: Import app
         run: python -c "import app.main; print('app import ok')"
 
+      - name: Test Ask Nova request behavior and weather parsing
+        env:
+          TESTING: "true"
+          DATABASE_URL: sqlite:///./test_nova_today_ask_ci.db
+          AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
+        run: |
+          node --test ../scripts/tests/nova-today-ask.test.cjs
+          pytest tests/test_nova_today_live_tools.py::test_extract_location_and_weather_location tests/test_nova_today_ask_transaction.py -q
+
       - name: Run Nova Stripe billing regression
         env:
           DATABASE_URL: sqlite:///./test_nova_stripe_ci.db
