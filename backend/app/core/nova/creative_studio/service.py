@@ -1820,6 +1820,17 @@ class CreativeStudioService(ShortDramaMixin):
         project = self._project_or_404(owner_id, project_id)
         confirmation = (project.metadata or {}).get("budget_confirmation") or {}
         if confirmation.get("confirmed") is True:
+            # A later, higher quote invalidates the earlier owner's approval.
+            # This is a quote ceiling, not cumulative provider-spend accounting.
+            quote = self.preflight_quote(owner_id, project_id)
+            approved = confirmation.get("acknowledged_estimate_usd")
+            if approved is None or float(quote["estimated_total_usd"]) > float(approved) + 0.005:
+                raise CreativeStudioError(
+                    "BUDGET_REAPPROVAL_REQUIRED",
+                    "The current project estimate exceeds the approved quote. "
+                    "Run preflight and approve the new estimate before any paid render.",
+                    http_status=422,
+                )
             # OpenAI voice has its own credential/activation path. A fal-specific
             # owner-reported balance is not evidence of OpenAI account funding.
             # Never authorize a different provider based on this bypass.
