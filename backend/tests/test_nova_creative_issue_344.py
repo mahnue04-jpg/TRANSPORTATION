@@ -266,3 +266,24 @@ def test_voice_budget_guard_does_not_use_fal_balance(monkeypatch):
         assert False, "fal-dependent general paid render should remain blocked"
     except CreativeStudioError as exc:
         assert exc.code == "PROVIDER_FUNDING_UNVERIFIED"
+
+def test_budget_acknowledgement_requires_matching_quote():
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("quote-owner-344", {
+        "title": "Quote validation", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("quote-owner-344", pid)
+    for amount in (None, quote["estimated_total_usd"] + 1.0):
+        try:
+            svc.confirm_render_budget("quote-owner-344", pid, confirmed=True, acknowledged_estimate_usd=amount)
+            assert False, "expected BUDGET_QUOTE_CHANGED"
+        except CreativeStudioError as exc:
+            assert exc.code == "BUDGET_QUOTE_CHANGED"
+    assert svc.preflight_quote("quote-owner-344", pid)["owner_budget_confirmed"] is False
+    result = svc.confirm_render_budget(
+        "quote-owner-344", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    assert result["budget_confirmation"]["confirmed"] is True
