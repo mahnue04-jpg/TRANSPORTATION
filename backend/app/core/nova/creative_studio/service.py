@@ -1774,6 +1774,18 @@ class CreativeStudioService(ShortDramaMixin):
     ) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         quote = self.preflight_quote(owner_id, project_id)
+        # Reject stale or missing price acknowledgements; saving approval
+        # is not permission to spend more than the quote the owner saw.
+        expected = float(quote["estimated_total_usd"])
+        if confirmed and (
+            acknowledged_estimate_usd is None
+            or abs(float(acknowledged_estimate_usd) - expected) > 0.005
+        ):
+            raise CreativeStudioError(
+                "BUDGET_QUOTE_CHANGED",
+                "The estimate changed or was not acknowledged. Run preflight again and review the current quote.",
+                http_status=422,
+            )
         # Acknowledging the quote is separate from authorizing provider execution.
         meta = dict(project.metadata or {})
         meta["budget_confirmation"] = {
