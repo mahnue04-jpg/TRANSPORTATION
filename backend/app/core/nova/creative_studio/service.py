@@ -1774,13 +1774,7 @@ class CreativeStudioService(ShortDramaMixin):
     ) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         quote = self.preflight_quote(owner_id, project_id)
-        if confirmed and quote.get("paid_render_allowed") is False:
-            raise CreativeStudioError(
-                "PAID_RENDER_BLOCKED",
-                "Paid provider renders are blocked until fal balance is funded and owner-approved. "
-                "Local motion / offline assembly may still run without provider charges.",
-                http_status=422,
-            )
+        # Acknowledging the quote is separate from authorizing provider execution.
         meta = dict(project.metadata or {})
         meta["budget_confirmation"] = {
             "confirmed": bool(confirmed),
@@ -1814,6 +1808,14 @@ class CreativeStudioService(ShortDramaMixin):
         project = self._project_or_404(owner_id, project_id)
         confirmation = (project.metadata or {}).get("budget_confirmation") or {}
         if confirmation.get("confirmed") is True:
+            quote = self.preflight_quote(owner_id, project_id)
+            if quote.get("paid_render_allowed") is not True:
+                raise CreativeStudioError(
+                    "PROVIDER_FUNDING_UNVERIFIED",
+                    "Budget approval is recorded, but provider funding/readiness "
+                    "cannot be verified. No paid render was started.",
+                    http_status=422,
+                )
             return
         raise CreativeStudioError(
             "BUDGET_CONFIRMATION_REQUIRED",

@@ -65,11 +65,17 @@ def test_budget_confirmation_blocks_when_paid_not_allowed(monkeypatch):
     )
     quote = svc.preflight_quote("owner-344", project["id"])
     assert quote["paid_render_allowed"] is False
+    acknowledgement = svc.confirm_render_budget(
+        "owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=1.0
+    )
+    assert acknowledgement["budget_confirmation"]["confirmed"] is True
+    assert svc.preflight_quote("owner-344", project["id"])["owner_budget_confirmed"] is True
+    # Recording owner intent must never activate a provider with unknown funds.
     try:
-        svc.confirm_render_budget("owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=1.0)
-        assert False, "expected PAID_RENDER_BLOCKED"
+        svc.require_budget_confirmation_for_paid("owner-344", project["id"])
+        assert False, "expected PROVIDER_FUNDING_UNVERIFIED"
     except CreativeStudioError as exc:
-        assert exc.code == "PAID_RENDER_BLOCKED"
+        assert exc.code == "PROVIDER_FUNDING_UNVERIFIED"
 
 
 def test_export_rejects_slideshow_as_commercial_ready():
