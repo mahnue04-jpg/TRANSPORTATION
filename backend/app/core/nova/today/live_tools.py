@@ -118,7 +118,7 @@ def extract_weather_location(text: str) -> str | None:
             # Keep those conversational suffixes out of the geocoder city query.
             for _ in range(3):
                 candidate = re.sub(
-                    r"(?i)[,\s]*(?:(?:mrs\.?\s+)?nova|please|today|tonight|right now|currently)[,\s]*$",
+                    r"(?i)[,\s]+(?:(?:mrs\.?\s+)?nova|please|today|tonight|right now|currently)[,\s]*$",
                     "",
                     candidate,
                 ).strip(" ,?!.")
