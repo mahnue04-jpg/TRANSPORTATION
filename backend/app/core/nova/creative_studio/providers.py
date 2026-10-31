@@ -848,6 +848,15 @@ class DidTalkingPresenterProvider:
                 "provider": self.provider_id,
             }
 
+        if not _durable_media_storage_ready():
+            return {
+                "status": CONFIG_REQUIRED,
+                "message": "Durable Studio media storage is not configured. Paid generation was not started.",
+                "url": None,
+                "asset_generated": False,
+                "provider": self.provider_id,
+            }
+
         source_url = self._public_source_url(presenter_image_url)
         clean_script = str(script or "").strip()
         if not source_url:
