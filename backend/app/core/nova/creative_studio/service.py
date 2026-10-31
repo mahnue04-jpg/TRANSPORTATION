@@ -1788,7 +1788,7 @@ class CreativeStudioService(ShortDramaMixin):
         self.store.save_project(project)
         return {"project_id": project_id, "budget_confirmation": meta["budget_confirmation"], "quote": quote}
 
-    def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str) -> None:
+    def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str, *, provider: str | None = None) -> None:
         from app.core.nova.creative_studio.flags import (
             image_provider_live_enabled,
             talking_presenter_provider_live_enabled,
@@ -1808,6 +1808,18 @@ class CreativeStudioService(ShortDramaMixin):
         project = self._project_or_404(owner_id, project_id)
         confirmation = (project.metadata or {}).get("budget_confirmation") or {}
         if confirmation.get("confirmed") is True:
+            # OpenAI voice has its own credential/activation path. A fal-specific
+            # owner-reported balance is not evidence of OpenAI account funding.
+            # Never authorize a different provider based on this bypass.
+            if provider == "voice":
+                from app.core.nova.creative_studio.flags import voice_provider_configured
+                if not voice_provider_live_enabled() or not voice_provider_configured():
+                    raise CreativeStudioError(
+                        "VOICE_PROVIDER_NOT_READY",
+                        "Voice provider is not configured and enabled; no audio was generated.",
+                        http_status=422,
+                    )
+                return
             quote = self.preflight_quote(owner_id, project_id)
             if quote.get("paid_render_allowed") is not True:
                 raise CreativeStudioError(
