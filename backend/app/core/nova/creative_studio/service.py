@@ -2208,12 +2208,19 @@ class CreativeStudioService(ShortDramaMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
         token = new_id("promo30").split("_", 1)[-1]
         output_path = output_dir / f"nova-walk-commercial-30s-{token}.mp4"
-        presenter_image = self._resolve_genova_presenter_image(owner_id, project_id)
-        if presenter_image is None:
+        # The approved 60s production demo's presenter video
+        # nova-da25e10f80924d6ca99e62a04c9eb346.mp4 was generated from this
+        # exact image (asset casset_12a81236461c). Do not pick a different
+        # project image by a fuzzy "Genova" description: that caused mismatched
+        # 30s/60s presenters even when the renderer returned HTTP 200.
+        output_dir, _ = _creative_media_root_and_prefix()
+        presenter_image = output_dir / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+        if not presenter_image.is_file():
             raise CreativeStudioError(
                 "PRESENTER_IMAGE_REQUIRED",
-                "The approved Nova presenter image is missing. Restore or select the approved image "
-                "before rendering the 30-second commercial; no substitute presenter will be used.",
+                "The original 60-second Nova presenter source image is unavailable. "
+                "Restore that exact approved image before rendering the 30-second commercial; "
+                "no alternate presenter or illustration will be used.",
                 http_status=422,
             )
         job = self._start_job(owner_id, project_id, "walking_commercial_30s")
