@@ -71,6 +71,27 @@ def _creative_media_root_and_prefix() -> tuple[Path, str]:
     return root, "/static/generated/nova-creative"
 
 
+def _durable_media_storage_ready() -> bool:
+    """Fail closed before a paid generation request when media is not durable.
+
+    Local development can explicitly opt in to ephemeral generation; Render cannot.
+    An explicit media directory must be located on a verified mounted volume.
+    """
+    configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
+    mount = Path("/data")
+    if mount.is_mount():
+        if not configured:
+            return True
+        try:
+            return Path(configured).resolve().is_relative_to(mount.resolve())
+        except (OSError, ValueError):
+            return False
+    return (
+        not os.getenv("RENDER_SERVICE_ID")
+        and os.getenv("NOVA_CREATIVE_ALLOW_EPHEMERAL_MEDIA", "").lower() == "true"
+    )
+
+
 def _resolve_creative_media_url(value: str | None) -> Path | None:
     raw = str(value or "").strip()
     if not raw:
@@ -197,6 +218,15 @@ class OpenAIImageProvider:
                 "url": None,
                 "asset_generated": False,
             }
+        if not _durable_media_storage_ready():
+            return {
+                "status": CONFIG_REQUIRED,
+                "message": "Durable Studio media storage is not configured. Paid generation was not started.",
+                "prompt": prompt,
+                "url": None,
+                "asset_generated": False,
+            }
+
         model = str(os.getenv("NOVA_CREATIVE_IMAGE_MODEL") or "gpt-image-2").strip()
         # Image generation can exceed the shared 30-second chat timeout.
         # Use one bounded attempt; automatic retries may duplicate paid work.
@@ -406,6 +436,15 @@ class RunwayVideoProvider:
                 "url": None,
                 "asset_generated": False,
             }
+        if not _durable_media_storage_ready():
+            return {
+                "status": CONFIG_REQUIRED,
+                "message": "Durable Studio media storage is not configured. Paid generation was not started.",
+                "brief": brief,
+                "url": None,
+                "asset_generated": False,
+            }
+
 
         prompt_text = str(
             brief.get("prompt_text")
@@ -604,6 +643,15 @@ class OpenAIVoiceProvider:
                 "url": None,
                 "asset_generated": False,
             }
+        if not _durable_media_storage_ready():
+            return {
+                "status": CONFIG_REQUIRED,
+                "message": "Durable Studio media storage is not configured. Paid generation was not started.",
+                "script": script,
+                "url": None,
+                "asset_generated": False,
+            }
+
         clean = str(script or "").strip()
         if not clean:
             return {
