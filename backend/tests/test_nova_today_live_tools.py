@@ -191,7 +191,7 @@ def test_fetch_web_search_passthrough(monkeypatch):
     monkeypatch.setattr(
         live_tools,
         "search_web",
-        lambda query, max_results=5, news_mode=False: {
+        lambda query, max_results=5, news_mode=False, require_domains=None, require_terms=None: {
             "response": "Search results for movies.",
             "sources": [
                 {"title": "Example", "url": "https://example.com", "label": "example.com"},
