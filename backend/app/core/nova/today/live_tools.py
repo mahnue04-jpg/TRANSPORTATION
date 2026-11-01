@@ -362,7 +362,7 @@ def is_current_public_information_request(text: str) -> bool:
     )
     changing_sports_facts = re.search(
         r"\b(?:rosters?|line[\s-]?ups?|starters?|starting|depth charts?|"
-        r"playing|players?|coaches?|stats?|statistics|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
+        r"playing|players?|coach(?:es)?|stats?|statistics|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
         r"schedules?|trades?|transfers?)\b",
         lowered,
     )
