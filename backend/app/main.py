@@ -334,13 +334,6 @@ async def lifespan(app: FastAPI):
     async def _deferred_startup_runner() -> None:
         from app.deployment.background_startup import run_deferred_platform_startup
 
-        # Optional owner-triggered public search probe. Its persistent claim
-        # prevents repeated billable calls after a restart; no account data is used.
-        try:
-            from app.core.nova.today.hosted_search import run_probe_if_configured
-            await asyncio.to_thread(run_probe_if_configured)
-        except Exception as probe_exc:
-            logger.warning("Public search probe failed: %s", type(probe_exc).__name__)
         await asyncio.to_thread(run_deferred_platform_startup, runtime_environment=RUNTIME_ENVIRONMENT)
         try:
             from app.monitoring.runtime_logger import record_supervision_event
@@ -376,6 +369,14 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             pass
+
+        # Optional owner-triggered public search probe. Its persistent claim
+        # prevents repeated billable calls after a restart; no account data is used.
+        try:
+            from app.core.nova.today.hosted_search import run_probe_if_configured
+            await asyncio.to_thread(run_probe_if_configured)
+        except Exception as probe_exc:
+            logger.warning("Public search probe failed: %s", type(probe_exc).__name__)
 
     from app.deployment.background_startup import deferred_startup_status
 
