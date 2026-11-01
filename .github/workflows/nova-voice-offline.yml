@@ -5,6 +5,8 @@ on:
       - 'backend/app/core/nova/creative_studio/local_voice.py'
       - 'backend/tests/test_nova_local_voice.py'
       - 'backend/tests/test_nova_kokoro_local.py'
+      - 'backend/tests/test_nova_narration_qa.py'
+      - 'backend/app/core/nova/creative_studio/narration_qa.py'
       - 'backend/app/core/nova/creative_studio/kokoro_local.py'
       - '.github/workflows/nova-voice-offline.yml'
   pull_request:
@@ -31,7 +33,9 @@ jobs:
           cp tests/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_local_voice.py
           cp app/core/nova/creative_studio/local_voice.py /tmp/nova-voice-contract/local_voice.py
           cp app/core/nova/creative_studio/kokoro_local.py /tmp/nova-voice-contract/kokoro_local.py
-          cp tests/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
+          cp tests/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_narration_qa.py
+          cp tests/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_narration_qa.py
+          cp app/core/nova/creative_studio/narration_qa.py /tmp/nova-voice-contract/narration_qa.py
           sed -i 's/from \.local_voice import /from local_voice import /' /tmp/nova-voice-contract/kokoro_local.py
           sed -i 's/from app.core.nova.creative_studio.local_voice import (/from local_voice import (/' /tmp/nova-voice-contract/test_nova_local_voice.py
           python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
