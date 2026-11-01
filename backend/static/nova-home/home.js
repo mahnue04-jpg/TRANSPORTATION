@@ -54,6 +54,8 @@
     return body;
   }
   function setSignedIn(on) {
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
+    $("create-nova-account").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -178,7 +180,7 @@
 
   if (session() && session().restore) session().restore();
   refreshBrain();
-  if (new URLSearchParams(window.location.search).get("signin") === "1") {
+  if (!token() && new URLSearchParams(window.location.search).get("signin") === "1") {
     $("login-form").classList.remove("hidden");
     window.setTimeout(function () { if ($("login-email")) $("login-email").focus(); }, 100);
   }
@@ -248,6 +250,7 @@
   }
   $("sign-out").addEventListener("click", async function () {
     if (session() && session().logout) await session().logout();
+    setSignedIn(false);
     window.location.href = "/nova";
   });
 })();
