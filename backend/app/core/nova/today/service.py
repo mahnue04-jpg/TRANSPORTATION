@@ -49,6 +49,8 @@ from app.core.nova.today.live_tools import (
     format_web_search,
     is_news_request,
     is_current_public_information_request,
+    is_public_sports_request,
+    resolve_public_sports_followup,
     public_query_terms,
     source_matches_public_query,
     is_weather_request,
@@ -3277,13 +3279,21 @@ def ask_today(
     organization_id: str,
     user: UserContext,
 ) -> NovaTodayBrainOut:
+    original_question = payload.question
+    effective_question = resolve_public_sports_followup(
+        original_question,
+        payload.public_topic if not (payload.action_id or payload.source_ref_id) else None,
+    )
+    live_payload = payload.model_copy(update={"question": effective_question})
     direct = _today_live_or_memory_answer(
         db,
-        payload,
+        live_payload,
         organization_id=organization_id,
         user=user,
     )
     if direct is not None:
+        if direct.fact_label in {"LIVE WEB SOURCES", "LIVE SPORTS FEED"} and is_public_sports_request(effective_question):
+            direct.public_topic = ((payload.public_topic or original_question) if effective_question != original_question else original_question)[:1200]
         return direct
 
     include_supporting = today_supporting_context_relevant(

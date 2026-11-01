@@ -105,7 +105,7 @@ def test_probe_claim_is_atomic_and_limits_calls_to_three(tmp_path, monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(lambda _: hosted_search.run_probe_if_configured(), range(2)))
     hosted_search.run_probe_if_configured()
-    assert calls == list(hosted_search.PROBE_QUESTIONS)
+    assert calls == [service.resolve_public_sports_followup(q, hosted_search.PROBE_PUBLIC_TOPICS.get(q)) for q in hosted_search.PROBE_QUESTIONS]
     saved = json.loads((tmp_path / 'nova_public_search_probes/fixture-probe.json').read_text())
     assert len(saved["results"]) == 3
     assert all(r["status"] == "completed" for r in saved["results"])
@@ -212,3 +212,24 @@ def test_dated_nba_rows_replace_conflicting_generated_time_summary():
 def test_dated_nba_schedule_selection_does_not_replace_player_status():
     result = {"answer": "Player fixture status.\n## NBA Schedule\n- A @ B on Saturday, Oct 31, 2026 at 07:00 PM CDT", "sources": []}
     assert hosted_search._prefer_dated_nba_schedule(result, "Anthony Edwards current status in NBA") is result
+
+
+def test_prediction_label_is_explicit_and_citation_segments_still_match():
+    result = hosted_search._label_prediction(hosted_search._parse_response(payload()), "Who do you think will win between the Lions and the Vikings?")
+    assert result["answer"].startswith("Sports prediction — uncertain, not a guaranteed result.")
+    assert "".join(p["text"] for p in result["answer_parts"]) == result["answer"]
+    assert result["sources"]
+
+
+def test_viewing_followup_does_not_inherit_prediction_status():
+    question = service.resolve_public_sports_followup("Where can I watch it for free?", "Who will win between the Lions and the Vikings?")
+    result = hosted_search._label_prediction(hosted_search._parse_response(payload()), question)
+    assert not result["answer"].startswith("Sports prediction")
+
+
+def test_viewing_answer_is_not_replaced_by_an_appended_nba_schedule():
+    result = {
+        "answer": "Fixture broadcaster and free-viewing terms.\n## NBA Schedule\n- A @ B on Saturday, Oct 31, 2026 at 07:00 PM CDT",
+        "sources": [{"title": "Fixture", "url": "https://www.nba.com/fixture"}],
+    }
+    assert hosted_search._prefer_dated_nba_schedule(result, "Where can I watch NBA games for free?") is result
