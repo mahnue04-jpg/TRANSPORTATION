@@ -27,6 +27,8 @@ jobs:
       - run: |
           mkdir -p /tmp/nova-voice-contract
           cp tests/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_local_voice.py
+          cp app/core/nova/creative_studio/local_voice.py /tmp/nova-voice-contract/local_voice.py
+          sed -i 's/from app.core.nova.creative_studio.local_voice import (/from local_voice import (/' /tmp/nova-voice-contract/test_nova_local_voice.py
           python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py
         env:
           PYTHONPATH: .
