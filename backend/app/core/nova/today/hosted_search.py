@@ -183,6 +183,48 @@ def _label_prediction(result: dict, question: str) -> dict:
     return {**result, "answer_parts": parts, "answer": "".join(part["text"] for part in parts)}
 
 
+
+def _calibrate_viewing_claims(result: dict, question: str) -> dict:
+    """A citation or free show/app is not proof of free full-game streaming."""
+    from app.core.nova.today.live_tools import is_sports_viewing_request
+
+    if not is_sports_viewing_request(question):
+        return result
+    parts = []
+    online_section = False
+    restricted = False
+    for part in result["answer_parts"]:
+        lines = []
+        for line in part["text"].splitlines(keepends=True):
+            online = bool(re.search(r"\b(?:stream|streaming|online|apps?|website|mobile|browser)\b|fox9\.com|\bFOX\s+(?:LOCAL|ONE)\b", line, re.I))
+            if re.search(r"over.the.air|antenna|\bradio\b", line, re.I) and not online:
+                online_section = False
+            if online:
+                online_section = True
+            free = re.search(r"\bfree\b|\bno subscription\b|\bat no cost\b", line, re.I)
+            qualified = re.search(
+                r"\b(?:trial|selected|designated|eligible|not free|"
+                r"unverified|not verified|cannot verify|could not verify)\b"
+                r"|\b\d+\s+free\s+games\b|\bTV provider credentials\b|\brequires?\b.{0,30}\b(?:paid|subscription)\b",
+                line, re.I,
+            )
+            program_only = re.search(r"\b(?:pregame|postgame|highlights)\b", line, re.I) and not re.search(r"\b(?:the|full|entire)\s+(?:live\s+)?game\b", line, re.I)
+            if (online or online_section) and free and not (qualified or program_only):
+                prefix = re.match(r"^\s*(?:[•-]\s*)?", line).group(0)
+                ending = "\n" if line.endswith("\n") else ""
+                line = prefix + "Free full-game online access for this matchup has not been verified here. Check the cited provider's game-specific access terms." + ending
+                restricted = True
+            line = re.sub(r"\bhave not yet been announced\b", "have not been verified here for the requested game", line, flags=re.I)
+            line = re.sub(r"\bhas not yet been announced\b", "has not been verified here for the requested game", line, flags=re.I)
+            line = re.sub(r"\bno confirmed plans yet[^.!?\n]*", "the current official schedule should be checked for exact free-game dates", line, flags=re.I)
+            lines.append(line)
+        parts.append({**part, "text": "".join(lines)})
+    if restricted:
+        for part in parts:
+            part["text"] = re.sub(r"These are the only confirmed free viewing options[^.]*\.", "", part["text"], flags=re.I)
+    return {**result, "answer_parts": parts, "answer": "".join(part["text"] for part in parts)}
+
+
 def search_public_web(question: str) -> dict:
     if not enabled():
         raise HostedSearchUnavailable("not_configured")
@@ -235,6 +277,10 @@ def search_public_web(question: str) -> dict:
             "For viewing options, use official league/team/broadcaster sources and legitimate services. "
             "Verify the event, date, broadcast market, geographic restrictions and any free-trial terms. "
             "Only claim free access or a trial when a retrieved official source explicitly verifies it. "
+            "Free pregame/postgame shows, a free app download, and a free channel news stream "
+            "do not establish free full-game video. Do not confuse them. "
+            "Check source publication dates; do not treat an old announcement or last season’s guide "
+            "as proof of the current game’s access terms. "
             "A regional sports network is not automatically free or available over the air. "
             "For antenna viewing, identify the specific station and game/date from an official source. "
             "If no free live video is verified, say that and offer sourced alternatives. "
@@ -251,7 +297,7 @@ def search_public_web(question: str) -> dict:
     )
     response_payload = response.model_dump()
     try:
-        result = _label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question)
+        result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.
         # Never log arbitrary user questions, response headers or credentials.

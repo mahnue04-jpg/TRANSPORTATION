@@ -249,3 +249,49 @@ def test_viewing_queries_only_search_official_league_broadcaster_and_service_dom
     assert "swipesports.com" not in domains
     assert calls[0]["max_tool_calls"] == 1
     assert calls[0]["max_output_tokens"] == 1600
+
+
+def test_unqualified_free_app_claim_is_not_presented_as_verified_full_game_access():
+    result = {
+        "answer_parts": [
+            {"text": "Broadcast: FOX 9 at noon.\n"},
+            {"text": "[1]", "url": "https://www.nfl.com/fixture", "title": "Game fixture"},
+            {"text": "\nStreaming via FOX app: You may stream the game for free through the FOX LOCAL app, no subscription required. "},
+            {"text": "[2]", "url": "https://www.fox9.com/fixture", "title": "Pregame fixture"},
+            {"text": "\nThese are the only confirmed free viewing options in Minneapolis."},
+        ],
+        "sources": [{"title": "Game fixture", "url": "https://www.nfl.com/fixture"}],
+    }
+    result["answer"] = "".join(p["text"] for p in result["answer_parts"])
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
+    assert "FOX 9 at noon" in out["answer"]
+    assert "You may stream the game for free" not in out["answer"]
+    assert "has not been verified here" in out["answer"]
+    assert "only confirmed free" not in out["answer"]
+    assert "".join(p["text"] for p in out["answer_parts"]) == out["answer"]
+    assert out["answer_parts"][3]["url"] == "https://www.fox9.com/fixture"
+
+
+def test_scoped_free_offers_and_paid_requirements_are_kept_distinct():
+    text = "DAZN app offers 15 designated free games.\nStreaming through NFL+ is not free; a subscription is required.\nAn eligible free trial requires checking current terms."
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Timberwolves game for free?")
+    assert out["answer"] == text
+
+
+def test_past_unannounced_availability_is_not_asserted_as_current():
+    text = "The free-game channel and dates have not yet been announced."
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Timberwolves game for free?")
+    assert "not yet been announced" not in out["answer"]
+    assert "have not been verified here" in out["answer"]
+
+
+@pytest.mark.parametrize("text, restricted", [
+    ("FOX LOCAL app offers free pregame and postgame shows.", False),
+    ("Stream the game for free on FOX LOCAL, including pregame shows.", True),
+])
+def test_free_shows_cannot_qualify_a_claim_about_the_full_game(text, restricted):
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
+    assert ("has not been verified here" in out["answer"]) is restricted
