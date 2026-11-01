@@ -15,9 +15,9 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 _CACHE: dict[str, tuple[float, dict]] = {}
 PROBE_QUESTIONS = (
-    "What is Anthony Edwards' current status with the Minnesota Timberwolves?",
-    "What NBA games are scheduled tonight?",
-    "Who won the latest Minnesota Vikings game?",
+    "Who are the starting players for the Minnesota Timberwolves?",
+    "Show me the Timberwolves roster.",
+    "Who is starting for the Timberwolves tonight?",
 )
 
 
@@ -191,6 +191,9 @@ def search_public_web(question: str) -> dict:
             "with the report's date. Prefer the team/league and reputable sports reporting. "
             "Distinguish a reported return estimate from clearance to play. If the return date is unknown, "
             "still give the confirmed status you found and identify only the missing detail. "
+            "For rosters and starting lineups, give the relevant players' names and the game/report date. "
+            "Distinguish a confirmed starting five from a projection or the most recent known lineup; "
+            "if tonight's lineup is not announced, provide the latest sourced lineup or projection with that label. "
             "For schedules and results, write matchups, dates, start times with timezones or final scores "
             "in plain answer text; do not rely on an embedded sports widget. "
             "Do not substitute a generic no-access statement, unrelated sites, or undated facts for current reporting. "
@@ -233,8 +236,11 @@ def run_probe_if_configured() -> None:
     results = []
     for question in PROBE_QUESTIONS:
         try:
+            from app.core.nova.today.live_tools import is_current_public_information_request, is_web_search_request
+            if not (is_current_public_information_request(question) and is_web_search_request(question)):
+                raise HostedSearchUnavailable("probe_question_not_routed_to_live_search")
             result = search_public_web(question)
-            entry = {"question": question, "status": "completed", **result}
+            entry = {"question": question, "status": "completed", "route": "live_public_web", **result}
         except Exception as exc:
             # Never log provider response bodies, headers, or credentials.
             entry = {"question": question, "status": "failed", "error_type": type(exc).__name__, "http_status": getattr(exc, "status_code", None), "error_code": str(getattr(exc, "code", "") or "")[:80], "error_param": str(getattr(exc, "param", "") or "")[:80]}

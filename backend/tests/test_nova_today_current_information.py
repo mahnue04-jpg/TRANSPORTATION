@@ -155,3 +155,70 @@ def test_public_source_requires_more_than_a_location_or_surname():
     assert not live_tools.source_matches_public_query({"title": "WhatsApp in Minnesota"}, terms)
     assert not live_tools.source_matches_public_query({"title": "Anthony Edwards actor profile"}, terms)
     assert live_tools.source_matches_public_query({"title": "Timberwolves Anthony Edwards report"}, terms)
+
+
+@pytest.mark.parametrize("question", [
+    "Who are the starting players for the Minnesota Timberwolves?",
+    "Show me the Timberwolves roster.",
+    "Who are the Timberwolves starters?",
+    "What is the Timberwolves starting five?",
+    "Who is starting for the Timberwolves tonight?",
+    "Show NBA starting lineups",
+    "Show me NBA rosters",
+    "Who is in the Lakers line-up?",
+    "What is the Vikings depth chart?",
+    "Who are our Timberwolves starters?",
+    "Who are the Timberwolves players?",
+    "Show NBA player statistics",
+    "Who is the Timberwolves coach?",
+    "Who is starting for the Heat?",
+])
+def test_implicit_current_sports_facts_use_live_search(question):
+    assert live_tools.is_current_public_information_request(question)
+    assert live_tools.is_web_search_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Show our staff roster",
+    "What is my fantasy basketball roster?",
+    "What is the current status of our NBA project?",
+    "Show my NBA subscription",
+    "Show my fantasy roster with Timberwolves players",
+])
+def test_private_rosters_and_sports_project_work_stay_private(question):
+    assert not live_tools.is_current_public_information_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Who are the starting players for the Minnesota Timberwolves?",
+    "Show me the Timberwolves roster.",
+    "Who is starting for the Timberwolves tonight?",
+])
+def test_plain_lineup_question_reaches_hosted_search_through_ask_today(monkeypatch, question):
+    from app.core.nova.today import hosted_search
+
+    calls = []
+    monkeypatch.setattr(service, "_today_government_grounded_answer", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "_answer_saved_work_opportunity", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "read_user_profile", lambda *a: {})
+    monkeypatch.setattr(service.NovaCoreService, "ask", lambda *a, **kw: pytest.fail("lineup must not reach basic chat"))
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+
+    def search(q):
+        calls.append(q)
+        return {
+            "answer": "Fixture lineup, reported on the fixture date. [1]",
+            "answer_parts": [
+                {"text": "Fixture lineup, reported on the fixture date. "},
+                {"text": "[1]", "url": "https://www.nba.com/timberwolves/fixture", "title": "Fixture"},
+            ],
+            "sources": [{"title": "Fixture", "url": "https://www.nba.com/timberwolves/fixture", "label": "NBA"}],
+        }
+
+    monkeypatch.setattr(hosted_search, "search_public_web", search)
+    result = service.ask_today(_DB(), NovaTodayBrainRequest(question=question), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert calls == [question]
+    assert result.fact_label == "LIVE WEB SOURCES"
+    assert result.sources[0].url == "https://www.nba.com/timberwolves/fixture"
+    assert result.next_actions == []
+    assert "don't have access" not in result.answer
