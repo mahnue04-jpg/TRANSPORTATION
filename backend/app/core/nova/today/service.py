@@ -48,6 +48,9 @@ from app.core.nova.today.live_tools import (
     format_weather,
     format_web_search,
     is_news_request,
+    is_current_public_information_request,
+    public_query_terms,
+    source_matches_public_query,
     is_weather_request,
     is_web_search_capability_question,
     is_web_search_request,
@@ -2799,6 +2802,33 @@ def _grounded_web_research_answer(
     gathered: list[dict[str, str]] = []
     seen_urls: set[str] = set()
     summaries: list[str] = []
+    public_status = is_current_public_information_request(question) and not is_grant
+    subject_terms = public_query_terms(query) if public_status else []
+    rejected_sources = 0
+    if public_status:
+        # Query dated news by its subject, rather than sending conversational
+        # question words to a fallback engine that may return unrelated sites.
+        try:
+            news_rows = fetch_news(" ".join(subject_terms) or query, limit=8)
+        except Exception:
+            logger.exception("today_public_status_news_failed")
+            news_rows = []
+        for row in news_rows:
+            item = {
+                "title": str(row.get("title") or ""),
+                "url": str(row.get("link") or ""),
+                "label": str(row.get("source") or "News source"),
+                "snippet": "Published: " + str(row.get("published") or "date unavailable") + ". " + str(row.get("title") or ""),
+            }
+            if not item["url"].startswith(("http://", "https://")) or not source_matches_public_query(item, subject_terms):
+                rejected_sources += 1
+                continue
+            if item["url"] not in seen_urls:
+                seen_urls.add(item["url"])
+                gathered.append(item)
+        # If dated news is unavailable, try the existing web chain once, with
+        # subject constraints and the same relevance check on its returned rows.
+        search_specs = [] if gathered else [(" ".join(subject_terms) or query, None, subject_terms or None)]
     for search_query, domains, terms in search_specs:
         try:
             result = fetch_web_search(
@@ -2819,6 +2849,9 @@ def _grounded_web_research_answer(
             url = str(item.get("url") or "")
             if not url.startswith(("http://", "https://")) or url in seen_urls:
                 continue
+            if public_status and not source_matches_public_query(item, subject_terms):
+                rejected_sources += 1
+                continue
             seen_urls.add(url)
             gathered.append(
                 {
@@ -2834,7 +2867,7 @@ def _grounded_web_research_answer(
             break
 
     source_rows = gathered[:10]
-    logger.info("today_live_web_research_sources count=%s", len(source_rows))
+    logger.info("today_live_web_research_sources count=%s rejected=%s", len(source_rows), rejected_sources)
     evidence_lines = []
     for index, row in enumerate(source_rows, 1):
         evidence_lines.append(
@@ -2895,12 +2928,12 @@ def _grounded_web_research_answer(
 
     return NovaTodayBrainOut(
         answer=answer,
-        fact_label="VERIFIED DATA" if source_rows else "AI SUGGESTION",
+        fact_label="LIVE WEB SOURCES" if source_rows else "LIVE INFORMATION NOT VERIFIED",
         next_actions=[],
         generated_at=now().isoformat(),
         source_href=source_rows[0]["url"] if source_rows else None,
         sources=source_rows,
-        verification_status="verified" if source_rows else "unavailable",
+        verification_status="unknown" if source_rows else "unavailable",
     )
 
 

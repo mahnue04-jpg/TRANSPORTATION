@@ -448,6 +448,29 @@ def is_web_search_request(text: str) -> bool:
     return natural_funding or discovery_request or (has_topic and has_research_intent)
 
 
+_PUBLIC_QUERY_STOP_WORDS = frozenset(
+    "what whats is are was were the a an of for from with to in on at about and or "
+    "please tell me can you do does did how any my our current latest recent status "
+    "update updates news live now today tonight yesterday right going happening "
+    "happened playing play injury injured score scores mrs nova search web internet look up".split()
+)
+
+
+def public_query_terms(text: str) -> list[str]:
+    """Keep the subject words, removing question wording and freshness cues."""
+    tokens = re.findall(r"[a-z0-9]+", _clean(text).lower().replace("’", "'"))
+    return list(dict.fromkeys(token for token in tokens if len(token) >= 3 and token not in _PUBLIC_QUERY_STOP_WORDS))
+
+
+def source_matches_public_query(item: dict[str, Any], terms: list[str]) -> bool:
+    if not terms:
+        return False
+    haystack = set(re.findall(r"[a-z0-9]+", " ".join(str(item.get(key) or "").lower() for key in ("title", "url", "snippet"))))
+    # A surname or a location alone must not qualify an unrelated result.
+    minimum = 1 if len(terms) == 1 else max(2, (len(terms) * 3 + 4) // 5)
+    return sum(term in haystack for term in terms) >= minimum
+
+
 def extract_known_site(text: str) -> tuple[str, str] | None:
     lowered = _clean(text).lower()
     action_phrases = (

@@ -187,7 +187,7 @@ def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypa
 
     monkeypatch.setattr(
         "app.core.nova.today.service.fetch_web_search",
-        lambda query, max_results=5: {
+        lambda query, max_results=5, require_domains=None, require_terms=None: {
             "status": "ok",
             "response": "Live result summary",
             "sources": [
@@ -195,14 +195,15 @@ def test_nova_today_live_weather_news_and_web_paths(client: TestClient, monkeypa
             ],
         },
     )
+    monkeypatch.setattr("app.core.nova.today.service.NovaCoreService._can_use_llm", lambda: False)
     web = client.post(
         "/api/nova/today/ask",
         headers=headers,
         json={"question": "Search the web for Minnesota small business resources"},
     )
     assert web.status_code == 200, web.text
-    assert web.json()["fact_label"] == "VERIFIED DATA"
-    assert web.json()["answer"] == "Live result summary"
+    assert web.json()["fact_label"] == "LIVE WEB SOURCES"
+    assert "Example source" in web.json()["answer"]
     assert web.json()["sources"][0]["url"] == "https://example.com/source"
 
 
@@ -239,11 +240,11 @@ def test_nova_today_natural_grant_request_uses_live_grounded_research(client: Te
     )
     assert asked.status_code == 200, asked.text
     body = asked.json()
-    assert body["fact_label"] == "VERIFIED DATA"
+    assert body["fact_label"] == "LIVE WEB SOURCES"
     assert "searched current public sources" in body["answer"].lower()
     assert body["sources"][0]["url"] == "https://example.gov/grants/business"
     assert body["source_href"] == "https://example.gov/grants/business"
-    assert body["verification_status"] == "verified"
+    assert body["verification_status"] == "unknown"
 
 
 def test_nova_today_grant_research_retries_with_relevance_filters(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
