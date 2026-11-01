@@ -2234,7 +2234,15 @@
       }
       await refreshAssets();
     } catch (err) {
-      showBanner(err.message || "Presenter action failed.", false);
+      var details = String((err && err.message) || "Presenter action failed.");
+      if (details.indexOf("BUDGET_REAPPROVAL_REQUIRED") !== -1 ||
+          details.indexOf("BUDGET_QUOTE_CHANGED") !== -1) {
+        details += " Run Preflight again and review the current estimate before approving.";
+      } else if (details.indexOf("PROVIDER_FUNDING_UNVERIFIED") !== -1 ||
+                 details.indexOf("VOICE_PROVIDER_NOT_READY") !== -1) {
+        details += " No paid render was started. Check provider readiness; do not repeatedly retry.";
+      }
+      showBanner(details, false);
     } finally {
       button.disabled = false;
     }
