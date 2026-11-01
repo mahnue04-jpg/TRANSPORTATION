@@ -56,7 +56,7 @@ def test_forced_search_is_bounded_cited_and_cached(monkeypatch):
     assert calls[0]["tool_choice"] == "required"
     assert calls[0]["include"] == ["web_search_call.action.sources"]
     assert calls[0]["max_tool_calls"] == 1
-    assert calls[0]["max_output_tokens"] == 900
+    assert calls[0]["max_output_tokens"] == 1600
     assert calls[0]["store"] is False
     assert a["sources"][0]["url"].startswith("https://www.nba.com/")
     assert "[1]" in a["answer"]
@@ -233,3 +233,19 @@ def test_viewing_answer_is_not_replaced_by_an_appended_nba_schedule():
         "sources": [{"title": "Fixture", "url": "https://www.nba.com/fixture"}],
     }
     assert hosted_search._prefer_dated_nba_schedule(result, "Where can I watch NBA games for free?") is result
+
+
+def test_viewing_queries_only_search_official_league_broadcaster_and_service_domains(monkeypatch):
+    from app import ai
+    calls = []
+    class Client:
+        def with_options(self, **kw): return self
+        responses = SimpleNamespace(create=lambda **kw: (calls.append(kw) or SimpleNamespace(model_dump=payload)))
+    monkeypatch.setattr(ai, "get_client", lambda: Client())
+    question = service.resolve_public_sports_followup("How can I watch the game for free?", "Minnesota Timberwolves game, viewing from Minneapolis")
+    hosted_search.search_public_web(question)
+    domains = calls[0]["tools"][0]["filters"]["allowed_domains"]
+    assert "nba.com" in domains and "dazn.com" in domains and "fox9.com" in domains
+    assert "swipesports.com" not in domains
+    assert calls[0]["max_tool_calls"] == 1
+    assert calls[0]["max_output_tokens"] == 1600
