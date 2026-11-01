@@ -1,21 +1,28 @@
-"""Read-only local readiness diagnostic; no network, downloads or inference."""
+"""Read-only Kokoro model readiness checks; never download or run inference."""
 from __future__ import annotations
 import argparse
 import importlib.util
 from pathlib import Path
 
+REQUIRED_FILES = ("config.json", "kokoro-v1_0.pth", "voices/af_heart.pt")
+
 
 def check(model_dir: Path) -> dict:
-    files = sorted(p.name for p in model_dir.iterdir()) if model_dir.is_dir() else []
+    exists = model_dir.is_dir()
+    files = sorted(p.name for p in model_dir.iterdir()) if exists else []
+    missing = [name for name in REQUIRED_FILES if not (model_dir / name).is_file()]
+    kokoro_installed = importlib.util.find_spec("kokoro") is not None
+    torch_installed = importlib.util.find_spec("torch") is not None
     return {
-        "model_directory_exists": model_dir.is_dir(),
+        "model_directory_exists": exists,
         "model_directory_nonempty": bool(files),
-        "kokoro_package_installed": importlib.util.find_spec("kokoro") is not None,
-        "torch_installed": importlib.util.find_spec("torch") is not None,
+        "kokoro_package_installed": kokoro_installed,
+        "torch_installed": torch_installed,
         "model_files": files[:20],
-        "ready_to_attempt_offline_inference": bool(files)
-        and importlib.util.find_spec("kokoro") is not None,
-        "notes": "No download or inference performed. Human license and quality review still required.",
+        "missing_required_files": missing,
+        "ready_to_attempt_offline_inference": exists and not missing
+            and kokoro_installed and torch_installed,
+        "notes": "File-presence check only. Does not verify weights, model compatibility, licensing, or audio quality. No network/inference used.",
     }
 
 
