@@ -341,8 +341,33 @@ def is_current_public_information_request(text: str) -> bool:
         r"subscriptions?|saved records?|my account|our account)\b",
         lowered,
     )
-    if internal or re.search(r"\b(?:my|our)\b", lowered):
+    if internal:
         return False
+    # Rosters and starting lineups change even when a user omits "current".
+    # A named professional team also disambiguates "our Timberwolves" from
+    # private staff/fantasy rosters, which must stay on the saved-work path.
+    named_team = re.search(
+        r"\b(?:timberwolves|wolves|vikings|lynx|twins|lakers|celtics|warriors|"
+        r"76ers|sixers|knicks|nets|raptors|cavaliers|cavs|bucks|bulls|"
+        r"pacers|pistons|hawks|hornets|wizards|nuggets|thunder|"
+        r"trail blazers|grizzlies|pelicans|rockets|spurs|mavericks|"
+        r"clippers|sacramento kings|utah jazz|miami heat|orlando magic|phoenix suns)\b",
+        lowered,
+    )
+    if re.search(r"\b(?:my|our)\b", lowered) and not named_team:
+        return False
+    sports_context = named_team or re.search(
+        r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer)\b",
+        lowered,
+    )
+    changing_sports_facts = re.search(
+        r"\b(?:rosters?|line[\s-]?ups?|starters?|starting|depth charts?|"
+        r"playing|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
+        r"schedules?|trades?|transfers?)\b",
+        lowered,
+    )
+    if sports_context and changing_sports_facts:
+        return True
     status_or_event = re.search(
         r"\b(?:current|latest|recent|live)\s+(?:status|updates?|scores?|results?|standings|roster|lineup)\b"
         r"|\bwhat happened to\b|\bwhat(?:'s| is) (?:happening|going on) with\b"
