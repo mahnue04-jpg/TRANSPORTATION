@@ -105,7 +105,7 @@ jobs:
           AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
         run: |
           node --test ../scripts/tests/nova-today-ask.test.cjs
-          pytest tests/test_nova_today_live_tools.py::test_extract_location_and_weather_location tests/test_nova_today_ask_transaction.py -q
+          pytest tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py -q
 
       - name: Run Nova Stripe billing regression
         env:

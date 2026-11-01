@@ -333,6 +333,38 @@ def is_web_search_capability_question(text: str) -> bool:
     )
 
 
+def is_current_public_information_request(text: str) -> bool:
+    """Recognize public status/events without diverting saved operational work."""
+    lowered = _clean(text).lower().replace("’", "'")
+    internal = re.search(
+        r"\b(?:workspace|tasks?|projects?|invoices?|mailbox|approvals?|"
+        r"subscriptions?|saved records?|my account|our account)\b",
+        lowered,
+    )
+    if internal or re.search(r"\b(?:my|our)\b", lowered):
+        return False
+    status_or_event = re.search(
+        r"\b(?:current|latest|recent|live)\s+(?:status|updates?|scores?|results?|standings|roster|lineup)\b"
+        r"|\bwhat happened to\b|\bwhat(?:'s| is) (?:happening|going on) with\b"
+        r"|\bany updates on\b",
+        lowered,
+    )
+    if status_or_event:
+        return True
+    sports = re.search(
+        r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer|"
+        r"players?|athletes?|teams?|games?|matches|playing|injur(?:y|ies|ed)|"
+        r"scores?|standings|lineup|roster|win|won|winning)\b",
+        lowered,
+    )
+    freshness = re.search(
+        r"\b(?:current|latest|recent|live|today|tonight|yesterday|updates?|"
+        r"right now|last night|this week|this season)\b",
+        lowered,
+    )
+    return bool(sports and freshness)
+
+
 def is_web_search_request(text: str) -> bool:
     """Recognize both explicit browsing commands and natural current-research questions."""
     lowered = _clean(text).lower()
@@ -340,6 +372,8 @@ def is_web_search_request(text: str) -> bool:
         return False
     if is_web_search_capability_question(text):
         return False
+    if is_current_public_information_request(text):
+        return True
 
     explicit = any(
         phrase in lowered
