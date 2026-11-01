@@ -36,13 +36,13 @@ jobs:
           cp app/core/nova/creative_studio/local_voice.py /tmp/nova-voice-contract/local_voice.py
           cp app/core/nova/creative_studio/kokoro_local.py /tmp/nova-voice-contract/kokoro_local.py
           cp tests/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
-          cp tests/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py
+          cp tests/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_narration_qa.py
           cp app/core/nova/creative_studio/narration_qa.py /tmp/nova-voice-contract/narration_qa.py
           cp app/core/nova/creative_studio/local_voice_demo.py /tmp/nova-voice-contract/local_voice_demo.py
           cp tests/test_nova_voice_demo_offline.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py
           sed -i 's/from \.kokoro_local import /from kokoro_local import /; s/from \.local_voice import /from local_voice import /; s/from \.narration_qa import /from narration_qa import /' /tmp/nova-voice-contract/local_voice_demo.py
           sed -i 's/from \.local_voice import /from local_voice import /' /tmp/nova-voice-contract/kokoro_local.py
           sed -i 's/from app.core.nova.creative_studio.local_voice import (/from local_voice import (/' /tmp/nova-voice-contract/test_nova_local_voice.py
-          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_narration_qa.py
+          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py
         env:
           PYTHONPATH: .
