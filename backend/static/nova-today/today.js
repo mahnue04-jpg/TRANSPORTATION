@@ -191,6 +191,7 @@
   }
   function setSignedIn(on) {
     if (!on) lastPublicSportsTopic = "";
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
