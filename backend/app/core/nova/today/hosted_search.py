@@ -22,7 +22,9 @@ PROBE_QUESTIONS = (
 
 
 class HostedSearchUnavailable(RuntimeError):
-    pass
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 def enabled() -> bool:
