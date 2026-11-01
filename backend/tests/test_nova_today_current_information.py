@@ -310,3 +310,21 @@ def test_private_handler_receives_no_public_sports_context(monkeypatch):
     out = service.ask_today(_DB(), NovaTodayBrainRequest(question=question, public_topic="Lions versus Vikings"), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
     assert calls == [question]
     assert out.public_topic is None
+
+
+@pytest.mark.parametrize("question", [
+    "Show bills",
+    "How do I pay bills?",
+    "Help me write a story about bears",
+    "Organize magic files",
+])
+def test_ambiguous_team_words_do_not_turn_ordinary_work_into_sports_search(question):
+    assert not live_tools.is_public_sports_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Where can I watch the Buffalo Bills game?",
+    "Who will win between the Bears and Lions?",
+])
+def test_ambiguous_team_words_work_with_matchup_or_viewing_context(question):
+    assert live_tools.is_public_sports_request(question)

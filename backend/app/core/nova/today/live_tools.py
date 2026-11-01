@@ -343,7 +343,8 @@ def _private_work_question(text: str) -> bool:
 
 
 def _sports_entity(text: str):
-    return re.search(
+    lowered = _clean(text).lower()
+    matches = list(re.finditer(
         r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer|"
         r"timberwolves|wolves|vikings|lions|lynx|twins|lakers|celtics|warriors|"
         r"76ers|sixers|knicks|nets|raptors|cavaliers|cavs|bucks|bulls|pacers|pistons|"
@@ -352,8 +353,27 @@ def _sports_entity(text: str):
         r"ravens|bengals|browns|steelers|texans|colts|jaguars|titans|broncos|chargers|"
         r"raiders|cowboys|eagles|giants|commanders|patriots|jets|dolphins|falcons|"
         r"panthers|saints|buccaneers|49ers|niners|rams|seahawks|cardinals)\b",
-        _clean(text).lower(),
+        lowered,
+    ))
+    if not matches:
+        return None
+    ambiguous = {
+        "bills", "bucks", "bulls", "twins", "bears", "giants", "jets", "dolphins",
+        "lions", "panthers", "cardinals", "saints", "rams", "suns", "kings", "nets",
+        "heat", "magic", "jazz", "thunder", "rockets",
+    }
+    clear = [match for match in matches if match.group(0) not in ambiguous]
+    if clear:
+        return clear[0]
+    city_context = re.search(
+        r"\b(?:buffalo|detroit|minnesota|milwaukee|chicago|new york|miami|orlando|utah|"
+        r"phoenix|sacramento|houston|oklahoma city|philadelphia|baltimore|atlanta|"
+        r"arizona|new orleans|los angeles|carolina|jacksonville)\b",
+        lowered,
     )
+    if city_context or _sports_followup_intent(text) or len({match.group(0) for match in matches}) > 1:
+        return matches[0]
+    return None
 
 
 def _sports_followup_intent(text: str) -> bool:
