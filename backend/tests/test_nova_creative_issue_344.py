@@ -314,3 +314,24 @@ def test_voice_guard_rejects_project_quote_above_approved_amount(monkeypatch):
         assert False, "expected BUDGET_REAPPROVAL_REQUIRED"
     except CreativeStudioError as exc:
         assert exc.code == "BUDGET_REAPPROVAL_REQUIRED"
+
+def test_voice_budget_guard_blocks_repeat_job_without_provider_call(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("repeat-voice-owner", {
+        "title": "Repeat request guard", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("repeat-voice-owner", pid)
+    svc.confirm_render_budget(
+        "repeat-voice-owner", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    svc._start_job("repeat-voice-owner", pid, "voice")
+    try:
+        svc.require_budget_confirmation_for_paid("repeat-voice-owner", pid, provider="voice")
+        assert False, "expected VOICE_REQUEST_ALREADY_RECORDED"
+    except CreativeStudioError as exc:
+        assert exc.code == "VOICE_REQUEST_ALREADY_RECORDED"
