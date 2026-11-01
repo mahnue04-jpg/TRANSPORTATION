@@ -194,3 +194,21 @@ def test_time_conversion_preserves_citation_links_and_answer_segments():
     assert "PDT" not in result["answer"]
     assert result["sources"][0]["url"] == payload()["output"][1]["content"][0]["annotations"][0]["url"]
     assert "".join(p["text"] for p in result["answer_parts"]) == result["answer"]
+
+
+def test_dated_nba_rows_replace_conflicting_generated_time_summary():
+    data = payload()
+    data["output"][1]["content"][0].update(text="Fixture game at 8 PM CT.\n\n## NBA Schedule\n- Fixture A @ Fixture B on Saturday, Oct 31, 2026 at 05:00 PM PDT. Current score: A 1 - B 2\n", annotations=[])
+    data["output"][0]["action"] = {"sources": [{"type": "url", "url": "https://www.nba.com/fixture-schedule"}]}
+    result = hosted_search._prefer_dated_nba_schedule(hosted_search._parse_response(data), "What NBA games are scheduled tonight?")
+    assert "8 PM CT" not in result["answer"]
+    assert "07:00 PM CDT" in result["answer"]
+    assert "Current score: A 1 - B 2" in result["answer"]
+    assert result["answer"].count("Fixture A @ Fixture B") == 1
+    assert "".join(p["text"] for p in result["answer_parts"]) == result["answer"]
+    assert result["answer_parts"][-2]["url"] == "https://www.nba.com/fixture-schedule"
+
+
+def test_dated_nba_schedule_selection_does_not_replace_player_status():
+    result = {"answer": "Player fixture status.\n## NBA Schedule\n- A @ B on Saturday, Oct 31, 2026 at 07:00 PM CDT", "sources": []}
+    assert hosted_search._prefer_dated_nba_schedule(result, "Anthony Edwards current status in NBA") is result
