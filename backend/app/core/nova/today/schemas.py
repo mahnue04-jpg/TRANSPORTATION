@@ -148,6 +148,7 @@ class NovaTodayDashboardOut(BaseModel):
 
 class NovaTodayBrainRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
+    public_topic: str | None = Field(default=None, max_length=1200)
     organization_id: str | None = None
     action_id: str | None = Field(default=None, max_length=32)
     source_ref_id: str | None = Field(default=None, max_length=80)
@@ -159,8 +160,16 @@ class NovaTodaySourceLink(BaseModel):
     label: str | None = None
 
 
+class NovaTodayAnswerPart(BaseModel):
+    text: str
+    url: str | None = None
+    title: str | None = None
+
+
 class NovaTodayBrainOut(BaseModel):
+    public_topic: str | None = Field(default=None, max_length=1200)
     answer: str
+    answer_parts: list[NovaTodayAnswerPart] = Field(default_factory=list)
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str
