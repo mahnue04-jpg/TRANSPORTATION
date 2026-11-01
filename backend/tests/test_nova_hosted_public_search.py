@@ -295,3 +295,46 @@ def test_free_shows_cannot_qualify_a_claim_about_the_full_game(text, restricted)
     result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
     out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
     assert ("has not been verified here" in out["answer"]) is restricted
+
+
+def test_weather_probe_is_atomic_public_only_and_preserves_search_claim(tmp_path, monkeypatch):
+    from app.core.nova.today import live_tools
+    monkeypatch.setenv("NOVA_PUBLIC_WEATHER_PROBE_ID", "weather-fixture")
+    monkeypatch.setenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT", str(tmp_path))
+    calls = []
+    monkeypatch.setattr(live_tools, "fetch_weather", lambda location: (calls.append(location) or {"location": location, "temperature_f": 45, "observed_at": "2026-11-01T11:30", "source": "Open-Meteo"}))
+    monkeypatch.setattr(live_tools, "update_user_profile", lambda *args, **kw: pytest.fail("public probe must not write account data"))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: hosted_search.run_weather_probe_if_configured(), range(2)))
+    hosted_search.run_weather_probe_if_configured()
+    assert calls == ["Minneapolis"]
+    result = json.loads((tmp_path / "nova_public_weather_probes/weather-fixture.json").read_text())
+    assert result["status"] == "completed"
+    assert result["observation"]["observed_at"] == "2026-11-01T11:30"
+    assert not (tmp_path / "nova_public_search_probes").exists()
+
+
+def test_weather_probe_requires_explicit_configuration(monkeypatch):
+    from app.core.nova.today import live_tools
+    monkeypatch.delenv("NOVA_PUBLIC_WEATHER_PROBE_ID", raising=False)
+    monkeypatch.setattr(live_tools, "fetch_weather", lambda *args: pytest.fail("unconfigured weather probe"))
+    hosted_search.run_weather_probe_if_configured()
+
+
+def test_weather_probe_failure_does_not_log_provider_body_or_retry(tmp_path, monkeypatch, caplog):
+    from app.core.nova.today import live_tools
+    monkeypatch.setenv("NOVA_PUBLIC_WEATHER_PROBE_ID", "weather-failure")
+    monkeypatch.setenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT", str(tmp_path))
+    calls = []
+    def fail(location):
+        calls.append(location)
+        raise ValueError("sensitive response fixture")
+    monkeypatch.setattr(live_tools, "fetch_weather", fail)
+    with caplog.at_level("INFO"):
+        hosted_search.run_weather_probe_if_configured()
+        hosted_search.run_weather_probe_if_configured()
+    assert calls == ["Minneapolis"]
+    result = json.loads((tmp_path / "nova_public_weather_probes/weather-failure.json").read_text())
+    assert result["status"] == "failed"
+    assert result["error_type"] == "ValueError"
+    assert "sensitive response fixture" not in caplog.text

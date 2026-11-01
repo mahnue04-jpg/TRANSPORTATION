@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from app.core.nova.today import live_tools
 
 
@@ -222,3 +223,42 @@ def test_product_vendor_local_and_visual_discovery_route_to_live_web():
     # wasting a live-search call.
     assert live_tools.is_web_search_request("How many bones are in an adult human body?") is False
     assert live_tools.is_web_search_request("How many teeth does an adult human have?") is False
+
+
+@pytest.mark.parametrize("bad_current", [
+    {}, {"temperature_2m": None}, {"temperature_2m": float("nan")},
+    {"weather_code": None}, {"weather_code": False}, {"time": None}, {"time": "bad-time"},
+])
+def test_fetch_weather_rejects_incomplete_observations(monkeypatch, bad_current):
+    current = {"temperature_2m": 45, "apparent_temperature": 40, "relative_humidity_2m": 60, "wind_speed_10m": 8, "weather_code": 0, "time": "2026-11-01T11:30"}
+    current = {} if not bad_current else {**current, **bad_current}
+    _weather_client(monkeypatch, current)
+    with pytest.raises(ValueError):
+        live_tools.fetch_weather("Minneapolis")
+
+
+def _weather_client(monkeypatch, current):
+    class Response:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): pass
+        def json(self): return self.body
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, url, **kwargs):
+            if "geocoding" in url:
+                assert kwargs["params"]["name"] == "Minneapolis"
+                return Response({"results": [{"name": "Minneapolis", "admin1": "Minnesota", "country": "United States", "latitude": 44.98, "longitude": -93.27}]})
+            assert kwargs["params"]["temperature_unit"] == "fahrenheit"
+            return Response({"current": current})
+    monkeypatch.setattr(live_tools.httpx, "Client", Client)
+
+
+def test_fetch_weather_keeps_real_zero_values(monkeypatch):
+    _weather_client(monkeypatch, {"temperature_2m": 0, "apparent_temperature": -5, "relative_humidity_2m": 60, "wind_speed_10m": 0, "weather_code": 0, "time": "2026-11-01T11:30"})
+    result = live_tools.fetch_weather("Minneapolis")
+    assert result["temperature_f"] == 0
+    assert result["wind_mph"] == 0
+    assert result["condition"] == "clear sky"
+    assert result["observed_at"] == "2026-11-01T11:30"
