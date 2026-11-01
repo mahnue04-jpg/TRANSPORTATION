@@ -27,10 +27,19 @@ def run(*, model_dir: Path, output: Path) -> dict:
     if not readiness["ready_to_attempt_offline_inference"]:
         raise VoiceNotReady("Local Kokoro model files or runtime dependencies are missing or empty. No inference attempted.")
     try:
-        from kokoro import KPipeline
+        from kokoro import KPipeline, KModel
+        import torch
     except ImportError as exc:
         raise VoiceNotReady("Kokoro is not installed; install only after license/runtime review.") from exc
-    pipeline = KPipeline(lang_code="a", repo_id=str(model_dir))
+    # Explicit local paths avoid HF downloads and invalid repo_id lookups.
+    model = KModel(repo_id="hexgrad/Kokoro-82M",
+                   config=str(model_dir / "config.json"),
+                   model=str(model_dir / "kokoro-v1_0.pth")).to("cpu").eval()
+    pipeline = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M", model=model, device="cpu")
+    # Kokoro normally lazily fetches voices from HF. Preload only local voice.
+    pipeline.voices["af_heart"] = torch.load(
+        str(model_dir / "voices" / "af_heart.pt"), map_location="cpu", weights_only=True
+    )
     script = "Welcome to AMICOR Nova, your AI business assistant."
     path = KokoroLocalBackend(pipeline).generate_wav(VoiceRequest(script), output)
     report = inspect_narration_wav(path)
