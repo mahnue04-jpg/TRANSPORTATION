@@ -1462,7 +1462,8 @@
       balanceText,
       "Paid render allowed by quote: " + (quote.paid_render_allowed ? "yes" : "no"),
       "Owner budget confirmed: " + (quote.owner_budget_confirmed ? "yes" : "no"),
-      "Auto purchase/top-up: off"
+      "Auto purchase/top-up: off",
+      "Important: the estimate is NOT a cumulative spending cap; repeated renders may incur additional charges."
     ];
     if (!quote.paid_render_allowed) {
       lines.push("Paid renders remain blocked until provider readiness and funding are verified.");
