@@ -36,6 +36,10 @@ def test_complete_file_set_and_dependencies_are_required(tmp_path: Path, monkeyp
     monkeypatch.setattr(voice_readiness.importlib.util, "find_spec", lambda name: object())
     status = voice_readiness.check(tmp_path)
     assert status["missing_required_files"] == []
-    assert status["ready_to_attempt_offline_inference"]
+    assert not status["ready_to_attempt_offline_inference"]
+    assert len(status["empty_required_files"]) == 3
+    for filename in voice_readiness.REQUIRED_FILES:
+        (tmp_path / filename).write_bytes(b"nonempty")
+    assert voice_readiness.check(tmp_path)["ready_to_attempt_offline_inference"]
     monkeypatch.setattr(voice_readiness.importlib.util, "find_spec", lambda name: None if name == "torch" else object())
     assert not voice_readiness.check(tmp_path)["ready_to_attempt_offline_inference"]
