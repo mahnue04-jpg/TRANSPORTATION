@@ -696,6 +696,33 @@
     box.classList.toggle("hidden", !box.innerHTML);
   }
 
+  function renderBrainAnswer(result) {
+    var box = $("brain-output");
+    var answer = String(result.answer || "");
+    box.textContent = (result.fact_label || "AI SUGGESTION") + "\n\n";
+    var parts = Array.isArray(result.answer_parts) ? result.answer_parts : [];
+    if (!parts.length || parts.map(function (part) { return String(part.text || ""); }).join("") !== answer) {
+      box.appendChild(document.createTextNode(answer));
+      return;
+    }
+    parts.forEach(function (part) {
+      var text = String(part.text || "");
+      var url = String(part.url || "");
+      if (!/^https?:\/\//i.test(url)) {
+        box.appendChild(document.createTextNode(text));
+        return;
+      }
+      var link = document.createElement("a");
+      link.textContent = text;
+      link.href = url;
+      link.title = String(part.title || "Source");
+      link.className = "brain-inline-source";
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      box.appendChild(link);
+    });
+  }
+
   var brainBusy = false;
   async function runBrain(event) {
     event.preventDefault();
@@ -740,7 +767,7 @@
       });
       if (!result || !result.answer) throw new Error("No response from Mrs. Nova Brain. Please try again.");
       var answer = result.answer;
-      $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + answer;
+      renderBrainAnswer(result);
       renderBrainSources(result.sources || [], result.source_href || "");
       // Preserve a new question typed while this answer was in flight.
       if ($("ask-input").value.trim() === question) $("ask-input").value = "";

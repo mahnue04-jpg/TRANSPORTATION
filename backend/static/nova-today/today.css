@@ -430,3 +430,5 @@ body.compact-view .mrs-nova-avatar {
   body.compact-view .today-main > * { grid-column: 1; }
   body.compact-view #ask-nova { grid-column: 1; }
 }
+
+.brain-inline-source { color: #79c9ff; text-decoration: underline; }

@@ -370,6 +370,14 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
+        # Optional owner-triggered public search probe. Its persistent claim
+        # prevents repeated billable calls after a restart; no account data is used.
+        try:
+            from app.core.nova.today.hosted_search import run_probe_if_configured
+            await asyncio.to_thread(run_probe_if_configured)
+        except Exception as probe_exc:
+            logger.warning("Public search probe failed: %s", type(probe_exc).__name__)
+
     from app.deployment.background_startup import deferred_startup_status
 
     deferred_startup_status()["scheduled"] = True
