@@ -312,8 +312,40 @@ def search_public_web(question: str) -> dict:
     return result
 
 
+def run_weather_probe_if_configured() -> None:
+    """Owner-enabled public observation test; no account or conversation writes."""
+    probe_id = os.getenv("NOVA_PUBLIC_WEATHER_PROBE_ID", "")
+    root = os.getenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT") or os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE_PATH", "")
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", probe_id) or not root:
+        return
+    folder = Path(root) / "nova_public_weather_probes"
+    folder.mkdir(parents=True, exist_ok=True)
+    marker = folder / f"{probe_id}.json"
+    try:
+        with marker.open("x", encoding="utf-8") as output:
+            json.dump({"status": "claimed"}, output)
+    except FileExistsError:
+        return
+    question = "What is the weather in Minneapolis today Mrs Nova?"
+    try:
+        from app.core.nova.today.live_tools import extract_weather_location, fetch_weather, format_weather, is_weather_request, is_web_search_request
+        if not is_weather_request(question) or is_web_search_request(question):
+            raise HostedSearchUnavailable("weather_question_not_routed_to_weather")
+        location = extract_weather_location(question)
+        if location != "Minneapolis":
+            raise HostedSearchUnavailable("weather_location_not_normalized")
+        observation = fetch_weather(location)
+        entry = {"question": question, "status": "completed", "route": "live_weather", "answer": format_weather(observation), "observation": observation}
+    except Exception as exc:
+        entry = {"question": question, "status": "failed", "error_type": type(exc).__name__, "http_status": getattr(getattr(exc, "response", None), "status_code", None)}
+    result = {"id": probe_id, **entry}
+    marker.write_text(json.dumps(result), encoding="utf-8")
+    logger.info("nova_public_weather_probe_result %s", json.dumps(result, ensure_ascii=True))
+
+
 def run_probe_if_configured() -> None:
     """Owner-enabled, fixed public questions, claimed once on the persistent disk."""
+    run_weather_probe_if_configured()
     probe_id = os.getenv("NOVA_PUBLIC_SEARCH_PROBE_ID", "")
     root = os.getenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT") or os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE_PATH", "")
     if not enabled() or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", probe_id) or not root:

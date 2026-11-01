@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import math
+from datetime import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -210,7 +212,14 @@ def fetch_weather(location: str) -> dict[str, Any]:
         payload = forecast.json() or {}
 
     current = payload.get("current") or {}
-    code = int(current.get("weather_code") or 0)
+    required = ("temperature_2m", "apparent_temperature", "relative_humidity_2m", "wind_speed_10m", "weather_code")
+    if any(isinstance(current.get(key), bool) or not isinstance(current.get(key), (int, float)) or not math.isfinite(current[key]) for key in required):
+        raise ValueError("weather observation is incomplete")
+    try:
+        datetime.fromisoformat(current.get("time") or "")
+    except (TypeError, ValueError):
+        raise ValueError("weather observation time is missing or invalid") from None
+    code = int(current["weather_code"])
     return {
         "location": label or place,
         "temperature_f": current.get("temperature_2m"),
