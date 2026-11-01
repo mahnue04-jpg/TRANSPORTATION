@@ -333,41 +333,109 @@ def is_web_search_capability_question(text: str) -> bool:
     )
 
 
+def _private_work_question(text: str) -> bool:
+    lowered = _clean(text).lower().replace("’", "'")
+    return bool(re.search(
+        r"\b(?:workspace|tasks?|projects?|invoices?|mailbox|approvals?|saved records?|my account|our account)\b"
+        r"|\b(?:my|our)\b.{0,100}\b(?:accounts?|subscriptions?|fantasy|staff|employees?|clients?|saved)\b",
+        lowered,
+    ))
+
+
+def _sports_entity(text: str):
+    lowered = _clean(text).lower()
+    matches = list(re.finditer(
+        r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer|"
+        r"timberwolves|wolves|vikings|lions|lynx|twins|lakers|celtics|warriors|"
+        r"76ers|sixers|knicks|nets|raptors|cavaliers|cavs|bucks|bulls|pacers|pistons|"
+        r"hawks|hornets|wizards|nuggets|thunder|trail blazers|grizzlies|pelicans|rockets|"
+        r"spurs|mavericks|clippers|kings|jazz|heat|magic|suns|packers|bears|chiefs|bills|"
+        r"ravens|bengals|browns|steelers|texans|colts|jaguars|titans|broncos|chargers|"
+        r"raiders|cowboys|eagles|giants|commanders|patriots|jets|dolphins|falcons|"
+        r"panthers|saints|buccaneers|49ers|niners|rams|seahawks|cardinals)\b",
+        lowered,
+    ))
+    if not matches:
+        return None
+    ambiguous = {
+        "bills", "bucks", "bulls", "twins", "bears", "giants", "jets", "dolphins",
+        "lions", "panthers", "cardinals", "saints", "rams", "suns", "kings", "nets",
+        "heat", "magic", "jazz", "thunder", "rockets",
+    }
+    clear = [match for match in matches if match.group(0) not in ambiguous]
+    if clear:
+        return clear[0]
+    city_context = re.search(
+        r"\b(?:buffalo|detroit|minnesota|milwaukee|chicago|new york|miami|orlando|utah|"
+        r"phoenix|sacramento|houston|oklahoma city|philadelphia|baltimore|atlanta|"
+        r"arizona|new orleans|los angeles|carolina|jacksonville)\b",
+        lowered,
+    )
+    if city_context or _sports_followup_intent(text) or len({match.group(0) for match in matches}) > 1:
+        return matches[0]
+    return None
+
+
+def _sports_followup_intent(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:watch|stream|broadcast|channel|televised|listen|win|wins|winning|"
+        r"prediction|predict|favourite|favorite|playing|starting|starters?|players?|rosters?|"
+        r"line[\s-]?ups?|scores?|injur(?:y|ies)|standings|coach(?:es)?|schedules?)\b|\bwhat time\b|\bwhen\b.{0,50}\bstart\b",
+        _clean(text).lower(),
+    ))
+
+
+def is_public_sports_request(text: str) -> bool:
+    """Public sports facts/analysis use live research by default, not a phrase whitelist."""
+    if _private_work_question(text):
+        return False
+    lowered = _clean(text).lower()
+    context = _sports_entity(text) or (
+        re.search(r"\b(?:games?|matches|matchups?|playoffs|super bowl)\b", lowered)
+        and _sports_followup_intent(text)
+    )
+    if not context:
+        return False
+    conceptual = re.search(r"^(?:please\s+)?(?:explain|teach|define)\b", lowered) and re.search(
+        r"\b(?:rules|basics|fundamentals|definition|meaning|pick.and.roll|offside)\b", lowered
+    )
+    fresh = re.search(r"\b(?:current|latest|recent|live|today|tonight|this season|new|changed)\b", lowered)
+    return not (conceptual and not fresh)
+
+
+def resolve_public_sports_followup(question: str, public_topic: str | None = None) -> str:
+    """Use only the prior public question, never a saved/private answer."""
+    original_question = question
+    question = _clean(question)
+    topic = _clean(public_topic or "")[:1200]
+    if not topic or _private_work_question(question) or _sports_entity(question):
+        return original_question
+    if not is_public_sports_request(topic) or not _sports_followup_intent(question):
+        return original_question
+    # Explicit new matchups remain independent, even if their teams are unfamiliar.
+    if re.search(r"\b(?:versus|vs\.?|against|between)\b", question, re.I):
+        return original_question
+    return f"Regarding the public sports topic: {topic}\nFollow-up question: {question}"
+
+
+def is_sports_prediction_request(text: str) -> bool:
+    intent = text.rsplit("\nFollow-up question: ", 1)[-1]
+    return is_public_sports_request(text) and bool(re.search(
+        r"\b(?:predict|prediction|predictions)\b|\bwho\b.{0,100}\b(?:win|wins|winning)\b"
+        r"|\b(?:likely|favou?rite|chances)\b.{0,60}\b(?:win|winning)\b",
+        _clean(intent).lower(),
+    ))
+
+
 def is_current_public_information_request(text: str) -> bool:
     """Recognize public status/events without diverting saved operational work."""
     lowered = _clean(text).lower().replace("’", "'")
-    internal = re.search(
-        r"\b(?:workspace|tasks?|projects?|invoices?|mailbox|approvals?|"
-        r"subscriptions?|saved records?|my account|our account)\b",
-        lowered,
-    )
-    if internal or re.search(r"\b(?:my|our)\b.*\bfantasy\b", lowered):
+    if _private_work_question(text):
         return False
-    # Rosters and starting lineups change even when a user omits "current".
-    # A named professional team also disambiguates "our Timberwolves" from
-    # private staff/fantasy rosters, which must stay on the saved-work path.
-    named_team = re.search(
-        r"\b(?:timberwolves|wolves|vikings|lynx|twins|lakers|celtics|warriors|"
-        r"76ers|sixers|knicks|nets|raptors|cavaliers|cavs|bucks|bulls|"
-        r"pacers|pistons|hawks|hornets|wizards|nuggets|thunder|"
-        r"trail blazers|grizzlies|pelicans|rockets|spurs|mavericks|"
-        r"clippers|kings|jazz|heat|magic|suns)\b",
-        lowered,
-    )
-    if re.search(r"\b(?:my|our)\b", lowered) and not named_team:
-        return False
-    sports_context = named_team or re.search(
-        r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer)\b",
-        lowered,
-    )
-    changing_sports_facts = re.search(
-        r"\b(?:rosters?|line[\s-]?ups?|starters?|starting|depth charts?|"
-        r"playing|players?|coach(?:es)?|stats?|statistics|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
-        r"schedules?|trades?|transfers?)\b",
-        lowered,
-    )
-    if sports_context and changing_sports_facts:
+    if is_public_sports_request(text):
         return True
+    if re.search(r"\b(?:my|our)\b", lowered):
+        return False
     status_or_event = re.search(
         r"\b(?:current|latest|recent|live)\s+(?:status|updates?|scores?|results?|standings|roster|lineup)\b"
         r"|\bwhat happened to\b|\bwhat(?:'s| is) (?:happening|going on) with\b"
@@ -377,8 +445,7 @@ def is_current_public_information_request(text: str) -> bool:
     if status_or_event:
         return True
     sports = re.search(
-        r"\b(?:sports?|nba|wnba|nfl|nhl|mlb|basketball|football|baseball|hockey|soccer|"
-        r"players?|athletes?|teams?|games?|matches|playing|injur(?:y|ies|ed)|"
+        r"\b(?:players?|athletes?|teams?|games?|matches|playing|injur(?:y|ies|ed)|"
         r"scores?|standings|lineup|roster|win|won|winning)\b",
         lowered,
     )
@@ -393,9 +460,13 @@ def is_current_public_information_request(text: str) -> bool:
 def is_web_search_request(text: str) -> bool:
     """Recognize both explicit browsing commands and natural current-research questions."""
     lowered = _clean(text).lower()
-    if is_weather_request(text) or is_news_request(text):
+    if is_weather_request(text):
         return False
     if is_web_search_capability_question(text):
+        return False
+    if is_public_sports_request(text):
+        return True
+    if is_news_request(text):
         return False
     if is_current_public_information_request(text):
         return True

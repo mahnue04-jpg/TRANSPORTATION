@@ -190,6 +190,7 @@
     return body;
   }
   function setSignedIn(on) {
+    if (!on) lastPublicSportsTopic = "";
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -734,6 +735,7 @@
   }
 
   var brainBusy = false;
+  var lastPublicSportsTopic = "";
   async function runBrain(event) {
     event.preventDefault();
     if (brainBusy) return;
@@ -771,12 +773,15 @@
         signal: controller.signal,
         body: JSON.stringify({
           question: question,
+          public_topic: lastPublicSportsTopic || null,
           action_id: selectedActionId || null,
           source_ref_id: selectedSourceRefId || null
         })
       });
       if (!result || !result.answer) throw new Error("No response from Mrs. Nova Brain. Please try again.");
       var answer = result.answer;
+      lastPublicSportsTopic = (result.fact_label === "LIVE WEB SOURCES" || result.fact_label === "LIVE SPORTS FEED")
+        ? String(result.public_topic || "").slice(0, 1200) : "";
       renderBrainAnswer(result);
       renderBrainSources(result.sources || [], result.source_href || "");
       // Preserve a new question typed while this answer was in flight.
@@ -787,6 +792,7 @@
       showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
       answered = true;
     } catch (err) {
+      lastPublicSportsTopic = "";
       askError(err.message || String(err));
     } finally {
       window.clearTimeout(timeout);
