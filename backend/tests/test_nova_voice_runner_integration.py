@@ -46,7 +46,7 @@ def test_offline_demo_writes_wav_from_preloaded_pipeline(tmp_path: Path, monkeyp
     assert called == {
         "model_config": str(model_dir / "config.json"),\n        "model_weights": str(model_dir / "kokoro-v1_0.pth"),
         "lang_code": "a",
-        "repo_id": str(model_dir),
+        "repo_id": "hexgrad/Kokoro-82M",
         "text": "Welcome to Ammy Core Nova, your AI business assistant.",
         "voice": "af_heart",
     }
