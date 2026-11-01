@@ -65,7 +65,9 @@
       novaHumanVoice = window.AmiCorHumanVoice.createEngine({
         browserFallbackEnabled: true,
         onState: function (state) {
-          if (state && state.speaking) setVoiceStatus("Nova is speaking naturally…");
+          if (state && state.preparing) setVoiceStatus("Preparing Nova’s voice…");
+          else if (state && state.speaking) setVoiceStatus("Nova is speaking…");
+          else if (state && state.reason === "speak-failed") setVoiceStatus("Audio could not start. Tap Read aloud to retry.");
           else if (state && state.reason) setVoiceStatus("Ready.");
         }
       });
@@ -94,7 +96,10 @@
       });
       return;
     }
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) {
+      setVoiceStatus("Audio is unavailable in this browser. Your answer is ready to read.");
+      return;
+    }
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(String(text));
@@ -103,9 +108,14 @@
       utterance.pitch = 1.01;
       utterance.onstart = function () { setVoiceStatus("Nova is speaking…"); };
       utterance.onend = function () { setVoiceStatus("Ready."); };
+      utterance.onerror = function () { setVoiceStatus("Audio could not start. Tap Read aloud to retry."); };
       window.speechSynthesis.speak(utterance);
-    } catch (_) {}
+    } catch (_) {
+      setVoiceStatus("Audio could not start. Tap Read aloud to retry.");
+    }
   }
+  // Shared controls must use the reader that owns automatic answer playback.
+  window.NovaTodaySpeech = { speak: speakNova, stop: stopNovaSpeaking };
   function startVoiceInput() {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
