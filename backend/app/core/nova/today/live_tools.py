@@ -418,6 +418,15 @@ def resolve_public_sports_followup(question: str, public_topic: str | None = Non
     return f"Regarding the public sports topic: {topic}\nFollow-up question: {question}"
 
 
+
+def is_sports_viewing_request(text: str) -> bool:
+    intent = text.rsplit("\nFollow-up question: ", 1)[-1]
+    return is_public_sports_request(text) and bool(re.search(
+        r"\b(?:watch|view|stream|streams|streaming|broadcast|channel|televised|listen)\b",
+        _clean(intent).lower(),
+    ))
+
+
 def is_sports_prediction_request(text: str) -> bool:
     intent = text.rsplit("\nFollow-up question: ", 1)[-1]
     return is_public_sports_request(text) and bool(re.search(

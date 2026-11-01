@@ -196,19 +196,33 @@ def search_public_web(question: str) -> dict:
 
     # One request, one search call, no automatic transport retries or stored response.
     client = get_client().with_options(timeout=28.0, max_retries=0)
+    from app.core.nova.today.live_tools import is_sports_viewing_request
+    search_tool = {
+        "type": "web_search", "search_context_size": "low", "external_web_access": True,
+        "user_location": {"type": "approximate", "timezone": "America/Chicago"},
+    }
+    if is_sports_viewing_request(question):
+        search_tool["filters"] = {"allowed_domains": [
+            "nba.com", "wnba.com", "nfl.com", "nhl.com", "mlb.com",
+            "vikings.com", "detroitlions.com", "fox9.com", "foxsports.com", "fox.com",
+            "cbs.com", "cbssports.com", "nbc.com", "nbcsports.com", "espn.com",
+            "dazn.com", "peacocktv.com", "primevideo.com", "tv.youtube.com",
+            "hulu.com", "fubo.tv", "sling.com",
+        ]}
     response = client.responses.create(
         model=os.getenv("NOVA_WEB_SEARCH_MODEL", "gpt-4.1-mini"),
-        tools=[{"type": "web_search", "search_context_size": "low", "external_web_access": True,
-                "user_location": {"type": "approximate", "timezone": "America/Chicago"}}],
+        tools=[search_tool],
         tool_choice="required",
         include=["web_search_call.action.sources"],
         max_tool_calls=1,
-        max_output_tokens=900,
+        max_output_tokens=1600,
         store=False,
         instructions=(
             "You are Nova's public-information researcher. You MUST search before answering. "
             f"Current local time is {local_now.isoformat()}, America/Chicago; use that for tonight/today unless the user specifies another place. "
-            "Answer the actual question with concrete, relevant reported facts and inline URL citations. "
+            "Answer the actual question first in at most 200 words, with at most four sources. "
+            "Use short paragraphs or bullets, no tables, and no long injury or betting breakdown. "
+            "Give concrete, relevant reported facts and inline URL citations. "
             "For sports status, report the latest confirmed injury, surgery, availability, or return estimate you find, "
             "with the report's date. Prefer the team/league and reputable sports reporting. "
             "Distinguish a reported return estimate from clearance to play. If the return date is unknown, "
@@ -220,6 +234,10 @@ def search_public_web(question: str) -> dict:
             "in plain answer text; do not rely on an embedded sports widget. "
             "For viewing options, use official league/team/broadcaster sources and legitimate services. "
             "Verify the event, date, broadcast market, geographic restrictions and any free-trial terms. "
+            "Only claim free access or a trial when a retrieved official source explicitly verifies it. "
+            "A regional sports network is not automatically free or available over the air. "
+            "For antenna viewing, identify the specific station and game/date from an official source. "
+            "If no free live video is verified, say that and offer sourced alternatives. "
             "Do not describe paid subscriptions as free. Distinguish free over-the-air viewing, trials, "
             "radio audio, highlights/replays, and full live video. If a game already ended, say so. "
             "If the game or viewing location is unclear, ask a focused clarification rather than inventing availability. "
