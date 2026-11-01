@@ -51,6 +51,7 @@ def test_forced_search_is_bounded_cited_and_cached(monkeypatch):
     assert calls[0]["tools"][0]["type"] == "web_search"
     assert calls[0]["tools"][0]["external_web_access"] is True
     assert calls[0]["tool_choice"] == "required"
+    assert calls[0]["include"] == ["web_search_call.action.sources"]
     assert calls[0]["max_tool_calls"] == 1
     assert calls[0]["max_output_tokens"] == 900
     assert calls[0]["store"] is False
@@ -123,3 +124,34 @@ def test_annotation_over_prose_does_not_delete_the_reported_fact():
     assert result["answer"] == text
     assert result["answer_parts"][0]["text"] == text
     assert result["answer_parts"][0]["url"].startswith("https://www.nba.com/")
+
+
+def test_consulted_web_sources_are_visible_when_inline_annotations_are_absent():
+    data = payload()
+    data["output"][1]["content"][0].update(text="Fixture game starts at 7 PM CT.", annotations=[])
+    data["output"][0]["action"] = {"sources": [{"type": "url", "url": "https://www.nba.com/fixture-schedule"}]}
+    result = hosted_search._parse_response(data)
+    assert "Sources consulted: [1]" in result["answer"]
+    assert result["answer_parts"][-2]["url"] == "https://www.nba.com/fixture-schedule"
+
+
+def test_actual_sports_feed_is_attributed_without_inventing_a_webpage(monkeypatch):
+    data = payload()
+    data["output"][1]["content"][0].update(text="Fixture game starts at 7 PM CT.", annotations=[])
+    data["output"][0]["action"] = {"sources": [{"type": "url", "url": "oai-sports"}]}
+    result = hosted_search._parse_response(data)
+    assert result["source_feed"] == "Live sports data feed"
+    assert result["sources"] == []
+    assert "Source: Live sports data feed." in result["answer"]
+    monkeypatch.setattr(hosted_search, "search_public_web", lambda q: result)
+    out = service._grounded_web_research_answer(object(), question="What NBA games are scheduled tonight?", query="NBA tonight", organization_id="fixture")
+    assert out.fact_label == "LIVE SPORTS FEED"
+    assert out.source_href is None
+
+
+def test_unknown_non_url_sources_do_not_pass_provenance_check():
+    data = payload()
+    data["output"][1]["content"][0]["annotations"] = []
+    data["output"][0]["action"] = {"sources": [{"type": "url", "url": "unidentified-feed"}]}
+    with pytest.raises(hosted_search.HostedSearchUnavailable):
+        hosted_search._parse_response(data)

@@ -80,13 +80,35 @@ def _parse_response(payload: dict) -> dict:
                 parts.append({"text": text[cursor:]})
             parts.append({"text": "\n"})
     answer = "".join(part["text"] for part in parts).strip()
-    if not answer or not sources:
+    # Sports schedules can use a structured live feed with no URL annotation.
+    # Request and inspect actual tool provenance rather than discarding that answer
+    # or manufacturing a webpage citation for a feed.
+    feed = None
+    if answer and not sources:
+        consulted = []
+        for call in calls:
+            for source in (call.get("action") or {}).get("sources") or []:
+                url = _url(source.get("url"))
+                if url and url not in numbers:
+                    numbers[url] = len(sources) + 1
+                    title = str(source.get("title") or urlparse(url).hostname)
+                    sources.append({"title": title, "url": url, "label": urlparse(url).hostname})
+                    consulted.append({"text": f"[{numbers[url]}]", "url": url, "title": title})
+                if source.get("url") == "oai-sports" or source.get("type") == "oai-sports":
+                    feed = "Live sports data feed"
+        if consulted:
+            parts.append({"text": "\nSources consulted: "})
+            for part in consulted:
+                parts.extend([part, {"text": " "}])
+        elif feed:
+            parts.append({"text": f"\nSource: {feed}."})
+    if not answer or not (sources or feed):
         raise HostedSearchUnavailable("missing_cited_answer")
     # Keep the canonical text and rendered segments identical, including newlines.
     while parts and parts[-1]["text"] == "\n":
         parts.pop()
     answer = "".join(part["text"] for part in parts)
-    return {"answer": answer, "answer_parts": parts, "sources": sources, "web_search_calls": len(calls), "usage": payload.get("usage") or {}}
+    return {"answer": answer, "answer_parts": parts, "sources": sources, "source_feed": feed, "web_search_calls": len(calls), "usage": payload.get("usage") or {}}
 
 
 def search_public_web(question: str) -> dict:
@@ -106,6 +128,7 @@ def search_public_web(question: str) -> dict:
         model=os.getenv("NOVA_WEB_SEARCH_MODEL", "gpt-4.1-mini"),
         tools=[{"type": "web_search", "search_context_size": "low", "external_web_access": True}],
         tool_choice="required",
+        include=["web_search_call.action.sources"],
         max_tool_calls=1,
         max_output_tokens=900,
         store=False,
@@ -122,7 +145,18 @@ def search_public_web(question: str) -> dict:
         ),
         input=question,
     )
-    result = _parse_response(response.model_dump())
+    response_payload = response.model_dump()
+    try:
+        result = _parse_response(response_payload)
+    except HostedSearchUnavailable as exc:
+        # Only the fixed owner probe can emit public response content for debugging.
+        # Never log arbitrary user questions, response headers or credentials.
+        if question in PROBE_QUESTIONS and os.getenv("NOVA_PUBLIC_SEARCH_PROBE_ID"):
+            logger.info("nova_public_search_probe_diagnostic %s", json.dumps({
+                "question": question, "error_code": exc.code,
+                "output": response_payload.get("output", []),
+            }, ensure_ascii=True))
+        raise
     _CACHE[cache_key] = (time.monotonic() + 300, copy.deepcopy(result))
     logger.info("nova_hosted_public_search_completed sources=%s search_calls=%s", len(result["sources"]), result["web_search_calls"])
     return result
