@@ -16,15 +16,16 @@ from .narration_qa import inspect_narration_wav
 def run(*, model_dir: Path, output: Path) -> dict:
     if not model_dir.is_dir():
         raise VoiceNotReady("Preloaded local model directory is missing. No download attempted.")
+    # Validate offline mode before importing libraries that could fetch weights.
+    import os
+    if os.environ.get("HF_HUB_OFFLINE") != "1" or os.environ.get("TRANSFORMERS_OFFLINE") != "1":
+        raise VoiceNotReady(
+            "Set HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 before local inference."
+        )
     try:
         from kokoro import KPipeline
     except ImportError as exc:
         raise VoiceNotReady("Kokoro is not installed; install only after license/runtime review.") from exc
-    # KPipeline may access Hugging Face if model assets are not cached.
-    # This experiment must run offline, so fail instead of fetching anything.
-    import os
-    if os.environ.get("HF_HUB_OFFLINE") != "1":
-        raise VoiceNotReady("Set HF_HUB_OFFLINE=1 before loading a local model.")
     pipeline = KPipeline(lang_code="a", repo_id=str(model_dir))
     script = "Welcome to AMICOR Nova, your AI business assistant."
     path = KokoroLocalBackend(pipeline).generate_wav(VoiceRequest(script), output)
