@@ -11,6 +11,7 @@ from pathlib import Path
 from .kokoro_local import KokoroLocalBackend
 from .local_voice import VoiceNotReady, VoiceRequest
 from .narration_qa import inspect_narration_wav
+from .voice_readiness import check as check_voice_readiness
 
 
 def run(*, model_dir: Path, output: Path) -> dict:
@@ -22,6 +23,9 @@ def run(*, model_dir: Path, output: Path) -> dict:
         raise VoiceNotReady(
             "Set HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 before local inference."
         )
+    readiness = check_voice_readiness(model_dir)
+    if not readiness["ready_to_attempt_offline_inference"]:
+        raise VoiceNotReady("Local Kokoro model files or runtime dependencies are missing or empty. No inference attempted.")
     try:
         from kokoro import KPipeline
     except ImportError as exc:
