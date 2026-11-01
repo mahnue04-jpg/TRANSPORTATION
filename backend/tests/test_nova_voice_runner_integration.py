@@ -54,3 +54,28 @@ def test_offline_demo_writes_wav_from_preloaded_pipeline(tmp_path: Path, monkeyp
     with wave.open(str(output), "rb") as wav:
         assert wav.getframerate() == 24000
         assert wav.getnframes() == 4800
+
+
+def test_model_initialization_failure_is_safe(tmp_path: Path, monkeypatch):
+    import pytest
+    import local_voice_demo
+    from local_voice import VoiceNotReady
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    monkeypatch.setattr(local_voice_demo, "check_voice_readiness",
+                        lambda _: {"ready_to_attempt_offline_inference": True})
+
+    class BrokenModel:
+        def __init__(self, **kwargs):
+            raise RuntimeError("corrupt local weights")
+
+    monkeypatch.setitem(sys.modules, "kokoro",
+                        types.SimpleNamespace(KPipeline=object, KModel=BrokenModel))
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace())
+    output = tmp_path / "failed.wav"
+    with pytest.raises(VoiceNotReady, match="model initialization failed"):
+        run(model_dir=model_dir, output=output)
+    assert not output.exists()
