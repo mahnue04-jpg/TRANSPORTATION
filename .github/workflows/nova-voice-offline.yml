@@ -4,6 +4,8 @@ on:
     paths:
       - 'backend/app/core/nova/creative_studio/local_voice.py'
       - 'backend/tests/test_nova_local_voice.py'
+      - 'backend/tests/test_nova_kokoro_local.py'
+      - 'backend/app/core/nova/creative_studio/kokoro_local.py'
       - '.github/workflows/nova-voice-offline.yml'
   pull_request:
     paths:
@@ -28,7 +30,10 @@ jobs:
           mkdir -p /tmp/nova-voice-contract
           cp tests/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_local_voice.py
           cp app/core/nova/creative_studio/local_voice.py /tmp/nova-voice-contract/local_voice.py
+          cp app/core/nova/creative_studio/kokoro_local.py /tmp/nova-voice-contract/kokoro_local.py
+          cp tests/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
+          sed -i 's/from \.local_voice import /from local_voice import /' /tmp/nova-voice-contract/kokoro_local.py
           sed -i 's/from app.core.nova.creative_studio.local_voice import (/from local_voice import (/' /tmp/nova-voice-contract/test_nova_local_voice.py
-          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py
+          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
         env:
           PYTHONPATH: .
