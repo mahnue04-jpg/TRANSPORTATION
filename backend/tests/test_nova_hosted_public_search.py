@@ -285,3 +285,13 @@ def test_past_unannounced_availability_is_not_asserted_as_current():
     out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Timberwolves game for free?")
     assert "not yet been announced" not in out["answer"]
     assert "have not been verified here" in out["answer"]
+
+
+@pytest.mark.parametrize("text, restricted", [
+    ("FOX LOCAL app offers free pregame and postgame shows.", False),
+    ("Stream the game for free on FOX LOCAL, including pregame shows.", True),
+])
+def test_free_shows_cannot_qualify_a_claim_about_the_full_game(text, restricted):
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
+    assert ("has not been verified here" in out["answer"]) is restricted

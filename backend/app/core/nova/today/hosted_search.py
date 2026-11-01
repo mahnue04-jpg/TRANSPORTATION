@@ -196,19 +196,20 @@ def _calibrate_viewing_claims(result: dict, question: str) -> dict:
     for part in result["answer_parts"]:
         lines = []
         for line in part["text"].splitlines(keepends=True):
-            online = bool(re.search(r"\b(?:stream|streaming|online|apps?|website|mobile)\b|fox9\.com", line, re.I))
+            online = bool(re.search(r"\b(?:stream|streaming|online|apps?|website|mobile|browser)\b|fox9\.com|\bFOX\s+(?:LOCAL|ONE)\b", line, re.I))
             if re.search(r"over.the.air|antenna|\bradio\b", line, re.I) and not online:
                 online_section = False
             if online:
                 online_section = True
             free = re.search(r"\bfree\b|\bno subscription\b|\bat no cost\b", line, re.I)
             qualified = re.search(
-                r"\b(?:trial|selected|designated|eligible|pregame|postgame|highlights|not free|"
+                r"\b(?:trial|selected|designated|eligible|not free|"
                 r"unverified|not verified|cannot verify|could not verify)\b"
-                r"|\b\d+\s+free\s+games\b|\bTV provider credentials\b",
+                r"|\b\d+\s+free\s+games\b|\bTV provider credentials\b|\brequires?\b.{0,30}\b(?:paid|subscription)\b",
                 line, re.I,
             )
-            if (online or online_section) and free and not qualified:
+            program_only = re.search(r"\b(?:pregame|postgame|highlights)\b", line, re.I) and not re.search(r"\b(?:the|full|entire)\s+(?:live\s+)?game\b", line, re.I)
+            if (online or online_section) and free and not (qualified or program_only):
                 prefix = re.match(r"^\s*(?:[•-]\s*)?", line).group(0)
                 ending = "\n" if line.endswith("\n") else ""
                 line = prefix + "Free full-game online access for this matchup has not been verified here. Check the cited provider's game-specific access terms." + ending
