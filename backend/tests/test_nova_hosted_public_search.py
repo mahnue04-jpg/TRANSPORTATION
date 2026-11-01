@@ -173,3 +173,24 @@ def test_relative_date_rollover_and_explicit_date_preservation():
     instant = datetime(2026, 10, 31, 21, tzinfo=ZoneInfo("America/Chicago"))
     assert "Sunday, November 01, 2026" in hosted_search._dated_search_question("NBA games tomorrow", instant)
     assert hosted_search._dated_search_question("NBA games on November 3, 2026", instant) == "NBA games on November 3, 2026"
+
+
+@pytest.mark.parametrize("original, expected", [
+    ("Saturday, Oct 31, 2026 at 05:00 PM PDT", "Saturday, Oct 31, 2026 at 07:00 PM CDT"),
+    ("Sunday, Nov 01, 2026 at 05:00 PM PST", "Sunday, Nov 01, 2026 at 07:00 PM CST"),
+    ("Saturday, Oct 31, 2026 at 11:30 PM PDT", "Sunday, Nov 01, 2026 at 01:30 AM CDT"),
+])
+def test_provider_pacific_schedule_times_are_converted_with_dst_and_date_rollover(original, expected):
+    assert hosted_search._central_sports_times(original) == expected
+
+
+def test_time_conversion_preserves_citation_links_and_answer_segments():
+    data = payload()
+    content = data["output"][1]["content"][0]
+    content["text"] = "Fixture game: Saturday, Oct 31, 2026 at 05:00 PM PDT. citefixture0"
+    content["annotations"][0].update(start_index=content["text"].index("cite"), end_index=len(content["text"]))
+    result = hosted_search._parse_response(data)
+    assert "07:00 PM CDT" in result["answer"]
+    assert "PDT" not in result["answer"]
+    assert result["sources"][0]["url"] == payload()["output"][1]["content"][0]["annotations"][0]["url"]
+    assert "".join(p["text"] for p in result["answer_parts"]) == result["answer"]
