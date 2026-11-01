@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -50,6 +50,20 @@ def _dated_search_question(question: str, local_now: datetime) -> str:
     if resolved != question:
         resolved += "\nUse the requested calendar date exactly. List start times in America/Chicago (Central Time), with the timezone label."
     return resolved
+
+
+def _central_sports_times(text: str) -> str:
+    """Convert dated provider schedule rows instead of relabeling Pacific hours."""
+    pattern = r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), ([A-Z][a-z]{2} \d{1,2}, \d{4}) at (\d{1,2}:\d{2} [AP]M) (PDT|PST)\b"
+    def replace(match: re.Match) -> str:
+        try:
+            value = datetime.strptime(f"{match[1]} {match[2]}", "%b %d, %Y %I:%M %p")
+            offset = -7 if match[3] == "PDT" else -8
+            central = value.replace(tzinfo=timezone(timedelta(hours=offset))).astimezone(ZoneInfo("America/Chicago"))
+            return central.strftime("%A, %b %d, %Y at %I:%M %p %Z")
+        except ValueError:
+            return match.group()
+    return re.sub(pattern, replace, text)
 
 
 def _parse_response(payload: dict) -> dict:
@@ -120,6 +134,8 @@ def _parse_response(payload: dict) -> dict:
     # Keep the canonical text and rendered segments identical, including newlines.
     while parts and parts[-1]["text"] == "\n":
         parts.pop()
+    for part in parts:
+        part["text"] = _central_sports_times(part["text"])
     answer = "".join(part["text"] for part in parts)
     return {"answer": answer, "answer_parts": parts, "sources": sources, "source_feed": feed, "web_search_calls": len(calls), "usage": payload.get("usage") or {}}
 
