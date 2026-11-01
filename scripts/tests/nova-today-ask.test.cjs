@@ -23,6 +23,7 @@ function harness(fetch, signedIn = true) {
     token: () => signedIn ? 'test-token' : '', session: () => null,
     showBanner: () => {}, hideBanner: () => {}, stopNovaSpeaking: () => {},
     setVoiceStatus: () => {}, renderBrainSources: () => {}, speakNova: () => {},
+    renderBrainAnswer(result) { $('brain-output').textContent = (result.fact_label || 'AI SUGGESTION') + '\n\n' + result.answer; },
     refresh: async () => {},
     window: { setTimeout(fn) { timer = fn; return 1; }, clearTimeout() { cleared = true; } }
   });

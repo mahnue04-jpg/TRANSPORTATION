@@ -2787,7 +2787,24 @@ def _grounded_web_research_answer(
     query: str,
     organization_id: str,
 ) -> NovaTodayBrainOut:
-    """Run several relevance-gated searches, then explain the best current evidence."""
+    """Run cited public search or relevance-gated research for current evidence."""
+    from app.core.nova.today import hosted_search
+
+    if is_current_public_information_request(question) and hosted_search.enabled():
+        try:
+            result = hosted_search.search_public_web(question)
+            return NovaTodayBrainOut(
+                answer=result["answer"],
+                answer_parts=result["answer_parts"],
+                sources=result["sources"],
+                source_href=result["sources"][0]["url"],
+                fact_label="LIVE WEB SOURCES",
+                next_actions=[],
+                generated_at=now().isoformat(),
+                verification_status="unknown",
+            )
+        except Exception as exc:
+            logger.warning("nova_hosted_public_search_failed type=%s status=%s", type(exc).__name__, getattr(exc, "status_code", None))
     lowered = question.lower()
     is_grant = "grant" in lowered or "funding" in lowered
     search_specs: list[tuple[str, list[str] | None, list[str] | None]] = [(query, None, None)]

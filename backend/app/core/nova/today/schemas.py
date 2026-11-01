@@ -159,8 +159,15 @@ class NovaTodaySourceLink(BaseModel):
     label: str | None = None
 
 
+class NovaTodayAnswerPart(BaseModel):
+    text: str
+    url: str | None = None
+    title: str | None = None
+
+
 class NovaTodayBrainOut(BaseModel):
     answer: str
+    answer_parts: list[NovaTodayAnswerPart] = Field(default_factory=list)
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str
