@@ -341,7 +341,7 @@ def is_current_public_information_request(text: str) -> bool:
         r"subscriptions?|saved records?|my account|our account)\b",
         lowered,
     )
-    if internal:
+    if internal or re.search(r"\b(?:my|our)\b.*\bfantasy\b", lowered):
         return False
     # Rosters and starting lineups change even when a user omits "current".
     # A named professional team also disambiguates "our Timberwolves" from
@@ -351,7 +351,7 @@ def is_current_public_information_request(text: str) -> bool:
         r"76ers|sixers|knicks|nets|raptors|cavaliers|cavs|bucks|bulls|"
         r"pacers|pistons|hawks|hornets|wizards|nuggets|thunder|"
         r"trail blazers|grizzlies|pelicans|rockets|spurs|mavericks|"
-        r"clippers|sacramento kings|utah jazz|miami heat|orlando magic|phoenix suns)\b",
+        r"clippers|kings|jazz|heat|magic|suns)\b",
         lowered,
     )
     if re.search(r"\b(?:my|our)\b", lowered) and not named_team:
@@ -362,7 +362,7 @@ def is_current_public_information_request(text: str) -> bool:
     )
     changing_sports_facts = re.search(
         r"\b(?:rosters?|line[\s-]?ups?|starters?|starting|depth charts?|"
-        r"playing|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
+        r"playing|players?|coaches?|stats?|statistics|availability|injur(?:y|ies|ed)|scores?|results?|standings|"
         r"schedules?|trades?|transfers?)\b",
         lowered,
     )

@@ -168,6 +168,10 @@ def test_public_source_requires_more_than_a_location_or_surname():
     "Who is in the Lakers line-up?",
     "What is the Vikings depth chart?",
     "Who are our Timberwolves starters?",
+    "Who are the Timberwolves players?",
+    "Show NBA player statistics",
+    "Who is the Timberwolves coach?",
+    "Who is starting for the Heat?",
 ])
 def test_implicit_current_sports_facts_use_live_search(question):
     assert live_tools.is_current_public_information_request(question)
@@ -179,6 +183,7 @@ def test_implicit_current_sports_facts_use_live_search(question):
     "What is my fantasy basketball roster?",
     "What is the current status of our NBA project?",
     "Show my NBA subscription",
+    "Show my fantasy roster with Timberwolves players",
 ])
 def test_private_rosters_and_sports_project_work_stay_private(question):
     assert not live_tools.is_current_public_information_request(question)
