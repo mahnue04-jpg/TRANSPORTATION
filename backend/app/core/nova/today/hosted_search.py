@@ -66,6 +66,27 @@ def _central_sports_times(text: str) -> str:
     return re.sub(pattern, replace, text)
 
 
+def _prefer_dated_nba_schedule(result: dict, question: str) -> dict:
+    """Use provider schedule rows once, without a contradictory generated recap."""
+    if not re.search(r"\bnba\b", question, re.I) or not re.search(r"\b(?:games?|schedule[d]?)\b", question, re.I):
+        return result
+    text = result["answer"]
+    if "## NBA Schedule" not in text:
+        return result
+    schedule = text.split("## NBA Schedule", 1)[1].split("\n## ", 1)[0]
+    rows = re.findall(r"^- .+ on (?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), [A-Z][a-z]{2} \d{1,2}, \d{4} at \d{1,2}:\d{2} [AP]M (?:CDT|CST)\b[^\n]*", schedule, re.M)
+    if not rows:
+        return result
+    parts = [{"text": "NBA schedule (Central Time):\n" + "\n".join(rows)}]
+    if result["sources"]:
+        parts.append({"text": "\n\nSources consulted: "})
+        for index, source in enumerate(result["sources"], start=1):
+            parts.extend([{"text": f"[{index}]", "url": source["url"], "title": source["title"]}, {"text": " "}])
+    elif result.get("source_feed"):
+        parts.append({"text": "\n\nSource: " + result["source_feed"] + "."})
+    return {**result, "answer_parts": parts, "answer": "".join(part["text"] for part in parts)}
+
+
 def _parse_response(payload: dict) -> dict:
     if payload.get("status") != "completed":
         raise HostedSearchUnavailable("incomplete_response")
@@ -179,7 +200,7 @@ def search_public_web(question: str) -> dict:
     )
     response_payload = response.model_dump()
     try:
-        result = _parse_response(response_payload)
+        result = _prefer_dated_nba_schedule(_parse_response(response_payload), question)
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.
         # Never log arbitrary user questions, response headers or credentials.
