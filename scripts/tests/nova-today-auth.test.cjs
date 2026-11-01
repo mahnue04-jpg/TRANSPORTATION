@@ -4,10 +4,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '../..');
-const html = fs.readFileSync(path.join(root, 'backend/static/nova-today/index.html'), 'utf8');
-const source = fs.readFileSync(path.join(root, 'backend/static/nova-today/today.js'), 'utf8');
+const pageName = process.env.NOVA_AUTH_TEST_PAGE || 'nova-today';
+const pageRoot = 'backend/static/' + pageName;
+const html = fs.readFileSync(path.join(root, pageRoot, 'index.html'), 'utf8');
+const source = fs.readFileSync(path.join(root, pageRoot, pageName === 'nova-home' ? 'home.js' : 'today.js'), 'utf8');
 
-function harness(restored) {
+function harness(restored, search = '') {
   const elements = new Map(), timers = [];
   function element(id) {
     const tag = html.match(new RegExp('<[^>]*\\bid="' + id + '"[^>]*>'));
@@ -42,9 +44,9 @@ function harness(restored) {
   const document = { getElementById: get, body: element('body'),
     createElement: () => element('detached'), addEventListener() {},
     querySelectorAll: () => [], querySelector: () => null };
-  const window = { AmiCorSession: session,
+  const window = { AmiCorSession: session, location: { search, href: '' },
     setTimeout(fn) { timers.push(fn); }, localStorage: { getItem() { return null; }, setItem() {} } };
-  vm.runInNewContext(source, { window, document, fetch: async url => ({
+  vm.runInNewContext(source, { window, document, URLSearchParams, fetch: async url => ({
     status: 200, ok: true, json: async () => url === '/api/auth/login'
       ? { access_token: 'login-token', email: 'owner@example.test' } : {}
   }) });
@@ -55,6 +57,7 @@ function harness(restored) {
 function assertControls(h, signedIn) {
   assert.equal(h.get('sign-in-toggle').classList.contains('hidden'), signedIn);
   assert.equal(h.get('sign-out').classList.contains('hidden'), !signedIn);
+  if (pageName === 'nova-home') assert.equal(h.get('create-nova-account').classList.contains('hidden'), signedIn);
 }
 
 test('restored sign-in hides Sign in in compact and expanded views', async () => {
@@ -62,8 +65,10 @@ test('restored sign-in hides Sign in in compact and expanded views', async () =>
   await h.flush();
   assert.match(h.get('session-meta').textContent, /Owner/);
   assertControls(h, true);
-  h.get('compact-toggle').handlers.click();
-  assertControls(h, true);
+  if (pageName === 'nova-today') {
+    h.get('compact-toggle').handlers.click();
+    assertControls(h, true);
+  }
 });
 
 test('login, logout and login again show only the appropriate auth control', async () => {
@@ -78,8 +83,23 @@ test('login, logout and login again show only the appropriate auth control', asy
     await h.flush();
     assertControls(h, true);
     assert.equal(h.get('login-form').classList.contains('hidden'), true);
-    h.get('sign-out').handlers.click();
+    await h.get('sign-out').handlers.click();
     assertControls(h, false);
     assert.match(h.get('session-meta').textContent, /Sign in/);
   }
 });
+
+if (pageName === 'nova-home') {
+  test('signed-in Home never opens a login form from a stale signin URL', async () => {
+    const h = harness(true, '?signin=1');
+    await h.flush();
+    assertControls(h, true);
+    assert.equal(h.get('login-form').classList.contains('hidden'), true);
+  });
+  test('signed-out Home still opens the requested login form', async () => {
+    const h = harness(false, '?signin=1');
+    await h.flush();
+    assertControls(h, false);
+    assert.equal(h.get('login-form').classList.contains('hidden'), false);
+  });
+}
