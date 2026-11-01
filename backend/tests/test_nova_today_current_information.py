@@ -9,6 +9,11 @@ from app.core.nova.today import live_tools, service
 from app.core.nova.today.schemas import NovaTodayBrainRequest
 
 
+@pytest.fixture(autouse=True)
+def offline_news(monkeypatch):
+    monkeypatch.setattr(service, "fetch_news", lambda *a, **kw: [])
+
+
 @pytest.mark.parametrize("question", [
     "What is the current status of Anthony Edwards from the Minnesota Timberwolves?",
     "What is Anthony Edwards' current status?",
@@ -66,11 +71,11 @@ def test_ask_uses_web_sources_instead_of_generic_brain(monkeypatch, question):
 
     def search(query, **kwargs):
         calls.append(query)
-        return {"sources": [{"title": "Official player update (test fixture)", "url": "https://www.nba.com/timberwolves/fixture", "snippet": "Availability is unconfirmed in this test fixture.", "label": "NBA"}]}
+        return {"sources": [{"title": "Anthony Edwards Minnesota Timberwolves update (test fixture)", "url": "https://www.nba.com/timberwolves/fixture", "snippet": "Availability is unconfirmed in this test fixture.", "label": "NBA"}]}
 
     monkeypatch.setattr(service, "fetch_web_search", search)
     result = service.ask_today(_DB(), NovaTodayBrainRequest(question=question), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
-    assert calls and "Anthony Edwards" in calls[0]
+    assert calls and "anthony edwards" in calls[0].lower()
     assert result.sources[0].url.startswith("https://www.nba.com/")
     assert result.next_actions == []
     assert "don't have access" not in result.answer
@@ -88,7 +93,7 @@ def test_no_search_results_do_not_fall_back_to_ungrounded_current_claims(monkeyp
 
 def test_grounded_status_prompt_and_generic_denial_recovery(monkeypatch):
     prompts = []
-    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: {"sources": [{"title": "Official availability fixture", "url": "https://www.nba.com/fixture", "snippet": "Status not established in fixture."}]})
+    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: {"sources": [{"title": "Anthony Edwards availability fixture", "url": "https://www.nba.com/fixture", "snippet": "Status not established in fixture."}]})
     monkeypatch.setattr(service.NovaCoreService, "_can_use_llm", lambda: True)
 
     def ask(*a, **kw):
@@ -100,5 +105,53 @@ def test_grounded_status_prompt_and_generic_denial_recovery(monkeypatch):
     assert "availability" in prompts[0]
     assert "do not infer today's status" in prompts[0].lower()
     assert "don't have access" not in result.answer
-    assert "Official availability fixture" in result.answer
+    assert "Anthony Edwards availability fixture" in result.answer
     assert result.sources
+
+
+def test_irrelevant_whatsapp_results_are_rejected_without_verification_claim(monkeypatch):
+    junk = {"title": "WhatsApp Web", "url": "https://web.whatsapp.com", "snippet": "Private messaging and calling"}
+    monkeypatch.setattr(service, "fetch_news", lambda *a, **kw: [{"title": junk["title"], "link": junk["url"], "source": "WhatsApp"}])
+    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: {"sources": [junk]})
+    monkeypatch.setattr(service.NovaCoreService, "ask", lambda *a, **kw: pytest.fail("irrelevant evidence must not reach the model"))
+    result = service._grounded_web_research_answer(_DB(), question="What is Anthony Edwards' current status with the Minnesota Timberwolves?", query="What is Anthony Edwards' current status with the Minnesota Timberwolves?", organization_id="org-1")
+    assert result.sources == []
+    assert result.source_href is None
+    assert result.verification_status == "unavailable"
+    assert result.fact_label == "LIVE INFORMATION NOT VERIFIED"
+    assert "WhatsApp" not in result.answer
+
+
+def test_current_status_prefers_subject_news_and_preserves_dates_for_synthesis(monkeypatch):
+    calls = []
+    prompts = []
+    def news(query, **kw):
+        calls.append(query)
+        return [
+            {"title": "WhatsApp Web", "link": "https://web.whatsapp.com", "source": "WhatsApp"},
+            {"title": "Timberwolves Anthony Edwards availability fixture", "link": "https://www.nba.com/timberwolves/fixture", "source": "NBA", "published": "Sat, 31 Oct 2026 10:00:00 GMT"},
+        ]
+    monkeypatch.setattr(service, "fetch_news", news)
+    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: pytest.fail("relevant news should not trigger another provider"))
+    monkeypatch.setattr(service.NovaCoreService, "_can_use_llm", lambda: True)
+    def answer(*a, **kw):
+        prompts.append(kw["question"])
+        return SimpleNamespace(answer="The fixture does not establish current playing availability.")
+    monkeypatch.setattr(service.NovaCoreService, "ask", answer)
+    question = "What is Anthony Edwards' current status with the Minnesota Timberwolves?"
+    result = service._grounded_web_research_answer(_DB(), question=question, query=question, organization_id="org-1")
+    assert calls == ["anthony edwards minnesota timberwolves"]
+    assert len(result.sources) == 1
+    assert result.sources[0].label == "NBA"
+    assert "Sat, 31 Oct 2026" in prompts[0]
+    assert "WhatsApp" not in prompts[0]
+    assert result.fact_label == "LIVE WEB SOURCES"
+    assert result.verification_status == "unknown"
+
+
+def test_public_source_requires_more_than_a_location_or_surname():
+    terms = live_tools.public_query_terms("What is Anthony Edwards' current status with the Minnesota Timberwolves?")
+    assert terms == ["anthony", "edwards", "minnesota", "timberwolves"]
+    assert not live_tools.source_matches_public_query({"title": "WhatsApp in Minnesota"}, terms)
+    assert not live_tools.source_matches_public_query({"title": "Anthony Edwards actor profile"}, terms)
+    assert live_tools.source_matches_public_query({"title": "Timberwolves Anthony Edwards report"}, terms)
