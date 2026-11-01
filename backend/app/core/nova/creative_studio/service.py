@@ -1842,6 +1842,16 @@ class CreativeStudioService(ShortDramaMixin):
                         "Voice provider is not configured and enabled; no audio was generated.",
                         http_status=422,
                     )
+                # Until durable cost accounting exists, fail closed on repeat
+                # voice requests for a project that already started a voice job.
+                # This is defense in depth, not atomic/concurrency-safe billing.
+                if any(job.kind == "voice" for job in self.store.list_jobs(project_id, owner_id)):
+                    raise CreativeStudioError(
+                        "VOICE_REQUEST_ALREADY_RECORDED",
+                        "A voice generation job already exists for this project. "
+                        "Review it before trying another paid request; no retry was started.",
+                        http_status=422,
+                    )
                 return
             quote = self.preflight_quote(owner_id, project_id)
             if quote.get("paid_render_allowed") is not True:
