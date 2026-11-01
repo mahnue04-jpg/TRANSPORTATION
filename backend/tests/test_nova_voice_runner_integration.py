@@ -7,6 +7,7 @@ import types
 import wave
 from pathlib import Path
 
+import local_voice_demo
 from local_voice_demo import run
 
 
@@ -15,6 +16,7 @@ def test_offline_demo_writes_wav_from_preloaded_pipeline(tmp_path: Path, monkeyp
     model_dir.mkdir()
     monkeypatch.setenv("HF_HUB_OFFLINE", "1")
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    monkeypatch.setattr(local_voice_demo, "check_voice_readiness", lambda _: {"ready_to_attempt_offline_inference": True})
     called = {}
 
     class FakePipeline:
