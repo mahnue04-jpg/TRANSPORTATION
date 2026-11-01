@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -50,6 +52,7 @@ def test_forced_search_is_bounded_cited_and_cached(monkeypatch):
     assert options == [{"timeout": 28.0, "max_retries": 0}]
     assert calls[0]["tools"][0]["type"] == "web_search"
     assert calls[0]["tools"][0]["external_web_access"] is True
+    assert calls[0]["tools"][0]["user_location"]["timezone"] == "America/Chicago"
     assert calls[0]["tool_choice"] == "required"
     assert calls[0]["include"] == ["web_search_call.action.sources"]
     assert calls[0]["max_tool_calls"] == 1
@@ -155,3 +158,18 @@ def test_unknown_non_url_sources_do_not_pass_provenance_check():
     data["output"][0]["action"] = {"sources": [{"type": "url", "url": "unidentified-feed"}]}
     with pytest.raises(hosted_search.HostedSearchUnavailable):
         hosted_search._parse_response(data)
+
+
+def test_tonight_resolves_to_minneapolis_date_after_utc_midnight():
+    instant = datetime.fromisoformat("2026-11-01T01:40:00+00:00").astimezone(ZoneInfo("America/Chicago"))
+    text = hosted_search._dated_search_question("What NBA games are scheduled tonight?", instant)
+    assert "Saturday, October 31, 2026" in text
+    assert "2026-10-31, evening, America/Chicago" in text
+    assert "Central Time" in text
+    assert "tonight" not in text
+
+
+def test_relative_date_rollover_and_explicit_date_preservation():
+    instant = datetime(2026, 10, 31, 21, tzinfo=ZoneInfo("America/Chicago"))
+    assert "Sunday, November 01, 2026" in hosted_search._dated_search_question("NBA games tomorrow", instant)
+    assert hosted_search._dated_search_question("NBA games on November 3, 2026", instant) == "NBA games on November 3, 2026"
