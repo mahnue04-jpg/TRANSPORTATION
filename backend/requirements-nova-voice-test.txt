@@ -1,0 +1,9 @@
+# Test-only profile: CPython 3.12, Linux x86_64. Not included by production.
+# CPU wheel is explicit so dependency resolution cannot install CUDA packages.
+torch @ https://download.pytorch.org/whl/cpu/torch-2.6.0%2Bcpu-cp312-cp312-linux_x86_64.whl
+kokoro==0.9.4
+transformers==4.51.3
+huggingface-hub==0.30.2
+numpy==2.2.5
+soundfile==0.13.1
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

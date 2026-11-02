@@ -45,3 +45,21 @@ The broader backend diagnostic initially hit a Chrome rendering-test timeout and
 ## Remaining
 
 Deploy to an approved test environment and verify the browser sign-in, audio playback and download flow. Resource capacity, pinned dependency provisioning, presenter word alignment and production rollout remain separate work. Do not enable this provider on the existing small production service solely because contract tests passed.
+
+
+## Temporary Render test package
+
+`Dockerfile.nova-voice-test` is a separate Python 3.12/Linux CPU image. It adds the pinned top-level speech runtime requirements from `requirements-nova-voice-test.txt`, preloads the reviewed model revision during build, verifies all three asset checksums, and enables offline local voice only at runtime. The normal production Dockerfile and requirements are not replaced.
+
+The test startup command refuses every hostname except `nova-studio-validation-350.onrender.com`, rejects non-local voice selection and refuses enabled paid-provider/live-billing flags. Render environment overrides must be checked before deployment because they override image defaults. The Dockerfile-specific test ignore file excludes credentials, local databases and caches while preserving application/media source assets.
+
+Validation: the combined base/speech dependency resolver dry run passed, and 13 startup-guard cases passed. A Docker engine was unavailable in the development container, so the complete image build is not yet verified; Render's build must succeed before a runtime test can be claimed.
+
+Observed validation-host baseline before any proposed test change:
+
+- Compute: 1c-2g (2 GB RAM); idle measured usage approximately 460 MiB. The current model plus web process does not fit the admission/reserve policy.
+- Source branch: `cursor/studio-montage-preserve-a66f`; current live commit `9212687f77904da645c179a705b6a2534a87d2bc`.
+- Docker context: `backend`; Dockerfile: `backend/Dockerfile`; automatic deploys off.
+- Existing persistent disk: 10 GB mounted at `/data`. Do not resize or replace it for this test.
+
+Before a paid test, capture a fresh configuration snapshot and record the authorized spending/time limit. A suitable proposed runtime is 2c-4g. Restore the previous compute plan, source/build settings and any changed non-secret flags after testing or failure. Preserve databases and media. Verify the restored live deployment and memory limit before reporting completion. A service with an attached disk can be briefly unavailable during redeploys.
