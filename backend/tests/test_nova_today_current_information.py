@@ -155,3 +155,199 @@ def test_public_source_requires_more_than_a_location_or_surname():
     assert not live_tools.source_matches_public_query({"title": "WhatsApp in Minnesota"}, terms)
     assert not live_tools.source_matches_public_query({"title": "Anthony Edwards actor profile"}, terms)
     assert live_tools.source_matches_public_query({"title": "Timberwolves Anthony Edwards report"}, terms)
+
+
+@pytest.mark.parametrize("question", [
+    "Who are the starting players for the Minnesota Timberwolves?",
+    "Show me the Timberwolves roster.",
+    "Who are the Timberwolves starters?",
+    "What is the Timberwolves starting five?",
+    "Who is starting for the Timberwolves tonight?",
+    "Show NBA starting lineups",
+    "Show me NBA rosters",
+    "Who is in the Lakers line-up?",
+    "What is the Vikings depth chart?",
+    "Who are our Timberwolves starters?",
+    "Who are the Timberwolves players?",
+    "Show NBA player statistics",
+    "Who is the Timberwolves coach?",
+    "Who is starting for the Heat?",
+])
+def test_implicit_current_sports_facts_use_live_search(question):
+    assert live_tools.is_current_public_information_request(question)
+    assert live_tools.is_web_search_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Show our staff roster",
+    "What is my fantasy basketball roster?",
+    "What is the current status of our NBA project?",
+    "Show my NBA subscription",
+    "Show my fantasy roster with Timberwolves players",
+])
+def test_private_rosters_and_sports_project_work_stay_private(question):
+    assert not live_tools.is_current_public_information_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Who are the starting players for the Minnesota Timberwolves?",
+    "Show me the Timberwolves roster.",
+    "Who is starting for the Timberwolves tonight?",
+])
+def test_plain_lineup_question_reaches_hosted_search_through_ask_today(monkeypatch, question):
+    from app.core.nova.today import hosted_search
+
+    calls = []
+    monkeypatch.setattr(service, "_today_government_grounded_answer", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "_answer_saved_work_opportunity", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "read_user_profile", lambda *a: {})
+    monkeypatch.setattr(service.NovaCoreService, "ask", lambda *a, **kw: pytest.fail("lineup must not reach basic chat"))
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+
+    def search(q):
+        calls.append(q)
+        return {
+            "answer": "Fixture lineup, reported on the fixture date. [1]",
+            "answer_parts": [
+                {"text": "Fixture lineup, reported on the fixture date. "},
+                {"text": "[1]", "url": "https://www.nba.com/timberwolves/fixture", "title": "Fixture"},
+            ],
+            "sources": [{"title": "Fixture", "url": "https://www.nba.com/timberwolves/fixture", "label": "NBA"}],
+        }
+
+    monkeypatch.setattr(hosted_search, "search_public_web", search)
+    result = service.ask_today(_DB(), NovaTodayBrainRequest(question=question), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert calls == [question]
+    assert result.fact_label == "LIVE WEB SOURCES"
+    assert result.sources[0].url == "https://www.nba.com/timberwolves/fixture"
+    assert result.next_actions == []
+    assert "don't have access" not in result.answer
+
+
+@pytest.mark.parametrize("question", [
+    "How can I watch the game for free?",
+    "Where can I watch the Timberwolves game for free in Minneapolis?",
+    "How can I watch the game on my phone for free?",
+    "Who do you think will win between the Lions and the Vikings?",
+    "Who will win, Lions or Vikings?",
+    "Lions vs Vikings prediction",
+    "What network shows the Lions versus Vikings?",
+    "Which subscriptions show Timberwolves games?",
+    "What is happening in NBA news?",
+    "Compare the Lions and Vikings",
+    "What channel carries the Packers game?",
+])
+def test_public_sports_defaults_to_live_research(question):
+    assert live_tools.is_public_sports_request(question)
+    assert live_tools.is_current_public_information_request(question)
+    assert live_tools.is_web_search_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Show my Vikings subscription",
+    "Show our fantasy roster with Vikings players",
+    "Where can I watch my project video?",
+    "Show our saved staff roster",
+    "Explain basketball rules",
+    "Define offside in soccer",
+])
+def test_public_sports_default_preserves_private_work_and_concept_explanations(question):
+    assert not live_tools.is_public_sports_request(question)
+    assert not live_tools.is_current_public_information_request(question)
+
+
+def test_public_sports_followup_resolves_game_but_not_private_or_new_team_questions():
+    topic = "Who do you think will win between the Lions and Vikings?"
+    question = "Where can I watch it for free on my phone?"
+    resolved = live_tools.resolve_public_sports_followup(question, topic)
+    assert topic in resolved and question in resolved
+    assert live_tools.is_web_search_request(resolved)
+    assert not live_tools.is_sports_prediction_request(resolved), "viewing must not inherit a prior prediction label"
+    new_question = "Who starts for the Timberwolves?"
+    assert live_tools.resolve_public_sports_followup(new_question, topic) == new_question
+    private_question = "Show my account and subscription"
+    assert live_tools.resolve_public_sports_followup(private_question, topic) == private_question
+    assert live_tools.resolve_public_sports_followup(question, "Show my saved tasks") == question
+
+
+@pytest.mark.parametrize("question, topic", [
+    ("Where can I watch it for free on my phone?", "Minnesota Timberwolves game, viewing from Minneapolis"),
+    ("Who do you think will win between the Lions and the Vikings?", None),
+    ("Where can I watch the Lions versus Vikings game for free in Minneapolis?", None),
+])
+def test_viewing_and_prediction_reach_live_search_through_full_handler(monkeypatch, question, topic):
+    from app.core.nova.today import hosted_search
+
+    calls = []
+    monkeypatch.setattr(service, "_today_government_grounded_answer", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "_answer_saved_work_opportunity", lambda *a, **kw: None)
+    monkeypatch.setattr(service, "read_user_profile", lambda *a: {})
+    monkeypatch.setattr(service.NovaCoreService, "ask", lambda *a, **kw: pytest.fail("public sports must not reach basic chat"))
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+    def search(q):
+        calls.append(q)
+        return {
+            "answer": "Fixture sports research. [1]",
+            "answer_parts": [{"text": "Fixture sports research. "}, {"text": "[1]", "url": "https://www.nfl.com/fixture", "title": "Fixture"}],
+            "sources": [{"title": "Fixture", "url": "https://www.nfl.com/fixture", "label": "NFL"}],
+        }
+    monkeypatch.setattr(hosted_search, "search_public_web", search)
+    out = service.ask_today(_DB(), NovaTodayBrainRequest(question=question, public_topic=topic), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert calls == [live_tools.resolve_public_sports_followup(question, topic)]
+    assert out.fact_label == "LIVE WEB SOURCES"
+    assert out.public_topic == (topic or question)
+    assert out.next_actions == []
+
+
+def test_private_handler_receives_no_public_sports_context(monkeypatch):
+    from app.core.nova.today.schemas import NovaTodayBrainOut
+    calls = []
+    question = "Show my account and subscriptions"
+    def direct(db, payload, **kwargs):
+        calls.append(payload.question)
+        return NovaTodayBrainOut(answer="Private account fixture.", fact_label="USER-SAVED INFORMATION", generated_at="fixture")
+    monkeypatch.setattr(service, "_today_live_or_memory_answer", direct)
+    out = service.ask_today(_DB(), NovaTodayBrainRequest(question=question, public_topic="Lions versus Vikings"), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert calls == [question]
+    assert out.public_topic is None
+
+
+@pytest.mark.parametrize("question", [
+    "Show bills",
+    "How do I pay bills?",
+    "Help me write a story about bears",
+    "Organize magic files",
+])
+def test_ambiguous_team_words_do_not_turn_ordinary_work_into_sports_search(question):
+    assert not live_tools.is_public_sports_request(question)
+
+
+@pytest.mark.parametrize("question", [
+    "Where can I watch the Buffalo Bills game?",
+    "Who will win between the Bears and Lions?",
+])
+def test_ambiguous_team_words_work_with_matchup_or_viewing_context(question):
+    assert live_tools.is_public_sports_request(question)
+
+
+def test_math_question_bypasses_research_and_has_no_unrelated_source(monkeypatch):
+    from datetime import datetime, timezone
+    from test_nova_today_reasoning import SCHOOL_QUESTION
+    prompts = []
+    monkeypatch.setattr(service, "_today_government_grounded_answer", lambda *a, **kw: pytest.fail("self-contained math must not search government data"))
+    monkeypatch.setattr(service, "_answer_saved_work_opportunity", lambda *a, **kw: pytest.fail("self-contained math must not read saved opportunities"))
+    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: pytest.fail("self-contained math must not browse"))
+    monkeypatch.setattr(service, "dashboard", lambda *a, **kw: pytest.fail("math needs no operational dashboard"))
+    def ask(*a, **kw):
+        prompts.append(kw["question"])
+        return SimpleNamespace(answer=r"**Maximum:** \(12\) laptops, \(8\) tablets. \(7400 \times 0.9 \times 1.08 = 7192.80\).", generated_at=datetime.now(timezone.utc).isoformat())
+    monkeypatch.setattr(service.NovaCoreService, "ask", ask)
+    out = service.ask_today(_DB(), NovaTodayBrainRequest(question=SCHOOL_QUESTION), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert "12 laptops, 8 tablets" in out.answer
+    assert "7400 × 0.9 × 1.08 = 7192.80" in out.answer
+    assert "supplied numbers" in out.fact_label
+    assert "LIVE" not in out.fact_label
+    assert out.sources == [] and out.source_href is None
+    assert out.next_actions == []
+    assert "Do not browse, cite websites" in prompts[0]
+    assert not live_tools.is_web_search_request(SCHOOL_QUESTION)

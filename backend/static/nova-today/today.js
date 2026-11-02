@@ -13,6 +13,24 @@
   }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
+  // One successful turn in memory only; never localStorage or cross-account context.
+  var priorBrainTurn = null;
+  var priorBrainScope = "";
+  function brainScope() {
+    var org = session() && session().getOrganizationId ? session().getOrganizationId() : "";
+    return token() + "|" + String(org || "");
+  }
+  function previousBrainTurn() {
+    if (priorBrainScope !== brainScope()) priorBrainTurn = null;
+    return priorBrainTurn;
+  }
+  function rememberBrainTurn(question, result, scope) {
+    if (scope !== brainScope()) return;
+    priorBrainScope = scope;
+    priorBrainTurn = result.verification_status === "unavailable" || !/^AI SUGGESTION/.test(result.fact_label || "AI SUGGESTION") ? null : {
+      question: String(question).slice(0, 4000), answer: String(result.answer || "").slice(0, 8000)
+    };
+  }
   function identity() {
     var current = session() && session().getCurrent ? session().getCurrent() : null;
     return current && current.identity ? current.identity : null;
@@ -65,7 +83,9 @@
       novaHumanVoice = window.AmiCorHumanVoice.createEngine({
         browserFallbackEnabled: true,
         onState: function (state) {
-          if (state && state.speaking) setVoiceStatus("Nova is speaking naturally…");
+          if (state && state.preparing) setVoiceStatus("Preparing Nova’s voice…");
+          else if (state && state.speaking) setVoiceStatus("Nova is speaking…");
+          else if (state && state.reason === "speak-failed") setVoiceStatus("Audio could not start. Tap Read aloud to retry.");
           else if (state && state.reason) setVoiceStatus("Ready.");
         }
       });
@@ -94,7 +114,10 @@
       });
       return;
     }
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis) {
+      setVoiceStatus("Audio is unavailable in this browser. Your answer is ready to read.");
+      return;
+    }
     try {
       window.speechSynthesis.cancel();
       var utterance = new SpeechSynthesisUtterance(String(text));
@@ -103,9 +126,14 @@
       utterance.pitch = 1.01;
       utterance.onstart = function () { setVoiceStatus("Nova is speaking…"); };
       utterance.onend = function () { setVoiceStatus("Ready."); };
+      utterance.onerror = function () { setVoiceStatus("Audio could not start. Tap Read aloud to retry."); };
       window.speechSynthesis.speak(utterance);
-    } catch (_) {}
+    } catch (_) {
+      setVoiceStatus("Audio could not start. Tap Read aloud to retry.");
+    }
   }
+  // Shared controls must use the reader that owns automatic answer playback.
+  window.NovaTodaySpeech = { speak: speakNova, stop: stopNovaSpeaking };
   function startVoiceInput() {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
@@ -180,6 +208,9 @@
     return body;
   }
   function setSignedIn(on) {
+    if (!on) { priorBrainTurn = null; priorBrainScope = ""; }
+    if (!on) lastPublicSportsTopic = "";
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -724,6 +755,7 @@
   }
 
   var brainBusy = false;
+  var lastPublicSportsTopic = "";
   async function runBrain(event) {
     event.preventDefault();
     if (brainBusy) return;
@@ -737,6 +769,7 @@
       $("login-form").classList.remove("hidden");
       return;
     }
+    var requestScope = brainScope();
     var question = $("ask-input").value.trim();
     if (!question) {
       askError("Type a question or use the microphone.");
@@ -761,14 +794,24 @@
         signal: controller.signal,
         body: JSON.stringify({
           question: question,
+          previous_turn: previousBrainTurn(),
+          public_topic: lastPublicSportsTopic || null,
           action_id: selectedActionId || null,
           source_ref_id: selectedSourceRefId || null
         })
       });
       if (!result || !result.answer) throw new Error("No response from Mrs. Nova Brain. Please try again.");
+      if (requestScope !== brainScope()) return;
+      rememberBrainTurn(question, result, requestScope);
       var answer = result.answer;
+      lastPublicSportsTopic = (result.fact_label === "LIVE WEB SOURCES" || result.fact_label === "LIVE SPORTS FEED")
+        ? String(result.public_topic || "").slice(0, 1200) : "";
       renderBrainAnswer(result);
       renderBrainSources(result.sources || [], result.source_href || "");
+      if (result.verification_status === "unavailable") {
+        setVoiceStatus("Nova could not complete or verify this answer. Your question remains available.");
+        return;
+      }
       // Preserve a new question typed while this answer was in flight.
       if ($("ask-input").value.trim() === question) $("ask-input").value = "";
       $("ask-input").focus();
@@ -777,6 +820,7 @@
       showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
       answered = true;
     } catch (err) {
+      lastPublicSportsTopic = "";
       askError(err.message || String(err));
     } finally {
       window.clearTimeout(timeout);

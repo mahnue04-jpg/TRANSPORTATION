@@ -328,6 +328,14 @@
 
     <section class="card" aria-label="Assets">
       <h2>13. Asset list</h2>
+      <form id="finished-video-import-form" class="grid">
+        <label class="wide">Finished commercial MP4
+          <input id="finished-video-file" type="file" accept="video/mp4,.mp4" required />
+        </label>
+        <p class="hint wide">Save an existing MP4 to the active project without changing its voice, presenter or captions. Maximum 150 MB. Import does not generate media or publish the commercial.</p>
+        <button type="submit" id="import-finished-video">Import finished MP4</button>
+        <p id="finished-video-import-status" class="hint wide" role="status" aria-live="polite"></p>
+      </form>
       <div class="actions">
         <button type="button" id="clear-legacy-preview-videos" class="secondary">Remove old headshot / short previews</button>
         <button type="button" id="reset-project-media" class="secondary">Clear all generated media from this project</button>
@@ -339,6 +347,7 @@
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
-  <script src="/static/nova-creative/creative.js?v=nova-local-presenter-voice-1"></script>
+  <script src="/static/nova-creative/creative.js?v=nova-local-presenter-finished-import-1"></script>
 </body>
 </html>
+

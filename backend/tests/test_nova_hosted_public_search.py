@@ -56,7 +56,7 @@ def test_forced_search_is_bounded_cited_and_cached(monkeypatch):
     assert calls[0]["tool_choice"] == "required"
     assert calls[0]["include"] == ["web_search_call.action.sources"]
     assert calls[0]["max_tool_calls"] == 1
-    assert calls[0]["max_output_tokens"] == 900
+    assert calls[0]["max_output_tokens"] == 1600
     assert calls[0]["store"] is False
     assert a["sources"][0]["url"].startswith("https://www.nba.com/")
     assert "[1]" in a["answer"]
@@ -105,7 +105,7 @@ def test_probe_claim_is_atomic_and_limits_calls_to_three(tmp_path, monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(lambda _: hosted_search.run_probe_if_configured(), range(2)))
     hosted_search.run_probe_if_configured()
-    assert calls == list(hosted_search.PROBE_QUESTIONS)
+    assert calls == [service.resolve_public_sports_followup(q, hosted_search.PROBE_PUBLIC_TOPICS.get(q)) for q in hosted_search.PROBE_QUESTIONS]
     saved = json.loads((tmp_path / 'nova_public_search_probes/fixture-probe.json').read_text())
     assert len(saved["results"]) == 3
     assert all(r["status"] == "completed" for r in saved["results"])
@@ -212,3 +212,129 @@ def test_dated_nba_rows_replace_conflicting_generated_time_summary():
 def test_dated_nba_schedule_selection_does_not_replace_player_status():
     result = {"answer": "Player fixture status.\n## NBA Schedule\n- A @ B on Saturday, Oct 31, 2026 at 07:00 PM CDT", "sources": []}
     assert hosted_search._prefer_dated_nba_schedule(result, "Anthony Edwards current status in NBA") is result
+
+
+def test_prediction_label_is_explicit_and_citation_segments_still_match():
+    result = hosted_search._label_prediction(hosted_search._parse_response(payload()), "Who do you think will win between the Lions and the Vikings?")
+    assert result["answer"].startswith("Sports prediction — uncertain, not a guaranteed result.")
+    assert "".join(p["text"] for p in result["answer_parts"]) == result["answer"]
+    assert result["sources"]
+
+
+def test_viewing_followup_does_not_inherit_prediction_status():
+    question = service.resolve_public_sports_followup("Where can I watch it for free?", "Who will win between the Lions and the Vikings?")
+    result = hosted_search._label_prediction(hosted_search._parse_response(payload()), question)
+    assert not result["answer"].startswith("Sports prediction")
+
+
+def test_viewing_answer_is_not_replaced_by_an_appended_nba_schedule():
+    result = {
+        "answer": "Fixture broadcaster and free-viewing terms.\n## NBA Schedule\n- A @ B on Saturday, Oct 31, 2026 at 07:00 PM CDT",
+        "sources": [{"title": "Fixture", "url": "https://www.nba.com/fixture"}],
+    }
+    assert hosted_search._prefer_dated_nba_schedule(result, "Where can I watch NBA games for free?") is result
+
+
+def test_viewing_queries_only_search_official_league_broadcaster_and_service_domains(monkeypatch):
+    from app import ai
+    calls = []
+    class Client:
+        def with_options(self, **kw): return self
+        responses = SimpleNamespace(create=lambda **kw: (calls.append(kw) or SimpleNamespace(model_dump=payload)))
+    monkeypatch.setattr(ai, "get_client", lambda: Client())
+    question = service.resolve_public_sports_followup("How can I watch the game for free?", "Minnesota Timberwolves game, viewing from Minneapolis")
+    hosted_search.search_public_web(question)
+    domains = calls[0]["tools"][0]["filters"]["allowed_domains"]
+    assert "nba.com" in domains and "dazn.com" in domains and "fox9.com" in domains
+    assert "swipesports.com" not in domains
+    assert calls[0]["max_tool_calls"] == 1
+    assert calls[0]["max_output_tokens"] == 1600
+
+
+def test_unqualified_free_app_claim_is_not_presented_as_verified_full_game_access():
+    result = {
+        "answer_parts": [
+            {"text": "Broadcast: FOX 9 at noon.\n"},
+            {"text": "[1]", "url": "https://www.nfl.com/fixture", "title": "Game fixture"},
+            {"text": "\nStreaming via FOX app: You may stream the game for free through the FOX LOCAL app, no subscription required. "},
+            {"text": "[2]", "url": "https://www.fox9.com/fixture", "title": "Pregame fixture"},
+            {"text": "\nThese are the only confirmed free viewing options in Minneapolis."},
+        ],
+        "sources": [{"title": "Game fixture", "url": "https://www.nfl.com/fixture"}],
+    }
+    result["answer"] = "".join(p["text"] for p in result["answer_parts"])
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
+    assert "FOX 9 at noon" in out["answer"]
+    assert "You may stream the game for free" not in out["answer"]
+    assert "has not been verified here" in out["answer"]
+    assert "only confirmed free" not in out["answer"]
+    assert "".join(p["text"] for p in out["answer_parts"]) == out["answer"]
+    assert out["answer_parts"][3]["url"] == "https://www.fox9.com/fixture"
+
+
+def test_scoped_free_offers_and_paid_requirements_are_kept_distinct():
+    text = "DAZN app offers 15 designated free games.\nStreaming through NFL+ is not free; a subscription is required.\nAn eligible free trial requires checking current terms."
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Timberwolves game for free?")
+    assert out["answer"] == text
+
+
+def test_past_unannounced_availability_is_not_asserted_as_current():
+    text = "The free-game channel and dates have not yet been announced."
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Timberwolves game for free?")
+    assert "not yet been announced" not in out["answer"]
+    assert "have not been verified here" in out["answer"]
+
+
+@pytest.mark.parametrize("text, restricted", [
+    ("FOX LOCAL app offers free pregame and postgame shows.", False),
+    ("Stream the game for free on FOX LOCAL, including pregame shows.", True),
+])
+def test_free_shows_cannot_qualify_a_claim_about_the_full_game(text, restricted):
+    result = {"answer": text, "answer_parts": [{"text": text}], "sources": []}
+    out = hosted_search._calibrate_viewing_claims(result, "Where can I watch the Lions versus Vikings game for free?")
+    assert ("has not been verified here" in out["answer"]) is restricted
+
+
+def test_weather_probe_is_atomic_public_only_and_preserves_search_claim(tmp_path, monkeypatch):
+    from app.core.nova.today import live_tools
+    monkeypatch.setenv("NOVA_PUBLIC_WEATHER_PROBE_ID", "weather-fixture")
+    monkeypatch.setenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT", str(tmp_path))
+    calls = []
+    monkeypatch.setattr(live_tools, "fetch_weather", lambda location: (calls.append(location) or {"location": location, "temperature_f": 45, "observed_at": "2026-11-01T11:30", "source": "Open-Meteo"}))
+    monkeypatch.setattr(live_tools, "update_user_profile", lambda *args, **kw: pytest.fail("public probe must not write account data"))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _: hosted_search.run_weather_probe_if_configured(), range(2)))
+    hosted_search.run_weather_probe_if_configured()
+    assert calls == ["Minneapolis"]
+    result = json.loads((tmp_path / "nova_public_weather_probes/weather-fixture.json").read_text())
+    assert result["status"] == "completed"
+    assert result["observation"]["observed_at"] == "2026-11-01T11:30"
+    assert not (tmp_path / "nova_public_search_probes").exists()
+
+
+def test_weather_probe_requires_explicit_configuration(monkeypatch):
+    from app.core.nova.today import live_tools
+    monkeypatch.delenv("NOVA_PUBLIC_WEATHER_PROBE_ID", raising=False)
+    monkeypatch.setattr(live_tools, "fetch_weather", lambda *args: pytest.fail("unconfigured weather probe"))
+    hosted_search.run_weather_probe_if_configured()
+
+
+def test_weather_probe_failure_does_not_log_provider_body_or_retry(tmp_path, monkeypatch, caplog):
+    from app.core.nova.today import live_tools
+    monkeypatch.setenv("NOVA_PUBLIC_WEATHER_PROBE_ID", "weather-failure")
+    monkeypatch.setenv("NOVA_PUBLIC_SEARCH_PROBE_ROOT", str(tmp_path))
+    calls = []
+    def fail(location):
+        calls.append(location)
+        raise ValueError("sensitive response fixture")
+    monkeypatch.setattr(live_tools, "fetch_weather", fail)
+    with caplog.at_level("INFO"):
+        hosted_search.run_weather_probe_if_configured()
+        hosted_search.run_weather_probe_if_configured()
+    assert calls == ["Minneapolis"]
+    result = json.loads((tmp_path / "nova_public_weather_probes/weather-failure.json").read_text())
+    assert result["status"] == "failed"
+    assert result["error_type"] == "ValueError"
+    assert "sensitive response fixture" not in caplog.text

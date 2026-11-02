@@ -28,7 +28,8 @@ function harness(fetch, signedIn = true) {
     window: { setTimeout(fn) { timer = fn; return 1; }, clearTimeout() { cleared = true; } }
   });
   // Execute the production request and submit functions, with only UI/transport adapters mocked.
-  vm.runInContext(source.slice(source.indexOf('  function errorText('), source.indexOf('  function setSignedIn(')) +
+  vm.runInContext(source.slice(source.indexOf('  // One successful turn'), source.indexOf('  function identity(')) +
+    source.slice(source.indexOf('  function errorText('), source.indexOf('  function setSignedIn(')) +
     source.slice(source.indexOf('  var brainBusy ='), source.indexOf('  async function decide(')), context);
   $('ask-input').value = 'what is the weather in Minneapolis today Mrs Nova';
   return { $, button, submit: () => context.runBrain({ preventDefault() {} }),
@@ -108,4 +109,42 @@ test('403 preserves the server explanation so an account restriction is actionab
   await h.submit();
   assert.equal(h.$('brain-output').textContent, detail);
   assert.equal(h.button.disabled, false);
+});
+
+
+test('follow-ups carry only the public sports topic and clear it after a private answer', async () => {
+  const bodies = [];
+  const replies = [
+    {answer: 'Sourced public sports answer.', fact_label: 'LIVE WEB SOURCES', public_topic: 'Lions versus Vikings'},
+    {answer: 'A private workspace answer.', fact_label: 'USER-SAVED INFORMATION', public_topic: 'must not retain this'},
+    {answer: 'Another answer.'}
+  ];
+  const h = harness(async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return response(200, replies.shift());
+  });
+  h.$('ask-input').value = 'Who will win between the Lions and the Vikings?';
+  await h.submit();
+  h.$('ask-input').value = 'Show my saved tasks';
+  await h.submit();
+  assert.equal(bodies[1].public_topic, 'Lions versus Vikings');
+  h.$('ask-input').value = 'How can I watch the game for free?';
+  await h.submit();
+  assert.equal(bodies[2].public_topic, null);
+  assert.equal(JSON.stringify(bodies).includes('A private workspace answer'), false);
+  assert.equal(JSON.stringify(bodies).includes('must not retain this'), false);
+});
+
+test('viewing follow-up includes the previous public question, not the answer text', async () => {
+  const bodies = [];
+  const h = harness(async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return response(200, {answer: 'Public answer with many details.', fact_label: 'LIVE WEB SOURCES', public_topic: 'Minnesota Timberwolves game'});
+  });
+  h.$('ask-input').value = 'Who is starting for the Timberwolves?';
+  await h.submit();
+  h.$('ask-input').value = 'Where can I watch it for free on my phone?';
+  await h.submit();
+  assert.equal(bodies[1].public_topic, 'Minnesota Timberwolves game');
+  assert.equal(JSON.stringify(bodies).includes('Public answer with many details'), false);
 });

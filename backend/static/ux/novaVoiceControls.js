@@ -18,6 +18,7 @@
   }
 
   function voice() {
+    if (window.NovaTodaySpeech) return window.NovaTodaySpeech;
     if (!voiceEngine && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
       voiceEngine = window.AmiCorHumanVoice.createEngine({ browserFallbackEnabled: true, getLanguage: selectedLanguage });
     }
@@ -45,6 +46,7 @@
   function speak(text) {
     var value = String(text || "").trim();
     if (!value) return;
+    if (window.NovaTodaySpeech) { window.NovaTodaySpeech.speak(value); return; }
     if (window.NovaWorkspaceSpeech) { window.NovaWorkspaceSpeech.speak(value); return; }
     var engine = voice();
     if (engine && engine.speak) {
@@ -310,7 +312,7 @@
     eligibleInputs().forEach(function (pair) {
       enhanceForm(pair[0], pair[1]);
     });
-    if (!window.NovaWorkspaceSpeech) installBrainAutoRead();
+    if (!window.NovaWorkspaceSpeech && !window.NovaTodaySpeech) installBrainAutoRead();
     installReadResultButton();
   }
 

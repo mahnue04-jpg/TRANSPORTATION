@@ -119,6 +119,7 @@
 
     const state = {
       speaking: false,
+      generation: 0,
       interrupted: false,
       queue: [],
       index: 0,
@@ -150,6 +151,7 @@
     }
 
     function stop(reason) {
+      state.generation += 1;
       state.interrupted = true;
       state.speaking = false;
       if (state.controller) {
@@ -166,7 +168,7 @@
       onState({ speaking: false, reason: reason || "stopped" });
     }
 
-    function fallbackBrowserSpeak(text, persona) {
+    function fallbackBrowserSpeak(text, persona, generation) {
       return new Promise((resolve) => {
         if (!browserFallbackEnabled || !window.speechSynthesis) {
           resolve(false);
@@ -185,6 +187,9 @@
           utter.lang = preferred && preferred.lang ? preferred.lang : language;
           utter.rate = Math.max(0.88, Math.min(1.03, Number(persona.rate || 1)));
           utter.pitch = Math.max(0.92, Math.min(1.06, Number(persona.pitch || 1)));
+          utter.onstart = () => {
+            if (!state.interrupted && generation === state.generation) onState({ speaking: true, reason: "browser-playing" });
+          };
           utter.onend = () => resolve(true);
           utter.onerror = () => resolve(false);
           window.speechSynthesis.speak(utter);
@@ -194,12 +199,16 @@
       });
     }
 
-    async function playAudioBlob(blob) {
+    async function playAudioBlob(blob, generation) {
       const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
       try {
         await new Promise((resolve, reject) => {
-          const audio = new Audio(url);
           state.currentAudio = audio;
+          audio.onplaying = () => {
+            if (!state.interrupted && generation === state.generation) onState({ speaking: true, reason: "audio-playing" });
+          };
+          audio.onpause = () => resolve(false);
           audio.onended = () => resolve(true);
           audio.onerror = () => reject(new Error("audio_playback_failed"));
           const playResult = audio.play();
@@ -209,7 +218,7 @@
         });
       } finally {
         URL.revokeObjectURL(url);
-        state.currentAudio = null;
+        if (state.currentAudio === audio) state.currentAudio = null;
       }
     }
 
@@ -239,9 +248,10 @@
       state.lastPersona = personaName;
 
       stop("speak-restart");
+      const generation = state.generation;
       state.interrupted = false;
       state.speaking = true;
-      onState({ speaking: true, reason: "speak-start", persona: personaName });
+      onState({ speaking: false, preparing: true, reason: "speak-start", persona: personaName });
 
       const cleaned = sanitizeForSpeech(rawText);
       let failed = false;
@@ -254,7 +264,7 @@
       onDebug({ type: "voice-providers", providers });
 
       for (let i = state.index; i < state.queue.length; i += 1) {
-        if (state.interrupted) break;
+        if (state.interrupted || generation !== state.generation) break;
         state.index = i;
         const chunk = state.queue[i];
 
@@ -262,10 +272,11 @@
           let generated;
           try {
             generated = await synthesizeChunk(chunk, personaName);
-          } catch (_) {
+          } catch (err) {
+            if (state.interrupted || generation !== state.generation) throw err;
             generated = await synthesizeChunk(chunk, personaName);
           }
-          if (state.interrupted) break;
+          if (state.interrupted || generation !== state.generation) break;
           onDebug({
             type: "voice-chunk",
             index: i,
@@ -275,8 +286,9 @@
             fallback: false,
             realtimeState: "provider",
           });
-          await playAudioBlob(generated.blob);
+          await playAudioBlob(generated.blob, generation);
         } catch (err) {
+          if (state.interrupted || generation !== state.generation) break;
           onDebug({
             type: "voice-fallback",
             index: i,
@@ -284,7 +296,7 @@
             fallback: true,
             realtimeState: "fallback",
           });
-          const ok = await fallbackBrowserSpeak(chunk, persona);
+          const ok = await fallbackBrowserSpeak(chunk, persona, generation);
           if (!ok) {
             failed = true;
             onDebug({ type: "voice-fallback-browser-failed", index: i });
@@ -292,14 +304,15 @@
           }
         }
 
-        if (!state.interrupted && persona.pauseMs > 0) {
+        if (!state.interrupted && generation === state.generation && persona.pauseMs > 0) {
           await wait(persona.pauseMs);
         }
       }
 
+      if (generation !== state.generation) return false;
       const interrupted = state.interrupted;
       state.speaking = false;
-      onState({ speaking: false, reason: interrupted ? "interrupted" : "speak-complete", persona: personaName });
+      onState({ speaking: false, reason: interrupted ? "interrupted" : failed ? "speak-failed" : "speak-complete", persona: personaName });
       return !interrupted && !failed;
     }
 
@@ -307,26 +320,29 @@
       if (!state.resumeText || state.speaking) return false;
       const personaName = state.lastPersona || "Warm Conversational";
       const persona = PERSONAS[personaName] || PERSONAS["Warm Conversational"];
+      const generation = state.generation;
       state.interrupted = false;
       state.speaking = true;
-      onState({ speaking: true, reason: "resume", persona: personaName });
+      onState({ speaking: false, preparing: true, reason: "resume", persona: personaName });
 
       for (let i = state.index; i < state.queue.length; i += 1) {
-        if (state.interrupted) break;
+        if (state.interrupted || generation !== state.generation) break;
         state.index = i;
         const chunk = state.queue[i];
         try {
           const generated = await synthesizeChunk(chunk, personaName);
-          await playAudioBlob(generated.blob);
+          await playAudioBlob(generated.blob, generation);
         } catch (_) {
-          const ok = await fallbackBrowserSpeak(chunk, persona);
+          if (state.interrupted || generation !== state.generation) break;
+          const ok = await fallbackBrowserSpeak(chunk, persona, generation);
           if (!ok) break;
         }
-        if (!state.interrupted && persona.pauseMs > 0) {
+        if (!state.interrupted && generation === state.generation && persona.pauseMs > 0) {
           await wait(persona.pauseMs);
         }
       }
 
+      if (generation !== state.generation) return false;
       const interrupted = state.interrupted;
       state.speaking = false;
       onState({ speaking: false, reason: interrupted ? "interrupted" : "resume-complete", persona: personaName });

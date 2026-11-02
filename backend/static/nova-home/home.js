@@ -4,6 +4,24 @@
   function $(id) { return document.getElementById(id); }
   function session() { return window.AmiCorSession || null; }
   function token() { return session() && session().getAccessToken ? session().getAccessToken() : ""; }
+  // One successful turn in memory only; never localStorage or cross-account context.
+  var priorBrainTurn = null;
+  var priorBrainScope = "";
+  function brainScope() {
+    var org = session() && session().getOrganizationId ? session().getOrganizationId() : "";
+    return token() + "|" + String(org || "");
+  }
+  function previousBrainTurn() {
+    if (priorBrainScope !== brainScope()) priorBrainTurn = null;
+    return priorBrainTurn;
+  }
+  function rememberBrainTurn(question, result, scope) {
+    if (scope !== brainScope()) return;
+    priorBrainScope = scope;
+    priorBrainTurn = result.verification_status === "unavailable" || !/^AI SUGGESTION/.test(result.fact_label || "AI SUGGESTION") ? null : {
+      question: String(question).slice(0, 4000), answer: String(result.answer || "").slice(0, 8000)
+    };
+  }
   function identity() {
     var current = session() && session().getCurrent ? session().getCurrent() : null;
     return current && current.identity ? current.identity : null;
@@ -54,6 +72,9 @@
     return body;
   }
   function setSignedIn(on) {
+    if (!on) { priorBrainTurn = null; priorBrainScope = ""; }
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
+    $("create-nova-account").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -123,25 +144,45 @@
     await refreshTodayCount();
     await refreshCustomerScope();
   }
+  function renderBrainResult(result) {
+    var box = $("brain-output");
+    box.textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" +
+      (result.answer || "No response from Mrs. Nova Brain.");
+    var rows = Array.isArray(result.sources) ? result.sources.slice(0, 8) : [];
+    if (!rows.length && result.source_href) rows = [{url: result.source_href, title: "Open source"}];
+    var heading = false;
+    rows.forEach(function (row, index) {
+      var url = String(row.url || "");
+      if (!/^https?:\/\//i.test(url)) return;
+      if (!heading) { box.appendChild(document.createTextNode("\n\nSources:\n")); heading = true; }
+      var link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "[" + (index + 1) + "] " + String(row.title || row.label || url);
+      box.appendChild(link);
+      box.appendChild(document.createTextNode("\n"));
+    });
+    if (!heading && result.source_href) box.appendChild(document.createTextNode("\n\nSource: " + result.source_href));
+  }
   async function askBrain(question) {
     if (!token()) {
       showBanner("Sign in to ask Mrs. Nova Brain.");
       $("login-form").classList.remove("hidden");
       return;
     }
-    var body = { question: question };
+    var requestScope = brainScope();
+    var body = { question: question, previous_turn: previousBrainTurn() };
     var orgId = organizationId();
     if (orgId) body.organization_id = String(orgId);
     var result = await api("/api/nova/today/ask", {
       method: "POST",
       body: JSON.stringify(body)
     });
-    var trust = result.fact_label || "AI SUGGESTION";
-    $("brain-output").textContent = trust + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
-    if (result.source_href) {
-      $("brain-output").textContent += "\n\nSource: " + result.source_href;
-    }
-    showBanner("Mrs. Nova Brain answered through the live Nova Today intelligence path.", true);
+    if (requestScope !== brainScope()) return;
+    rememberBrainTurn(question, result, requestScope);
+    renderBrainResult(result);
+    showBanner("Mrs. Nova Brain answered.", true);
   }
   function renderSearch(data) {
     var sources = (data && data.sources) || [];
@@ -178,19 +219,37 @@
 
   if (session() && session().restore) session().restore();
   refreshBrain();
-  if (new URLSearchParams(window.location.search).get("signin") === "1") {
+  if (!token() && new URLSearchParams(window.location.search).get("signin") === "1") {
     $("login-form").classList.remove("hidden");
     window.setTimeout(function () { if ($("login-email")) $("login-email").focus(); }, 100);
   }
 
+  var homeBrainBusy = false;
   $("command-form").addEventListener("submit", async function (event) {
     event.preventDefault();
+    if (homeBrainBusy) return;
     var question = $("command-input").value.trim();
     if (question.length < 3) {
       showBanner("Ask Mrs. Nova Brain at least 3 characters, or use Search the web.");
       return;
     }
-    try { await askBrain(question); } catch (err) { showBanner(err.message); }
+    if (!token()) { await askBrain(question); return; }
+    homeBrainBusy = true;
+    var form = $("command-form");
+    var submit = form.querySelector('[type="submit"]');
+    form.setAttribute("aria-busy", "true");
+    if (submit) submit.disabled = true;
+    $("brain-output").textContent = "Nova is working on your question…";
+    try {
+      await askBrain(question);
+    } catch (err) {
+      $("brain-output").textContent = err.message;
+      showBanner(err.message);
+    } finally {
+      homeBrainBusy = false;
+      form.setAttribute("aria-busy", "false");
+      if (submit) submit.disabled = false;
+    }
   });
   $("search-web").addEventListener("click", async function () {
     try { await runSearch(false); } catch (err) { showBanner(err.message); }
@@ -248,6 +307,7 @@
   }
   $("sign-out").addEventListener("click", async function () {
     if (session() && session().logout) await session().logout();
+    setSignedIn(false);
     window.location.href = "/nova";
   });
 })();

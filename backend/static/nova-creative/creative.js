@@ -696,6 +696,7 @@
   async function uploadBrowserFinalPromo(projectId, result) {
     var form = new FormData();
     form.append("file", result.blob, result.fileName || "amicor-nova-final-promo.webm");
+    if (result.source === "owner_import") form.append("source", "owner_import");
     var path = "/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/assets/browser-final-promo";
     var shared = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
     var res;
@@ -709,9 +710,10 @@
     }
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
-    if (!res.ok) throw new Error(detailText(body, "Could not save the browser-built final promo. (" + res.status + ")"));
+    if (!res.ok) throw new Error(detailText(body, "Could not save the final promo. (" + res.status + ")"));
     return body;
   }
+
 
   function setSignedIn(on) {
     // Signed in → only Sign out. Signed out → only Sign in.
@@ -726,6 +728,56 @@
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
   }
+  var finishedVideoForm = $("finished-video-import-form");
+  if (finishedVideoForm) finishedVideoForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var projectId = activeProjectId;
+    var input = $("finished-video-file");
+    var button = $("import-finished-video");
+    var status = $("finished-video-import-status");
+    var file = input.files && input.files[0];
+    if (button.disabled) return;
+    if (!projectId) { status.textContent = "Select a project before importing."; return; }
+    if (!token()) { status.textContent = "Sign in before importing."; return; }
+    if (!file || !/\.mp4$/i.test(file.name) || (file.type && file.type !== "video/mp4")) {
+      status.textContent = "Choose a finished MP4 video."; return;
+    }
+    if (!file.size || file.size > 150 * 1024 * 1024) {
+      status.textContent = "Choose a non-empty MP4 no larger than 150 MB."; return;
+    }
+    var project = projectRowsCache.find(function (row) { return row.id === projectId; });
+    var projectTitle = project ? project.title : projectId;
+    var uploaded = false;
+    button.disabled = true;
+    input.disabled = true;
+    status.textContent = "Importing into " + projectTitle + "...";
+    try {
+      var saved = await uploadBrowserFinalPromo(projectId, {
+        blob: file, fileName: file.name, source: "owner_import"
+      });
+      uploaded = true;
+      var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId));
+      var asset = (detail.assets || []).find(function (row) {
+        return saved && saved.asset && row.id === saved.asset.id;
+      });
+      if (!asset || !asset.url || asset.media_available === false) {
+        throw new Error("The saved video is not available for playback yet.");
+      }
+      input.value = "";
+      if (activeProjectId === projectId) await refreshAssets();
+      status.textContent = "Imported into " + projectTitle + ". Open it in the asset list to play or download. Nothing was published.";
+      showBanner(status.textContent, true);
+    } catch (err) {
+      status.textContent = uploaded
+        ? "Upload was saved, but playback verification failed. Reopen the project before uploading again. " + err.message
+        : "Import was not confirmed. Check the project before trying again. " + err.message;
+      showBanner(status.textContent, false);
+    } finally {
+      button.disabled = false;
+      input.disabled = false;
+    }
+  });
+
   function renderOutput(data) {
     $("output").textContent = JSON.stringify(data, null, 2);
   }
@@ -1204,7 +1256,8 @@
           row.metadata.render_mode === "offline_montage_not_lipsync" ||
           row.metadata.pipeline === "offline_title_card_fallback"
         );
-        var videoLabel = offlineMontage
+        var importedVideo = row.metadata && row.metadata.source === "owner_import";
+        var videoLabel = importedVideo ? "Download imported MP4" : offlineMontage
           ? "Download offline montage"
           : (isBodyMotion ? "Download body motion preview" : (isPresenterVideo ? "Download talking presenter video" : "Download AI video"));
         var filePath = row.id
@@ -2359,3 +2412,4 @@
 
   boot();
 })();
+
