@@ -30,10 +30,30 @@ MIN_FREE_BYTES = 2304 * 1024 * 1024
 STOP_RESERVE_BYTES = 256 * 1024 * 1024
 
 
+class VoiceCapacityError(OSError):
+    pass
+
+
+def _reclaimable_file_cache() -> int:
+    for filename, field in (("/sys/fs/cgroup/memory.stat", "inactive_file"),
+                            ("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file")):
+        try:
+            values = dict(line.split() for line in Path(filename).read_text().splitlines())
+            if field in values:
+                return max(0, int(values[field]))
+        except (OSError, ValueError):
+            continue
+    return 0
+
+
 def _free_memory_bytes() -> int | None:
     budget = memory_budget()
     if budget is not None:
-        return max(0, budget[1] - budget[0])
+        # Inactive file cache is reclaimable by the kernel; count neither
+        # anonymous model memory nor active file pages as available capacity.
+        used, limit = budget
+        reclaimable = min(max(0, used), _reclaimable_file_cache())
+        return max(0, min(limit, limit - used + reclaimable))
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
@@ -50,7 +70,7 @@ def _run_worker(command, env, log):
         while child.poll() is None:
             free = _free_memory_bytes()
             if free is None or free < STOP_RESERVE_BYTES:
-                raise OSError("Local voice memory reserve reached")
+                raise VoiceCapacityError("Local voice memory reserve reached")
             if time.monotonic() - started > 120:
                 raise subprocess.TimeoutExpired(command, 120)
             time.sleep(0.1)
@@ -120,8 +140,9 @@ class NovaLocalVoiceProvider:
                     script_file, output = work / "script.txt", work / "narration.wav"
                     script_file.write_text(request.text, encoding="utf-8")
                     env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
-                               OMP_NUM_THREADS="2", MKL_NUM_THREADS="2")
-                    command = [sys.executable, "-m", "app.core.nova.creative_studio.local_voice_demo",
+                               OMP_NUM_THREADS="2", MKL_NUM_THREADS="2",
+                               NOVA_LOCAL_VOICE_PARENT_PID=str(os.getpid()))
+                    command = [sys.executable, str(Path(__file__).with_name("local_voice_worker.py")),
                                "--model-dir", os.environ["NOVA_LOCAL_VOICE_MODEL_DIR"],
                                "--output", str(output), "--script-file", str(script_file),
                                "--speed", str(request.speed), "--verify-model"]
@@ -144,5 +165,7 @@ class NovaLocalVoiceProvider:
                         "owner_review_required": True, "presenter_alignment": False}
         except subprocess.TimeoutExpired:
             return failed(ERROR, "Nova local voice timed out; the worker was stopped. No paid fallback was used.")
+        except VoiceCapacityError:
+            return failed(ERROR, "Nova stopped local narration to protect server memory. A host with more capacity is needed.")
         except (OSError, ValueError, KeyError, wave.Error, EOFError):
             return failed(ERROR, "Nova local narration could not be saved. No paid fallback was used.")

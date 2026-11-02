@@ -77,6 +77,22 @@ def run(*, model_dir: Path, output: Path, script: str | None = None,
             "quality_check": report.valid_for_narration}
 
 
+def require_worker_parent(expected_pid: int) -> None:
+    """Linux child exits with its web parent, including the startup race."""
+    import ctypes
+    import os
+    import signal
+    import sys
+    if sys.platform != "linux":
+        raise VoiceNotReady("The local Studio worker requires a Linux test host.")
+    libc = ctypes.CDLL(None, use_errno=True)
+    prctl = libc.prctl
+    prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+    prctl.restype = ctypes.c_int
+    if prctl(1, signal.SIGKILL, 0, 0, 0) != 0 or os.getppid() != expected_pid:
+        raise VoiceNotReady("The local voice worker no longer has its expected parent.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", required=True, type=Path)
@@ -85,6 +101,9 @@ def main() -> None:
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--verify-model", action="store_true")
     args = parser.parse_args()
+    import os
+    if os.environ.get("NOVA_LOCAL_VOICE_PARENT_PID"):
+        require_worker_parent(int(os.environ["NOVA_LOCAL_VOICE_PARENT_PID"]))
     # This command runs in a dedicated child, never the web process. Block
     # Python socket connections before importing model libraries.
     import socket

@@ -158,3 +158,13 @@ def test_readiness_flags_follow_selected_provider_not_external_credential(monkey
     assert flags.voice_provider_live_enabled()
     monkeypatch.setenv("NOVA_CREATIVE_VOICE_PROVIDER", "typo_local")
     assert not flags.voice_provider_configured() and not flags.voice_provider_live_enabled()
+
+
+def test_memory_headroom_counts_only_reclaimable_inactive_file_cache(monkeypatch):
+    monkeypatch.setattr(provider, "memory_budget", lambda: (3500, 4096))
+    monkeypatch.setattr(provider, "_reclaimable_file_cache", lambda: 500)
+    assert provider._free_memory_bytes() == 1096
+    monkeypatch.setattr(provider, "_reclaimable_file_cache", lambda: 0)
+    assert provider._free_memory_bytes() == 596
+    monkeypatch.setattr(provider, "_reclaimable_file_cache", lambda: 9000)
+    assert provider._free_memory_bytes() == 4096

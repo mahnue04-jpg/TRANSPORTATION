@@ -667,8 +667,7 @@ def generate_voice(
     _require_owner(user)
     try:
         service = get_service(db)
-        service.require_budget_confirmation_for_paid(user.user_id, project_id)
-        return service.request_voice_generation(user.user_id, project_id)
+        return service.request_voice_generation(user.user_id, project_id, enforce_paid_budget=True)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
