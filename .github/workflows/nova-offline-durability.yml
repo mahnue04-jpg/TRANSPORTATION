@@ -13,6 +13,7 @@ on:
       - 'backend/tests/test_nova_operations_csv_runner.py'
       - 'backend/app/core/nova/work_revenue/operations_artifact_review.py'
       - 'backend/tests/test_nova_operations_artifact_review.py'
+      - 'backend/tests/test_nova_operations_atomic_completion.py'
       - '.github/workflows/nova-offline-durability.yml'
   workflow_dispatch:
 
@@ -35,7 +36,7 @@ jobs:
         run: |
           set -eu
           files=""
-          for f in tests/test_nova_shared_evidence.py tests/test_nova_operations_job_queue.py tests/test_nova_operations_csv_cleanup.py tests/test_nova_operations_csv_runner.py tests/test_nova_operations_artifact_review.py; do
+          for f in tests/test_nova_shared_evidence.py tests/test_nova_operations_job_queue.py tests/test_nova_operations_csv_cleanup.py tests/test_nova_operations_csv_runner.py tests/test_nova_operations_artifact_review.py tests/test_nova_operations_atomic_completion.py; do
             if [ -f "$f" ]; then files="$files $f"; fi
           done
           test -n "$files"
