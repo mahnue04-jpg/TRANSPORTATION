@@ -327,6 +327,20 @@ def ask_government(
     db: Session = Depends(get_db),
 ):
     org_id = _resolve_org(user, payload.organization_id)
+    from app.core.nova.today.live_tools import is_public_government_research_request
+    raw_question = (payload.question or "").strip()
+    if payload.action == "ask" and is_public_government_research_request(raw_question):
+        from app.core.nova.today.router import ask_today
+        from app.core.nova.today.schemas import NovaTodayBrainRequest
+
+        # Reuse the existing API entry point, including trial/free-use policies.
+        # A selected saved item must not replace explicit public research.
+        researched = ask_today(NovaTodayBrainRequest(question=raw_question, organization_id=org_id),
+                               user=user, db=db)
+        return NovaGovBrainOut(action="ask", answer=researched.answer,
+                               answer_parts=researched.answer_parts, sources=researched.sources,
+                               fact_label=researched.fact_label, next_actions=[],
+                               generated_at=researched.generated_at)
     try:
         return service.ask_government(db, payload, organization_id=org_id, user=user)
     except service.NovaGovernmentError as exc:
