@@ -328,3 +328,26 @@ def test_ambiguous_team_words_do_not_turn_ordinary_work_into_sports_search(quest
 ])
 def test_ambiguous_team_words_work_with_matchup_or_viewing_context(question):
     assert live_tools.is_public_sports_request(question)
+
+
+def test_math_question_bypasses_research_and_has_no_unrelated_source(monkeypatch):
+    from datetime import datetime, timezone
+    from test_nova_today_reasoning import SCHOOL_QUESTION
+    prompts = []
+    monkeypatch.setattr(service, "_today_government_grounded_answer", lambda *a, **kw: pytest.fail("self-contained math must not search government data"))
+    monkeypatch.setattr(service, "_answer_saved_work_opportunity", lambda *a, **kw: pytest.fail("self-contained math must not read saved opportunities"))
+    monkeypatch.setattr(service, "fetch_web_search", lambda *a, **kw: pytest.fail("self-contained math must not browse"))
+    monkeypatch.setattr(service, "dashboard", lambda *a, **kw: pytest.fail("math needs no operational dashboard"))
+    def ask(*a, **kw):
+        prompts.append(kw["question"])
+        return SimpleNamespace(answer=r"**Maximum:** \(12\) laptops, \(8\) tablets. \(7400 \times 0.9 \times 1.08 = 7192.80\).", generated_at=datetime.now(timezone.utc).isoformat())
+    monkeypatch.setattr(service.NovaCoreService, "ask", ask)
+    out = service.ask_today(_DB(), NovaTodayBrainRequest(question=SCHOOL_QUESTION), organization_id="org-1", user=SimpleNamespace(user_id="user-1"))
+    assert "12 laptops, 8 tablets" in out.answer
+    assert "7400 × 0.9 × 1.08 = 7192.80" in out.answer
+    assert "supplied numbers" in out.fact_label
+    assert "LIVE" not in out.fact_label
+    assert out.sources == [] and out.source_href is None
+    assert out.next_actions == []
+    assert "Do not browse, cite websites" in prompts[0]
+    assert not live_tools.is_web_search_request(SCHOOL_QUESTION)

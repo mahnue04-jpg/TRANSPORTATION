@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from app.core.nova.today.reasoning import is_self_contained_math_request
+
 from app.core.nova.memory import memory_store
 from app.web_search import search_web
 
@@ -478,6 +480,8 @@ def is_current_public_information_request(text: str) -> bool:
 def is_web_search_request(text: str) -> bool:
     """Recognize both explicit browsing commands and natural current-research questions."""
     lowered = _clean(text).lower()
+    if is_self_contained_math_request(text):
+        return False
     if is_weather_request(text):
         return False
     if is_web_search_capability_question(text):

@@ -28,7 +28,8 @@ function harness(fetch, signedIn = true) {
     window: { setTimeout(fn) { timer = fn; return 1; }, clearTimeout() { cleared = true; } }
   });
   // Execute the production request and submit functions, with only UI/transport adapters mocked.
-  vm.runInContext(source.slice(source.indexOf('  function errorText('), source.indexOf('  function setSignedIn(')) +
+  vm.runInContext(source.slice(source.indexOf('  // One successful turn'), source.indexOf('  function identity(')) +
+    source.slice(source.indexOf('  function errorText('), source.indexOf('  function setSignedIn(')) +
     source.slice(source.indexOf('  var brainBusy ='), source.indexOf('  async function decide(')), context);
   $('ask-input').value = 'what is the weather in Minneapolis today Mrs Nova';
   return { $, button, submit: () => context.runBrain({ preventDefault() {} }),
