@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -1340,18 +1340,20 @@ def prepare_talking_presenter_preview(
 async def save_browser_final_promo(
     project_id: str,
     file: UploadFile = File(...),
+    source: str = Form("browser_assembly"),
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_owner(user)
     try:
-        payload = await file.read()
+        payload = await file.read(150 * 1024 * 1024 + 1)
         return get_service(db).persist_browser_final_promo(
             user.user_id,
             project_id,
             data=payload,
             filename=file.filename or "amicor-nova-final-promo.webm",
             content_type=file.content_type or "video/webm",
+            source=source,
         )
     except CreativeStudioError as exc:
         _raise(exc)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 import tempfile
 import time
@@ -1830,12 +1831,23 @@ class CreativeStudioService(ShortDramaMixin):
         data: bytes,
         filename: str = "amicor-nova-final-promo.webm",
         content_type: str = "video/webm",
+        source: str = "browser_assembly",
     ) -> dict[str, Any]:
         self._project_or_404(owner_id, project_id)
         if not data:
             raise CreativeStudioError("EMPTY_UPLOAD", "The browser final promo file was empty.", http_status=422)
         if len(data) > 150 * 1024 * 1024:
             raise CreativeStudioError("UPLOAD_TOO_LARGE", "The browser final promo is larger than 150 MB.", http_status=422)
+
+        if source not in {"browser_assembly", "owner_import"}:
+            raise CreativeStudioError("INVALID_UPLOAD_SOURCE", "Unsupported media upload source.", http_status=422)
+        imported = source == "owner_import"
+        if imported and (
+            Path(filename or "").suffix.lower() != ".mp4"
+            or content_type not in {"video/mp4", "application/octet-stream"}
+            or len(data) < 12 or data[4:8] != b"ftyp"
+        ):
+            raise CreativeStudioError("INVALID_MP4", "Choose a valid MP4 video file.", http_status=422)
 
         suffix = Path(filename or "").suffix.lower()
         if suffix not in {".webm", ".mp4"}:
@@ -1850,12 +1862,15 @@ class CreativeStudioService(ShortDramaMixin):
             owner_id=owner_id,
             project_id=project_id,
             kind="video",
-            title="Final AMICOR Nova promo",
-            content="Final promo assembled safely in the owner's browser from generated Creative Studio assets.",
+            title=("Imported commercial: " + Path(filename).name[:180]) if imported else "Final AMICOR Nova promo",
+            content=("Owner-imported finished MP4. Original bytes preserved; playback and commercial approval remain separate.") if imported else "Final promo assembled safely in the owner's browser from generated Creative Studio assets.",
             status="GENERATED",
             metadata={
                 "final_promo": True,
-                "render_mode": "browser_safe_upload",
+                "render_mode": "owner_import" if imported else "browser_safe_upload",
+                "source": source,
+                "original_filename": Path(filename).name[:255],
+                "sha256": hashlib.sha256(data).hexdigest(),
                 "publish_ready": False,
                 "owner_review_required": True,
                 "commercial_ready_candidate": suffix == ".mp4",
@@ -1873,9 +1888,9 @@ class CreativeStudioService(ShortDramaMixin):
         self._finish_job(
             job,
             status="GENERATED",
-            message="Browser-safe final AMICOR Nova promo saved successfully.",
+            message="Finished MP4 imported successfully." if imported else "Browser-safe final AMICOR Nova promo saved successfully.",
             asset_ids=[asset.id],
-            provider="nova_browser_mediarecorder",
+            provider="nova_owner_media_import" if imported else "nova_browser_mediarecorder",
         )
         return {"asset": asset.as_dict(), "url": asset.url, "status": "GENERATED"}
 
