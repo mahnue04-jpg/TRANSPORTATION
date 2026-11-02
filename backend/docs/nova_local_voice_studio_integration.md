@@ -1,6 +1,6 @@
 # Nova local voice: Studio backend integration
 
-Status: implemented in draft PR #425; not merged or deployed. The original approved 30-second commercial and its soundtrack are unchanged.
+Status: implemented in draft PR #425 and verified on the temporary Render validation host; not merged or activated in production. The original approved 30-second commercial and its soundtrack are unchanged.
 
 ## Behavior
 
@@ -44,21 +44,31 @@ The broader backend diagnostic initially hit a Chrome rendering-test timeout and
 
 ## Remaining
 
-Deploy to an approved test environment and verify the browser sign-in, audio playback and download flow. Resource capacity, pinned dependency provisioning, presenter word alignment and production rollout remain separate work. Do not enable this provider on the existing small production service solely because contract tests passed.
+The approved 4 GB validation-host browser test passed as recorded below. Presenter word alignment, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
 
 
 ## Temporary Render test package
 
 `Dockerfile.nova-voice-test` is a separate Python 3.12/Linux CPU image. It adds the pinned top-level speech runtime requirements from `requirements-nova-voice-test.txt`, preloads the reviewed model revision during build, verifies all three asset checksums, and enables offline local voice only at runtime. The normal production Dockerfile and requirements are not replaced.
 
-The test startup command refuses every hostname except `nova-studio-validation-350.onrender.com`, rejects non-local voice selection and refuses enabled paid-provider/live-billing flags. Render environment overrides must be checked before deployment because they override image defaults. The Dockerfile-specific test ignore file excludes credentials, local databases and caches while preserving application/media source assets.
+The test startup command refuses every hostname except the approved validation hostname, rejects non-local voice selection and refuses enabled paid-provider/live-billing flags. Render environment overrides must be checked before deployment because they override image defaults. The Dockerfile-specific test ignore file excludes credentials, local databases and caches while preserving application/media source assets.
 
-Validation: the combined base/speech dependency resolver dry run passed, and 13 startup-guard cases passed. A Docker engine was unavailable in the development container, so the complete image build is not yet verified; Render's build must succeed before a runtime test can be claimed.
+Validation: the combined base/speech dependency resolver dry run passed. Render built and ran the image successfully. All 14 startup checks passed, including an explicit single-worker override of Render's WEB_CONCURRENCY=2 default. When an environment uses ephemeral signing keys, multiple web workers can generate different keys and reject one another's sessions. The test launcher now explicitly uses one web worker. Sessions can still require renewal after restart; production needs a stable secret managed separately.
+
+## Signed-in browser proof
+
+The image ran on an approved temporary validation host. All four GitHub workflows passed for the tested code. The browser signed in through the secure credential flow and successfully saved the brief and text-only script in an isolated test project.
+
+The normal **9. Generate Voice** button generated and saved local stock-voice narration. Generation completed in approximately 24 seconds. The output is a 21.7-second, mono, 24 kHz WAV, 1,041,644 bytes. The authenticated browser download checksum matched provider provenance exactly.
+
+The browser audio element reported readyState 4 and no media error, played to currentTime 21.7 with ended=true, and loaded the same saved asset successfully after a page reload. No paid-provider calls or publication occurred. This proves the general local-narration browser path, not presenter lip-sync or approval of the synthetic test script. The approved commercial was not regenerated or replaced.
+
+Restoration was verified after the test: the original application, source/build settings, compute allocation, automatic-deployment setting and existing persistent disk were restored. No environment variables were changed.
 
 Observed validation-host baseline before any proposed test change:
 
 - Compute: 1c-2g (2 GB RAM); idle measured usage approximately 460 MiB. The current model plus web process does not fit the admission/reserve policy.
-- Source branch: `cursor/studio-montage-preserve-a66f`; current live commit `9212687f77904da645c179a705b6a2534a87d2bc`.
+- Capture the current source branch and live revision privately before testing.
 - Docker context: `backend`; Dockerfile: `backend/Dockerfile`; automatic deploys off.
 - Existing persistent disk: 10 GB mounted at `/data`. Do not resize or replace it for this test.
 
