@@ -110,7 +110,7 @@ def test_invalid_selection_cannot_publish_or_cache_draft(monkeypatch, mutate):
     selection = copy.deepcopy(SELECTION)
     mutate(selection)
     calls, _ = install_responses(monkeypatch, [cited_payload("Bad draft fixture"), selection_payload(selection)])
-    with pytest.raises(ValueError):
+    with pytest.raises(hosted_search.HostedSearchUnavailable):
         hosted_search.search_public_web(QUESTION)
     assert len(calls) == 2 and not hosted_search._CACHE
 
@@ -129,7 +129,7 @@ def test_failed_or_unstructured_selection_does_not_publish(monkeypatch, failure)
 def test_no_readable_sources_does_not_call_selector_or_fall_back_to_snippets(monkeypatch):
     monkeypatch.setattr(review, "retrieve_documents", lambda *a: ([], 2))
     calls, _ = install_responses(monkeypatch, [cited_payload("Search snippet fixture")])
-    with pytest.raises(ValueError, match="government_source_text_unavailable"):
+    with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_source_text_unavailable"):
         hosted_search.search_public_web(QUESTION)
     assert len(calls) == 1 and not hosted_search._CACHE
 
@@ -177,7 +177,7 @@ def test_late_evidence_is_not_published(monkeypatch):
     client = SimpleNamespace(responses=SimpleNamespace(create=create))
     client.with_options = lambda **kw: client
     monkeypatch.setattr("app.ai.get_client", lambda: client)
-    with pytest.raises(ValueError, match="government_evidence_budget_exhausted"):
+    with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_evidence_budget_exhausted"):
         hosted_search.search_public_web(QUESTION)
     assert not hosted_search._CACHE
 
@@ -197,3 +197,44 @@ def test_discovery_includes_consulted_detail_pages_and_excludes_lookalikes_and_a
         "https://www.sba.gov/federal-contracting/contracting-assistance-programs/8a-business-development-program",
     ]
     assert all(set(row) == {"url"} for row in candidates)
+
+
+@pytest.mark.parametrize("shape", ["sources_only", "truncated", "mixed_domains", "no_prose"])
+def test_source_discovery_does_not_require_a_finished_cited_answer(monkeypatch, shape):
+    payload = cited_payload("Source-discovery prose is not an answer")
+    official = "https://www.acquisition.gov/far/32.501-1"
+    payload["output"][0]["action"] = {"sources": [{"url": official}]}
+    if shape == "truncated":
+        payload["status"] = "incomplete"
+        payload["incomplete_details"] = {"reason": "max_output_tokens"}
+    elif shape == "mixed_domains":
+        payload["output"][1]["content"][0]["annotations"][0]["url"] = "https://www.ecfr.gov/current/title-13/part-124"
+    elif shape == "sources_only":
+        payload["output"][1]["content"][0]["annotations"] = []
+    elif shape == "no_prose":
+        payload["output"] = payload["output"][:1]
+    observed = []
+    def retrieve(sources, domains, deadline):
+        observed.extend(sources)
+        return copy.deepcopy(DOCUMENTS), 0
+    monkeypatch.setattr(review, "retrieve_documents", retrieve)
+    calls, _ = install_responses(monkeypatch, [payload, selection_payload()])
+    result = hosted_search.search_public_web(QUESTION)
+    assert observed == [{"url": official}]
+    assert result["government_evidence_checked"] and len(calls) == 2
+    assert "Source-discovery prose" not in result["answer"]
+    assert "ecfr.gov" not in result["answer"]
+
+
+@pytest.mark.parametrize("status,search_status,code", [
+    ("failed", "completed", "government_discovery_failed"),
+    ("incomplete", "failed", "government_discovery_search_missing"),
+    ("completed", "completed", "government_sources_missing"),
+])
+def test_discovery_without_usable_search_evidence_fails_closed(monkeypatch, status, search_status, code):
+    payload = {"status": status, "output": [{"type": "web_search_call", "status": search_status,
+        "action": {"sources": [{"url": "https://commercial.example/rule"}]}}]}
+    calls, _ = install_responses(monkeypatch, [payload])
+    with pytest.raises(hosted_search.HostedSearchUnavailable, match=code):
+        hosted_search.search_public_web(QUESTION)
+    assert len(calls) == 1 and not hosted_search._CACHE

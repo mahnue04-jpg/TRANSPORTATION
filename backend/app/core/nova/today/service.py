@@ -2800,6 +2800,7 @@ def _grounded_web_research_answer(
     from app.core.nova.today import hosted_search
 
     government_research = is_public_government_research_request(question)
+    research_failure_code = "not_configured"
     if is_current_public_information_request(question) and hosted_search.enabled():
         try:
             result = hosted_search.search_public_web(question)
@@ -2815,11 +2816,24 @@ def _grounded_web_research_answer(
                 verification_status="unknown",
             )
         except Exception as exc:
-            logger.warning("nova_hosted_public_search_failed type=%s status=%s", type(exc).__name__, getattr(exc, "status_code", None))
+            research_failure_code = exc.code if isinstance(exc, hosted_search.HostedSearchUnavailable) else "provider_or_evidence_error"
+            logger.warning("nova_hosted_public_search_failed type=%s status=%s code=%s", type(exc).__name__,
+                           getattr(exc, "status_code", None), research_failure_code)
     if government_research:
         # Do not relabel saved evidence or generic search snippets as a current ruling.
+        reason = {
+            "government_sources_missing": "The search did not supply usable official pages within the requested websites.",
+            "government_discovery_failed": "The official-source search did not finish successfully.",
+            "government_discovery_search_missing": "The research service did not return a completed official-source search.",
+            "government_source_text_unavailable": "Candidate official pages were found, but their contents could not be read.",
+            "government_review_budget_exhausted": "The official-source research exceeded its time limit.",
+            "government_evidence_budget_exhausted": "The official-source research exceeded its time limit.",
+            "invalid_evidence_selection": "Official pages were retrieved, but reliable supporting passages could not be assembled.",
+            "government_evidence_invalid": "Official pages were retrieved, but reliable supporting passages could not be assembled.",
+            "not_configured": "Official-source research is not currently configured.",
+        }.get(research_failure_code, "The official-source research service encountered an error.")
         return NovaTodayBrainOut(
-            answer="I could not complete the current official-source government research. I have not verified the requested requirements. Please retry; a saved licensing record does not answer this request.",
+            answer=reason + " I have not verified the requested requirements. No unverified answer has been substituted.",
             fact_label="LIVE INFORMATION NOT VERIFIED", next_actions=[],
             generated_at=now().isoformat(), sources=[], verification_status="unavailable",
         )

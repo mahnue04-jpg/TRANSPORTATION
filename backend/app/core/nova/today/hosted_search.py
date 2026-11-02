@@ -233,7 +233,7 @@ def search_public_web(question: str) -> dict:
     from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
     government_research = is_public_government_research_request(question)
     official_domains = government_research_domains(question) if government_research else []
-    cache_key = f"{local_now.date()}:" + ("government-excerpts-v3:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
+    cache_key = f"{local_now.date()}:" + ("government-discovery-v4:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return copy.deepcopy(cached[1])
@@ -313,17 +313,26 @@ def search_public_web(question: str) -> dict:
     )
     response_payload = response.model_dump()
     try:
-        result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
         if government_research:
-            _validate_government_sources(result, official_domains)
+            result = _government_discovery(response_payload, official_domains)
+        else:
+            result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
+        if government_research:
             remaining = min(16.0, deadline - time.monotonic())
             if remaining < 2.0:
                 raise HostedSearchUnavailable("government_review_budget_exhausted")
             from app.core.nova.today.government_review import review_government_answer
-            reviewed_payload = review_government_answer(
-                question, {**result, "sources": _government_candidate_sources(response_payload, result, official_domains)},
-                official_domains=official_domains, local_now=local_now, timeout=remaining,
-            )
+            try:
+                reviewed_payload = review_government_answer(
+                    question, result,
+                    official_domains=official_domains, local_now=local_now, timeout=remaining,
+                )
+            except ValueError as exc:
+                known_codes = {"incomplete_evidence_selection", "invalid_evidence_selection",
+                               "invalid_unresolved_question", "evidence_display_budget_exhausted",
+                               "government_source_text_unavailable", "government_evidence_budget_exhausted"}
+                code = str(exc) if str(exc) in known_codes else "government_evidence_invalid"
+                raise HostedSearchUnavailable(code) from exc
             if time.monotonic() > deadline:
                 raise HostedSearchUnavailable("government_review_budget_exhausted")
             reviewed = reviewed_payload
@@ -344,6 +353,36 @@ def search_public_web(question: str) -> dict:
     logger.info("nova_hosted_public_search_completed sources=%s search_calls=%s", len(result["sources"]), result["web_search_calls"])
     return result
 
+
+
+
+def _government_discovery(payload: dict, domains: list[str]) -> dict:
+    """A completed search can supply candidates even if its prose was truncated.
+
+    Discovery text is never published. Each accepted URL still has to pass bounded
+    official-page retrieval and source-owned excerpt selection before publication.
+    """
+    if payload.get("status") not in {"completed", "incomplete"}:
+        raise HostedSearchUnavailable("government_discovery_failed")
+    calls = [row for row in payload.get("output", [])
+             if row.get("type") == "web_search_call" and row.get("status") == "completed"]
+    if len(calls) != 1:
+        raise HostedSearchUnavailable("government_discovery_search_missing")
+    cited = []
+    for message in payload.get("output", []):
+        if message.get("type") != "message":
+            continue
+        for content in message.get("content", []):
+            if content.get("type") != "output_text":
+                continue
+            for annotation in content.get("annotations", []):
+                if annotation.get("type") == "url_citation":
+                    cited.append({"url": annotation.get("url")})
+    sources = _government_candidate_sources(payload, {"sources": cited}, domains)
+    if not sources:
+        raise HostedSearchUnavailable("government_sources_missing")
+    return {"answer": "", "answer_parts": [], "sources": sources, "source_feed": None,
+            "web_search_calls": len(calls), "usage": payload.get("usage") or {}}
 
 
 def _government_candidate_sources(payload: dict, result: dict, domains: list[str]) -> list[dict]:
