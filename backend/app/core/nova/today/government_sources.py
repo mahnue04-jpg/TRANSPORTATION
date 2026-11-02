@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import ipaddress
+import logging
 import re
 import socket
 import time
@@ -12,13 +13,17 @@ from urllib.parse import unquote, urljoin, urlparse, urlunparse
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 MAX_BYTES = 1_000_000
 MAX_DOCUMENTS = 6
 MAX_TEXT = 24_000
 
 
 class SourceUnavailable(ValueError):
-    pass
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 def official_url(value: str, domains: list[str]) -> str:
@@ -174,13 +179,24 @@ def retrieve_documents(sources: list[dict], domains: list[str], deadline: float)
     futures = [pool.submit(fetch_document, url, domains, deadline) for url in candidates]
     done, pending = wait(futures, timeout=max(0, deadline - time.monotonic()))
     documents = []
-    for future in futures:  # Stable source order despite concurrent retrieval.
+    for index, future in enumerate(futures):  # Stable order despite concurrent retrieval.
+        host = urlparse(candidates[index]).hostname or ""
+        host = host[:253] if re.fullmatch(r"[a-z0-9.-]+\.gov", host) else "invalid"
         if future in done:
             try:
-                documents.append(future.result())
-            except Exception:
-                pass  # Report a source gap, never substitute search snippets.
+                document = future.result()
+                documents.append(document)
+                logger.info("nova_government_source_read_completed host=%s paragraphs=%s", host, len(document["paragraphs"]))
+            except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                known = {"not_allowed_official_url", "invalid_port", "archived_source", "non_public_address",
+                         "fetch_budget_exhausted", "too_many_redirects", "source_budget_exhausted",
+                         "pdf_budget_exhausted", "source_text_missing", "unsupported_source_type"}
+                code = exc.code if isinstance(exc, SourceUnavailable) and exc.code in known else "unreadable"
+                logger.info("nova_government_source_read_failed host=%s type=%s code=%s status=%s", host,
+                            type(exc).__name__, code, status if type(status) is int else None)
         else:
             future.cancel()
+            logger.info("nova_government_source_read_failed host=%s type=Timeout code=fetch_budget_exhausted status=None", host)
     pool.shutdown(wait=False, cancel_futures=True)
     return documents, len(sources) - len(documents)

@@ -142,9 +142,9 @@ def test_hosted_search_honors_requested_domains_and_rejects_other_sources(monkey
         with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_sources_missing"):
             hosted_search.search_public_web(QUESTION)
     request = calls[0]
-    assert request["tools"][0]["filters"] == {"allowed_domains": ["sam.gov", "sba.gov", "acquisition.gov"]}
-    assert request["max_tool_calls"] == 1 and request["max_output_tokens"] == 1600
-    assert "every numbered question" in request["instructions"]
+    assert {tuple(call["tools"][0]["filters"]["allowed_domains"]) for call in calls} == {(d,) for d in ["sam.gov", "sba.gov", "acquisition.gov"]}
+    assert request["max_tool_calls"] == 1 and request["max_output_tokens"] == 600
+    assert "focus question" in request["instructions"]
     assert "date checked" in request["instructions"]
 
 
@@ -182,4 +182,13 @@ def test_sources_without_selected_passages_are_not_labeled_official_excerpts(mon
     monkeypatch.setattr(hosted_search, "search_public_web", lambda q: fixture)
     out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
     assert out.fact_label == "OFFICIAL SOURCES CONSULTED — ANSWER NOT ESTABLISHED"
+    assert out.verification_status == "unknown"
+
+
+def test_partial_evidence_has_a_partial_label(monkeypatch):
+    fixture = {**evidence(), "government_evidence_checked": True, "government_evidence_partial": True}
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+    monkeypatch.setattr(hosted_search, "search_public_web", lambda q: fixture)
+    out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
+    assert out.fact_label == "PARTIAL OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED"
     assert out.verification_status == "unknown"
