@@ -25,12 +25,22 @@
     return voiceEngine;
   }
 
-  function stopAll() {
+  function stopAll(finishInput) {
     listeningRequested = false;
     window.clearTimeout(restartTimer);
     if (activeRecognition) {
-      try { activeRecognition.abort(); } catch (_) {}
-      activeRecognition = null;
+      var recognition = activeRecognition;
+      if (finishInput === true && typeof recognition.stop === "function") {
+        try { recognition.stop(); }
+        catch (_) {
+          activeRecognition = null;
+          try { recognition.abort(); } catch (_) {}
+        }
+      } else {
+        // Retire first: abort may deliver error/end callbacks synchronously or later.
+        activeRecognition = null;
+        try { recognition.abort(); } catch (_) {}
+      }
     }
     if (window.NovaWorkspaceSpeech) window.NovaWorkspaceSpeech.stop();
     var engine = voice();
@@ -180,18 +190,31 @@
     recognition.maxAlternatives = 1;
     setStatus(host, "Listening… speak now.");
     recognition.onresult = function (event) {
+      if (activeRecognition !== recognition) return;
       var words = [];
       for (var i = event.resultIndex || 0; i < event.results.length; i++) {
         if (event.results[i].isFinal && event.results[i][0]) words.push(event.results[i][0].transcript);
       }
       if (words.length) input.value = (input.value ? input.value + " " : "") + words.join(" ");
-      setStatus(host, "Listening through pauses. Press Stop when done, review the text, then Ask Nova.");
+      setStatus(host, listeningRequested
+        ? "Listening through pauses. Press Stop when done, review the text, then Ask Nova."
+        : "Review your words, then press Ask Nova.");
     };
     recognition.onerror = function (event) {
+      if (activeRecognition !== recognition) return;
       var code = event && event.error ? event.error : "unavailable";
       if (code === "no-speech") return;
+      if (code === "aborted" && !listeningRequested) return;
       listeningRequested = false;
-      setStatus(host, "Microphone error: " + code + ". Your text remains available.");
+      activeRecognition = null;
+      window.clearTimeout(restartTimer);
+      if (code === "aborted") {
+        setStatus(host, "Microphone stopped unexpectedly. Your text remains available. Press Talk to try again.");
+      } else if (code === "not-allowed" || code === "service-not-allowed") {
+        setStatus(host, "Microphone access was denied. Check browser permission, then press Talk. Your text remains available.");
+      } else {
+        setStatus(host, "Microphone error: " + code + ". Your text remains available. Press Talk to try again.");
+      }
     };
     recognition.onend = function () {
       if (activeRecognition !== recognition) return;
@@ -285,7 +308,7 @@
     });
     stop.addEventListener("click", function () {
       if (window.NovaWorkspaceRecording) window.NovaWorkspaceRecording.finish();
-      stopAll();
+      stopAll(true);
       setStatus(host, "Stopped.");
     });
   }
