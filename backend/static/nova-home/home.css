@@ -160,6 +160,9 @@ button, .button {
   min-height: 72px;
 }
 
+#brain-output a { color: #8edbff; text-decoration: underline; }
+#brain-output a:visited { color: #d2b4ff; }
+
 .login-grid { grid-template-columns: 1fr 1fr auto; margin-top: 12px; }
 
 input {

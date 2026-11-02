@@ -104,7 +104,7 @@ jobs:
           DATABASE_URL: sqlite:///./test_nova_today_ask_ci.db
           AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
         run: |
-          node --test ../scripts/tests/nova-today-auth.test.cjs ../scripts/tests/nova-today-ask.test.cjs ../scripts/tests/nova-today-citations.test.cjs ../scripts/tests/nova-today-voice.test.cjs tests/nova_voice_pauses.test.cjs tests/nova_reasoning_context.test.cjs
+          node --test ../scripts/tests/nova-today-auth.test.cjs ../scripts/tests/nova-today-ask.test.cjs ../scripts/tests/nova-today-citations.test.cjs ../scripts/tests/nova-today-voice.test.cjs tests/nova_voice_pauses.test.cjs tests/nova_reasoning_context.test.cjs tests/nova_home_sources.test.cjs
           NOVA_AUTH_TEST_PAGE=nova-home node --test ../scripts/tests/nova-today-auth.test.cjs
           node ../scripts/tests/nova-auth-rendered.cjs
           pytest tests/test_nova_today_government_research.py tests/test_nova_reasoning_provider.py tests/test_nova_today_reasoning.py tests/test_nova_hosted_public_search.py tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py \
