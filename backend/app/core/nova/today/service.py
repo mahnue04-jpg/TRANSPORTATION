@@ -59,6 +59,7 @@ from app.core.nova.today.live_tools import (
     read_user_profile,
     update_user_profile,
 )
+from app.core.nova.today.reasoning import is_self_contained_math_request, readable_calculation
 from app.core.nova.today.links import (
     is_standing_synthetic,
     is_workflow_fixture,
@@ -2966,6 +2967,8 @@ def _today_live_or_memory_answer(
     question = str(payload.question or "").strip()
     if not question:
         return None
+    if not (payload.action_id or payload.source_ref_id) and is_self_contained_math_request(question):
+        return None
 
     government_answer = _today_government_grounded_answer(
         db,
@@ -3296,7 +3299,8 @@ def ask_today(
             direct.public_topic = ((payload.public_topic or original_question) if effective_question != original_question else original_question)[:1200]
         return direct
 
-    include_supporting = today_supporting_context_relevant(
+    math_only = not (payload.action_id or payload.source_ref_id) and is_self_contained_math_request(payload.question)
+    include_supporting = not math_only and today_supporting_context_relevant(
         payload.question,
         selected_item=bool(payload.action_id or payload.source_ref_id),
     )
@@ -3374,6 +3378,13 @@ def ask_today(
         comms_line=comms_line,
         history_line=history_line,
     )
+    if math_only:
+        context += (
+            "\n\nSolve this self-contained calculation using only the supplied numbers. "
+            "Show the arithmetic and check the constraints. State any missing assumptions. "
+            "Use readable plain text and mathematical symbols, without Markdown markers or LaTeX commands. "
+            "Do not browse, cite websites, or describe this calculation as live or independently verified data."
+        )
     asked = NovaCoreService.ask(
         db,
         organization_id=organization_id,
@@ -3391,8 +3402,8 @@ def ask_today(
         next_actions = ["Re-check the source"] + next_actions
     next_actions = [item for item in next_actions if "send" not in item.lower() and "file" not in item.lower()][:6]
     return NovaTodayBrainOut(
-        answer=asked.answer,
-        fact_label="AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA. ACTION REQUIRES APPROVAL before any write. Ask Nova does not execute external actions.",
+        answer=readable_calculation(asked.answer) if math_only else asked.answer,
+        fact_label="AI SUGGESTION — calculation from your supplied numbers" if math_only else "AI SUGGESTION unless the answer cites USER-SAVED INFORMATION or VERIFIED DATA. ACTION REQUIRES APPROVAL before any write. Ask Nova does not execute external actions.",
         next_actions=next_actions,
         generated_at=asked.generated_at,
         source_href=resolved,
