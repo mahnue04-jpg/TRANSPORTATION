@@ -233,13 +233,13 @@ def search_public_web(question: str) -> dict:
     from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
     government_research = is_public_government_research_request(question)
     official_domains = government_research_domains(question) if government_research else []
-    cache_key = f"{local_now.date()}:" + ("government-reviewed-v1:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
+    cache_key = f"{local_now.date()}:" + ("government-excerpts-v3:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return copy.deepcopy(cached[1])
     from app.ai import get_client
 
-    # Government research gets a separately searched review, within a 40s budget.
+    # Government research gets source-text retrieval and selection within a 40s budget.
     # Other public information retains its existing one-call behavior.
     deadline = time.monotonic() + 40.0 if government_research else None
     client = get_client().with_options(timeout=22.0 if government_research else 28.0, max_retries=0)
@@ -268,8 +268,10 @@ def search_public_web(question: str) -> dict:
         instructions=(
             "You are Nova's public-information researcher. You MUST search before answering. "
             f"Current local time is {local_now.isoformat()}, America/Chicago; use that for tonight/today unless the user specifies another place. "
-            + ("Answer every numbered question in at most 400 words, with at most four sources. "
-               "For government rules, use current official government sources and inline citations for each regulatory claim. "
+            + ("Find detailed current official sources for every numbered question, with at most six inline-cited sources. "
+               "Return a short source list describing each page topic, rather than drafting regulatory conclusions. "
+               "Seek the actual program eligibility/rule pages and operative provisions, not generic certification hubs "
+               "or landing pages containing only introductory text. Search for the missing detailed sources. "
                "State the date checked and separate legal/program requirements from business recommendations. "
                "For a numeric rule, retain its agency, contract/payment type, trigger and exceptions. "
                "Prefer current codified provisions to draft rewrites; label agency supplements explicitly. "
@@ -319,15 +321,15 @@ def search_public_web(question: str) -> dict:
                 raise HostedSearchUnavailable("government_review_budget_exhausted")
             from app.core.nova.today.government_review import review_government_answer
             reviewed_payload = review_government_answer(
-                question, result, official_domains=official_domains, local_now=local_now, timeout=remaining,
+                question, {**result, "sources": _government_candidate_sources(response_payload, result, official_domains)},
+                official_domains=official_domains, local_now=local_now, timeout=remaining,
             )
             if time.monotonic() > deadline:
                 raise HostedSearchUnavailable("government_review_budget_exhausted")
-            reviewed = _parse_response(reviewed_payload)
+            reviewed = reviewed_payload
             _validate_government_sources(reviewed, official_domains)
             reviewed["usage"] = {"research": result.get("usage", {}), "review": reviewed.get("usage", {})}
             reviewed["web_search_calls"] += result["web_search_calls"]
-            reviewed["government_reviewed"] = True
             result = reviewed
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.
@@ -341,6 +343,29 @@ def search_public_web(question: str) -> dict:
     _CACHE[cache_key] = (time.monotonic() + 300, copy.deepcopy(result))
     logger.info("nova_hosted_public_search_completed sources=%s search_calls=%s", len(result["sources"]), result["web_search_calls"])
     return result
+
+
+
+def _government_candidate_sources(payload: dict, result: dict, domains: list[str]) -> list[dict]:
+    """Include actual consulted pages, not just the model's chosen citation hubs."""
+    from app.core.nova.today.government_sources import official_url, SourceUnavailable, MAX_DOCUMENTS
+
+    candidates = list(result["sources"])
+    for call in payload.get("output", []):
+        if call.get("type") == "web_search_call" and call.get("status") == "completed":
+            candidates.extend((call.get("action") or {}).get("sources") or [])
+    accepted, seen = [], set()
+    for source in candidates:
+        try:
+            url = official_url(str(source.get("url") or ""), domains)
+        except (SourceUnavailable, ValueError):
+            continue
+        if url not in seen:
+            accepted.append({"url": url})  # Titles/prose must come from the fetched document.
+            seen.add(url)
+        if len(accepted) == MAX_DOCUMENTS:
+            break
+    return accepted
 
 
 def _validate_government_sources(result: dict, official_domains: list[str]) -> None:

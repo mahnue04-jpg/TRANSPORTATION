@@ -107,11 +107,26 @@ jobs:
           node --test ../scripts/tests/nova-today-auth.test.cjs ../scripts/tests/nova-today-ask.test.cjs ../scripts/tests/nova-today-citations.test.cjs ../scripts/tests/nova-today-voice.test.cjs tests/nova_voice_pauses.test.cjs tests/nova_reasoning_context.test.cjs tests/nova_home_sources.test.cjs
           NOVA_AUTH_TEST_PAGE=nova-home node --test ../scripts/tests/nova-today-auth.test.cjs
           node ../scripts/tests/nova-auth-rendered.cjs
-          pytest tests/test_nova_government_scope_review.py tests/test_nova_today_government_research.py tests/test_nova_reasoning_provider.py tests/test_nova_today_reasoning.py tests/test_nova_hosted_public_search.py tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py \
+          pytest tests/test_nova_government_sources.py tests/test_nova_government_scope_review.py tests/test_nova_today_government_research.py tests/test_nova_reasoning_provider.py tests/test_nova_today_reasoning.py tests/test_nova_hosted_public_search.py tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py \
             tests/test_nova_today.py::test_nova_today_government_named_work_item_stays_grounded \
             tests/test_nova_today.py::test_nova_today_live_weather_news_and_web_paths \
             tests/test_nova_today.py::test_nova_today_natural_grant_request_uses_live_grounded_research \
             tests/test_nova_today.py::test_nova_today_grant_research_retries_with_relevance_filters -q
+
+      - name: Check public government source retrieval (no AI calls)
+        continue-on-error: true
+        run: |
+          python - <<'PYCODE'
+          import json, time
+          from app.core.nova.today.government_sources import retrieve_documents
+          urls = ["https://www.acquisition.gov/far/32.501-1", "https://sam.gov/entity-registration", "https://www.sba.gov/Certifications/", "https://www.sba.gov/federal-contracting/contracting-assistance-programs/8a-business-development-program"]
+          documents, gaps = retrieve_documents([{"url": url} for url in urls], ["acquisition.gov", "sam.gov", "sba.gov"], time.monotonic() + 8)
+          for document in documents:
+              print(json.dumps({"url": document["url"], "title": document["title"], "paragraphs": len(document["paragraphs"]), "preview": [text[:300] for text in document["paragraphs"][:3]]}))
+          print(json.dumps({"readable_sources": len(documents), "unreadable_sources": gaps}))
+          if not any("acquisition.gov" in document["url"] for document in documents):
+              raise SystemExit("Current FAR source retrieval could not be confirmed")
+          PYCODE
 
       - name: Run Nova Stripe billing regression
         env:

@@ -135,6 +135,8 @@ def test_hosted_search_honors_requested_domains_and_rejects_other_sources(monkey
     client.with_options = lambda **kwargs: client
     monkeypatch.setattr("app.ai.get_client", lambda: client)
     if allowed:
+        from app.core.nova.today import government_review
+        monkeypatch.setattr(government_review, "review_government_answer", lambda q, draft, **kw: draft)
         assert hosted_search.search_public_web(QUESTION)["sources"][0]["url"] == url
     else:
         with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_source_not_official"):
@@ -144,3 +146,12 @@ def test_hosted_search_honors_requested_domains_and_rejects_other_sources(monkey
     assert request["max_tool_calls"] == 1 and request["max_output_tokens"] == 1600
     assert "every numbered question" in request["instructions"]
     assert "date checked" in request["instructions"]
+
+
+def test_source_excerpt_label_does_not_claim_verified_requirements(monkeypatch):
+    fixture = {**evidence(), "government_evidence_checked": True}
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+    monkeypatch.setattr(hosted_search, "search_public_web", lambda q: fixture)
+    out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
+    assert out.fact_label == "OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED"
+    assert out.verification_status == "unknown"
