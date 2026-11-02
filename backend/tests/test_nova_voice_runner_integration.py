@@ -48,7 +48,7 @@ def test_offline_demo_writes_wav_from_preloaded_pipeline(tmp_path: Path, monkeyp
         "model_weights": str(model_dir / "kokoro-v1_0.pth"),
         "lang_code": "a",
         "repo_id": "hexgrad/Kokoro-82M",
-        "text": "Welcome to [AMICOR](/ˈɑmɪkɔɹ/) Nova, your AI business assistant.",
+        "text": "Welcome to Amih-core Nova, your AI business assistant.",
         "voice": "af_heart",
     }
     with wave.open(str(output), "rb") as wav:

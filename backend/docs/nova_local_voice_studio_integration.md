@@ -4,6 +4,8 @@ Status: implemented in draft PR #425 and verified on the temporary Render valida
 
 ## Behavior
 
+The latest short pronunciation sample was explicitly approved by the owner. Future local narration maps the written brand to the literal audio-only wording `Amih-core`, replacing the earlier phoneme override. Stored scripts and captions retain AMICOR. The existing approved commercial is unchanged. This pronunciation update is prepared in the draft branch; it has not been activated in production.
+
 The existing Studio Generate Voice service now has an explicit local provider selection. With no selector, existing OpenAI behavior remains unchanged. With `NOVA_CREATIVE_VOICE_PROVIDER=nova_local`, voice requests use the local adapter; failure never falls back to OpenAI. Unknown selectors fail closed.
 
 The local provider runs a standalone CPU child process with the reviewed Kokoro model, config and af_heart voice checksums, the owner-approved pronunciation mapping, and speed 0.87. Scripts remain unchanged in stored records and captions. Local generation writes a unique WAV in the existing Studio media directory; the service can save its URL and provenance as an audio asset. Existing owner-scoped download handling supports WAV.

@@ -32,8 +32,8 @@ class VoiceRequest:
 def spoken_text(script: str) -> str:
     """Audio-only brand pronunciation; never alter captions or saved script."""
     import re
-    brand = "[AMICOR](/ˈɑmɪkɔɹ/)"
-    # Owner approved this exact Kokoro sequence in real local narration.
+    brand = "Amih-core"
+    # Owner approved this literal spelling in the latest short Kokoro sample.
     # The written script and captions keep their original spelling.
     return re.sub(
         r"\bGetAmiCore?\.com\b|\bAMICOR\b",

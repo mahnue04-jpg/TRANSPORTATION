@@ -18,7 +18,7 @@ def test_fake_kokoro_pipeline_produces_real_pcm_wav(tmp_path: Path):
         assert wav.getnchannels() == 1
         assert wav.getframerate() == 24000
         assert wav.getnframes() == 2400
-    assert received == {"script": "Welcome to [AMICOR](/ˈɑmɪkɔɹ/) Nova", "voice": "af_heart"}
+    assert received == {"script": "Welcome to Amih-core Nova", "voice": "af_heart"}
 
 
 def test_missing_local_model_fails_closed(tmp_path: Path):
@@ -43,4 +43,4 @@ def test_reviewed_speed_reaches_model_without_changing_written_script(tmp_path):
     KokoroLocalBackend(pipeline).generate_wav(
         VoiceRequest("Meet AMICOR", speed=0.87), tmp_path / "voice.wav"
     )
-    assert received == {"text": "Meet [AMICOR](/ˈɑmɪkɔɹ/)", "voice": "af_heart", "speed": 0.87}
+    assert received == {"text": "Meet Amih-core", "voice": "af_heart", "speed": 0.87}
