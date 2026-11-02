@@ -7,7 +7,7 @@ const root = path.join(__dirname, '../..');
 const pageName = process.env.NOVA_AUTH_TEST_PAGE || 'nova-today';
 const pageRoot = 'backend/static/' + pageName;
 const html = fs.readFileSync(path.join(root, pageRoot, 'index.html'), 'utf8');
-const source = fs.readFileSync(path.join(root, pageRoot, pageName === 'nova-home' ? 'home.js' : 'today.js'), 'utf8');
+const source = fs.readFileSync(path.join(root, pageRoot, pageName.replace('nova-', '') + '.js'), 'utf8');
 
 function harness(restored, search = '') {
   const elements = new Map(), timers = [];

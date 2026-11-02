@@ -216,3 +216,5 @@ button {
   border-color: var(--nova-accent);
   background: rgba(255,255,255,0.04);
 }
+
+#brain-sources a { color: #8cdaff; display: block; overflow-wrap: anywhere; margin: 0.5rem 0; }

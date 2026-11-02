@@ -7,14 +7,14 @@ const root = path.join(__dirname, '../..');
 const browser = process.env.CHROME_BIN || '/usr/bin/google-chrome';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-auth-render-'));
 try {
-  for (const pageName of ['nova-home', 'nova-today']) {
+  for (const pageName of ['nova-home', 'nova-today', 'nova-government']) {
     for (const signedIn of [false, true]) {
       const dir = path.join(root, 'backend/static', pageName);
       let html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8')
         .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
         .replace(/<link\b[^>]*>/gi, '');
-      const css = fs.readFileSync(path.join(dir, pageName === 'nova-home' ? 'home.css' : 'today.css'), 'utf8');
-      const source = fs.readFileSync(path.join(dir, pageName === 'nova-home' ? 'home.js' : 'today.js'), 'utf8');
+      const css = fs.readFileSync(path.join(dir, pageName.replace('nova-', '') + '.css'), 'utf8');
+      const source = fs.readFileSync(path.join(dir, pageName.replace('nova-', '') + '.js'), 'utf8');
       const fixture = `
         window.AmiCorSession = {
           restore() {}, getAccessToken() { return ${signedIn} ? 'offline-fixture' : ''; },
