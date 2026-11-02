@@ -27,7 +27,11 @@ def validate_environment(env: Mapping[str, str]) -> None:
 def main():
     validate_environment(os.environ)
     os.execvp("uvicorn", ["uvicorn", "app.main:app", "--host", "0.0.0.0",
-                          "--port", os.environ.get("PORT", "10000")])
+                          "--port", os.environ.get("PORT", "10000"),
+                          # Render supplies WEB_CONCURRENCY=2 on the temporary
+                          # plan. One web worker preserves the test host's
+                          # ephemeral signing key and reserves RAM for speech.
+                          "--workers", "1"])
 
 
 if __name__ == "__main__":

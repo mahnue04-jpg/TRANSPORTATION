@@ -20,6 +20,20 @@ def test_validation_host_with_local_offline_voice_is_accepted():
     start.validate_environment(environment())
 
 
+def test_start_uses_one_worker_despite_render_concurrency_default(monkeypatch):
+    for key, value in environment().items():
+        monkeypatch.setenv(key, value)
+    for key in start.PAID_FLAGS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    monkeypatch.setenv("PORT", "10000")
+    calls = []
+    monkeypatch.setattr(start.os, "execvp", lambda command, args: calls.append((command, args)))
+    start.main()
+    assert calls == [("uvicorn", ["uvicorn", "app.main:app", "--host", "0.0.0.0",
+                                   "--port", "10000", "--workers", "1"])]
+
+
 @pytest.mark.parametrize("key,value", [
     ("RENDER_EXTERNAL_HOSTNAME", "amicor-health-isf-py.onrender.com"),
     ("NOVA_CREATIVE_VOICE_PROVIDER", "openai"), ("NOVA_LOCAL_VOICE_ENABLED", "false"),
