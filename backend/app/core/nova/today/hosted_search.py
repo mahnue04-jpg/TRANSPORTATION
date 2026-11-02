@@ -230,17 +230,19 @@ def search_public_web(question: str) -> dict:
         raise HostedSearchUnavailable("not_configured")
     question = str(question).strip(' \t\r\n"“”')
     local_now = datetime.now(ZoneInfo("America/Chicago"))
-    cache_key = f"{local_now.date()}:" + re.sub(r"\W+", " ", question.casefold()).strip()
+    from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
+    government_research = is_public_government_research_request(question)
+    official_domains = government_research_domains(question) if government_research else []
+    cache_key = f"{local_now.date()}:" + ("government-reviewed-v1:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return copy.deepcopy(cached[1])
     from app.ai import get_client
 
-    # One request, one search call, no automatic transport retries or stored response.
-    client = get_client().with_options(timeout=28.0, max_retries=0)
-    from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
-    government_research = is_public_government_research_request(question)
-    official_domains = government_research_domains(question) if government_research else []
+    # Government research gets a separately searched review, within a 40s budget.
+    # Other public information retains its existing one-call behavior.
+    deadline = time.monotonic() + 40.0 if government_research else None
+    client = get_client().with_options(timeout=22.0 if government_research else 28.0, max_retries=0)
     search_tool = {
         "type": "web_search", "search_context_size": "low", "external_web_access": True,
         "user_location": {"type": "approximate", "timezone": "America/Chicago"},
@@ -269,6 +271,8 @@ def search_public_web(question: str) -> dict:
             + ("Answer every numbered question in at most 400 words, with at most four sources. "
                "For government rules, use current official government sources and inline citations for each regulatory claim. "
                "State the date checked and separate legal/program requirements from business recommendations. "
+               "For a numeric rule, retain its agency, contract/payment type, trigger and exceptions. "
+               "Prefer current codified provisions to draft rewrites; label agency supplements explicitly. "
                "A UEI, registration, certification and contract award are different; verify the requested distinctions. "
                "Do not assume a company is eligible, an award is guaranteed, or a payment clause applies to every contract. "
                "Identify specific facts or sources you could not verify. Do not substitute a saved work item for public research. "
@@ -309,12 +313,22 @@ def search_public_web(question: str) -> dict:
     try:
         result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
         if government_research:
-            if not result["sources"]:
-                raise HostedSearchUnavailable("government_sources_missing")
-            for source in result["sources"]:
-                host = (urlparse(source["url"]).hostname or "").lower()
-                if not host.endswith(".gov") or (official_domains and not any(host == domain or host.endswith("." + domain) for domain in official_domains)):
-                    raise HostedSearchUnavailable("government_source_not_official")
+            _validate_government_sources(result, official_domains)
+            remaining = min(16.0, deadline - time.monotonic())
+            if remaining < 2.0:
+                raise HostedSearchUnavailable("government_review_budget_exhausted")
+            from app.core.nova.today.government_review import review_government_answer
+            reviewed_payload = review_government_answer(
+                question, result, official_domains=official_domains, local_now=local_now, timeout=remaining,
+            )
+            if time.monotonic() > deadline:
+                raise HostedSearchUnavailable("government_review_budget_exhausted")
+            reviewed = _parse_response(reviewed_payload)
+            _validate_government_sources(reviewed, official_domains)
+            reviewed["usage"] = {"research": result.get("usage", {}), "review": reviewed.get("usage", {})}
+            reviewed["web_search_calls"] += result["web_search_calls"]
+            reviewed["government_reviewed"] = True
+            result = reviewed
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.
         # Never log arbitrary user questions, response headers or credentials.
@@ -327,6 +341,15 @@ def search_public_web(question: str) -> dict:
     _CACHE[cache_key] = (time.monotonic() + 300, copy.deepcopy(result))
     logger.info("nova_hosted_public_search_completed sources=%s search_calls=%s", len(result["sources"]), result["web_search_calls"])
     return result
+
+
+def _validate_government_sources(result: dict, official_domains: list[str]) -> None:
+    if not result["sources"]:
+        raise HostedSearchUnavailable("government_sources_missing")
+    for source in result["sources"]:
+        host = (urlparse(source["url"]).hostname or "").lower()
+        if not host.endswith(".gov") or (official_domains and not any(host == domain or host.endswith("." + domain) for domain in official_domains)):
+            raise HostedSearchUnavailable("government_source_not_official")
 
 
 def run_weather_probe_if_configured() -> None:
