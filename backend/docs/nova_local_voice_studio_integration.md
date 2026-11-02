@@ -10,7 +10,9 @@ The existing Studio Generate Voice service now has an explicit local provider se
 
 The local provider runs a standalone CPU child process with the reviewed Kokoro model, config and af_heart voice checksums, the owner-approved pronunciation mapping, and speed 0.87. Scripts remain unchanged in stored records and captions. Local generation writes a unique WAV in the existing Studio media directory; the service can save its URL and provenance as an audio asset. Existing owner-scoped download handling supports WAV.
 
-The local provider supports the general Generate Voice action and supplies validated native word timings and caption cues when the speech model provides them. Generate Presenter Voice remains held pending its voice-selection, loudness and lip-sync workflow integration. OpenAI voice names such as coral are not treated as the local stock voice.
+The local provider supports Generate Voice and Generate Presenter Voice. When the local provider is selected, the presenter selector offers the approved local stock voice and disables external voice names. Presenter narration requires explicit af_heart selection and complete validated native caption timing; missing timing does not publish an audio file. Switching back to the external provider removes the local option, and the external adapter refuses af_heart rather than substituting another voice.
+
+Local presenter narration retains the approved PCM without re-encoding or claiming LUFS normalization. Its metadata records the measured peak, caption preparation version and presenter_narration_ready=true, while presenter_alignment and publish_ready remain false. Preparing narration does not generate a talking face. Paid lip-sync/motion routes retain their budget checks. The voice endpoint skips a paid quote only when the selected provider is local; external speech and short drama keep the existing budget guard.
 
 ## Test-host prerequisites
 
@@ -46,7 +48,7 @@ The broader backend diagnostic initially hit a Chrome rendering-test timeout and
 
 ## Remaining
 
-The approved 4 GB validation-host browser test passed as recorded below. The newer native-caption change has separate local proof below and has not been deployed. Presenter workflow integration, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
+The approved 4 GB general-narration browser test passed as recorded below. The newer native-caption and presenter-narration changes have separate local proof and have not been deployed. Live browser validation of the new presenter controls, lip-sync renderer integration, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
 
 ## Native caption timing
 
@@ -55,6 +57,14 @@ The worker can export Kokoro token times with the exact concatenated PCM offsets
 The parent validates the WAV checksum, exact script checksum, duration, complete written-word coverage and monotonic timing before rebuilding caption cues. It ignores child-supplied caption text. Invalid or absent timing preserves reviewable audio but returns caption_alignment=false without a paid fallback. Valid cues are stored in provider_result for the existing final-promo caption path. Presenter/lip-sync readiness remains false.
 
 Local verification: 72 isolated checks passed, plus 86 API/core/startup checks. Coverage includes brand/domain expansions, multi-chunk PCM offsets, missing/extra words, invalid times, mismatched recording/script fingerprints, native-metadata persistence through SQLite reopen and protected downloads. A real reviewed-model full narration run at speed 0.87 produced 27.775 seconds, 58 written words and 10 caption cues, including the unchanged AMICOR and GetAmiCore.com text. A short real-model run also passed. These are timing and format checks; new full narration still requires owner listening review.
+
+## Presenter narration connection
+
+Subsequent verification passed 75 isolated checks, 97 API/core/startup/presenter-media checks and 11 frontend checks. The API cases cover the presenter endpoint's local voice selection, exact-script captions, persisted readiness metadata, cross-owner rejection, refusal to alias an external voice and preservation of the external paid-budget guard. Frontend cases verify provider switching and that disabled/failed narration displays the actual provider reason instead of a success banner.
+
+The parent now verifies native timing against exact PCM frame duration instead of the public millisecond-rounded duration report. A fractional-frame-duration regression covers recordings whose rounded display length differs from their exact length.
+
+A separate real-provider invocation using the reviewed local model and full script returned presenter_narration_ready=true and caption_alignment=true: 27.775 seconds, measured peak fraction 0.5162, no paid calls, no re-encoding and no lip-sync/publishing claim. This real-model proof invoked the provider directly; endpoint authentication and persistence were tested separately with a synthetic worker. Existing approved commercial assets and hosting configuration were not changed.
 
 
 ## Temporary Render test package

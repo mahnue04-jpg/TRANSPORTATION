@@ -69,6 +69,44 @@ def test_parent_attaches_only_matching_native_caption_timing(ready, monkeypatch)
     assert result["presenter_alignment"] is False
 
 
+def test_presenter_voice_requires_exact_local_selection_and_native_captions(ready, monkeypatch):
+    monkeypatch.setattr(provider, "_run_worker", aligned_audio)
+    result = provider.NovaLocalVoiceProvider().generate(script="Hello AMICOR", voice="af_heart", presenter=True)
+    assert result["status"] == "GENERATED"
+    assert result["presenter_narration_ready"] is True and result["presenter_audio_version"] == 2
+    assert result["caption_alignment"] is True and result["presenter_alignment"] is False
+    assert result["loudness"]["normalization_skipped"] is True
+    assert result["paid_provider_calls"] is False and result["publish_ready"] is False
+
+
+def test_presenter_missing_timing_does_not_publish_audio(ready, monkeypatch):
+    monkeypatch.setattr(provider, "_run_worker", write_audio)
+    result = provider.NovaLocalVoiceProvider().generate(script="Hello AMICOR", voice="af_heart", presenter=True)
+    assert result["status"] == "ERROR" and not result["asset_generated"]
+    assert not list(ready.glob("*.wav"))
+
+
+def test_exact_pcm_duration_is_used_instead_of_rounded_public_report(ready, monkeypatch):
+    import hashlib
+    import json
+    def worker(command, env, log):
+        aligned_audio(command, env, log)
+        output = Path(command[command.index("--output") + 1])
+        with wave.open(str(output), "wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
+            wav.writeframes(b"\x00\x20" * 4801)
+        timing = Path(command[command.index("--alignment-output") + 1])
+        data = json.loads(timing.read_text())
+        data.update(duration_seconds=4801 / 24000,
+                    audio_sha256=hashlib.sha256(output.read_bytes()).hexdigest())
+        timing.write_text(json.dumps(data))
+        return 0
+    monkeypatch.setattr(provider, "_run_worker", worker)
+    result = provider.NovaLocalVoiceProvider().generate(script="Hello AMICOR", voice="af_heart", presenter=True)
+    assert result["duration_seconds"] == .2
+    assert result["caption_alignment"] is True
+
+
 @pytest.mark.parametrize("damage", ["audio", "words", "json"])
 def test_bad_sidecar_never_becomes_caption_timing(ready, monkeypatch, damage):
     import json

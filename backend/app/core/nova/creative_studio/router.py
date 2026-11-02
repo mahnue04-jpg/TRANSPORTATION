@@ -322,13 +322,13 @@ class PresenterIn(BaseModel):
     motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
-    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer)$")
+    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer|af_heart)$")
     captions: bool = False
 
 
 class CloudPresenterFinalizeIn(BaseModel):
     script: str = Field(min_length=1, max_length=600)
-    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
+    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer|af_heart)$")
     captions: bool = True
 
 
@@ -710,8 +710,10 @@ def generate_presenter_voice(
     _require_owner(user)
     try:
         service = get_service(db)
-        service.require_budget_confirmation_for_paid(user.user_id, project_id)
-        result = service.request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
+        result = service.request_voice_generation(
+            user.user_id, project_id, script=payload.script, voice=payload.voice,
+            presenter=payload.captions, enforce_paid_budget=True,
+        )
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
@@ -887,7 +889,7 @@ def finalize_full_body_presenter_in_cloud(
         return {
             "status": "GENERATED",
             "stage": "complete",
-            "message": "Full-body Genova has Coral narration, cloud lip-sync, and burned-in captions. Ready for owner review.",
+            "message": "Full-body Genova has the selected narration, cloud lip-sync, and burned-in captions. Ready for owner review.",
             "asset": caption_asset.as_dict(),
             "url": caption_asset.url,
         }

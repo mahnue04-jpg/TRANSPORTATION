@@ -118,6 +118,16 @@ def test_presenter_voice_preserves_original_audio_when_normalization_hits_memory
     assert " ".join(cue["text"] for cue in result["caption_cues"]) == "Hello Genova."
 
 
+def test_external_presenter_provider_never_substitutes_for_local_voice(monkeypatch):
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.delenv("NOVA_CREATIVE_VOICE_PROVIDER", raising=False)
+    monkeypatch.setattr(providers, "get_client", lambda: pytest.fail("No paid speech call allowed"))
+    result = providers.OpenAIVoiceProvider().generate(script="Hello Nova", voice="af_heart", presenter=True)
+    assert result["status"] == "CONFIG_REQUIRED" and result["asset_generated"] is False
+
+
 def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
     from PIL import Image
     from app.core.nova.creative_studio import presenter_media as media

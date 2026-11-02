@@ -136,6 +136,50 @@ def test_missing_authentication_cannot_generate_or_download(studio):
     assert calls == []
 
 
+def test_presenter_local_voice_uses_exact_script_captions_and_owner_scope(studio, monkeypatch):
+    client, state, project, media, calls, reopen, service = studio
+    monkeypatch.setattr(CreativeStudioService, "require_budget_confirmation_for_paid",
+                        lambda *_: pytest.fail("local narration must not need a paid quote"))
+    payload = {"script": "Business paperwork piling up? Meet AMICOR.",
+               "voice": "af_heart", "captions": True}
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["provider"]["presenter_narration_ready"] is True
+    assert body["provider"]["presenter_audio_version"] == 2
+    assert body["provider"]["voice"] == "af_heart" and len(calls) == 1
+    assert " ".join(c["text"] for c in body["provider"]["caption_cues"]) == payload["script"]
+    reopen()
+    saved = next(a for a in service().store.list_assets(project, "owner-a") if a.id == body["asset"]["id"])
+    assert saved.metadata["provider_result"]["presenter_narration_ready"] is True
+    state["user_id"] = "owner-b"
+    assert client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json=payload).status_code == 404
+    assert len(calls) == 1
+
+
+def test_presenter_local_provider_does_not_substitute_external_voice(studio):
+    client, _, project, _, calls, _, _ = studio
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json={
+        "script": "Business paperwork piling up? Meet AMICOR.", "voice": "coral", "captions": True,
+    })
+    assert response.status_code == 200
+    assert response.json()["provider"]["status"] == "CONFIG_REQUIRED"
+    assert calls == []
+
+
+def test_external_presenter_voice_retains_paid_budget_guard(studio, monkeypatch):
+    client, _, project, _, calls, _, _ = studio
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_PROVIDER", "openai")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    from app.core.nova.creative_studio import providers
+    monkeypatch.setattr(providers, "get_client", lambda: pytest.fail("paid provider must not run"))
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json={
+        "script": "Business paperwork piling up? Meet AMICOR.", "voice": "coral", "captions": True,
+    })
+    assert response.status_code == 422
+    assert calls == []
+
+
 def test_real_signed_tokens_enforce_owner_identity_and_session_revocation(studio):
     client, state, project, _, calls, _, _ = studio
     from app.auth import create_access_token

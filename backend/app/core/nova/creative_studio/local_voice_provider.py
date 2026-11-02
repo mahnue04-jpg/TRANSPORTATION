@@ -115,9 +115,9 @@ class NovaLocalVoiceProvider:
         state = self.status()
         if state.status != AVAILABLE:
             return failed(state.status, state.message)
-        # Never pretend that OpenAI voice IDs or unaligned captions are local.
-        if presenter or voice not in {None, "af_heart", "professional_female"}:
-            return failed(CONFIG_REQUIRED, "Use Generate Voice for local narration and timed captions. This provider has one stock voice; presenter voice selection and lip-sync are not connected yet.")
+        # Presenter requests must explicitly select the reviewed local stock voice.
+        if voice not in {None, "af_heart", "professional_female"} or (presenter and voice != "af_heart"):
+            return failed(CONFIG_REQUIRED, "Select Nova Voice for this local provider. External voice names are not local stock voices.")
         try:
             request = VoiceRequest(script, speed=0.87)
             request.validate()
@@ -162,11 +162,24 @@ class NovaLocalVoiceProvider:
                         from .local_voice_alignment import checked_caption_result
                         try:
                             data = json.loads(alignment_file.read_text(encoding="utf-8"))
-                            captions = checked_caption_result(data, script, report.seconds, sha256)
+                            # The public report rounds to milliseconds; bind native
+                            # timing to the exact PCM frame duration instead.
+                            with wave.open(str(output), "rb") as wav:
+                                exact_seconds = wav.getnframes() / wav.getframerate()
+                            captions = checked_caption_result(data, script, exact_seconds, sha256)
                         except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
                             # Audio can still be reviewed; never substitute guessed
                             # timings or send it to a paid transcription provider.
                             pass
+                    if presenter and captions.get("caption_alignment") is not True:
+                        return failed(ERROR, "Presenter narration needs complete native caption timing. No audio was published and no paid fallback was used.")
+                    presenter_details = {}
+                    if presenter:
+                        presenter_details = {"presenter_audio_version": 2,
+                                             "presenter_narration_ready": True,
+                                             "loudness": {"normalization_skipped": True,
+                                                          "reason": "Reviewed local PCM retained without re-encoding.",
+                                                          "peak_fraction": report.peak_fraction}}
                     filename = "nova-local-" + uuid.uuid4().hex + ".wav"
                     output.replace(root / filename)
                 return {"status": "GENERATED", "message": "Nova local narration saved for review.",
@@ -176,7 +189,7 @@ class NovaLocalVoiceProvider:
                         "duration_seconds": report.seconds, "sha256": sha256,
                         "paid_provider_calls": False, "publish_ready": False,
                         "owner_review_required": True, "presenter_alignment": False,
-                        **captions}
+                        **captions, **presenter_details}
         except subprocess.TimeoutExpired:
             return failed(ERROR, "Nova local voice timed out; the worker was stopped. No paid fallback was used.")
         except VoiceCapacityError:

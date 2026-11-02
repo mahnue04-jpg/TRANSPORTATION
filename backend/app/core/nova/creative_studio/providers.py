@@ -602,6 +602,10 @@ class OpenAIVoiceProvider:
                 "asset_generated": False,
             }
         model = str(os.getenv("NOVA_CREATIVE_VOICE_MODEL") or "gpt-4o-mini-tts").strip()
+        if voice == "af_heart":
+            return {"status": CONFIG_REQUIRED,
+                    "message": "Nova Voice requires the local voice provider; no external voice was substituted.",
+                    "script": clean, "url": None, "asset_generated": False}
         voice = resolve_studio_voice(voice, presenter=presenter)
         speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
         if presenter and model.startswith("gpt-4o-mini-tts"):
