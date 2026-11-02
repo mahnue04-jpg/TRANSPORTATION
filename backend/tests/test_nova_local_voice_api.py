@@ -202,12 +202,13 @@ def test_local_presenter_requires_prepared_audio_before_any_video_work(studio, m
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("mode", ["head", "full_body", "cloud"])
-@pytest.mark.parametrize("captions", [True, False])
-def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, monkeypatch, mode, captions):
+@pytest.mark.parametrize("captions,mode,caption_error", [
+    (captions, mode, None) for captions in (True, False) for mode in ("head", "full_body", "cloud")
+] + [(True, "cloud", "capacity"), (True, "cloud", "io")])
+def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, monkeypatch, mode, captions, caption_error):
     from types import SimpleNamespace
     from app.core.nova.creative_studio import fal_cloud, kling, presenter_media, providers
-    client, _, project, _, calls, reopen, service = studio
+    client, _, project, media, calls, reopen, service = studio
     script = "Business paperwork piling up? Meet AMICOR."
     payload = {"script": script, "voice": "af_heart", "captions": captions}
     audio_response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json=payload)
@@ -244,29 +245,78 @@ def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, mo
         generate=lambda **_k: pytest.fail("Reviewed motion must not regenerate")))
     monkeypatch.setattr(kling.FalKlingLipSyncProvider, "generate_lipsync", lambda _self, **kw: generated(**kw))
     monkeypatch.setattr(fal_cloud.FalCloudProcessor, "lip_sync", lambda _self, **kw: generated(**kw))
-    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "auto_subtitle", lambda _self, **_kw: {
-        "status": "GENERATED", "asset_generated": True, "url": "/media/cloud-captioned.mp4"})
-    monkeypatch.setattr(providers, "_resolve_creative_media_url", lambda _url: Path("/tmp/lipsynced.mp4"))
+    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "auto_subtitle",
+                        lambda _self, **_kw: pytest.fail("Native captions must not request paid transcription"))
+    monkeypatch.setattr(providers, "_resolve_creative_media_url", lambda _url: media / "lipsynced.mp4")
     caption_calls = []
     def captioned(_path, cues, **kwargs):
         caption_calls.append(kwargs)
         assert cues == audio["metadata"]["provider_result"]["caption_cues"]
-        return Path("/tmp/lipsynced-captioned.mp4"), Path("/tmp/lipsynced.srt")
+        if caption_error and len(caption_calls) == 1:
+            if caption_error == "capacity":
+                _path.with_suffix('.srt').write_text(presenter_media.srt_text(cues))
+                raise RuntimeError("Nova paused video rendering: insufficient server memory headroom.")
+            raise OSError("fixture write failure")
+        return _path.with_name("lipsynced-captioned.mp4"), _path.with_suffix('.srt')
     monkeypatch.setattr(presenter_media, "caption_presenter", captioned)
     endpoint = "cloud-finalize" if mode == "cloud" else "preview"
     if mode != "cloud":
         payload.update(presenter_mode=mode, output_preset="16:9", motion_style="friendly_explainer")
     response = client.post(f"/api/nova/creative/projects/{project}/presenter/{endpoint}", json=payload)
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "GENERATED"
+    assert response.json()["status"] == ("ERROR" if caption_error else "GENERATED")
     assert response.json()["asset"]["metadata"]["source_audio_asset_id"] == audio["id"]
     assert len(used) == len(calls) == 1
-    if mode != "cloud":
-        assert len(caption_calls) == int(captions)
-        if captions:
-            assert response.json()["asset"]["metadata"]["captions_burned_in"] is True
-            assert response.json()["url"].endswith("lipsynced-captioned.mp4")
-            assert caption_calls[0] == ({"output_preset": "16:9"} if mode == "full_body" else {})
+    assert len(caption_calls) == int(captions)
+    if caption_error:
+        metadata = response.json()["asset"]["metadata"]
+        assert response.json()["stage"] == "captions"
+        assert response.json()["url"] == "/media/lipsynced.mp4"
+        assert metadata["captions_burned_in"] is False
+        assert metadata["captions_sidecar_ready"] == (caption_error == "capacity")
+        assert metadata["publish_ready"] is False
+        assert "incomplete" in response.json()["message"]
+    elif captions:
+        assert response.json()["asset"]["metadata"]["captions_burned_in"] is True
+        assert response.json()["url"].endswith("lipsynced-captioned.mp4")
+        assert caption_calls[0] == ({"output_preset": "16:9"} if mode != "head" else {})
+    if mode == "cloud" and captions:
+        reopen()
+        # A completed asset is reused; a failed burn-in retries only the local
+        # encoder after SQLite reopen, preserving the paid lip-sync result.
+        retry = client.post(f"/api/nova/creative/projects/{project}/presenter/cloud-finalize", json=payload)
+        assert retry.status_code == 200 and retry.json()["stage"] == "complete", retry.text
+        assert retry.json()["asset"]["metadata"]["paid_caption_provider_calls"] is False
+        assert len(used) == len(calls) == 1
+        assert len(caption_calls) == (2 if caption_error else 1)
+        if not caption_error:
+            assert retry.json()["asset"]["id"] == response.json()["asset"]["id"]
+
+
+def test_external_cloud_finalization_retains_its_budget_and_caption_provider(studio, monkeypatch):
+    from app.core.nova.creative_studio import fal_cloud
+    client, _, project, _, _, _, service = studio
+    for kind, url, metadata in (
+        ("presenter_video", "/media/motion.mp4", {"presenter_mode": "full_body"}),
+        ("audio", "/media/external.mp3", {"provider_result": {"voice": "coral"}}),
+    ):
+        service()._save_text_asset(owner_id="owner-a", project_id=project, kind=kind,
+            title="Existing media", content="Reviewed script", status="GENERATED", url=url, metadata=metadata)
+    calls = []
+    monkeypatch.setattr(CreativeStudioService, "require_budget_confirmation_for_paid", lambda *_: calls.append("budget"))
+    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "lip_sync", lambda _self, **_kw: {
+        "status": "GENERATED", "asset_generated": True, "url": "/media/lipsynced.mp4"})
+    def subtitle(_self, **kwargs):
+        calls.append("external captions")
+        assert kwargs["video_url"] == "/media/lipsynced.mp4"
+        return {"status": "GENERATED", "asset_generated": True, "url": "/media/captioned.mp4"}
+    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "auto_subtitle", subtitle)
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/cloud-finalize", json={
+        "script": "Reviewed script", "voice": "coral", "captions": True,
+    })
+    assert response.status_code == 200 and response.json()["stage"] == "complete", response.text
+    assert calls == ["budget", "external captions"]
+    assert response.json()["url"] == "/media/captioned.mp4"
 
 
 def test_external_presenter_voice_retains_paid_budget_guard(studio, monkeypatch):
