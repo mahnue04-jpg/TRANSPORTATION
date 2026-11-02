@@ -5,6 +5,7 @@ import pytest
 
 from app.core.nova.work_revenue.operations_job_queue import JobConflict, ensure_schema, get_job_state
 from app.core.nova.work_revenue.operations_csv_runner import prepare_csv_job
+from app.core.nova.work_revenue.operations_artifact_review import read_review_artifact
 
 
 @pytest.fixture
@@ -22,6 +23,8 @@ def test_processing_returns_reviewable_artifact(db):
         now=100,
     )
     assert result.state == "awaiting_owner_review"
+    stored = read_review_artifact(db, tenant_id="demo", job_id=result.job_id)
+    assert stored == ("awaiting_review", result.report.cleaned_csv)
     assert result.report.duplicate_rows_removed == 1
     assert get_job_state(db, tenant_id="demo", job_id=result.job_id) == "completed"
 
