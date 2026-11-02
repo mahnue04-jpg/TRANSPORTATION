@@ -44,6 +44,15 @@ def studio(tmp_path, monkeypatch):
         with wave.open(str(output), "wb") as wav:
             wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(24000)
             wav.writeframes(b"\x00\x20\x00\xe0" * 2400)
+        import json
+        words = [{"word": word, "start": i * .02, "end": (i + 1) * .02}
+                 for i, word in enumerate(text.split())]
+        Path(command[command.index("--alignment-output") + 1]).write_text(json.dumps({
+            "alignment_available": True, "alignment_source": "kokoro_native_token_durations",
+            "duration_seconds": .2, "words": words,
+            "audio_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+            "script_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        }))
         return 0
     monkeypatch.setattr(local_voice_provider, "_run_worker", worker)
 
@@ -97,11 +106,15 @@ def test_generate_readback_download_and_reopen_preserve_local_audio(studio):
     result = asset["metadata"]["provider_result"]
     assert result["voice"] == "af_heart" and result["paid_provider_calls"] is False
     assert result["owner_review_required"] is True and result["publish_ready"] is False
+    assert result["caption_alignment"] is True and result["presenter_alignment"] is False
+    assert " ".join(c["text"] for c in result["caption_cues"]) == asset["content"]
     path = f"/api/nova/creative/projects/{project}/assets/{asset['id']}/file"
     first = client.get(path)
     assert first.status_code == 200 and first.headers["content-type"].startswith("audio/wav")
     assert hashlib.sha256(first.content).hexdigest() == result["sha256"]
     reopen()
+    saved = next(a for a in service().store.list_assets(project, "owner-a") if a.id == asset["id"])
+    assert saved.metadata["provider_result"]["caption_cues"] == result["caption_cues"]
     detail = client.get(f"/api/nova/creative/projects/{project}")
     assert detail.status_code == 200, detail.text
     saved = next(row for row in detail.json()["assets"] if row["id"] == asset["id"])

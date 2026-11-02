@@ -15,7 +15,7 @@ from .voice_readiness import check as check_voice_readiness
 
 
 def run(*, model_dir: Path, output: Path, script: str | None = None,
-        speed: float = 1.0, verify_model: bool = False) -> dict:
+        speed: float = 1.0, verify_model: bool = False, alignment_output: Path | None = None) -> dict:
     request = VoiceRequest(
         "Welcome to AMICOR Nova, your AI business assistant." if script is None else script,
         speed=speed,
@@ -71,7 +71,7 @@ def run(*, model_dir: Path, output: Path, script: str | None = None,
         raise VoiceNotReady(
             "Local Kokoro model initialization failed. Check model/runtime compatibility; no paid fallback attempted."
         ) from exc
-    path = KokoroLocalBackend(pipeline).generate_wav(request, output)
+    path = KokoroLocalBackend(pipeline).generate_wav(request, output, alignment_output=alignment_output)
     report = inspect_narration_wav(path, max_seconds=120)
     return {"audio_path": str(path), "duration_seconds": report.seconds,
             "quality_check": report.valid_for_narration}
@@ -100,6 +100,7 @@ def main() -> None:
     parser.add_argument("--script-file", type=Path)
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--verify-model", action="store_true")
+    parser.add_argument("--alignment-output", type=Path)
     args = parser.parse_args()
     import os
     if os.environ.get("NOVA_LOCAL_VOICE_PARENT_PID"):
@@ -115,7 +116,8 @@ def main() -> None:
     import json
     script = args.script_file.read_text(encoding="utf-8") if args.script_file else None
     print(json.dumps(run(model_dir=args.model_dir, output=args.output, script=script,
-                         speed=args.speed, verify_model=args.verify_model)))
+                         speed=args.speed, verify_model=args.verify_model,
+                         alignment_output=args.alignment_output)))
 
 
 if __name__ == "__main__":

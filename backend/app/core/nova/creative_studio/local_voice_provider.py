@@ -106,7 +106,7 @@ class NovaLocalVoiceProvider:
         free = _free_memory_bytes()
         if free is None or free < MIN_FREE_BYTES:
             return state(DISABLED, "Nova local voice needs at least 2304 MiB of free memory before starting.", True)
-        return state(AVAILABLE, "Nova local narration is available with the reviewed af_heart stock voice. Presenter alignment is separate.", True)
+        return state(AVAILABLE, "Nova local narration is available with the reviewed af_heart stock voice. Native caption timing is checked after generation; presenter lip-sync is separate.", True)
 
     def generate(self, *, script: str, voice: str | None = None, presenter: bool = False) -> dict:
         def failed(status, message):
@@ -117,7 +117,7 @@ class NovaLocalVoiceProvider:
             return failed(state.status, state.message)
         # Never pretend that OpenAI voice IDs or unaligned captions are local.
         if presenter or voice not in {None, "af_heart", "professional_female"}:
-            return failed(CONFIG_REQUIRED, "Use Generate Voice for Nova local narration. This provider has one stock voice; presenter caption alignment is not connected yet.")
+            return failed(CONFIG_REQUIRED, "Use Generate Voice for local narration and timed captions. This provider has one stock voice; presenter voice selection and lip-sync are not connected yet.")
         try:
             request = VoiceRequest(script, speed=0.87)
             request.validate()
@@ -138,6 +138,7 @@ class NovaLocalVoiceProvider:
                 with tempfile.TemporaryDirectory(prefix=".nova-voice-", dir=root) as work:
                     work = Path(work)
                     script_file, output = work / "script.txt", work / "narration.wav"
+                    alignment_file = work / "alignment.json"
                     script_file.write_text(request.text, encoding="utf-8")
                     env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
                                OMP_NUM_THREADS="2", MKL_NUM_THREADS="2",
@@ -145,7 +146,8 @@ class NovaLocalVoiceProvider:
                     command = [sys.executable, str(Path(__file__).with_name("local_voice_worker.py")),
                                "--model-dir", os.environ["NOVA_LOCAL_VOICE_MODEL_DIR"],
                                "--output", str(output), "--script-file", str(script_file),
-                               "--speed", str(request.speed), "--verify-model"]
+                               "--speed", str(request.speed), "--verify-model",
+                               "--alignment-output", str(alignment_file)]
                     with tempfile.TemporaryFile() as log:
                         returncode = _run_worker(command, env, log)
                     if returncode or not output.is_file():
@@ -154,6 +156,17 @@ class NovaLocalVoiceProvider:
                     if not report.valid_for_narration or report.peak_fraction >= 1.0:
                         return failed(ERROR, "Nova local narration did not pass WAV validation.")
                     sha256 = hashlib.sha256(output.read_bytes()).hexdigest()
+                    captions = {"caption_alignment": False}
+                    if alignment_file.is_file() and alignment_file.stat().st_size <= 131072:
+                        import json
+                        from .local_voice_alignment import checked_caption_result
+                        try:
+                            data = json.loads(alignment_file.read_text(encoding="utf-8"))
+                            captions = checked_caption_result(data, script, report.seconds, sha256)
+                        except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+                            # Audio can still be reviewed; never substitute guessed
+                            # timings or send it to a paid transcription provider.
+                            pass
                     filename = "nova-local-" + uuid.uuid4().hex + ".wav"
                     output.replace(root / filename)
                 return {"status": "GENERATED", "message": "Nova local narration saved for review.",
@@ -162,7 +175,8 @@ class NovaLocalVoiceProvider:
                         "voice": "af_heart", "speed": request.speed, "mime_type": "audio/wav",
                         "duration_seconds": report.seconds, "sha256": sha256,
                         "paid_provider_calls": False, "publish_ready": False,
-                        "owner_review_required": True, "presenter_alignment": False}
+                        "owner_review_required": True, "presenter_alignment": False,
+                        **captions}
         except subprocess.TimeoutExpired:
             return failed(ERROR, "Nova local voice timed out; the worker was stopped. No paid fallback was used.")
         except VoiceCapacityError:

@@ -2,6 +2,8 @@ name: Nova Voice offline contract
 on:
   push:
     paths:
+      - 'backend/app/core/nova/creative_studio/local_voice_alignment.py'
+      - 'backend/tests/test_nova_local_voice_alignment.py'
       - 'backend/app/core/nova/creative_studio/local_voice.py'
       - 'backend/tests/test_nova_local_voice.py'
       - 'backend/tests/test_nova_kokoro_local.py'
@@ -33,6 +35,8 @@ on:
       - '.github/workflows/nova-voice-offline.yml'
   pull_request:
     paths:
+      - 'backend/app/core/nova/creative_studio/local_voice_alignment.py'
+      - 'backend/tests/test_nova_local_voice_alignment.py'
       - 'backend/app/core/nova/creative_studio/local_voice.py'
       - 'backend/tests/test_nova_local_voice.py'
       - 'backend/app/core/nova/creative_studio/local_voice_provider.py'
@@ -73,6 +77,8 @@ jobs:
           cp tests/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_kokoro_local.py
           cp tests/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_narration_qa.py
           cp app/core/nova/creative_studio/narration_qa.py /tmp/nova-voice-contract/narration_qa.py
+          cp app/core/nova/creative_studio/local_voice_alignment.py /tmp/nova-voice-contract/local_voice_alignment.py
+          cp tests/test_nova_local_voice_alignment.py /tmp/nova-voice-contract/test_nova_local_voice_alignment.py
           cp app/core/nova/creative_studio/local_voice_demo.py /tmp/nova-voice-contract/local_voice_demo.py
           cp tests/test_nova_voice_demo_offline.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py
           cp tests/test_nova_voice_runner_integration.py /tmp/nova-voice-contract/test_nova_voice_runner_integration.py
@@ -81,7 +87,7 @@ jobs:
           cp app/core/nova/creative_studio/acquire_kokoro.py /tmp/nova-voice-contract/acquire_kokoro.py
           cp app/core/nova/creative_studio/voice_readiness.py /tmp/nova-voice-contract/voice_readiness.py
           sed -i 's/from \.kokoro_local import /from kokoro_local import /; s/from \.local_voice import /from local_voice import /; s/from \.narration_qa import /from narration_qa import /; s/from \.voice_readiness import /from voice_readiness import /' /tmp/nova-voice-contract/local_voice_demo.py
-          sed -i 's/from \.local_voice import /from local_voice import /' /tmp/nova-voice-contract/kokoro_local.py
+          sed -i 's/from \.local_voice import /from local_voice import /; s/from \.local_voice_alignment import /from local_voice_alignment import /' /tmp/nova-voice-contract/kokoro_local.py /tmp/nova-voice-contract/local_voice_alignment.py
           sed -i 's/from app.core.nova.creative_studio.local_voice import (/from local_voice import (/' /tmp/nova-voice-contract/test_nova_local_voice.py
           cp app/core/nova/creative_studio/local_voice_provider.py /tmp/nova-voice-contract/local_voice_provider.py
           cp app/core/nova/creative_studio/local_voice_worker.py /tmp/nova-voice-contract/local_voice_worker.py
@@ -90,8 +96,8 @@ jobs:
           cp app/core/nova/creative_studio/flags.py /tmp/nova-voice-contract/flags.py
           cp app/core/nova/creative_studio/media_runtime.py /tmp/nova-voice-contract/media_runtime.py
           cp tests/test_nova_local_voice_provider.py /tmp/nova-voice-contract/test_nova_local_voice_provider.py
-          sed -i 's/from \.local_voice import /from local_voice import /; s/from \.provider_types import /from provider_types import /; s/from \.media_runtime import /from media_runtime import /; s/from \.narration_qa import /from narration_qa import /; s/from \.providers import /from providers import /; s/from \.voice_readiness import /from voice_readiness import /' /tmp/nova-voice-contract/local_voice_provider.py /tmp/nova-voice-contract/flags.py
-          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py /tmp/nova-voice-contract/test_nova_voice_runner_integration.py /tmp/nova-voice-contract/test_nova_voice_readiness.py /tmp/nova-voice-contract/test_nova_kokoro_acquisition.py /tmp/nova-voice-contract/test_nova_local_voice_provider.py
+          sed -i 's/from \.local_voice import /from local_voice import /; s/from \.provider_types import /from provider_types import /; s/from \.media_runtime import /from media_runtime import /; s/from \.narration_qa import /from narration_qa import /; s/from \.providers import /from providers import /; s/from \.local_voice_alignment import /from local_voice_alignment import /; s/from \.voice_readiness import /from voice_readiness import /' /tmp/nova-voice-contract/local_voice_provider.py /tmp/nova-voice-contract/flags.py
+          python -m pytest -q /tmp/nova-voice-contract/test_nova_local_voice_alignment.py /tmp/nova-voice-contract/test_nova_local_voice.py /tmp/nova-voice-contract/test_nova_kokoro_local.py /tmp/nova-voice-contract/test_nova_narration_qa.py /tmp/nova-voice-contract/test_nova_voice_demo_offline.py /tmp/nova-voice-contract/test_nova_voice_runner_integration.py /tmp/nova-voice-contract/test_nova_voice_readiness.py /tmp/nova-voice-contract/test_nova_kokoro_acquisition.py /tmp/nova-voice-contract/test_nova_local_voice_provider.py
         env:
           PYTHONPATH: .
 

@@ -10,7 +10,7 @@ The existing Studio Generate Voice service now has an explicit local provider se
 
 The local provider runs a standalone CPU child process with the reviewed Kokoro model, config and af_heart voice checksums, the owner-approved pronunciation mapping, and speed 0.87. Scripts remain unchanged in stored records and captions. Local generation writes a unique WAV in the existing Studio media directory; the service can save its URL and provenance as an audio asset. Existing owner-scoped download handling supports WAV.
 
-The local provider supports the general Generate Voice action. Generate Presenter Voice is deliberately held: word-timed caption alignment and lip-sync integration are not yet connected. It does not pretend that OpenAI voice names such as coral are the local stock voice.
+The local provider supports the general Generate Voice action and supplies validated native word timings and caption cues when the speech model provides them. Generate Presenter Voice remains held pending its voice-selection, loudness and lip-sync workflow integration. OpenAI voice names such as coral are not treated as the local stock voice.
 
 ## Test-host prerequisites
 
@@ -46,7 +46,15 @@ The broader backend diagnostic initially hit a Chrome rendering-test timeout and
 
 ## Remaining
 
-The approved 4 GB validation-host browser test passed as recorded below. Presenter word alignment, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
+The approved 4 GB validation-host browser test passed as recorded below. The newer native-caption change has separate local proof below and has not been deployed. Presenter workflow integration, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
+
+## Native caption timing
+
+The worker can export Kokoro token times with the exact concatenated PCM offsets, avoiding separate transcription. An exact normalized match maps audio-only brand/domain expansions back to the unchanged written script. Missing, nonfinite, overlapping, out-of-range or mismatched timing never becomes aligned caption metadata. Only native frame rounding within 75 ms can be clipped to the PCM boundary; word times are never evenly estimated.
+
+The parent validates the WAV checksum, exact script checksum, duration, complete written-word coverage and monotonic timing before rebuilding caption cues. It ignores child-supplied caption text. Invalid or absent timing preserves reviewable audio but returns caption_alignment=false without a paid fallback. Valid cues are stored in provider_result for the existing final-promo caption path. Presenter/lip-sync readiness remains false.
+
+Local verification: 72 isolated checks passed, plus 86 API/core/startup checks. Coverage includes brand/domain expansions, multi-chunk PCM offsets, missing/extra words, invalid times, mismatched recording/script fingerprints, native-metadata persistence through SQLite reopen and protected downloads. A real reviewed-model full narration run at speed 0.87 produced 27.775 seconds, 58 written words and 10 caption cues, including the unchanged AMICOR and GetAmiCore.com text. A short real-model run also passed. These are timing and format checks; new full narration still requires owner listening review.
 
 
 ## Temporary Render test package
