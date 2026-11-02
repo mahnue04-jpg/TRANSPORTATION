@@ -174,3 +174,12 @@ def test_failure_explains_stage_without_private_payload_or_irrelevant_saved_reco
     assert "code=" + code in caplog.text
     assert QUESTION not in caplog.text
     assert out.sources == [] and out.verification_status == "unavailable"
+
+
+def test_sources_without_selected_passages_are_not_labeled_official_excerpts(monkeypatch):
+    fixture = {**evidence(), "government_evidence_checked": False, "government_no_supporting_passages": True}
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+    monkeypatch.setattr(hosted_search, "search_public_web", lambda q: fixture)
+    out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
+    assert out.fact_label == "OFFICIAL SOURCES CONSULTED — ANSWER NOT ESTABLISHED"
+    assert out.verification_status == "unknown"
