@@ -18,7 +18,7 @@ def test_fake_kokoro_pipeline_produces_real_pcm_wav(tmp_path: Path):
         assert wav.getnchannels() == 1
         assert wav.getframerate() == 24000
         assert wav.getnframes() == 2400
-    assert received == {"script": "Welcome to Ammy Core Nova", "voice": "af_heart"}
+    assert received == {"script": "Welcome to [AMICOR](/ˈɑmɪkɔɹ/) Nova", "voice": "af_heart"}
 
 
 def test_missing_local_model_fails_closed(tmp_path: Path):

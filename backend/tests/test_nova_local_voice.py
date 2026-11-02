@@ -11,7 +11,7 @@ from app.core.nova.creative_studio.local_voice import (
 def test_amico_brand_is_phonetic_for_audio_only():
     original = "Welcome to AMICOR Nova. AMICOR helps your business."
     audio = spoken_text(original)
-    assert audio == "Welcome to Ammy Core Nova. Ammy Core helps your business."
+    assert audio == "Welcome to [AMICOR](/ˈɑmɪkɔɹ/) Nova. [AMICOR](/ˈɑmɪkɔɹ/) helps your business."
     assert original == "Welcome to AMICOR Nova. AMICOR helps your business."
 
 
@@ -28,3 +28,17 @@ def test_invalid_local_voice_requests():
     for text in ("", " " * 3, "x" * 1601):
         with pytest.raises(ValueError):
             VoiceRequest(text).validate()
+
+def test_approved_website_pronunciation_and_word_boundaries():
+    original = "Visit GetAmiCore.com or getamicor.com. AMICORN stays unchanged."
+    assert spoken_text(original) == (
+        "Visit Get [AMICOR](/ˈɑmɪkɔɹ/) dot com or "
+        "Get [AMICOR](/ˈɑmɪkɔɹ/) dot com. AMICORN stays unchanged."
+    )
+    assert original == "Visit GetAmiCore.com or getamicor.com. AMICORN stays unchanged."
+
+
+def test_brand_matching_is_case_insensitive_and_preserves_punctuation():
+    assert spoken_text("Amicor, amicor!") == (
+        "[AMICOR](/ˈɑmɪkɔɹ/), [AMICOR](/ˈɑmɪkɔɹ/)!"
+    )

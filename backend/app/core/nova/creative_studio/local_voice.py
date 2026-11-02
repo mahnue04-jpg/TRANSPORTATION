@@ -28,7 +28,15 @@ class VoiceRequest:
 def spoken_text(script: str) -> str:
     """Audio-only brand pronunciation; never alter captions or saved script."""
     import re
-    return re.sub(r"\bAMICOR\b", "Ammy Core", script, flags=re.IGNORECASE)
+    brand = "[AMICOR](/ˈɑmɪkɔɹ/)"
+    # Owner approved this exact Kokoro sequence in real local narration.
+    # The written script and captions keep their original spelling.
+    return re.sub(
+        r"\bGetAmiCore?\.com\b|\bAMICOR\b",
+        lambda match: "Get " + brand + " dot com" if "." in match.group(0) else brand,
+        script,
+        flags=re.IGNORECASE,
+    )
 
 
 class LocalVoiceBackend(Protocol):
