@@ -602,7 +602,15 @@ def test_http_surface_and_page(client: TestClient):
     )
     assert brief.status_code == 200
     script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
+    assert script.status_code == 422
+    assert script.json()["detail"]["code"] == "LESSON_SCRIPT_REQUIRED"
+    narration = "Describe your workflow. Identify repeated steps. Review one improvement with your team."
+    saved = client.post(f"/api/nova/creative/projects/{project_id}/presenter/script", headers=headers,
+                        json={"script": narration})
+    assert saved.status_code == 200, saved.text
+    script = client.post(f"/api/nova/creative/projects/{project_id}/generate/script", headers=headers)
     assert script.status_code == 200
+    assert script.json()["pack"]["voiceover_script"] == narration
     image = client.post(
         f"/api/nova/creative/projects/{project_id}/generate/image",
         headers=headers,
