@@ -144,6 +144,27 @@
     await refreshTodayCount();
     await refreshCustomerScope();
   }
+  function renderBrainResult(result) {
+    var box = $("brain-output");
+    box.textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" +
+      (result.answer || "No response from Mrs. Nova Brain.");
+    var rows = Array.isArray(result.sources) ? result.sources.slice(0, 8) : [];
+    if (!rows.length && result.source_href) rows = [{url: result.source_href, title: "Open source"}];
+    var heading = false;
+    rows.forEach(function (row, index) {
+      var url = String(row.url || "");
+      if (!/^https?:\/\//i.test(url)) return;
+      if (!heading) { box.appendChild(document.createTextNode("\n\nSources:\n")); heading = true; }
+      var link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "[" + (index + 1) + "] " + String(row.title || row.label || url);
+      box.appendChild(link);
+      box.appendChild(document.createTextNode("\n"));
+    });
+    if (!heading && result.source_href) box.appendChild(document.createTextNode("\n\nSource: " + result.source_href));
+  }
   async function askBrain(question) {
     if (!token()) {
       showBanner("Sign in to ask Mrs. Nova Brain.");
@@ -160,11 +181,7 @@
     });
     if (requestScope !== brainScope()) return;
     rememberBrainTurn(question, result, requestScope);
-    var trust = result.fact_label || "AI SUGGESTION";
-    $("brain-output").textContent = trust + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
-    if (result.source_href) {
-      $("brain-output").textContent += "\n\nSource: " + result.source_href;
-    }
+    renderBrainResult(result);
     showBanner("Mrs. Nova Brain answered.", true);
   }
   function renderSearch(data) {

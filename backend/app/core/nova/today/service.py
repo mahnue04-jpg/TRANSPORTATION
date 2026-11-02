@@ -49,6 +49,7 @@ from app.core.nova.today.live_tools import (
     format_web_search,
     is_news_request,
     is_current_public_information_request,
+    is_public_government_research_request,
     is_public_sports_request,
     resolve_public_sports_followup,
     public_query_terms,
@@ -2729,6 +2730,10 @@ def _today_government_grounded_answer(
     gov_terms = ("government", "license", "licensing", "permit", "regulation", "requirement", "work item")
     if not any(term in lowered for term in gov_terms):
         return None
+    if is_public_government_research_request(question):
+        return None
+    if not re.search(r"\b(?:saved|stored|work item|government record|this requirement|this license|my license|our license)\b", lowered):
+        return None
 
     try:
         rows = government_list_items(
@@ -2779,7 +2784,8 @@ def _today_government_grounded_answer(
         generated_at=grounded.generated_at,
         source_href="/nova/government",
         referenced_source_ref_id=best.item_id,
-        verification_status="verified" if "VERIFIED" in str(grounded.fact_label or "").upper() else "proposed",
+        # Saved source verification does not establish applicability of a requirement.
+        verification_status="unknown",
     )
 
 
@@ -2793,6 +2799,7 @@ def _grounded_web_research_answer(
     """Run cited public search or relevance-gated research for current evidence."""
     from app.core.nova.today import hosted_search
 
+    government_research = is_public_government_research_request(question)
     if is_current_public_information_request(question) and hosted_search.enabled():
         try:
             result = hosted_search.search_public_web(question)
@@ -2808,6 +2815,13 @@ def _grounded_web_research_answer(
             )
         except Exception as exc:
             logger.warning("nova_hosted_public_search_failed type=%s status=%s", type(exc).__name__, getattr(exc, "status_code", None))
+    if government_research:
+        # Do not relabel saved evidence or generic search snippets as a current ruling.
+        return NovaTodayBrainOut(
+            answer="I could not complete the current official-source government research. I have not verified the requested requirements. Please retry; a saved licensing record does not answer this request.",
+            fact_label="LIVE INFORMATION NOT VERIFIED", next_actions=[],
+            generated_at=now().isoformat(), sources=[], verification_status="unavailable",
+        )
     lowered = question.lower()
     is_grant = "grant" in lowered or "funding" in lowered
     search_specs: list[tuple[str, list[str] | None, list[str] | None]] = [(query, None, None)]
@@ -2969,6 +2983,11 @@ def _today_live_or_memory_answer(
         return None
     if not (payload.action_id or payload.source_ref_id) and is_self_contained_math_request(question):
         return None
+
+    if not (payload.action_id or payload.source_ref_id) and is_public_government_research_request(question):
+        return _grounded_web_research_answer(
+            db, question=question, query=question, organization_id=organization_id,
+        )
 
     government_answer = _today_government_grounded_answer(
         db,
