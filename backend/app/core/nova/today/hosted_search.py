@@ -233,13 +233,13 @@ def search_public_web(question: str) -> dict:
     from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
     government_research = is_public_government_research_request(question)
     official_domains = government_research_domains(question) if government_research else []
-    cache_key = f"{local_now.date()}:" + ("government-reviewed-v1:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
+    cache_key = f"{local_now.date()}:" + ("government-excerpts-v2:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return copy.deepcopy(cached[1])
     from app.ai import get_client
 
-    # Government research gets a separately searched review, within a 40s budget.
+    # Government research gets source-text retrieval and selection within a 40s budget.
     # Other public information retains its existing one-call behavior.
     deadline = time.monotonic() + 40.0 if government_research else None
     client = get_client().with_options(timeout=22.0 if government_research else 28.0, max_retries=0)
@@ -268,7 +268,7 @@ def search_public_web(question: str) -> dict:
         instructions=(
             "You are Nova's public-information researcher. You MUST search before answering. "
             f"Current local time is {local_now.isoformat()}, America/Chicago; use that for tonight/today unless the user specifies another place. "
-            + ("Answer every numbered question in at most 400 words, with at most four sources. "
+            + ("Answer every numbered question in at most 400 words, with at most six sources. "
                "For government rules, use current official government sources and inline citations for each regulatory claim. "
                "State the date checked and separate legal/program requirements from business recommendations. "
                "For a numeric rule, retain its agency, contract/payment type, trigger and exceptions. "
@@ -323,11 +323,10 @@ def search_public_web(question: str) -> dict:
             )
             if time.monotonic() > deadline:
                 raise HostedSearchUnavailable("government_review_budget_exhausted")
-            reviewed = _parse_response(reviewed_payload)
+            reviewed = reviewed_payload
             _validate_government_sources(reviewed, official_domains)
             reviewed["usage"] = {"research": result.get("usage", {}), "review": reviewed.get("usage", {})}
             reviewed["web_search_calls"] += result["web_search_calls"]
-            reviewed["government_reviewed"] = True
             result = reviewed
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.

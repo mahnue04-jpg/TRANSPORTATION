@@ -2808,7 +2808,8 @@ def _grounded_web_research_answer(
                 answer_parts=result["answer_parts"],
                 sources=result["sources"],
                 source_href=result["sources"][0]["url"] if result["sources"] else None,
-                fact_label="LIVE SPORTS FEED" if result.get("source_feed") else "LIVE WEB SOURCES",
+                fact_label=("OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED" if result.get("government_evidence_checked")
+                            else "LIVE SPORTS FEED" if result.get("source_feed") else "LIVE WEB SOURCES"),
                 next_actions=[],
                 generated_at=now().isoformat(),
                 verification_status="unknown",
