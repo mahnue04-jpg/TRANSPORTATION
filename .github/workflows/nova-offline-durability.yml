@@ -33,4 +33,4 @@ jobs:
             if [ -f "$f" ]; then files="$files $f"; fi
           done
           test -n "$files"
-          PYTHONPATH=. python -m pytest -q $files
+          PYTHONPATH=. python -m pytest --noconftest -q $files
