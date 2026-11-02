@@ -2810,6 +2810,7 @@ def _grounded_web_research_answer(
                 sources=result["sources"],
                 source_href=result["sources"][0]["url"] if result["sources"] else None,
                 fact_label=("OFFICIAL SOURCES CONSULTED — ANSWER NOT ESTABLISHED" if result.get("government_no_supporting_passages")
+                            else "PARTIAL OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED" if result.get("government_evidence_partial")
                             else "OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED" if result.get("government_evidence_checked")
                             else "LIVE SPORTS FEED" if result.get("source_feed") else "LIVE WEB SOURCES"),
                 next_actions=[],
@@ -2825,6 +2826,8 @@ def _grounded_web_research_answer(
         reason = {
             "government_sources_missing": "The search did not supply usable official pages within the requested websites.",
             "government_discovery_failed": "The official-source search did not finish successfully.",
+            "government_discovery_budget_exhausted": "The official-source search exceeded its time limit.",
+            "government_discovery_provider_error": "The official-source search service encountered an error.",
             "government_discovery_search_missing": "The research service did not return a completed official-source search.",
             "government_source_text_unavailable": "Candidate official pages were found, but their contents could not be read.",
             "government_review_budget_exhausted": "The official-source research exceeded its time limit.",

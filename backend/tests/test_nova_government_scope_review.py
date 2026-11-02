@@ -58,7 +58,7 @@ def install_responses(monkeypatch, responses):
     calls, options = [], []
     def create(**kwargs):
         calls.append(kwargs)
-        response = responses[len(calls) - 1]
+        response = responses[0 if kwargs.get("tools") else 1]
         if isinstance(response, Exception):
             raise response
         return SimpleNamespace(model_dump=lambda: response)
@@ -79,18 +79,19 @@ def test_observed_bad_claims_cannot_be_published_from_the_draft(monkeypatch, dra
     assert DOCUMENTS[0]["paragraphs"][0] in result["answer"]
     assert DOCUMENTS[0]["paragraphs"][1] in result["answer"]
     assert result["government_evidence_checked"] and result["verification_status"] == "unknown"
-    assert result["web_search_calls"] == 1  # Replaces, rather than adds, a search.
+    assert result["web_search_calls"] == 3  # One completed lookup per requested site.
     assert result["usage"]["review"] == {"input_tokens": 500, "output_tokens": 50}
-    assert calls[0]["tools"][0]["filters"] == {"allowed_domains": ["sam.gov", "sba.gov", "acquisition.gov"]}
-    assert options[0] == {"timeout": 22.0, "max_retries": 0}
-    assert 2 <= options[1]["timeout"] <= 16 and options[1]["max_retries"] == 0
-    request = calls[1]
+    assert {tuple(call["tools"][0]["filters"]["allowed_domains"]) for call in calls if call.get("tools")} == {(d,) for d in ["sam.gov", "sba.gov", "acquisition.gov"]}
+    assert all(0 < option["timeout"] <= 20 and option["max_retries"] == 0 for option in options[:-1])
+    assert 2 <= options[-1]["timeout"] <= 16 and options[-1]["max_retries"] == 0
+    request = calls[-1]
     assert request["tools"] == [] and request["store"] is False
     assert request["text"]["format"]["strict"] is True
     assert request["text"]["format"]["schema"] == review.selection_schema(3, 1)
     assert "unverified_draft" not in json.loads(request["input"])
     assert draft not in request["input"]  # Not even given to the selector.
-    assert hosted_search.search_public_web(QUESTION) == result and len(calls) == 2
+    assert result["government_evidence_partial"] and not hosted_search._CACHE
+    assert len(calls) == 4
     assert result["answer"] == "".join(p["text"] for p in result["answer_parts"])
 
 
@@ -112,7 +113,7 @@ def test_invalid_selection_cannot_publish_or_cache_draft(monkeypatch, mutate):
     calls, _ = install_responses(monkeypatch, [cited_payload("Bad draft fixture"), selection_payload(selection)])
     with pytest.raises(hosted_search.HostedSearchUnavailable):
         hosted_search.search_public_web(QUESTION)
-    assert len(calls) == 2 and not hosted_search._CACHE
+    assert len(calls) == 4 and not hosted_search._CACHE
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("fixture timeout"), {"status": "incomplete", "output": []},
@@ -131,7 +132,7 @@ def test_no_readable_sources_does_not_call_selector_or_fall_back_to_snippets(mon
     calls, _ = install_responses(monkeypatch, [cited_payload("Search snippet fixture")])
     with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_source_text_unavailable"):
         hosted_search.search_public_web(QUESTION)
-    assert len(calls) == 1 and not hosted_search._CACHE
+    assert len(calls) == 3 and not hosted_search._CACHE
 
 
 def test_partial_evidence_unresolved_questions_and_context_are_disclosed():
@@ -152,8 +153,8 @@ def test_untrusted_source_instructions_remain_data_not_selector_instructions(mon
     monkeypatch.setattr(review, "retrieve_documents", lambda *a: (documents, 0))
     calls, _ = install_responses(monkeypatch, [cited_payload("Draft"), selection_payload()])
     result = hosted_search.search_public_web(QUESTION)
-    assert attack in calls[1]["input"] and attack not in calls[1]["instructions"]
-    assert attack not in result["answer"] and calls[1]["tools"] == []
+    assert attack in calls[-1]["input"] and attack not in calls[-1]["instructions"]
+    assert attack not in result["answer"] and calls[-1]["tools"] == []
 
 
 def test_old_reviewed_cache_is_not_reused(monkeypatch):
@@ -162,7 +163,7 @@ def test_old_reviewed_cache_is_not_reused(monkeypatch):
     hosted_search._CACHE[key] = (float("inf"), {"answer": "Unreliable reviewed draft"})
     calls, _ = install_responses(monkeypatch, [cited_payload("Draft"), selection_payload()])
     assert hosted_search.search_public_web(QUESTION)["government_evidence_checked"]
-    assert len(calls) == 2
+    assert len(calls) == 4
 
 
 def test_late_evidence_is_not_published(monkeypatch):
@@ -171,9 +172,9 @@ def test_late_evidence_is_not_published(monkeypatch):
     calls = []
     def create(**kwargs):
         calls.append(kwargs)
-        if len(calls) == 2:
+        if not kwargs.get("tools"):
             clock[0] = 41.0
-        return SimpleNamespace(model_dump=lambda: cited_payload("Draft") if len(calls) == 1 else selection_payload())
+        return SimpleNamespace(model_dump=lambda: cited_payload("Draft") if kwargs.get("tools") else selection_payload())
     client = SimpleNamespace(responses=SimpleNamespace(create=create))
     client.with_options = lambda **kw: client
     monkeypatch.setattr("app.ai.get_client", lambda: client)
@@ -221,7 +222,7 @@ def test_source_discovery_does_not_require_a_finished_cited_answer(monkeypatch, 
     calls, _ = install_responses(monkeypatch, [payload, selection_payload()])
     result = hosted_search.search_public_web(QUESTION)
     assert observed == [{"url": official}]
-    assert result["government_evidence_checked"] and len(calls) == 2
+    assert result["government_evidence_checked"] and len(calls) == 4
     assert "Source-discovery prose" not in result["answer"]
     assert "ecfr.gov" not in result["answer"]
 
@@ -237,7 +238,7 @@ def test_discovery_without_usable_search_evidence_fails_closed(monkeypatch, stat
     calls, _ = install_responses(monkeypatch, [payload])
     with pytest.raises(hosted_search.HostedSearchUnavailable, match=code):
         hosted_search.search_public_web(QUESTION)
-    assert len(calls) == 1 and not hosted_search._CACHE
+    assert len(calls) == 3 and not hosted_search._CACHE
 
 
 def test_selection_schema_allows_only_server_assigned_ids_and_no_free_text_fields():
@@ -276,7 +277,7 @@ def test_catalog_builds_whole_contiguous_source_passages_without_model_paragraph
 def test_empty_valid_selection_is_an_evidence_gap_not_an_assembly_exception(monkeypatch):
     calls, _ = install_responses(monkeypatch, [cited_payload("Discovery fixture"), selection_payload({"selections": [], "unresolved_question_ids": []})])
     result = hosted_search.search_public_web(QUESTION)
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert result["government_no_supporting_passages"] and not result["government_evidence_checked"]
     assert result["answer"].count("Not established by the retrieved passages.") == 3
     assert "Official pages consulted" in result["answer"]
@@ -311,8 +312,27 @@ def test_sources_with_no_displayable_passages_do_not_make_an_empty_enum_api_requ
     monkeypatch.setattr(review, "retrieve_documents", lambda *a: (docs, 0))
     calls, _ = install_responses(monkeypatch, [cited_payload("Unchecked draft must not appear")])
     result = hosted_search.search_public_web(QUESTION)
-    assert len(calls) == 1
+    assert len(calls) == 3
     assert result["government_no_supporting_passages"]
     assert "Unchecked draft" not in result["answer"]
     assert "x" * 6000 not in result["answer"]
     assert not hosted_search._CACHE
+
+
+def test_complete_single_site_answer_is_cached_but_partial_multi_site_answer_is_not(monkeypatch):
+    question = "Research current official Acquisition.gov payment requirements."
+    selection = {"selections": [{"question_id": 0, "passage_id": 0}], "unresolved_question_ids": []}
+    calls, _ = install_responses(monkeypatch, [cited_payload("Source discovery"), selection_payload(selection)])
+    result = hosted_search.search_public_web(question)
+    assert not result["government_evidence_partial"]
+    assert hosted_search.search_public_web(question) == result and len(calls) == 2
+
+
+def test_missing_requested_domains_are_disclosed_after_page_retrieval(monkeypatch):
+    calls, _ = install_responses(monkeypatch, [cited_payload("Source discovery"), selection_payload()])
+    result = hosted_search.search_public_web(QUESTION)
+    assert result["government_evidence_partial"]
+    assert "Requested websites without readable passages: sam.gov, sba.gov." in result["answer"]
+    assert not hosted_search._CACHE
+    selector_input = json.loads(calls[-1]["input"])
+    assert selector_input["missing_requested_websites"] == ["sam.gov", "sba.gov"]

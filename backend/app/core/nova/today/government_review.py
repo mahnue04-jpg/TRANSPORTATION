@@ -7,6 +7,7 @@ import os
 import re
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
 from app.core.nova.today.government_sources import retrieve_documents
 
@@ -91,7 +92,7 @@ def _selection_data(payload: dict) -> dict:
     return value
 
 
-def render_evidence(question: str, documents: list[dict], selection: dict, *, local_now: datetime, gaps: int) -> dict:
+def render_evidence(question: str, documents: list[dict], selection: dict, *, local_now: datetime, gaps: int, missing_domains: list[str] | None = None) -> dict:
     """Every published regulatory word comes from a server-owned source passage."""
     questions = question_parts(question)
     passages = passage_catalog(documents)
@@ -141,6 +142,8 @@ def render_evidence(question: str, documents: list[dict], selection: dict, *, lo
             parts.append({"text": "These passages do not establish every requested detail for this question.\n\n"})
     if omitted:
         parts.append({"text": "Some selected passages were omitted to keep the answer within its display limit.\n\n"})
+    if missing_domains:
+        parts.append({"text": "Requested websites without readable passages: " + ", ".join(missing_domains) + ".\n\n"})
     if gaps:
         parts.append({"text": "Some candidate sources could not be read, were archived, or exceeded the retrieval budget; they were excluded. This is partial evidence.\n\n"})
     if not has_passages:
@@ -155,7 +158,9 @@ def render_evidence(question: str, documents: list[dict], selection: dict, *, lo
                       "Confirm the agency, solicitation, applicable clauses, payment method and company eligibility before relying on a passage."})
     return {"answer": "".join(part["text"] for part in parts), "answer_parts": parts, "sources": sources,
             "source_feed": None, "government_evidence_checked": has_passages,
-            "government_no_supporting_passages": not has_passages, "verification_status": "unknown"}
+            "government_no_supporting_passages": not has_passages,
+            "government_evidence_partial": bool(unresolved or omitted or gaps or missing_domains or any(not value for value in grouped.values())),
+            "verification_status": "unknown"}
 
 
 def review_government_answer(question: str, draft: dict, *, official_domains: list[str], local_now: datetime, timeout: float) -> dict:
@@ -166,8 +171,13 @@ def review_government_answer(question: str, draft: dict, *, official_domains: li
     if not documents:
         raise ValueError("government_source_text_unavailable")
     questions, passages = question_parts(question), passage_catalog(documents)
+    readable_sources = {passage["source_id"] for passage in passages}
+    missing_domains = [domain for domain in official_domains if not any(
+        index in readable_sources and ((urlparse(doc["url"]).hostname or "") == domain
+                                      or (urlparse(doc["url"]).hostname or "").endswith("." + domain))
+        for index, doc in enumerate(documents))]
     if not passages:
-        result = render_evidence(question, documents, {"selections": [], "unresolved_question_ids": []}, local_now=local_now, gaps=gaps)
+        result = render_evidence(question, documents, {"selections": [], "unresolved_question_ids": []}, local_now=local_now, gaps=gaps, missing_domains=missing_domains)
         return {**result, "usage": {}, "web_search_calls": 0}
     remaining = deadline - time.monotonic()
     if remaining < 2:
@@ -180,12 +190,12 @@ def review_government_answer(question: str, draft: dict, *, official_domains: li
         input=json.dumps({"original_question": question,
                           "questions": [{"question_id": i, "text": text} for i, text in enumerate(questions)],
                           "documents": [{"source_id": i, "url": doc["url"], "title": doc["title"]} for i, doc in enumerate(documents)],
-                          "passages": passages}, ensure_ascii=False),
+                          "passages": passages, "missing_requested_websites": missing_domains}, ensure_ascii=False),
     )
     if time.monotonic() > deadline:
         raise ValueError("government_evidence_budget_exhausted")
     payload = response.model_dump()
-    result = render_evidence(question, documents, _selection_data(payload), local_now=local_now, gaps=gaps)
+    result = render_evidence(question, documents, _selection_data(payload), local_now=local_now, gaps=gaps, missing_domains=missing_domains)
     result["usage"] = payload.get("usage") or {}
     result["web_search_calls"] = 0
     return result
