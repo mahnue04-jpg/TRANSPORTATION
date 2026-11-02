@@ -139,7 +139,7 @@ def test_hosted_search_honors_requested_domains_and_rejects_other_sources(monkey
         monkeypatch.setattr(government_review, "review_government_answer", lambda q, draft, **kw: draft)
         assert hosted_search.search_public_web(QUESTION)["sources"][0]["url"] == url
     else:
-        with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_source_not_official"):
+        with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_sources_missing"):
             hosted_search.search_public_web(QUESTION)
     request = calls[0]
     assert request["tools"][0]["filters"] == {"allowed_domains": ["sam.gov", "sba.gov", "acquisition.gov"]}
@@ -155,3 +155,22 @@ def test_source_excerpt_label_does_not_claim_verified_requirements(monkeypatch):
     out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
     assert out.fact_label == "OFFICIAL SOURCE EXCERPTS — APPLICABILITY NOT DETERMINED"
     assert out.verification_status == "unknown"
+
+
+@pytest.mark.parametrize("code,detail", [
+    ("government_sources_missing", "did not supply usable official pages"),
+    ("government_source_text_unavailable", "contents could not be read"),
+    ("government_evidence_budget_exhausted", "time limit"),
+    ("invalid_evidence_selection", "supporting passages could not be assembled"),
+])
+def test_failure_explains_stage_without_private_payload_or_irrelevant_saved_record(monkeypatch, caplog, code, detail):
+    monkeypatch.setattr(hosted_search, "enabled", lambda: True)
+    def fail(question): raise hosted_search.HostedSearchUnavailable(code)
+    monkeypatch.setattr(hosted_search, "search_public_web", fail)
+    with caplog.at_level("WARNING"):
+        out = service._grounded_web_research_answer(None, question=QUESTION, query=QUESTION, organization_id="fixture")
+    assert detail in out.answer
+    assert "saved licensing" not in out.answer and "Please retry" not in out.answer
+    assert "code=" + code in caplog.text
+    assert QUESTION not in caplog.text
+    assert out.sources == [] and out.verification_status == "unavailable"
