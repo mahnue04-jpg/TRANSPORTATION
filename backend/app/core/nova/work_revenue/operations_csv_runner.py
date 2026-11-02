@@ -12,6 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from .operations_csv_cleanup import CleanupResult, clean_csv_text
+from .operations_artifact_review import ensure_artifact_schema, save_review_artifact
 from .operations_job_queue import (
     JobConflict, claim_job, complete_job, enqueue_job, fail_job, get_job_state,
 )
@@ -51,6 +52,13 @@ def prepare_csv_job(
     except Exception:
         fail_job(db, job=claim, error_code="CSV_VALIDATION_FAILED", now=now)
         raise
+    # The output must be retained for owner review before processing is marked done.
+    # This is a prototype with local SQLite storage; never pass customer data here.
+    ensure_artifact_schema(db)
     complete_job(db, job=claim, output_sha256=report.output_sha256, now=now)
+    save_review_artifact(
+        db, tenant_id=tenant_id, job_id=job_id,
+        csv_text=report.cleaned_csv, output_sha256=report.output_sha256,
+    )
     # Completed here means offline processing only, NOT reviewed or delivered.
     return PreparedCSVJob(job_id=job_id, report=report, state="awaiting_owner_review")
