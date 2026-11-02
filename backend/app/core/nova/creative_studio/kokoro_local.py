@@ -24,7 +24,10 @@ class KokoroLocalBackend:
         # Use an actual Kokoro voice ID; do not send our generic speaker label.
         voice_id = "af_heart" if request.speaker == "professional_female" else request.speaker
         try:
-            chunks = self.pipeline(spoken_text(request.text), voice=voice_id)
+            kwargs = {"voice": voice_id}
+            if request.speed != 1.0:
+                kwargs["speed"] = request.speed
+            chunks = self.pipeline(spoken_text(request.text), **kwargs)
             values = array("h")
             for _, _, audio in chunks:
                 if hasattr(audio, "detach"):

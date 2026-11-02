@@ -15,16 +15,18 @@ def check(model_dir: Path) -> dict:
              and (model_dir / name).stat().st_size == 0]
     kokoro_installed = importlib.util.find_spec("kokoro") is not None
     torch_installed = importlib.util.find_spec("torch") is not None
+    english_model_installed = importlib.util.find_spec("en_core_web_sm") is not None
     return {
         "model_directory_exists": exists,
         "model_directory_nonempty": bool(files),
         "kokoro_package_installed": kokoro_installed,
         "torch_installed": torch_installed,
+        "english_model_installed": english_model_installed,
         "model_files": files[:20],
         "missing_required_files": missing,
         "empty_required_files": empty,
         "ready_to_attempt_offline_inference": exists and not missing and not empty
-            and kokoro_installed and torch_installed,
+            and kokoro_installed and torch_installed and english_model_installed,
         "notes": "File-presence check only. Does not verify weights, model compatibility, licensing, or audio quality. No network/inference used.",
     }
 

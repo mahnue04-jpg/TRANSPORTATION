@@ -33,3 +33,14 @@ def test_empty_audio_fails_without_output(tmp_path: Path):
             VoiceRequest("Hello"), tmp_path / "x.wav"
         )
     assert not (tmp_path / "x.wav").exists()
+
+
+def test_reviewed_speed_reaches_model_without_changing_written_script(tmp_path):
+    received = {}
+    def pipeline(text, **kwargs):
+        received.update(text=text, **kwargs)
+        yield ("text", "phonemes", [0.25, -0.25] * 1200)
+    KokoroLocalBackend(pipeline).generate_wav(
+        VoiceRequest("Meet AMICOR", speed=0.87), tmp_path / "voice.wav"
+    )
+    assert received == {"text": "Meet [AMICOR](/ˈɑmɪkɔɹ/)", "voice": "af_heart", "speed": 0.87}

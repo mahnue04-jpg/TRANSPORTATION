@@ -1,10 +1,11 @@
 """Local-only Nova Voice adapter contract.
 
 No import-time downloads, external APIs, purchases, or model execution.
-A real inference backend is intentionally not connected until feasibility QA.
+Studio integration is opt-in; importing this contract never loads a model.
 """
 from dataclasses import dataclass
 from pathlib import Path
+import math
 from typing import Protocol
 
 
@@ -17,12 +18,15 @@ class VoiceRequest:
     text: str
     speaker: str = "professional_female"
     sample_rate: int = 24000
+    speed: float = 1.0
 
     def validate(self) -> None:
         if not self.text.strip() or len(self.text) > 1600:
             raise ValueError("narration must contain 1–1600 characters")
         if self.sample_rate not in (22050, 24000, 44100, 48000):
             raise ValueError("unsupported sample rate")
+        if not math.isfinite(self.speed) or not 0.5 <= self.speed <= 2.0:
+            raise ValueError("speed must be between 0.5 and 2.0")
 
 
 def spoken_text(script: str) -> str:

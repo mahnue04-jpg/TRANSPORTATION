@@ -43,3 +43,5 @@ def test_complete_file_set_and_dependencies_are_required(tmp_path: Path, monkeyp
     assert voice_readiness.check(tmp_path)["ready_to_attempt_offline_inference"]
     monkeypatch.setattr(voice_readiness.importlib.util, "find_spec", lambda name: None if name == "torch" else object())
     assert not voice_readiness.check(tmp_path)["ready_to_attempt_offline_inference"]
+    monkeypatch.setattr(voice_readiness.importlib.util, "find_spec", lambda name: None if name == "en_core_web_sm" else object())
+    assert not voice_readiness.check(tmp_path)["ready_to_attempt_offline_inference"]

@@ -29,6 +29,12 @@ def test_invalid_local_voice_requests():
         with pytest.raises(ValueError):
             VoiceRequest(text).validate()
 
+
+def test_speed_bounds_reject_nonfinite_or_unreasonable_values():
+    for speed in (0.0, 0.49, 2.01, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            VoiceRequest("Hello", speed=speed).validate()
+
 def test_approved_website_pronunciation_and_word_boundaries():
     original = "Visit GetAmiCore.com or getamicor.com. AMICORN stays unchanged."
     assert spoken_text(original) == (
