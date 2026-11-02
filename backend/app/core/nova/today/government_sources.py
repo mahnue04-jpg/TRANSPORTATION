@@ -56,8 +56,6 @@ class _Text(HTMLParser):
         self.title_depth = 0
         self.title = []
         self.body = []
-        self.main = []
-        self.main_depth = 0
 
     def handle_starttag(self, tag, attrs):
         if self.hidden:
@@ -69,8 +67,6 @@ class _Text(HTMLParser):
             return
         if tag == "title":
             self.title_depth += 1
-        if tag == "main":
-            self.main_depth += 1
         if tag in self.BLOCK:
             self.handle_data("\n")
 
@@ -83,8 +79,6 @@ class _Text(HTMLParser):
             self.title_depth = max(0, self.title_depth - 1)
         if tag in self.BLOCK:
             self.handle_data("\n")
-        if tag == "main":
-            self.main_depth = max(0, self.main_depth - 1)
 
     def handle_data(self, data):
         if self.hidden:
@@ -95,8 +89,6 @@ class _Text(HTMLParser):
             if data != "\n":
                 data = re.sub(r"\s+", " ", data)
             self.body.append(data)
-            if self.main_depth:
-                self.main.append(data)
 
 
 def _paragraphs(text: str) -> list[str]:
@@ -148,7 +140,9 @@ def fetch_document(url: str, domains: list[str], deadline: float) -> dict:
                 elif kind in {"text/html", "application/xhtml+xml"}:
                     parser = _Text()
                     parser.feed(bytes(data).decode(response.encoding or "utf-8", errors="replace"))
-                    text = "".join(parser.main or parser.body)
+                    # Some official sites put substantive program panels outside <main>.
+                    # Keep all visible body blocks after removing navigation/executable content.
+                    text = "".join(parser.body)
                     title = " ".join(" ".join(parser.title).split())
                 elif kind == "text/plain":
                     text, title = bytes(data).decode("utf-8", errors="replace"), urlparse(current).path

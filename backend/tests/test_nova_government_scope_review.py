@@ -180,3 +180,20 @@ def test_late_evidence_is_not_published(monkeypatch):
     with pytest.raises(ValueError, match="government_evidence_budget_exhausted"):
         hosted_search.search_public_web(QUESTION)
     assert not hosted_search._CACHE
+
+
+def test_discovery_includes_consulted_detail_pages_and_excludes_lookalikes_and_archives():
+    payload = cited_payload("Certification hub", "https://www.sba.gov/Certifications/")
+    payload["output"][0]["action"] = {"sources": [
+        {"url": "https://www.sba.gov/Certifications/"},
+        {"url": "https://www.sba.gov/federal-contracting/contracting-assistance-programs/8a-business-development-program"},
+        {"url": "https://www.acquisition.gov/sites/default/files/archives/far/pdf/2025-01.pdf"},
+        {"url": "https://sba.gov.attacker.example/rules"},
+        {"url": "https://mn.gov/other-jurisdiction"},
+    ]}
+    candidates = hosted_search._government_candidate_sources(payload, hosted_search._parse_response(payload), ["sba.gov", "acquisition.gov"])
+    assert [row["url"] for row in candidates] == [
+        "https://www.sba.gov/Certifications/",
+        "https://www.sba.gov/federal-contracting/contracting-assistance-programs/8a-business-development-program",
+    ]
+    assert all(set(row) == {"url"} for row in candidates)

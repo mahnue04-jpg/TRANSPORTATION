@@ -99,7 +99,7 @@ def render_evidence(question: str, documents: list[dict], selection: dict, *, lo
             raise ValueError("invalid_unresolved_question")
         parts.append({"text": "Not established by the retrieved passages: " + excerpt + "\n\n"})
     if gaps:
-        parts.append({"text": "Some candidate sources could not be read or were archived; they were excluded. This is partial evidence.\n\n"})
+        parts.append({"text": "Some candidate sources could not be read, were archived, or exceeded the retrieval budget; they were excluded. This is partial evidence.\n\n"})
     if re.search(r"\b(?:business|contract|cash|payment|working capital)\b", question, re.I):
         parts.append({"text": "Business planning suggestion: Compare expected cash receipts and expenses by date. "
                       "A positive total profit does not ensure enough cash on every date. "

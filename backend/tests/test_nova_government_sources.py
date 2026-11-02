@@ -124,3 +124,14 @@ def test_partial_fetch_keeps_readable_documents_but_does_not_use_search_snippets
 def test_plain_text_extraction_does_not_truncate_a_rule_mid_paragraph(monkeypatch):
     monkeypatch.setattr(sources, "MAX_TEXT", 10)
     assert sources._paragraphs("small\nA rule longer than remaining space") == ["small"]
+
+
+def test_substantive_program_panels_outside_main_are_retained(monkeypatch):
+    html = (b"<title>Official program fixture</title><main><h1>Certifications</h1>"
+            b"<p>Introductory program overview.</p></main>"
+            b"<section><h2>Program qualifications</h2><p>Detailed eligibility conditions are in this "
+            b"synthetic source-owned panel outside the main element.</p></section>")
+    install_session(monkeypatch, [{"data": html}])
+    result = sources.fetch_document("https://www.sba.gov/certifications/", ["sba.gov"], time.monotonic() + 5)
+    assert "Program qualifications" in result["paragraphs"]
+    assert any("Detailed eligibility conditions" in paragraph for paragraph in result["paragraphs"])
