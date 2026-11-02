@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -10,6 +11,8 @@ from datetime import datetime
 
 from app.core.nova.today.government_review import question_parts
 from app.core.nova.today.government_sources import MAX_DOCUMENTS
+
+logger = logging.getLogger(__name__)
 
 MAX_QUERIES = 3
 
@@ -104,6 +107,8 @@ def discover_sources(question: str, domains: list[str], *, local_now: datetime, 
         if len(sources) == MAX_DOCUMENTS:
             break
     errors = [result["error"] for result in results if result["error"]]
+    logger.info("nova_government_discovery_completed queries=%s candidates=%s failed_queries=%s codes=%s",
+                len(plan), len(sources), len(errors), ",".join(sorted(set(errors))) or "none")
     if not sources:
         raise HostedSearchUnavailable(errors[0] if errors and len(set(errors)) == 1 else "government_sources_missing")
     return {"answer": "", "answer_parts": [], "sources": sources, "source_feed": None,

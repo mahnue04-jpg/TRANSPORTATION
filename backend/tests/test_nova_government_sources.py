@@ -135,3 +135,16 @@ def test_substantive_program_panels_outside_main_are_retained(monkeypatch):
     result = sources.fetch_document("https://www.sba.gov/certifications/", ["sba.gov"], time.monotonic() + 5)
     assert "Program qualifications" in result["paragraphs"]
     assert any("Detailed eligibility conditions" in paragraph for paragraph in result["paragraphs"])
+
+
+def test_source_diagnostics_do_not_log_url_queries_or_exception_payloads(monkeypatch, caplog):
+    def fail(*args):
+        response = requests.Response()
+        response.status_code = 403
+        raise requests.HTTPError("DO_NOT_LOG_PRIVATE_PAYLOAD", response=response)
+    monkeypatch.setattr(sources, "fetch_document", fail)
+    with caplog.at_level("INFO", logger=sources.__name__):
+        docs, gaps = sources.retrieve_documents([{ "url": "https://sam.gov/detail?token=DO_NOT_LOG_TOKEN"}], ["sam.gov"], time.monotonic() + 1)
+    assert not docs and gaps == 1
+    assert "host=sam.gov" in caplog.text and "status=403" in caplog.text
+    assert "DO_NOT_LOG" not in caplog.text and "/detail" not in caplog.text
