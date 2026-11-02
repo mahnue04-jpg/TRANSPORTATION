@@ -48,7 +48,7 @@ The broader backend diagnostic initially hit a Chrome rendering-test timeout and
 
 ## Remaining
 
-The approved 4 GB general-narration browser test passed as recorded below. The newer native-caption and presenter-narration changes have separate local proof and have not been deployed. Live browser validation of the new presenter controls, lip-sync renderer integration, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
+The temporary general-narration and presenter-narration browser tests passed as recorded below. Actual talking-presenter video generation, production dependency provisioning, capacity planning and production rollout remain separate work. Do not enable this provider on the existing small production service solely because the temporary test passed.
 
 ## Native caption timing
 
@@ -66,6 +66,10 @@ The parent now verifies native timing against exact PCM frame duration instead o
 
 A separate real-provider invocation using the reviewed local model and full script returned presenter_narration_ready=true and caption_alignment=true: 27.775 seconds, measured peak fraction 0.5162, no paid calls, no re-encoding and no lip-sync/publishing claim. This real-model proof invoked the provider directly; endpoint authentication and persistence were tested separately with a synthetic worker. Existing approved commercial assets and hosting configuration were not changed.
 
+
+The subsequent signed-in presenter browser test used the real local model through Generate Presenter Voice. It saved 27.775 seconds of narration and 10 native caption cues, with caption_alignment and presenter_narration_ready true and no paid calls. The protected download checksum matched the saved provenance, and full playback succeeded before and after a page reload. The original application and 2 GB compute plan were restored afterward. This validates narration preparation, not rendered lip-sync video.
+
+Presenter routes now require prepared local narration for the exact script and af_heart selection, including when captions are hidden. Missing readiness stops before image, motion or avatar calls; selecting a different saved voice cannot replace the local audio. The body route still performs narration/lip-sync when captions are off, and cloud finalization reuses the prepared audio rather than generating another recording. Project settings accept and persist af_heart. Route regressions use a synthetic voice worker and simulated video adapters; the new routing changes have not been deployed or used for a paid render.
 
 ## Temporary Render test package
 

@@ -196,7 +196,7 @@ class ProjectUpdateIn(BaseModel):
     motion_style: str | None = Field(default=None, pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str | None = Field(default=None, pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str | None = Field(default=None, pattern="^(9:16|1:1|16:9)$")
-    voice: str | None = Field(default=None, pattern="^(coral|nova|shimmer)$")
+    voice: str | None = Field(default=None, pattern="^(coral|nova|shimmer|af_heart)$")
     image_aspect: str | None = Field(default=None, pattern="^(1:1|4:5|9:16|16:9)$")
     captions: bool | None = None
 
@@ -712,13 +712,40 @@ def generate_presenter_voice(
         service = get_service(db)
         result = service.request_voice_generation(
             user.user_id, project_id, script=payload.script, voice=payload.voice,
-            presenter=payload.captions, enforce_paid_budget=True,
+            presenter=payload.captions or payload.voice == "af_heart", enforce_paid_budget=True,
         )
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+
+
+def _matching_presenter_narration(assets, script: str, voice: str, *, captions: bool):
+    """Keep the selected voice even when captions are hidden in the video."""
+    for asset in reversed(assets):
+        result = (asset.metadata or {}).get("provider_result") or {}
+        if (asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED"
+                or not asset.url or str(asset.content or "").strip() != script.strip()
+                or result.get("voice") != voice):
+            continue
+        if (captions or voice == "af_heart") and (
+                result.get("presenter_audio_version") != 2 or not result.get("caption_cues")):
+            continue
+        if voice == "af_heart" and (
+                result.get("presenter_narration_ready") is not True
+                or result.get("caption_alignment") is not True):
+            continue
+        return asset
+    return None
+
+
+def _require_local_presenter_narration(assets, script: str, voice: str):
+    if voice == "af_heart" and _matching_presenter_narration(assets, script, voice, captions=True) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Generate Presenter Voice first for this script and Nova Voice selection. Prepared local narration is required before presenter rendering.",
+        )
 
 
 @router.post("/projects/{project_id}/presenter/cloud-finalize")
@@ -739,6 +766,7 @@ def finalize_full_body_presenter_in_cloud(
     try:
         service._project_or_404(user.user_id, project_id)
         assets = service.store.list_assets(project_id, user.user_id)
+        _require_local_presenter_narration(assets, payload.script, payload.voice)
 
         source = next((
             asset for asset in reversed(assets)
@@ -751,14 +779,7 @@ def finalize_full_body_presenter_in_cloud(
         if source is None:
             raise HTTPException(status_code=422, detail="Generate and review one full-body presenter motion clip first.")
 
-        audio = next((
-            asset for asset in reversed(assets)
-            if asset.kind == "audio"
-            and str(asset.status or "").upper() == "GENERATED"
-            and asset.url
-            and str(asset.content or "").strip() == payload.script.strip()
-            and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
-        ), None)
+        audio = _matching_presenter_narration(assets, payload.script, payload.voice, captions=False)
         if audio is None:
             voice_result = service.request_voice_generation(
                 user.user_id,
@@ -910,6 +931,9 @@ def prepare_talking_presenter_preview(
     try:
         service._project_or_404(user.user_id, project_id)
         service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        _require_local_presenter_narration(
+            service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+        )
         presenter_meta = {
             "presenter_style": payload.presenter_style,
             "presenter_mode": payload.presenter_mode,
@@ -977,19 +1001,13 @@ def prepare_talking_presenter_preview(
             presenter_image = genova_images[-1]
             # Reuse a reviewed Studio narration only when it matches the exact
             # current script. Changed scripts must not speak stale audio.
-            narration = [
-                asset for asset in service.store.list_assets(project_id, user.user_id)
-                if asset.kind == "audio" and asset.url
-                and str(asset.status or "").upper() == "GENERATED"
-                and str(asset.content or "").strip() == payload.script.strip()
-                and (not payload.captions or (
-                    (asset.metadata or {}).get('provider_result', {}).get('voice') == payload.voice
-                    and (asset.metadata or {}).get('provider_result', {}).get('caption_cues')
-                    and (asset.metadata or {}).get('provider_result', {}).get('presenter_audio_version') == 2
-                ))
-            ]
+            narration_asset = _matching_presenter_narration(
+                service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+                captions=payload.captions,
+            )
+            narration = [narration_asset] if narration_asset is not None else []
             if payload.captions and not narration:
-                raise HTTPException(status_code=422, detail="Generate Presenter Voice first for this script and voice. This prepares louder narration and timed captions before rendering.")
+                raise HTTPException(status_code=422, detail="Generate Presenter Voice first for this script and voice. This prepares narration and timed captions before rendering.")
             presenter_args = {"presenter_image_url": str(presenter_image.url), "script": payload.script}
             if narration:
                 presenter_args["audio_url"] = str(narration[-1].url)
@@ -1140,15 +1158,11 @@ def prepare_talking_presenter_preview(
         status = str(result.get("status") or CONFIG_REQUIRED)
         generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
         body_lipsync_applied = False
-        if generated_url and payload.presenter_mode in {"half_body", "full_body"} and payload.captions:
-            narration_asset = next((
-                asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
-                if asset.kind == "audio"
-                and asset.url
-                and str(asset.status or "").upper() == "GENERATED"
-                and str(asset.content or "").strip() == payload.script.strip()
-                and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
-            ), None)
+        if generated_url and payload.presenter_mode in {"half_body", "full_body"} and (payload.captions or payload.voice == "af_heart"):
+            narration_asset = _matching_presenter_narration(
+                service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+                captions=payload.voice == "af_heart",
+            )
             if narration_asset is None:
                 voice_result = service.request_voice_generation(
                     user.user_id,

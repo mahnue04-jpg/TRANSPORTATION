@@ -136,12 +136,13 @@ def test_missing_authentication_cannot_generate_or_download(studio):
     assert calls == []
 
 
-def test_presenter_local_voice_uses_exact_script_captions_and_owner_scope(studio, monkeypatch):
+@pytest.mark.parametrize("captions", [True, False])
+def test_presenter_local_voice_uses_exact_script_captions_and_owner_scope(studio, monkeypatch, captions):
     client, state, project, media, calls, reopen, service = studio
     monkeypatch.setattr(CreativeStudioService, "require_budget_confirmation_for_paid",
                         lambda *_: pytest.fail("local narration must not need a paid quote"))
     payload = {"script": "Business paperwork piling up? Meet AMICOR.",
-               "voice": "af_heart", "captions": True}
+               "voice": "af_heart", "captions": captions}
     response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json=payload)
     assert response.status_code == 200, response.text
     body = response.json()
@@ -165,6 +166,97 @@ def test_presenter_local_provider_does_not_substitute_external_voice(studio):
     assert response.status_code == 200
     assert response.json()["provider"]["status"] == "CONFIG_REQUIRED"
     assert calls == []
+
+
+def test_local_presenter_selection_survives_project_reopen(studio):
+    client, _, project, _, _, reopen, service = studio
+    response = client.patch(f"/api/nova/creative/projects/{project}", json={
+        "voice": "af_heart", "captions": False,
+    })
+    assert response.status_code == 200, response.text
+    reopen()
+    settings = service().get_project("owner-a", project)["project"]["metadata"]["production_settings"]
+    assert settings["voice"] == "af_heart" and settings["captions"] is False
+
+
+@pytest.mark.parametrize("mode", ["head", "half_body", "full_body", "cloud"])
+@pytest.mark.parametrize("captions", [True, False])
+def test_local_presenter_requires_prepared_audio_before_any_video_work(studio, monkeypatch, mode, captions):
+    client, _, project, _, calls, _, service = studio
+    monkeypatch.setattr(CreativeStudioService, "require_budget_confirmation_for_paid", lambda *_: None)
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    def no_provider():
+        pytest.fail("Missing prepared Nova Voice narration must stop before any video provider")
+    monkeypatch.setattr(routes, "talking_presenter_provider", no_provider)
+    monkeypatch.setattr(routes, "video_provider", no_provider)
+    # General narration has native cues but has not passed presenter preparation.
+    client.post(f"/api/nova/creative/projects/{project}/generate/voice").raise_for_status()
+    payload = {"script": "Business paperwork piling up? Meet AMICOR.",
+               "voice": "af_heart", "captions": captions}
+    endpoint = "cloud-finalize" if mode == "cloud" else "preview"
+    if mode != "cloud":
+        payload["presenter_mode"] = mode
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/{endpoint}", json=payload)
+    assert response.status_code == 422, response.text
+    assert "Generate Presenter Voice first" in response.text
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mode", ["head", "full_body", "cloud"])
+@pytest.mark.parametrize("captions", [True, False])
+def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, monkeypatch, mode, captions):
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import fal_cloud, kling, presenter_media, providers
+    client, _, project, _, calls, reopen, service = studio
+    script = "Business paperwork piling up? Meet AMICOR."
+    payload = {"script": script, "voice": "af_heart", "captions": captions}
+    audio_response = client.post(f"/api/nova/creative/projects/{project}/presenter/voice", json=payload)
+    assert audio_response.status_code == 200, audio_response.text
+    audio = audio_response.json()["asset"]
+    reopen()
+    # A newer different voice must not replace the selected local narration.
+    service()._save_text_asset(owner_id="owner-a", project_id=project, kind="audio",
+        title="Other voice", content=script, status="GENERATED", url="/media/other.mp3",
+        metadata={"provider_result": {"voice": "coral"}})
+    service()._save_text_asset(owner_id="owner-a", project_id=project, kind="image",
+        title="Presenter", content="Genova presenter v2", status="GENERATED",
+        url="/media/presenter.png", metadata={})
+    service()._save_text_asset(owner_id="owner-a", project_id=project, kind="presenter_video",
+        title="Reviewed motion", content="Existing motion", status="GENERATED", url="/media/motion.mp4",
+        metadata={"presenter_mode": "full_body", "motion_style": "friendly_explainer",
+                  "output_preset": "16:9", "provider_result": {"provider": "fal_kling_video"}})
+    monkeypatch.setattr(CreativeStudioService, "require_budget_confirmation_for_paid", lambda *_: None)
+    monkeypatch.setattr(CreativeStudioService, "request_voice_generation",
+                        lambda *_a, **_k: pytest.fail("Prepared narration must not regenerate"))
+    monkeypatch.setattr(CreativeStudioService, "request_image_generation",
+                        lambda *_a, **_k: pytest.fail("Reviewed motion must not generate new artwork"))
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    monkeypatch.setenv("NOVA_TALKING_PRESENTER_PROVIDER", "d-id")
+    used = []
+    def generated(**kwargs):
+        used.append(kwargs)
+        assert kwargs["audio_url"] == audio["url"]
+        return {"status": "GENERATED", "asset_generated": True, "url": "/media/lipsynced.mp4",
+                "provider": "test_adapter", "watermark_free": False}
+    monkeypatch.setattr(routes, "talking_presenter_provider", lambda: SimpleNamespace(generate=generated))
+    monkeypatch.setattr(routes, "video_provider", lambda: SimpleNamespace(
+        provider_id="fal_kling_video", status=lambda: SimpleNamespace(status="AVAILABLE"),
+        generate=lambda **_k: pytest.fail("Reviewed motion must not regenerate")))
+    monkeypatch.setattr(kling.FalKlingLipSyncProvider, "generate_lipsync", lambda _self, **kw: generated(**kw))
+    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "lip_sync", lambda _self, **kw: generated(**kw))
+    monkeypatch.setattr(fal_cloud.FalCloudProcessor, "auto_subtitle", lambda _self, **_kw: {
+        "status": "GENERATED", "asset_generated": True, "url": "/media/cloud-captioned.mp4"})
+    monkeypatch.setattr(providers, "_resolve_creative_media_url", lambda _url: Path("/tmp/lipsynced.mp4"))
+    monkeypatch.setattr(presenter_media, "caption_presenter", lambda _path, cues: (
+        Path("/tmp/lipsynced-captioned.mp4"), Path("/tmp/lipsynced.srt")))
+    endpoint = "cloud-finalize" if mode == "cloud" else "preview"
+    if mode != "cloud":
+        payload.update(presenter_mode=mode, output_preset="16:9", motion_style="friendly_explainer")
+    response = client.post(f"/api/nova/creative/projects/{project}/presenter/{endpoint}", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "GENERATED"
+    assert response.json()["asset"]["metadata"]["source_audio_asset_id"] == audio["id"]
+    assert len(used) == len(calls) == 1
 
 
 def test_external_presenter_voice_retains_paid_budget_guard(studio, monkeypatch):
