@@ -233,7 +233,7 @@ def search_public_web(question: str) -> dict:
     from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
     government_research = is_public_government_research_request(question)
     official_domains = government_research_domains(question) if government_research else []
-    cache_key = f"{local_now.date()}:" + ("government-discovery-v4:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
+    cache_key = f"{local_now.date()}:" + ("government-selection-v5:" if government_research else "") + re.sub(r"\W+", " ", question.casefold()).strip()
     cached = _CACHE.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return copy.deepcopy(cached[1])
@@ -349,7 +349,8 @@ def search_public_web(question: str) -> dict:
                 "output": response_payload.get("output", []),
             }, ensure_ascii=True))
         raise
-    _CACHE[cache_key] = (time.monotonic() + 300, copy.deepcopy(result))
+    if not result.get("government_no_supporting_passages"):
+        _CACHE[cache_key] = (time.monotonic() + 300, copy.deepcopy(result))
     logger.info("nova_hosted_public_search_completed sources=%s search_calls=%s", len(result["sources"]), result["web_search_calls"])
     return result
 
