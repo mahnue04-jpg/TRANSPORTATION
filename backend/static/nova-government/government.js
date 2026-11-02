@@ -2,7 +2,7 @@
 
 (function () {
   var ACTIVE_ITEM_KEY = "amicor.nova.government.activeItemId";
-  var state = { itemId: null, dashboard: null, selectedItem: null };
+  var state = { itemId: null, dashboard: null, selectedItem: null, brainBusy: false, hasBrainAnswer: false };
 
   function rememberActiveItem(itemId) {
     state.itemId = itemId || null;
@@ -60,6 +60,7 @@
     try {
       response = await fetch(path, Object.assign({}, options || {}, { headers: headers }));
     } catch (_) {
+      if (options && options.signal && options.signal.aborted) throw new Error("The request timed out. Your question is still available.");
       throw new Error("Network error. Saved work was not changed.");
     }
     var body = null;
@@ -72,6 +73,7 @@
     return body;
   }
   function setSignedIn(on) {
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -172,7 +174,24 @@
     } else {
       $("active-work").textContent = "No active government work item selected.";
     }
-    $("brain-output").textContent = "Mrs. Nova Brain is connected to Nova Government. AI SUGGESTION is not an official ruling.";
+    if (!state.brainBusy && !state.hasBrainAnswer) {
+      $("brain-output").textContent = "Mrs. Nova Brain is connected to Nova Government. Enter your question above, then press Ask Nova.";
+    }
+  }
+  function renderBrainSources(sources) {
+    var box = $("brain-sources");
+    box.textContent = "";
+    (sources || []).forEach(function (source) {
+      var parsed;
+      try { parsed = new URL(source.url); } catch (_) { return; }
+      if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return;
+      var link = document.createElement("a");
+      link.href = parsed.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = source.title || parsed.hostname;
+      box.appendChild(link);
+    });
   }
   async function runBrain(action, question) {
     if (!token()) {
@@ -180,21 +199,49 @@
       $("login-form").classList.remove("hidden");
       return;
     }
+    if (state.brainBusy) return;
     var explicitQuestion = typeof question === "string" ? question.trim() : "";
     var askQuestion = action === "ask" ? (explicitQuestion || $("ask-input").value.trim()) : explicitQuestion;
-    var result = await api("/api/nova/government/ask", {
-      method: "POST",
-      body: JSON.stringify({
-        action: action,
-        question: askQuestion || null,
-        item_id: state.itemId
-      })
-    });
-    await refresh();
-
-    $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
-    $("fact-label").textContent = result.fact_label || "AI SUGGESTION is not an official government ruling.";
-    showBanner("Mrs. Nova Brain used existing Nova intelligence. Nothing was filed or sent.", true);
+    if (action === "ask" && !askQuestion) {
+      showBanner("Enter a question above, then press Ask Nova.");
+      $("ask-input").focus();
+      return;
+    }
+    var requestToken = token();
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timeout = controller ? window.setTimeout(function () { controller.abort(); }, 45000) : null;
+    state.brainBusy = true;
+    $("ask-submit").disabled = true;
+    $("brain-output").setAttribute("aria-busy", "true");
+    $("brain-output").textContent = "Mrs. Nova is working on your question…";
+    renderBrainSources([]);
+    try {
+      var result = await api("/api/nova/government/ask", {
+        method: "POST", signal: controller ? controller.signal : undefined,
+        body: JSON.stringify({ action: action, question: askQuestion || null, item_id: state.itemId })
+      });
+      if (requestToken !== token()) return;
+      // Ordinary questions are read-only. Refreshing the saved-work dashboard
+      // before rendering could hide a successful answer behind a dashboard error.
+      if (action !== "ask") await refresh();
+      state.hasBrainAnswer = true;
+      $("brain-output").textContent = (result.fact_label || "AI SUGGESTION") + "\n\n" + (result.answer || "No response from Mrs. Nova Brain.");
+      renderBrainSources(result.sources);
+      $("fact-label").textContent = result.fact_label || "AI SUGGESTION is not an official government ruling.";
+      showBanner("Mrs. Nova answered below. Nothing was filed or sent.", true);
+    } catch (err) {
+      if (requestToken === token()) {
+        state.hasBrainAnswer = true;
+        $("brain-output").textContent = err.message || "The request failed. Your question is still available.";
+        showBanner($("brain-output").textContent);
+      }
+      throw err;
+    } finally {
+      if (timeout !== null) window.clearTimeout(timeout);
+      state.brainBusy = false;
+      $("ask-submit").disabled = false;
+      $("brain-output").setAttribute("aria-busy", "false");
+    }
   }
 
   if (session() && session().restore) session().restore();
@@ -452,6 +499,10 @@
     rememberActiveItem(null);
     state.selectedItem = null;
     if (session() && session().logout) await session().logout();
+    state.hasBrainAnswer = false;
+    setSignedIn(false);
+    $("brain-output").textContent = "Mrs. Nova Brain is ready when you are signed in.";
+    renderBrainSources([]);
     window.location.href = "/nova/government";
   });
 })();

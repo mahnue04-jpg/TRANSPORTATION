@@ -106,8 +106,10 @@ jobs:
         run: |
           node --test ../scripts/tests/nova-today-auth.test.cjs ../scripts/tests/nova-today-ask.test.cjs ../scripts/tests/nova-today-citations.test.cjs ../scripts/tests/nova-today-voice.test.cjs tests/nova_voice_pauses.test.cjs tests/nova_reasoning_context.test.cjs tests/nova_home_sources.test.cjs
           NOVA_AUTH_TEST_PAGE=nova-home node --test ../scripts/tests/nova-today-auth.test.cjs
+          NOVA_AUTH_TEST_PAGE=nova-government node --test ../scripts/tests/nova-today-auth.test.cjs
+          node --test tests/nova_government_questions.test.cjs
           node ../scripts/tests/nova-auth-rendered.cjs
-          pytest tests/test_nova_government_sources.py tests/test_nova_government_scope_review.py tests/test_nova_today_government_research.py tests/test_nova_reasoning_provider.py tests/test_nova_today_reasoning.py tests/test_nova_hosted_public_search.py tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py \
+          pytest tests/test_nova_government_questions.py tests/test_nova_government_sources.py tests/test_nova_government_scope_review.py tests/test_nova_today_government_research.py tests/test_nova_reasoning_provider.py tests/test_nova_today_reasoning.py tests/test_nova_hosted_public_search.py tests/test_nova_today_live_tools.py tests/test_nova_today_current_information.py tests/test_nova_today_ask_transaction.py \
             tests/test_nova_today.py::test_nova_today_government_named_work_item_stays_grounded \
             tests/test_nova_today.py::test_nova_today_live_weather_news_and_web_paths \
             tests/test_nova_today.py::test_nova_today_natural_grant_request_uses_live_grounded_research \

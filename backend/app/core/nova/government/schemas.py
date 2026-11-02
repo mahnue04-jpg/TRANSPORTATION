@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.nova.today.schemas import NovaTodayAnswerPart, NovaTodaySourceLink
+
 GOV_STATUSES = (
     "researching",
     "requirements_found",
@@ -259,6 +261,8 @@ class NovaGovBrainRequest(BaseModel):
 class NovaGovBrainOut(BaseModel):
     action: str
     answer: str
+    answer_parts: list[NovaTodayAnswerPart] = Field(default_factory=list)
+    sources: list[NovaTodaySourceLink] = Field(default_factory=list)
     fact_label: str
     next_actions: list[str] = Field(default_factory=list)
     generated_at: str

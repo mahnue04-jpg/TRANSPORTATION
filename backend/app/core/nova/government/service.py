@@ -926,11 +926,25 @@ def ask_government(
     organization_id: str,
     user: UserContext,
 ) -> NovaGovBrainOut:
+    raw_question = (payload.question or "").strip()
+    if payload.action == "ask":
+        from app.core.nova.today.live_tools import is_public_government_research_request
+        if is_public_government_research_request(raw_question):
+            from app.core.nova.today.schemas import NovaTodayBrainRequest
+            from app.core.nova.today.service import ask_today
+
+            # An active saved item must not replace an explicit public-research
+            # question. Use the same read-only research path as Home/Today.
+            researched = ask_today(db, NovaTodayBrainRequest(question=raw_question),
+                                   organization_id=organization_id, user=user)
+            return NovaGovBrainOut(action="ask", answer=researched.answer,
+                                   answer_parts=researched.answer_parts, sources=researched.sources,
+                                   fact_label=researched.fact_label, next_actions=[],
+                                   generated_at=researched.generated_at)
     items = list_items(db, organization_id=organization_id, user=user)
 
     # Ask Nova is conversational. Do not bury a simple personal/session question
     # inside government workflow boilerplate.
-    raw_question = (payload.question or "").strip()
     lowered_question = raw_question.lower()
     if payload.action == "ask" and lowered_question in {
         "what is my name", "what's my name", "whats my name", "who am i", "who am i?"
