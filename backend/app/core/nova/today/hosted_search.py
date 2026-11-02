@@ -238,12 +238,16 @@ def search_public_web(question: str) -> dict:
 
     # One request, one search call, no automatic transport retries or stored response.
     client = get_client().with_options(timeout=28.0, max_retries=0)
-    from app.core.nova.today.live_tools import is_sports_viewing_request
+    from app.core.nova.today.live_tools import is_sports_viewing_request, is_public_government_research_request, government_research_domains
+    government_research = is_public_government_research_request(question)
+    official_domains = government_research_domains(question) if government_research else []
     search_tool = {
         "type": "web_search", "search_context_size": "low", "external_web_access": True,
         "user_location": {"type": "approximate", "timezone": "America/Chicago"},
     }
-    if is_sports_viewing_request(question):
+    if official_domains:
+        search_tool["filters"] = {"allowed_domains": official_domains}
+    if not government_research and is_sports_viewing_request(question):
         search_tool["filters"] = {"allowed_domains": [
             "nba.com", "wnba.com", "nfl.com", "nhl.com", "mlb.com",
             "vikings.com", "detroitlions.com", "fox9.com", "foxsports.com", "fox.com",
@@ -262,8 +266,14 @@ def search_public_web(question: str) -> dict:
         instructions=(
             "You are Nova's public-information researcher. You MUST search before answering. "
             f"Current local time is {local_now.isoformat()}, America/Chicago; use that for tonight/today unless the user specifies another place. "
-            "Answer the actual question first in at most 200 words, with at most four sources. "
-            "Use short paragraphs or bullets, no tables, and no long injury or betting breakdown. "
+            + ("Answer every numbered question in at most 400 words, with at most four sources. "
+               "For government rules, use current official government sources and inline citations for each regulatory claim. "
+               "State the date checked and separate legal/program requirements from business recommendations. "
+               "A UEI, registration, certification and contract award are different; verify the requested distinctions. "
+               "Do not assume a company is eligible, an award is guaranteed, or a payment clause applies to every contract. "
+               "Identify specific facts or sources you could not verify. Do not substitute a saved work item for public research. "
+               if government_research else "Answer the actual question first in at most 200 words, with at most four sources. ")
+            + "Use short paragraphs or bullets, no tables, and no long injury or betting breakdown. "
             "Give concrete, relevant reported facts and inline URL citations. "
             "For sports status, report the latest confirmed injury, surgery, availability, or return estimate you find, "
             "with the report's date. Prefer the team/league and reputable sports reporting. "
@@ -298,6 +308,11 @@ def search_public_web(question: str) -> dict:
     response_payload = response.model_dump()
     try:
         result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
+        if government_research:
+            for source in result["sources"]:
+                host = (urlparse(source["url"]).hostname or "").lower()
+                if not host.endswith(".gov") or (official_domains and not any(host == domain or host.endswith("." + domain) for domain in official_domains)):
+                    raise HostedSearchUnavailable("government_source_not_official")
     except HostedSearchUnavailable as exc:
         # Only the fixed owner probe can emit public response content for debugging.
         # Never log arbitrary user questions, response headers or credentials.

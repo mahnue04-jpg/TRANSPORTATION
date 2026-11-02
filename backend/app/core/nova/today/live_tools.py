@@ -447,9 +447,33 @@ def is_sports_prediction_request(text: str) -> bool:
     ))
 
 
+def is_public_government_research_request(text: str) -> bool:
+    """Explicit public rules research is independent of saved Government work."""
+    value = _clean(text).lower()
+    if re.search(r"\b(?:saved|stored)\s+(?:records?|work|government|licenses?|permits?|items?|sources?)\b", value):
+        return False
+    topic = re.search(
+        r"\b(?:government|federal|regulations?|licens\w*|permits?|contracting|sba|sam\.gov|acquisition\.gov|irs\.gov)\b|\b8\s*\(a\)",
+        value,
+    )
+    research = re.search(r"\b(?:research|search|look up|verify|current|latest|today)\b", value)
+    evidence = re.search(r"\b(?:official|public|sources?|rules?|regulations?|requirements?|eligibility)\b", value)
+    return bool(topic and research and evidence)
+
+
+def government_research_domains(text: str) -> list[str]:
+    """Honor explicitly requested .gov domains, without admitting lookalike hosts."""
+    return list(dict.fromkeys(re.findall(
+        r"(?<![\w.-])([a-z0-9-]+(?:\.[a-z0-9-]+)*\.gov)(?![\w-]|\.[a-z0-9-])",
+        str(text or "").lower(),
+    )))[:20]
+
+
 def is_current_public_information_request(text: str) -> bool:
     """Recognize public status/events without diverting saved operational work."""
     lowered = _clean(text).lower().replace("’", "'")
+    if is_public_government_research_request(text):
+        return True
     if _private_work_question(text):
         return False
     if is_public_sports_request(text):
