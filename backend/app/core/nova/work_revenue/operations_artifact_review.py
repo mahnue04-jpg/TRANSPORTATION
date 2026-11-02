@@ -88,3 +88,47 @@ def read_review_artifact(
            WHERE tenant_id=? AND job_id=?""", (tenant_id, job_id),
     ).fetchone()
     return (row[0], row[1]) if row else None
+
+
+def complete_and_store_review_artifact(
+    db: sqlite3.Connection, *, job, csv_text: str,
+    output_sha256: str, now: int,
+) -> None:
+    """Atomically complete the leased job and retain its review artifact.
+
+    A failed insert rolls back completion. The leased job remains running
+    until lease expiry, when the queue can safely reclaim it.
+    """
+    from .operations_job_queue import _valid_sha
+
+    if not isinstance(csv_text, str):
+        raise JobConflict("Invalid CSV artifact")
+    encoded = csv_text.encode("utf-8")
+    if len(encoded) > 1_000_000 or not _valid_sha(output_sha256):
+        raise JobConflict("Invalid artifact size or checksum")
+    if hashlib.sha256(encoded).hexdigest() != output_sha256:
+        raise JobConflict("Artifact checksum mismatch")
+    if db.in_transaction:
+        raise JobConflict("Caller must not hold an active transaction")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        cur = db.execute(
+            """UPDATE nova_operations_offline_jobs
+               SET state='completed', output_sha256=?,
+                   lease_until=NULL, lease_token=NULL
+               WHERE job_id=? AND tenant_id=? AND state='running'
+                 AND lease_token=? AND lease_until>?""",
+            (output_sha256, job.job_id, job.tenant_id, job.lease_token, now),
+        )
+        if cur.rowcount != 1:
+            raise JobConflict("Stale or expired job lease")
+        db.execute(
+            """INSERT INTO nova_operations_offline_artifacts
+               (tenant_id,job_id,output_sha256,csv_text)
+               VALUES (?,?,?,?)""",
+            (job.tenant_id, job.job_id, output_sha256, csv_text),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
