@@ -309,6 +309,8 @@ def search_public_web(question: str) -> dict:
     try:
         result = _calibrate_viewing_claims(_label_prediction(_prefer_dated_nba_schedule(_parse_response(response_payload), question), question), question)
         if government_research:
+            if not result["sources"]:
+                raise HostedSearchUnavailable("government_sources_missing")
             for source in result["sources"]:
                 host = (urlparse(source["url"]).hostname or "").lower()
                 if not host.endswith(".gov") or (official_domains and not any(host == domain or host.endswith("." + domain) for domain in official_domains)):

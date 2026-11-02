@@ -91,6 +91,24 @@ def test_saved_government_matching_requires_an_explicit_record_reference(monkeyp
         assert service._today_government_grounded_answer(None, question=question, organization_id="fixture", user=SimpleNamespace()) is None
 
 
+def test_government_research_requires_citations_even_if_a_feed_was_returned(monkeypatch):
+    hosted_search._CACHE.clear()
+    monkeypatch.setenv("NOVA_HOSTED_WEB_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture-not-a-real-key")
+    response = {"status": "completed", "output": [
+        {"type": "web_search_call", "status": "completed"},
+        {"type": "message", "content": [{"type": "output_text", "text": "Uncited government fixture", "annotations": []}]},
+    ]}
+    client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: SimpleNamespace(model_dump=lambda: response)))
+    client.with_options = lambda **kw: client
+    monkeypatch.setattr("app.ai.get_client", lambda: client)
+    monkeypatch.setattr(hosted_search, "_parse_response", lambda payload: {
+        "answer": "Uncited government fixture", "answer_parts": [], "sources": [], "source_feed": "oai-sports",
+    })
+    with pytest.raises(hosted_search.HostedSearchUnavailable, match="government_sources_missing"):
+        hosted_search.search_public_web(QUESTION)
+
+
 @pytest.mark.parametrize("url,allowed", [
     ("https://www.sba.gov/certifications/", True),
     ("https://sam.gov/fixture", True),
