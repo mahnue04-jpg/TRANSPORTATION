@@ -22,6 +22,9 @@ CASES = [
     ("The FAR working-capital adjustment is a general requirement for fixed-price contractors.",
      "Fixture correction: this DFARS provision is Department of Defense-specific, not a government-wide FAR requirement.",
      "https://www.acquisition.gov/dfars/215.404-71-3-contract-type-risk-and-working-capital-adjustment."),
+    ("The newest published FAR rewrite automatically governs every agency's contracts.",
+     "Fixture correction: check agency adoption, effective dates and the governing solicitation version; publication alone does not establish applicability.",
+     "https://www.acquisition.gov/far-overhaul/faqs"),
 ]
 
 

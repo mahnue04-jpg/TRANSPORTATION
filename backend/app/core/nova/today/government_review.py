@@ -24,9 +24,15 @@ Distinguish the FAR from agency supplements. Label a DFARS provision as Departme
 Defense-specific next to the claim; do not present it as a government-wide FAR rule.
 Apply the same agency-scope discipline to other supplements. A government pricing or
 profit-negotiation procedure is not automatically a contractor accounting requirement.
-Use current codified provisions for binding rules, not draft rewrites, plain-language
-proposals, archived copies or unofficial summaries. Official forms and checklists may
-support their own administrative instructions, not unrelated legal claims.
+Prefer current codified provisions for general rules. For a particular acquisition,
+also check operative agency deviations or adopted replacements, their effective dates
+and applicability to the solicitation. Published model deviation text is not automatically
+applicable to every agency: verify agency adoption and the relevant version. Do not
+discard an effective adopted deviation merely because it is not yet codified, or treat
+an unadopted draft rewrite, proposal, archived copy or unofficial summary as binding.
+Official forms and checklists may support their own administrative instructions, not
+unrelated legal claims. If the agency, solicitation or governing version is unknown,
+identify that gap instead of asserting universal applicability.
 
 Replace or remove unsupported claims rather than repeating them with a disclaimer.
 If the source or applicability cannot be verified, identify the precise missing detail.
