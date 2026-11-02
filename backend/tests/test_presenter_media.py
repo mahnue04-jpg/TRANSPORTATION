@@ -143,3 +143,33 @@ def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
     media._encode(['-ss','0.5','-i',str(result),'-frames:v','1',str(frame)])
     band=Image.open(frame).convert('RGB').crop((0,512,512,640))
     assert sum(1 for p in band.getdata() if min(p)>220)>100
+
+
+@pytest.mark.parametrize("preset,size", [("9:16", (720, 1280)), ("16:9", (1280, 720)), ("1:1", (720, 720))])
+def test_body_caption_real_encode_preserves_canvas_audio_and_visible_text(tmp_path, preset, size):
+    from PIL import Image
+    from app.core.nova.creative_studio import presenter_media as media
+    video = tmp_path / 'body.mp4'
+    media._encode(['-f', 'lavfi', '-i', 'color=c=blue:s=160x90:d=0.6',
+                   '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.6', '-t', '0.6',
+                   '-c:v', 'libx264', '-threads', '1', '-c:a', 'aac', str(video)])
+    cues = [{'start': 0, 'end': .6, 'text': 'AMICOR Nova. Every word retained.'}]
+    rendered, subtitles = caption_presenter(video, cues, output_preset=preset)
+    frame = tmp_path / 'frame.png'
+    media._encode(['-ss', '0.25', '-i', str(rendered), '-frames:v', '1', str(frame)])
+    image = Image.open(frame).convert('RGB')
+    assert image.size == size
+    width, height = size
+    band = image.crop((0, height - 128, width, height))
+    assert sum(1 for p in band.getdata() if min(p) > 220) > 100
+    assert 'AMICOR Nova. Every word retained.' in subtitles.read_text()
+    for source, name in ((video, 'original.aac'), (rendered, 'captioned.aac')):
+        media._encode(['-i', str(source), '-vn', '-c:a', 'copy', '-f', 'adts', str(tmp_path / name)])
+    assert (tmp_path / 'original.aac').read_bytes() == (tmp_path / 'captioned.aac').read_bytes()
+
+
+def test_caption_rejects_unknown_canvas_before_encoding(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio import presenter_media as media
+    monkeypatch.setattr(media, '_encode', lambda *_: pytest.fail('Invalid layout must not encode'))
+    with pytest.raises(RuntimeError, match='Unsupported presenter caption output preset'):
+        caption_presenter(tmp_path / 'video.mp4', [{'start': 0, 'end': 1, 'text': 'Nova'}], output_preset='invalid')

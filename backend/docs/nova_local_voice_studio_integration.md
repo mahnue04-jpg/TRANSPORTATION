@@ -71,6 +71,10 @@ The subsequent signed-in presenter browser test used the real local model throug
 
 Presenter routes now require prepared local narration for the exact script and af_heart selection, including when captions are hidden. Missing readiness stops before image, motion or avatar calls; selecting a different saved voice cannot replace the local audio. The body route still performs narration/lip-sync when captions are off, and cloud finalization reuses the prepared audio rather than generating another recording. Project settings accept and persist af_heart. Route regressions use a synthetic voice worker and simulated video adapters; the new routing changes have not been deployed or used for a paid render.
 
+Body previews with successful lip-sync now burn the prepared local native caption cues into the video when captions are requested. Vertical, widescreen and square canvases retain their selected shape, keep the full source frame above a separate caption band, and stream-copy the existing audio. If caption encoding is blocked, the existing preservation path retains the lip-synced video and reports caption/sidecar readiness without claiming completion. Cloud finalization still uses its separate cloud-caption stage.
+
+Verification for this caption connection: 103 route/core/presenter-media checks passed, including actual FFmpeg encodes at all three body output sizes, visible caption pixels, matching AAC bytes before/after burn-in, and exact native-cue handoff. These media tests use a generated test pattern and tone, not a generated talking presenter. No paid provider call or hosting change was made.
+
 ## Temporary Render test package
 
 `Dockerfile.nova-voice-test` is a separate Python 3.12/Linux CPU image. It adds the pinned top-level speech runtime requirements from `requirements-nova-voice-test.txt`, preloads the reviewed model revision during build, verifies all three asset checksums, and enables offline local voice only at runtime. The normal production Dockerfile and requirements are not replaced.

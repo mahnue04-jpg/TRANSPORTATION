@@ -247,8 +247,12 @@ def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, mo
     monkeypatch.setattr(fal_cloud.FalCloudProcessor, "auto_subtitle", lambda _self, **_kw: {
         "status": "GENERATED", "asset_generated": True, "url": "/media/cloud-captioned.mp4"})
     monkeypatch.setattr(providers, "_resolve_creative_media_url", lambda _url: Path("/tmp/lipsynced.mp4"))
-    monkeypatch.setattr(presenter_media, "caption_presenter", lambda _path, cues: (
-        Path("/tmp/lipsynced-captioned.mp4"), Path("/tmp/lipsynced.srt")))
+    caption_calls = []
+    def captioned(_path, cues, **kwargs):
+        caption_calls.append(kwargs)
+        assert cues == audio["metadata"]["provider_result"]["caption_cues"]
+        return Path("/tmp/lipsynced-captioned.mp4"), Path("/tmp/lipsynced.srt")
+    monkeypatch.setattr(presenter_media, "caption_presenter", captioned)
     endpoint = "cloud-finalize" if mode == "cloud" else "preview"
     if mode != "cloud":
         payload.update(presenter_mode=mode, output_preset="16:9", motion_style="friendly_explainer")
@@ -257,6 +261,12 @@ def test_local_presenter_passes_exact_prepared_audio_to_video_adapter(studio, mo
     assert response.json()["status"] == "GENERATED"
     assert response.json()["asset"]["metadata"]["source_audio_asset_id"] == audio["id"]
     assert len(used) == len(calls) == 1
+    if mode != "cloud":
+        assert len(caption_calls) == int(captions)
+        if captions:
+            assert response.json()["asset"]["metadata"]["captions_burned_in"] is True
+            assert response.json()["url"].endswith("lipsynced-captioned.mp4")
+            assert caption_calls[0] == ({"output_preset": "16:9"} if mode == "full_body" else {})
 
 
 def test_external_presenter_voice_retains_paid_budget_guard(studio, monkeypatch):
