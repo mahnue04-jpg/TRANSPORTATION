@@ -4,6 +4,14 @@ from __future__ import annotations
 import re
 
 
+def needs_previous_turn(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:your|the|that|this) (?:previous|last|earlier|above) (?:answer|response|schedule|calculation)\b"
+        r"|\b(?:check|verify|correct|explain|recalculate|review)\b.{0,35}\b(?:your answer|that answer|it again)\b",
+        str(text or "").lower(),
+    ))
+
+
 def is_self_contained_math_request(text: str) -> bool:
     value = " ".join(str(text or "").lower().split())
     # Requests for current facts or explicit browsing still need real sources.
@@ -19,7 +27,7 @@ def is_self_contained_math_request(text: str) -> bool:
     numbers = re.findall(r"(?<!\w)\$?\d[\d,]*(?:\.\d+)?%?", value)
     intent = re.search(
         r"\b(?:calculat\w*|comput\w*|solve|arithmetic|algebra|equations?|"
-        r"word problem|how many|maximum|minimum|greatest|smallest|"
+        r"word problem|how many|maximum|minimum|greatest|smallest|shortest|longest|probability|"
         r"total (?:cost|price)|how much)\b",
         value,
     )

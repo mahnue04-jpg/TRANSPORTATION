@@ -67,6 +67,7 @@ def _enable_llm(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         classmethod(lambda cls: True),
     )
     monkeypatch.setattr("app.ai.ask_openai", fake_openai)
+    monkeypatch.setattr("app.core.nova.reasoning.ask_nova_reasoning", fake_openai)
     return prompts
 
 
@@ -188,6 +189,8 @@ def test_conversational_ask_does_not_stuff_today_ops(
     question: str,
     answer_needles: tuple[str, ...],
 ) -> None:
+    # Exercise the general-answer prompt in isolation; live routes have separate tests.
+    monkeypatch.setattr("app.core.nova.today.service._today_live_or_memory_answer", lambda *a, **kw: None)
     prompts = _enable_llm(monkeypatch)
     asked = client.post(
         "/api/nova/today/ask",

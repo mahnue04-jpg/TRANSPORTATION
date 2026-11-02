@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 import os
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -160,7 +161,24 @@ class NovaCoreService:
         context: NovaContextResponse,
         *,
         require_operational_next_actions: bool = True,
+        reasoning_profile: bool = False,
     ) -> tuple[str, str]:
+        if reasoning_profile:
+            try:
+                from app.core.nova.reasoning import ask_nova_reasoning
+
+                if not cls._can_use_llm():
+                    raise RuntimeError("Reasoning provider not configured")
+                return ask_nova_reasoning(question), "openai_reasoning"
+            except Exception as exc:
+                logging.getLogger(__name__).warning("nova_reasoning_failed error_type=%s", type(exc).__name__)
+                # A provider/configuration/timeout failure is not a capability refusal.
+                return (
+                    "Nova's reasoning service could not complete this request. "
+                    "Please try again. Your question is still available. "
+                    "This is a service failure, not a limitation on solving this type of question.",
+                    "reasoning_unavailable",
+                )
         if not cls._can_use_llm():
             if not require_operational_next_actions:
                 return cls._prompt_primary_answer(question), "deterministic_fallback"
@@ -375,6 +393,7 @@ class NovaCoreService:
         question: str,
         *,
         require_operational_next_actions: bool = True,
+        reasoning_profile: bool = False,
     ) -> NovaAskResponse:
         context = cls.get_context(db, organization_id)
         answer, execution_mode = cls._llm_answer(
@@ -382,6 +401,7 @@ class NovaCoreService:
             question,
             context,
             require_operational_next_actions=require_operational_next_actions,
+            reasoning_profile=reasoning_profile,
         )
 
         next_actions = (

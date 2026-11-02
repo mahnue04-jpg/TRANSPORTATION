@@ -146,9 +146,15 @@ class NovaTodayDashboardOut(BaseModel):
     trust_labels: list[str] = Field(default_factory=lambda: list(TRUST_LABELS))
 
 
+class NovaTodayPreviousTurn(BaseModel):
+    question: str = Field(min_length=3, max_length=4000)
+    answer: str = Field(min_length=1, max_length=8000)
+
+
 class NovaTodayBrainRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
     public_topic: str | None = Field(default=None, max_length=1200)
+    previous_turn: NovaTodayPreviousTurn | None = None
     organization_id: str | None = None
     action_id: str | None = Field(default=None, max_length=32)
     source_ref_id: str | None = Field(default=None, max_length=80)
