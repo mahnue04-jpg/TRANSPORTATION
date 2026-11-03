@@ -22,7 +22,9 @@ def test_valid_utf8_csv_and_bom():
     ("records.csv", "text/csv", b""),
     ("records.csv", "text/csv", b"\x00a,b"),
     ("records.csv", "text/csv", b"\xff"),
-    ("records.csv", "text/csv", b"   "),\n    ("record\\nname.csv", "text/csv", b"a,b\\n1,2\\n"),\n    ("record\\x7fname.csv", "text/csv", b"a,b\\n1,2\\n"),
+    ("records.csv", "text/csv", b"   "),
+    ("record\nname.csv", "text/csv", b"a,b\n1,2\n"),
+    ("record\x7fname.csv", "text/csv", b"a,b\n1,2\n"),
 ])
 def test_rejects_invalid_upload(filename, content_type, payload):
     with pytest.raises(CSVUploadRejected):
