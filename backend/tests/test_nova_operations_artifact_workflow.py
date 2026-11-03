@@ -103,39 +103,28 @@ def test_tampered_bytes_fail_after_database_approval(tmp_path):
             store.get(acting_tenant_id=owner, manifest=approved)
 
 
-def test_duplicate_registry_record_reveals_nonatomic_orphan_risk(tmp_path):
+def test_file_without_registry_metadata_is_orphaned_after_failed_insert(tmp_path):
     store = LocalPrivateArtifactStore(tmp_path / "private")
     owner = str(uuid4())
     first = _new_manifest(owner, b"a,b\n1,2\n")
-    second = _new_manifest(owner, b"a,b\n3,4\n")
+    orphan = _new_manifest(owner, b"a,b\n3,4\n")
     with sqlite3.connect(":memory:") as connection:
         initialize_registry(connection)
         _persist(connection, store, owner, first, b"a,b\n1,2\n")
-        # Simulate SQL failure after a successful second file write by
-        # pre-creating the same primary-key row. The file remains orphaned.
-        save_manifest(connection, acting_tenant_id=owner, manifest=second)
-        other_owner = str(uuid4())
-        conflicting = build_artifact_manifest(
-            acting_tenant_id=other_owner,
-            job=TenantJobScope(tenant_id=other_owner, job_id=str(uuid4())),
-            artifact_id=str(uuid4()), content=b"x,y\n5,6\n",
-        )
         store.put(
-            acting_tenant_id=other_owner,
-            manifest=conflicting, content=b"x,y\n5,6\n",
+            acting_tenant_id=owner, manifest=orphan,
+            content=b"a,b\n3,4\n",
         )
-        with pytest.raises(sqlite3.IntegrityError):
-            save_manifest(
-                connection, acting_tenant_id=owner, manifest=first
+        # Simulate an interrupted metadata write after the file was created:
+        # no row is inserted for the orphan. It cannot be retrieved using
+        # the registry even though the private file remains on disk.
+        with pytest.raises(TenantAccessDenied):
+            load_manifest(
+                connection, acting_tenant_id=owner,
+                job=orphan.job, artifact_id=orphan.artifact_id,
             )
-        # Existing metadata must remain intact after duplicate rejection.
         assert load_manifest(
             connection, acting_tenant_id=owner,
             job=first.job, artifact_id=first.artifact_id,
         ) == first
-        with pytest.raises(TenantAccessDenied):
-            load_manifest(
-                connection, acting_tenant_id=other_owner,
-                job=conflicting.job, artifact_id=conflicting.artifact_id,
-            )
-    assert len(list((tmp_path / "private").iterdir())) == 3
+    assert len(list((tmp_path / "private").iterdir())) == 2
