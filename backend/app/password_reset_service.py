@@ -136,6 +136,10 @@ def _public_base_url() -> str:
 def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
     if _sendgrid_configured():
         return _send_reset_via_sendgrid(to_email=to_email, reset_url=reset_url)
+    if (os.getenv("SENDGRID_API_KEY") or "").strip() or (os.getenv("SENDGRID_FROM_EMAIL") or "").strip():
+        # Partial HTTPS configuration must not silently fall back to SMTP.
+        logger.warning("password_reset_email_skipped reason=incomplete_https_config")
+        return {"attempted": False, "sent": False, "reason": "not_configured"}
     if not password_reset_email_configured():
         logger.info("password_reset_email_skipped reason=not_configured")
         return {"attempted": False, "sent": False, "reason": "not_configured"}
