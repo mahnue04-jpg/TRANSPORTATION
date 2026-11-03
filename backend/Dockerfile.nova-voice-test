@@ -1,0 +1,31 @@
+# Dedicated temporary validation-host image. The production Dockerfile is unchanged.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=10000 PYTHONPATH=/app
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends espeak-ng espeak-ng-data libgomp1 libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-nova-voice-test.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-nova-voice-test.txt
+COPY . .
+
+RUN python app/core/nova/creative_studio/acquire_kokoro.py \
+      --destination /opt/nova-model \
+      --revision f3ff3571791e39611d31c381e3a41a3af07b4987 --download \
+    && printf '%s\n' \
+      '496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4  /opt/nova-model/kokoro-v1_0.pth' \
+      '5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f  /opt/nova-model/config.json' \
+      '0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff  /opt/nova-model/voices/af_heart.pt' \
+      | sha256sum --check
+
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+    NOVA_CREATIVE_VOICE_PROVIDER=nova_local NOVA_LOCAL_VOICE_ENABLED=true \
+    NOVA_LOCAL_VOICE_MODEL_DIR=/opt/nova-model OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 \
+    NOVA_CREATIVE_IMAGE_LIVE_ENABLED=false NOVA_CREATIVE_VIDEO_LIVE_ENABLED=false \
+    NOVA_CREATIVE_KLING_LIVE_ENABLED=false NOVA_CREATIVE_VOICE_LIVE_ENABLED=false \
+    NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED=false \
+    NOVA_STRIPE_LIVE_ENABLED=false HEALTH_ISF_STRIPE_ENABLED=false
+
+CMD ["python", "scripts/run_nova_voice_test.py"]

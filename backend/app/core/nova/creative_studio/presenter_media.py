@@ -121,15 +121,23 @@ def _write_ass(cues: list[dict], ass: Path, *, play_res_x: int, play_res_y: int,
 
 
 @serialized_media
-def caption_presenter(video: Path, cues: list[dict]):
+def caption_presenter(video: Path, cues: list[dict], *, output_preset: str | None = None):
     if not cues:
         raise RuntimeError('Timed presenter captions are missing.')
     font_dir = Path(__file__).parent / 'fonts'
     if not (font_dir / 'DejaVuSans.ttf').is_file():
         raise RuntimeError('Bundled presenter caption font is missing.')
+    # Keep the original talking-head layout by default. Body video uses its
+    # selected canvas instead of being squeezed into the square head layout.
+    layouts = {None: (512, 640, 23), "9:16": (720, 1280, 28),
+               "16:9": (1280, 720, 28), "1:1": (720, 720, 28)}
+    if output_preset not in layouts:
+        raise RuntimeError('Unsupported presenter caption output preset.')
+    width, height, font_size = layouts[output_preset]
+    content_height = height - 128
     # Pad below the original frame. Never crop or cover provider watermarks.
     ass = video.with_suffix('.ass')
-    _write_ass(cues, ass, play_res_x=512, play_res_y=640, font_size=23)
+    _write_ass(cues, ass, play_res_x=width, play_res_y=height, font_size=font_size)
     srt = video.with_suffix('.srt')
     srt.write_text(srt_text(cues), encoding='utf-8')
     output = video.with_name(video.stem + '-captioned.mp4')
@@ -138,7 +146,7 @@ def caption_presenter(video: Path, cues: list[dict]):
     escaped_path = str(ass).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
     escaped_fonts = str(font_dir).replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
     _encode(['-threads', '1', '-filter_threads', '1', '-i', str(video), '-vf',
-             f"scale=512:512:force_original_aspect_ratio=decrease,pad=512:640:(ow-iw)/2:0:color=0x07111f,subtitles='{escaped_path}':fontsdir='{escaped_fonts}'",
+             f"scale={width}:{content_height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:0:color=0x07111f,setsar=1,subtitles='{escaped_path}':fontsdir='{escaped_fonts}'",
              '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-tune', 'zerolatency',
              '-c:a', 'copy', '-movflags', '+faststart', str(output)], 96 * MIB)
     return output, srt

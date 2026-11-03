@@ -1091,11 +1091,21 @@ class CreativeStudioService(ShortDramaMixin):
             "scene_count": len(scenes),
         }
 
-    def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None, voice: str | None = None, presenter: bool = False) -> dict[str, Any]:
+    def request_voice_generation(self, owner_id: str, project_id: str, *, script: str | None = None, voice: str | None = None, presenter: bool = False, enforce_paid_budget: bool = False) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         if project.project_type == "short_drama":
+            if enforce_paid_budget:
+                self.require_budget_confirmation_for_paid(owner_id, project_id)
             return self.generate_drama_voices(owner_id, project_id)
+        selected_provider = voice_provider()
+        if enforce_paid_budget and selected_provider.provider_id != "nova_local_voice":
+            self.require_budget_confirmation_for_paid(owner_id, project_id)
         job = self._start_job(owner_id, project_id, "voice")
+        if selected_provider.provider_id == "nova_local_voice":
+            # Persist the provider before starting the child so an interrupted
+            # request remains identifiable after application restart.
+            job.provider = selected_provider.provider_id
+            self.store.save_job(job)
         text = script or ""
         if not text:
             assets = self.store.list_assets(project_id, owner_id)
@@ -1115,7 +1125,7 @@ class CreativeStudioService(ShortDramaMixin):
             voice_args['voice'] = voice
         if presenter:
             voice_args['presenter'] = True
-        result = voice_provider().generate(**voice_args)
+        result = selected_provider.generate(**voice_args)
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         asset = self._save_text_asset(
@@ -1128,7 +1138,7 @@ class CreativeStudioService(ShortDramaMixin):
             metadata={"provider_result": {k: v for k, v in result.items() if k != "url"}},
             url=generated_url,
         )
-        self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=voice_provider().provider_id)
+        self._finish_job(job, status=status, message=str(result.get("message") or status), asset_ids=[asset.id], provider=selected_provider.provider_id)
         return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": generated_url}
 
     @serialized_media
@@ -2468,9 +2478,25 @@ class CreativeStudioService(ShortDramaMixin):
         job = next((row for row in self.store.list_jobs(project_id, owner_id) if row.id == job_id), None)
         if job is None:
             raise CreativeStudioError("NOT_FOUND", "Job not found", http_status=404)
+        if job.provider == "nova_local_voice" and job.status == "RUNNING":
+            try:
+                started = datetime.fromisoformat(job.created_at)
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                expired = (datetime.now(timezone.utc) - started).total_seconds() > 180
+            except (TypeError, ValueError):
+                expired = False
+            if expired:
+                # The local child has a 120-second hard timeout. Polling only
+                # records the interruption; it never starts another generation.
+                self._finish_job(
+                    job, status="ERROR",
+                    message="Local narration was interrupted or exceeded its runtime. Generate it again when ready.",
+                    asset_ids=job.result_asset_ids, provider=job.provider,
+                )
         lip_sync = None
         paid = None
-        if job.provider == "nova_offline_montage":
+        if job.provider in {"nova_offline_montage", "nova_local_voice"}:
             lip_sync = False
             paid = False
         elif job.provider in {"nova_walking_presenter", "nova_walking_commercial"}:
@@ -2478,7 +2504,9 @@ class CreativeStudioService(ShortDramaMixin):
             paid = False
         return {
             "job": job.as_dict(),
-            "ready": job.status in {"GENERATED", "ERROR"},
+            "ready": job.status in {"GENERATED", "ERROR"} or (
+                job.provider == "nova_local_voice" and job.status in {"DISABLED", "CONFIG_REQUIRED"}
+            ),
             "lip_sync": lip_sync,
             "paid_provider_charges": paid,
         }
