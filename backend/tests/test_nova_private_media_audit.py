@@ -33,3 +33,15 @@ def test_audit_is_read_only_and_does_not_read_asset_files(tmp_path):
     assert result["private_reference"] == 0
     assert original.read_bytes() == b"original-unchanged"
     assert tuple(tmp_path.iterdir()) == (original,)
+
+
+def test_malformed_private_references_require_review():
+    rows = [
+        asset("private-media://wrong.mp4", source="owner_video_import"),
+        asset("private-media://imported_video_abcdef123456.mp4/extra", source="owner_import"),
+        asset("private-media://imported_video_abcdef123456.mp4?token=bad", approved=True),
+    ]
+    result = audit_protected_media(rows)
+    assert result["protected_total"] == 3
+    assert result["private_reference"] == 0
+    assert result["missing_reference_requires_review"] == 3
