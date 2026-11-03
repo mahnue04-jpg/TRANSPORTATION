@@ -36,3 +36,53 @@ def test_nonimport_name_still_served_and_import_path_cannot_bypass(tmp_path: Pat
     client.app.mount("/media/nova-creative", GuardedCreativeStaticFiles(directory=tmp_path))
     assert client.get("/media/nova-creative/imported_video_hidden.mp4").status_code == 404
     assert client.get("/media/nova-creative/public-thumbnail.png").content == b"thumbnail"
+
+
+def test_imported_original_saved_outside_public_mount_and_owner_can_read(tmp_path, monkeypatch):
+    """Private asset reference remains owner-readable, but not static-readable."""
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    public_dir = tmp_path / "public"
+    private_dir = tmp_path / "private"
+    public_dir.mkdir()
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(public_dir))
+    monkeypatch.setenv("NOVA_CREATIVE_PRIVATE_MEDIA_DIR", str(private_dir))
+    monkeypatch.setattr(video_import, "validate_video", lambda path: {
+        "duration_seconds": 1.0, "video_codec": "h264",
+        "audio_codec": "aac", "decode_verified": True,
+    })
+    service = CreativeStudioService(CreativeStudioStore())
+    project_id = service.create_project("owner", {
+        "title": "Private originals", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"mock-private-original-no-real-codec"
+    asset = service.import_finished_video("owner", project_id, original, content_type="video/mp4")["asset"]
+    assert asset["url"].startswith("private-media://")
+    path, mime, _ = service.open_asset_file("owner", project_id, asset["id"])
+    assert path.read_bytes() == original
+    assert mime == "video/mp4"
+    assert path.parent == private_dir
+    assert not list(public_dir.glob("imported_video_*.mp4"))
+    app = FastAPI()
+    app.mount("/media/nova-creative", GuardedCreativeStaticFiles(directory=public_dir))
+    client = TestClient(app)
+    assert client.get("/media/nova-creative/" + path.name).status_code == 404
+    from app.core.nova.creative_studio.service import CreativeStudioError
+    import pytest
+    with pytest.raises(CreativeStudioError) as exc:
+        service.open_asset_file("other-owner", project_id, asset["id"])
+    assert exc.value.http_status == 404
+
+
+def test_private_root_cannot_be_configured_under_public_static_root(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio.providers import _creative_private_media_root
+    import pytest
+    public_dir = tmp_path / "public"
+    public_dir.mkdir()
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(public_dir))
+    monkeypatch.setenv("NOVA_CREATIVE_PRIVATE_MEDIA_DIR", str(public_dir / "private"))
+    with pytest.raises(ValueError, match="public static root"):
+        _creative_private_media_root()
