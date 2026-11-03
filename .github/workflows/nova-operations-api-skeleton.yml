@@ -16,6 +16,8 @@ on:
       - 'backend/app/core/nova/work_revenue/operations_local_artifact_store.py'
       - 'backend/tests/test_nova_operations_local_artifact_store.py'
       - 'backend/tests/test_nova_operations_artifact_workflow.py'
+      - 'backend/app/core/nova/work_revenue/operations_artifact_inventory.py'
+      - 'backend/tests/test_nova_operations_artifact_inventory.py'
       - '.github/workflows/nova-operations-api-skeleton.yml'
   workflow_dispatch:
 
@@ -35,4 +37,4 @@ jobs:
         run: python -m pip install 'pytest>=8,<9' 'fastapi>=0.100,<1' 'sqlalchemy>=2,<3'
       - name: Run fail-closed contract tests
         working-directory: backend
-        run: PYTHONPATH=. python -m pytest --noconftest -q tests/test_nova_operations_api_skeleton.py tests/test_nova_operations_csv_preflight.py tests/test_nova_operations_tenant_scope.py tests/test_nova_operations_artifact_manifest.py tests/test_nova_operations_artifact_registry.py tests/test_nova_operations_local_artifact_store.py tests/test_nova_operations_artifact_workflow.py
+        run: PYTHONPATH=. python -m pytest --noconftest -q tests/test_nova_operations_api_skeleton.py tests/test_nova_operations_csv_preflight.py tests/test_nova_operations_tenant_scope.py tests/test_nova_operations_artifact_manifest.py tests/test_nova_operations_artifact_registry.py tests/test_nova_operations_local_artifact_store.py tests/test_nova_operations_artifact_workflow.py tests/test_nova_operations_artifact_inventory.py
