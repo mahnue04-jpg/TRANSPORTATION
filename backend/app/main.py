@@ -24,6 +24,7 @@ from zipfile import BadZipFile
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from app.core.nova.creative_studio.public_media_guard import GuardedCreativeStaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 
@@ -2692,9 +2693,9 @@ def assistant_confirm(
 # Serve static files from backend/static/
 _static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static"))
 if os.path.isdir(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+    app.mount("/static", GuardedCreativeStaticFiles(directory=_static_dir), name="static")
     # Keep an assets alias for SPA bundle compatibility.
-    app.mount("/assets", StaticFiles(directory=_static_dir), name="assets")
+    app.mount("/assets", GuardedCreativeStaticFiles(directory=_static_dir), name="assets")
 
 # Creative Studio media uses the Render persistent disk when available so
 # generated images/audio/video survive deploys and restarts. The directory
@@ -2706,7 +2707,7 @@ try:
     os.makedirs(_nova_media_dir, exist_ok=True)
     app.mount(
         "/media/nova-creative",
-        StaticFiles(directory=_nova_media_dir),
+        GuardedCreativeStaticFiles(directory=_nova_media_dir),
         name="nova-creative-media",
     )
 except OSError:
