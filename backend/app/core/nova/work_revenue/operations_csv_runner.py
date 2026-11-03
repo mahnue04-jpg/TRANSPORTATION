@@ -42,11 +42,13 @@ def prepare_csv_job(
         kind="csv_cleanup", input_sha256=fingerprint,
     )
     state = get_job_state(db, tenant_id=tenant_id, job_id=job_id)
-    if state != "queued":
+    if state not in ("queued", "running"):
         raise JobConflict("Job is not available for new execution")
-    claim = claim_job(db, tenant_id=tenant_id, now=now)
-    if claim is None or claim.job_id != job_id:
-        raise JobConflict("Job is not next in tenant queue")
+    # Claim the exact idempotent request, never another queued tenant job.
+    # Running jobs can be reclaimed only after their lease has expired.
+    claim = claim_job(db, tenant_id=tenant_id, now=now, job_id=job_id)
+    if claim is None:
+        raise JobConflict("Job is not available for claim or lease recovery")
     try:
         report = clean_csv_text(raw_csv, max_bytes=max_bytes)
     except Exception:
