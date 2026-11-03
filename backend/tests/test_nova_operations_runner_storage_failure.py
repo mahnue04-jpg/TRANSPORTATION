@@ -4,26 +4,15 @@ import sqlite3
 import pytest
 
 from app.core.nova.work_revenue.operations_csv_runner import prepare_csv_job
-from app.core.nova.work_revenue.operations_job_queue import get_job_state
-from app.core.nova.work_revenue.operations_artifact_review import read_review_artifact
+from app.core.nova.work_revenue.operations_job_queue import get_job_state, ensure_schema
+from app.core.nova.work_revenue.operations_artifact_review import read_review_artifact, ensure_artifact_schema
 
 
 def test_runner_recovers_after_atomic_artifact_failure_and_restart(tmp_path):
     path = tmp_path / "failure.sqlite"
     db = sqlite3.connect(path)
-    db.execute(
-        """CREATE TABLE IF NOT EXISTS nova_operations_offline_artifacts (
-            artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            tenant_id TEXT NOT NULL,
-            csv_text TEXT NOT NULL,
-            output_sha256 TEXT NOT NULL,
-            review_state TEXT NOT NULL DEFAULT 'awaiting_review',
-            reviewer_id TEXT,
-            reviewed_at INTEGER,
-            UNIQUE(tenant_id, job_id)
-        )"""
-    )
+    ensure_schema(db)
+    ensure_artifact_schema(db)
     db.execute(
         """CREATE TRIGGER fail_artifact BEFORE INSERT ON nova_operations_offline_artifacts
            BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"""
