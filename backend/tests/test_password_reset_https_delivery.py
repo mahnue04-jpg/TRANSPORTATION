@@ -148,3 +148,22 @@ def test_incomplete_sendgrid_config_does_not_send_https():
             )
     assert result["reason"] == "not_configured"
     send.assert_not_called()
+
+
+def test_partial_https_config_prevents_smtp_fallback():
+    config = {
+        "SENDGRID_API_KEY": "placeholder",
+        "SENDGRID_FROM_EMAIL": "",
+        "AUTH_SMTP_HOST": "smtp.example.org",
+        "AUTH_SMTP_FROM": "noreply@example.org",
+    }
+    with patch.dict("os.environ", config):
+        with patch.object(reset.smtplib, "SMTP") as smtp:
+            with patch.object(reset, "urlopen") as https_send:
+                result = reset._send_reset_email(
+                    to_email="person@example.org",
+                    reset_url="https://example.org/nova/reset-password",
+                )
+    assert result == {"attempted": False, "sent": False, "reason": "not_configured"}
+    smtp.assert_not_called()
+    https_send.assert_not_called()
