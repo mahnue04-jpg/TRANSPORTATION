@@ -82,8 +82,9 @@ def enqueue_job(
 
 def claim_job(
     db: sqlite3.Connection, *, tenant_id: str, now: int, lease_seconds: int = 60,
+    job_id: int | None = None,
 ) -> ClaimedJob | None:
-    if not tenant_id or lease_seconds < 1 or lease_seconds > 3600:
+    if not tenant_id or lease_seconds < 1 or lease_seconds > 3600 or (job_id is not None and (not isinstance(job_id, int) or job_id <= 0)) :
         raise JobConflict("Invalid tenant or lease duration")
     token = secrets.token_hex(24)
     # BEGIN IMMEDIATE serializes claims across independent SQLite connections.
@@ -95,8 +96,9 @@ def claim_job(
                WHERE tenant_id=? AND attempts < max_attempts
                  AND ((state='queued' AND available_at<=?)
                    OR (state='running' AND lease_until<=?))
+                 AND (? IS NULL OR job_id=?)
                ORDER BY job_id LIMIT 1""",
-            (tenant_id, now, now),
+            (tenant_id, now, now, job_id, job_id),
         ).fetchone()
         if row is None:
             db.commit()
