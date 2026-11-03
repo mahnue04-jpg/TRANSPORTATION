@@ -216,3 +216,69 @@ def test_database_cleanup_preserves_originals_after_session_reopen(tmp_path, mon
         ).hexdigest()
     finally:
         db2.close()
+
+
+def test_authenticated_http_import_download_after_reset(tmp_path, monkeypatch):
+    """HTTP import/download requires owner and returns original bytes after cleanup."""
+    import hashlib
+    import importlib
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.auth import UserContext, get_current_user_context
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.router import router
+    from app.core.nova.router import require_nova_access
+    from app.db.session import get_db
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    monkeypatch.setattr(video_import, "validate_video", lambda path: {
+        "duration_seconds": 30.0, "width": 720, "height": 1280,
+        "video_codec": "h264", "audio_codec": "aac", "decode_verified": True,
+    })
+    service = CreativeStudioService(CreativeStudioStore())
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    monkeypatch.setattr(routes, "get_service", lambda db=None: service)
+    user = {"id": "import-owner"}
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_nova_access] = lambda: None
+    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_current_user_context] = lambda: UserContext(
+        user_id=user["id"], email="test-owner@example.invalid",
+        role="staff", organization_id="test-org",
+    )
+    project_id = service.create_project("import-owner", {
+        "title": "HTTP protected commercial", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"fake-video-bytes-for-http-transport-only"
+    client = TestClient(app)
+    uploaded = client.post(
+        f"/api/nova/creative/projects/{project_id}/finished-video-upload",
+        files={"file": ("approved.mp4", original, "video/mp4")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    asset_id = uploaded.json()["asset"]["id"]
+    url = f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file"
+    result = client.get(url)
+    assert result.status_code == 200, result.text
+    assert result.headers["content-type"].startswith("video/mp4")
+    assert "no-store" in result.headers["cache-control"]
+    assert hashlib.sha256(result.content).hexdigest() == hashlib.sha256(original).hexdigest()
+    assert client.get(url + "?token=forbidden").status_code == 400
+
+    service.reset_project_media("import-owner", project_id)
+    again = client.get(url)
+    assert again.status_code == 200
+    assert again.content == original
+
+    user["id"] = "other-owner"
+    assert client.get(url).status_code == 404
+    assert client.post(
+        f"/api/nova/creative/projects/{project_id}/finished-video-upload",
+        files={"file": ("approved.mp4", original, "video/mp4")},
+    ).status_code == 404
