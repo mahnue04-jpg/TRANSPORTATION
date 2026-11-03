@@ -135,6 +135,7 @@ def test_real_h264_aac_mp4_survives_cleanup(tmp_path, monkeypatch):
         "owner", project_id, original, content_type="video/mp4"
     )["reused"] is True
 
+    media_dir.mkdir(parents=True, exist_ok=True)
     preview = media_dir / "temporary-preview.mp4"
     preview.write_bytes(b"temporary-preview")
     store.save_asset(CreativeAsset(
