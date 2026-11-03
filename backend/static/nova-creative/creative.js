@@ -1515,14 +1515,19 @@
       balanceText,
       "Paid render allowed by quote: " + (quote.paid_render_allowed ? "yes" : "no"),
       "Owner budget confirmed: " + (quote.owner_budget_confirmed ? "yes" : "no"),
-      "Auto purchase/top-up: off"
+      "Auto purchase/top-up: off",
+      "Important: the estimate is NOT a cumulative spending cap; repeated renders may incur additional charges."
     ];
+    if (!quote.paid_render_allowed) {
+      lines.push("Paid renders remain blocked until provider readiness and funding are verified.");
+      lines.push("Budget acknowledgement only records your consent; it does not start generation.");
+    }
     (quote.line_items || []).forEach(function (item) {
       lines.push("- " + item.label + ": $" + String(item.estimated_usd));
     });
     el.innerHTML = lines.map(function (line) { return "<div>" + escapeHtml(line) + "</div>"; }).join("");
     if (confirmBtn) {
-      confirmBtn.disabled = !quote.paid_render_allowed || !!quote.owner_budget_confirmed;
+      confirmBtn.disabled = !!quote.owner_budget_confirmed;
     }
   }
 
@@ -1563,7 +1568,7 @@
           })
         });
         renderPreflight(body.quote || latestPreflight);
-        showBanner("Budget confirmation saved for this project. Still no automatic purchases.", true);
+        showBanner("Budget acknowledgement saved. Paid rendering remains blocked until provider funding/readiness is verified; no purchases made.", true);
       } catch (err) {
         showBanner(err.message || "Budget confirmation failed.", false);
         confirmBudgetBtn.disabled = false;
@@ -2282,7 +2287,15 @@
       }
       await refreshAssets();
     } catch (err) {
-      showBanner(err.message || "Presenter action failed.", false);
+      var details = String((err && err.message) || "Presenter action failed.");
+      if (details.indexOf("BUDGET_REAPPROVAL_REQUIRED") !== -1 ||
+          details.indexOf("BUDGET_QUOTE_CHANGED") !== -1) {
+        details += " Run Preflight again and review the current estimate before approving.";
+      } else if (details.indexOf("PROVIDER_FUNDING_UNVERIFIED") !== -1 ||
+                 details.indexOf("VOICE_PROVIDER_NOT_READY") !== -1) {
+        details += " No paid render was started. Check provider readiness; do not repeatedly retry.";
+      }
+      showBanner(details, false);
     } finally {
       button.disabled = false;
     }

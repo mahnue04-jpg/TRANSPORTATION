@@ -168,3 +168,23 @@ class NovaCreativeWebhookEvent(Base):
     order_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     processing_result: Mapped[str] = mapped_column(String(48), nullable=False, default="ok")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeSpendReservation(Base):
+    """Durable reservation record; no paid execution is authorized by this table alone."""
+
+    __tablename__ = "nova_creative_spend_reservations"
+    __table_args__ = (
+        Index("ix_nova_creative_spend_owner_project", "owner_id", "project_id"),
+    )
+
+    # Stable idempotency key, unique within the table via its primary key.
+    request_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    reserved_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="reserved")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)

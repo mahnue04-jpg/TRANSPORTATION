@@ -1775,13 +1775,19 @@ class CreativeStudioService(ShortDramaMixin):
     ) -> dict[str, Any]:
         project = self._project_or_404(owner_id, project_id)
         quote = self.preflight_quote(owner_id, project_id)
-        if confirmed and quote.get("paid_render_allowed") is False:
+        # Reject stale or missing price acknowledgements; saving approval
+        # is not permission to spend more than the quote the owner saw.
+        expected = float(quote["estimated_total_usd"])
+        if confirmed and (
+            acknowledged_estimate_usd is None
+            or abs(float(acknowledged_estimate_usd) - expected) > 0.005
+        ):
             raise CreativeStudioError(
-                "PAID_RENDER_BLOCKED",
-                "Paid provider renders are blocked until fal balance is funded and owner-approved. "
-                "Local motion / offline assembly may still run without provider charges.",
+                "BUDGET_QUOTE_CHANGED",
+                "The estimate changed or was not acknowledged. Run preflight again and review the current quote.",
                 http_status=422,
             )
+        # Acknowledging the quote is separate from authorizing provider execution.
         meta = dict(project.metadata or {})
         meta["budget_confirmation"] = {
             "confirmed": bool(confirmed),
@@ -1795,7 +1801,7 @@ class CreativeStudioService(ShortDramaMixin):
         self.store.save_project(project)
         return {"project_id": project_id, "budget_confirmation": meta["budget_confirmation"], "quote": quote}
 
-    def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str) -> None:
+    def require_budget_confirmation_for_paid(self, owner_id: str, project_id: str, *, provider: str | None = None) -> None:
         from app.core.nova.creative_studio.flags import (
             image_provider_live_enabled,
             talking_presenter_provider_live_enabled,
@@ -1815,6 +1821,47 @@ class CreativeStudioService(ShortDramaMixin):
         project = self._project_or_404(owner_id, project_id)
         confirmation = (project.metadata or {}).get("budget_confirmation") or {}
         if confirmation.get("confirmed") is True:
+            # A later, higher quote invalidates the earlier owner's approval.
+            # This is a quote ceiling, not cumulative provider-spend accounting.
+            quote = self.preflight_quote(owner_id, project_id)
+            approved = confirmation.get("acknowledged_estimate_usd")
+            if approved is None or float(quote["estimated_total_usd"]) > float(approved) + 0.005:
+                raise CreativeStudioError(
+                    "BUDGET_REAPPROVAL_REQUIRED",
+                    "The current project estimate exceeds the approved quote. "
+                    "Run preflight and approve the new estimate before any paid render.",
+                    http_status=422,
+                )
+            # OpenAI voice has its own credential/activation path. A fal-specific
+            # owner-reported balance is not evidence of OpenAI account funding.
+            # Never authorize a different provider based on this bypass.
+            if provider == "voice":
+                from app.core.nova.creative_studio.flags import voice_provider_configured
+                if not voice_provider_live_enabled() or not voice_provider_configured():
+                    raise CreativeStudioError(
+                        "VOICE_PROVIDER_NOT_READY",
+                        "Voice provider is not configured and enabled; no audio was generated.",
+                        http_status=422,
+                    )
+                # Until durable cost accounting exists, fail closed on repeat
+                # voice requests for a project that already started a voice job.
+                # This is defense in depth, not atomic/concurrency-safe billing.
+                if any(job.kind == "voice" for job in self.store.list_jobs(project_id, owner_id)):
+                    raise CreativeStudioError(
+                        "VOICE_REQUEST_ALREADY_RECORDED",
+                        "A voice generation job already exists for this project. "
+                        "Review it before trying another paid request; no retry was started.",
+                        http_status=422,
+                    )
+                return
+            quote = self.preflight_quote(owner_id, project_id)
+            if quote.get("paid_render_allowed") is not True:
+                raise CreativeStudioError(
+                    "PROVIDER_FUNDING_UNVERIFIED",
+                    "Budget approval is recorded, but provider funding/readiness "
+                    "cannot be verified. No paid render was started.",
+                    http_status=422,
+                )
             return
         raise CreativeStudioError(
             "BUDGET_CONFIRMATION_REQUIRED",

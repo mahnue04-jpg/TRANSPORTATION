@@ -13,6 +13,7 @@ from app.core.nova.creative_studio.db_models import (
     NovaCreativeOrder,
     NovaCreativeProject,
     NovaCreativeScene,
+    NovaCreativeSpendReservation,
     NovaCreativeWebhookEvent,
 )
 from app.db.session import Base, engine as default_engine
@@ -24,6 +25,7 @@ CREATIVE_TABLES = (
     NovaCreativeAsset.__table__,
     NovaCreativeScene.__table__,
     NovaCreativeJob.__table__,
+    NovaCreativeSpendReservation.__table__,
     NovaCreativeOrder.__table__,
     NovaCreativeWebhookEvent.__table__,
 )
