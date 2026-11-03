@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'backend/app/core/nova/work_revenue/operations_csv_api.py'
-      - 'backend/tests/test_nova_operations_api_skeleton.py'
+      - 'backend/tests/test_nova_operations_api_skeleton.py tests/test_nova_operations_csv_preflight.py'
+      - 'backend/app/core/nova/work_revenue/operations_csv_preflight.py'
+      - 'backend/tests/test_nova_operations_csv_preflight.py'
       - '.github/workflows/nova-operations-api-skeleton.yml'
   workflow_dispatch:
 
