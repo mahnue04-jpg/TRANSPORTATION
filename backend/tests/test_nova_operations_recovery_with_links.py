@@ -35,15 +35,15 @@ def _scan(at, filenames):
     )
 
 
-def _new_link(connection):
+def _new_link(connection, now=1000):
     tenant = str(uuid4())
     job = TenantJobScope(tenant_id=tenant, job_id=str(uuid4()))
     lease = acquire_upload_lease(
-        connection, acting_tenant_id=tenant, job=job, now=1000,
+        connection, acting_tenant_id=tenant, job=job, now=now,
     )
     link = link_artifact_to_active_upload(
         connection, acting_tenant_id=tenant, lease=lease,
-        artifact_id=str(uuid4()), now=1001,
+        artifact_id=str(uuid4()), now=now + 1,
     )
     name = sha256(link.storage_key.encode("utf-8")).hexdigest() + ".artifact"
     return tenant, lease, name
@@ -75,7 +75,7 @@ def test_active_lease_still_protects_every_orphan():
     with sqlite3.connect(":memory:") as connection:
         initialize_upload_leases(connection)
         initialize_upload_artifact_links(connection)
-        _, _, linked = _new_link(connection)
+        _, _, linked = _new_link(connection, now=4000)
         unlinked = sha256(b"unlinked").hexdigest() + ".artifact"
         files = (linked, unlinked)
         result = audit_with_artifact_links(
