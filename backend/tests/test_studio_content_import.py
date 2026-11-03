@@ -19,8 +19,12 @@ def studio(tmp_path, monkeypatch):
     def forbidden(*a, **kw): raise AssertionError('No provider may be called')
     for name in ['image_provider', 'voice_provider', 'video_provider']:
         monkeypatch.setattr(service_module, name, forbidden)
-    root = lambda: (tmp_path, '/media/test')
-    resolve = lambda url: tmp_path / Path(url).name if url else None
+    public_dir = tmp_path / 'public'
+    private_dir = tmp_path / 'private'
+    public_dir.mkdir()
+    root = lambda: (public_dir, '/media/test')
+    resolve = lambda url: ((private_dir if str(url).startswith('private-media://') else public_dir) / Path(url).name) if url else None
+    monkeypatch.setattr(providers, '_creative_private_media_root', lambda: private_dir)
     for module in [service_module, providers]:
         monkeypatch.setattr(module, '_creative_media_root_and_prefix', root)
         monkeypatch.setattr(module, '_resolve_creative_media_url', resolve)

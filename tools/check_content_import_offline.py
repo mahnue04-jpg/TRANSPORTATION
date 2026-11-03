@@ -117,6 +117,8 @@ class ImportTests(unittest.TestCase):
         self.svc=Service(self.root)
         media=ModuleType(P+'providers')
         media._creative_media_root_and_prefix=lambda:(self.root,'/media/test')
+        media._creative_private_media_root=lambda:self.root
+        media._PRIVATE_MEDIA_PREFIX='private-media://'
         media._resolve_creative_media_url=lambda url: self.root/Path(url).name if url else None
         sys.modules[media.__name__]=media
         ns['_creative_media_root_and_prefix']=media._creative_media_root_and_prefix

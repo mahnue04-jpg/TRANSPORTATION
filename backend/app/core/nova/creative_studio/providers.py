@@ -119,6 +119,34 @@ def _creative_media_root_and_prefix() -> tuple[Path, str]:
     )
 
 
+_PRIVATE_MEDIA_PREFIX = "private-media://"
+
+
+def _creative_private_media_root() -> Path:
+    """Private originals must NEVER be placed under a publicly mounted static root.
+
+    A Render persistent disk at /data preserves files across restarts. When no
+    disk is present, the backend-private fallback is deliberately ephemeral;
+    deployment readiness must separately verify durable storage.
+    """
+    configured = str(os.getenv("NOVA_CREATIVE_PRIVATE_MEDIA_DIR") or "").strip()
+    if configured:
+        selected = Path(configured).resolve()
+    elif Path("/data").is_dir():
+        selected = Path("/data/nova_creative_private").resolve()
+    else:
+        selected = (Path(__file__).resolve().parents[4] / "private" / "nova-creative").resolve()
+
+    # Fail closed if a configuration points to a directory served as static media.
+    public_root, _ = _creative_media_root_and_prefix()
+    public_roots = (public_root, _ephemeral_media_root(), Path(__file__).resolve().parents[4] / "static")
+    for public in public_roots:
+        resolved_public = public.resolve()
+        if selected == resolved_public or resolved_public in selected.parents:
+            raise ValueError("Private Studio media directory cannot be inside a public static root")
+    return selected
+
+
 def _media_filename(raw: str) -> str | None:
     name = raw.rsplit("/", 1)[-1].strip()
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
@@ -130,6 +158,11 @@ def _resolve_creative_media_url(value: str | None) -> Path | None:
     raw = str(value or "").strip()
     if not raw:
         return None
+    if raw.startswith(_PRIVATE_MEDIA_PREFIX):
+        name = raw[len(_PRIVATE_MEDIA_PREFIX):]
+        if not re.fullmatch(r"imported_video_[a-z0-9]{12}\.mp4", name):
+            return None
+        return _creative_private_media_root() / name
     root, prefix = _creative_media_root_and_prefix()
     filename = None
     for known in (prefix, _MEDIA_PREFIX, _EPHEMERAL_PREFIX):

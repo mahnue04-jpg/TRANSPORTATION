@@ -2101,7 +2101,8 @@ class CreativeStudioService(ShortDramaMixin):
                 path = _resolve_creative_media_url(existing.url)
                 if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
                     return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
-        root, prefix = _creative_media_root_and_prefix()
+        from app.core.nova.creative_studio.providers import _creative_private_media_root, _PRIVATE_MEDIA_PREFIX
+        root = _creative_private_media_root()
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="nova-video-import-") as temporary:
             path = Path(temporary) / "upload.mp4"
@@ -2116,7 +2117,7 @@ class CreativeStudioService(ShortDramaMixin):
         try:
             asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="video",
                 title="Imported finished video (owner review)", content="Existing MP4 imported without generation.",
-                status="GENERATED", url=prefix.rstrip("/") + "/" + name,
+                status="GENERATED", url=_PRIVATE_MEDIA_PREFIX + name,
                 metadata={**measured, "source": "owner_video_import", "sha256": digest,
                     "publish_ready": False, "commercial_complete": False, "owner_review_required": True,
                     "captions_verified": False, "lip_sync_verified": False,
@@ -3011,7 +3012,7 @@ class CreativeStudioService(ShortDramaMixin):
         part: str = "media",
     ) -> tuple[Path, str, str]:
         """Owner-scoped file for playback download. Another account gets not found."""
-        from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix, _resolve_creative_media_url
+        from app.core.nova.creative_studio.providers import (_creative_media_root_and_prefix, _resolve_creative_media_url, _creative_private_media_root, _PRIVATE_MEDIA_PREFIX)
 
         requested = str(part or "media").strip().lower()
         if requested not in {"media", "captions"}:
@@ -3021,7 +3022,7 @@ class CreativeStudioService(ShortDramaMixin):
         if asset is None:
             raise CreativeStudioError("NOT_FOUND", "Asset not found", http_status=404)
         path = _resolve_creative_media_url(asset.url)
-        root, _prefix = _creative_media_root_and_prefix()
+        root = _creative_private_media_root() if str(asset.url or "").startswith(_PRIVATE_MEDIA_PREFIX) else _creative_media_root_and_prefix()[0]
         if path is None:
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "This asset has no downloadable file.", http_status=404)
         if requested == "captions":
