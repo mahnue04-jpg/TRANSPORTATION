@@ -33,3 +33,16 @@ def test_no_customer_data_or_paid_provider_calls_in_skeleton():
     source = SOURCE.read_text(encoding="utf-8")
     for forbidden in ("UploadFile", "File(", "requests.", "httpx.", "fal_client", "stripe."):
         assert forbidden not in source
+
+
+def test_no_implicit_router_registration_in_application_entrypoint():
+    """The skeleton is intentionally not mounted by the application."""
+    root = SOURCE.parents[3]
+    candidate_paths = (
+        root / "main.py",
+        root / "app" / "main.py",
+    )
+    for candidate in candidate_paths:
+        if candidate.exists():
+            source = candidate.read_text(encoding="utf-8")
+            assert "operations_csv_api" not in source
