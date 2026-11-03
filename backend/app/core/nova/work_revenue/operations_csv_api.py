@@ -5,8 +5,6 @@ validation are implemented. No customer data is accepted or processed.
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import UserContext, get_current_user_context
