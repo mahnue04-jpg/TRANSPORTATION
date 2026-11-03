@@ -4,11 +4,13 @@ This module never opens, moves, hashes, or deletes a media file.
 """
 from __future__ import annotations
 
+import re
 from typing import Iterable, Any
 
 
 PROTECTED_SOURCES = frozenset({"owner_import", "owner_video_import"})
 PRIVATE_SCHEME = "private-media://"
+_VALID_PRIVATE_REFERENCE = re.compile(r"private-media://imported_video_[a-f0-9]{12}\.mp4\Z")
 
 
 def audit_protected_media(assets: Iterable[Any]) -> dict[str, int]:
@@ -30,7 +32,7 @@ def audit_protected_media(assets: Iterable[Any]) -> dict[str, int]:
             continue
         counts["protected_total"] += 1
         url = str(getattr(asset, "url", "") or "").strip()
-        if url.startswith(PRIVATE_SCHEME):
+        if _VALID_PRIVATE_REFERENCE.fullmatch(url):
             counts["private_reference"] += 1
         elif url.startswith(("/media/", "/static/", "/assets/")):
             counts["public_reference_requires_migration"] += 1
