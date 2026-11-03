@@ -23,9 +23,11 @@ def validate_csv_upload(
     *, filename: str, content_type: str | None, payload: bytes,
     max_bytes: int = 1_000_000,
 ) -> CSVUpload:
-    if not isinstance(max_bytes, int) or max_bytes < 1 or max_bytes > 1_000_000:\n        raise CSVUploadRejected("Invalid upload size limit")\n    if not isinstance(filename, str) or not filename.lower().endswith(".csv"):
+    if not isinstance(max_bytes, int) or max_bytes < 1 or max_bytes > 1_000_000:
+        raise CSVUploadRejected("Invalid upload size limit")\n    if not isinstance(filename, str) or not filename.lower().endswith(".csv"):
         raise CSVUploadRejected("A .csv filename is required")
-    if ("/" in filename or "\\" in filename or len(filename) > 128\n            or any(ord(ch) < 32 or ord(ch) == 127 for ch in filename)):
+    if ("/" in filename or "\\" in filename or len(filename) > 128
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in filename)):
         raise CSVUploadRejected("Unsafe CSV filename")
     if content_type not in ("text/csv", "application/vnd.ms-excel", "application/octet-stream"):
         raise CSVUploadRejected("Unsupported CSV content type")
