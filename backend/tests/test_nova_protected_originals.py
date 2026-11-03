@@ -150,3 +150,69 @@ def test_real_h264_aac_mp4_survives_cleanup(tmp_path, monkeypatch):
     assert hashlib.sha256(saved_path.read_bytes()).hexdigest() == digest
     with pytest.raises(Exception):
         service.open_asset_file("different-owner", project_id, asset_id)
+
+
+def test_database_cleanup_preserves_originals_after_session_reopen(tmp_path, monkeypatch):
+    """Exercise SQLAlchemy storage and service file cleanup across DB sessions."""
+    import hashlib
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+    from app.core.nova.creative_studio.schema_ensure import ensure_nova_creative_schema
+    from app.db.session import SessionLocal, engine
+
+    ensure_nova_creative_schema(engine)
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+
+    db = SessionLocal()
+    try:
+        svc = CreativeStudioService(DbCreativeStudioStore(db))
+        project_id = svc.create_project("protected-test-owner", {
+            "title": "SQL cleanup isolation", "project_type": "promo_video",
+            "platform": "TikTok", "duration_target": 30,
+        })["id"]
+        original = tmp_path / "sql-owner-original.mp4"
+        original.write_bytes(b"original-master-file")
+        preview = tmp_path / "sql-disposable-preview.mp4"
+        preview.write_bytes(b"generated-preview")
+        for asset_id, filename, metadata, status in [
+            ("sql-original", original.name, {"source": "owner_video_import"}, "GENERATED"),
+            ("sql-preview", preview.name, {"source": "generated_preview"}, "GENERATED"),
+            ("sql-failed-import", "no-file.mp4", {"source": "owner_import"}, "ERROR"),
+            ("sql-failed-preview", "no-file-2.mp4", {}, "ERROR"),
+        ]:
+            svc.store.save_asset(CreativeAsset(
+                id=asset_id, project_id=project_id, owner_id="protected-test-owner",
+                kind="video", title=asset_id, content="", status=status,
+                url="/media/nova-creative/" + filename, metadata=metadata,
+            ))
+    finally:
+        db.close()
+
+    db2 = SessionLocal()
+    try:
+        svc = CreativeStudioService(DbCreativeStudioStore(db2))
+        assert svc.store.delete_failed_video_assets(project_id, "protected-test-owner") == 1
+        removed = svc.store.delete_assets_by_ids(
+            project_id, "protected-test-owner", {"sql-original", "sql-preview", "sql-failed-import"}
+        )
+        assert [a.id for a in removed] == ["sql-preview"]
+        # Delete by ID removes the preview record; recreate it to exercise service-level unlink.
+        svc.store.save_asset(CreativeAsset(
+            id="sql-preview", project_id=project_id, owner_id="protected-test-owner",
+            kind="video", title="Disposable", content="",
+            url="/media/nova-creative/" + preview.name,
+        ))
+        reset = svc.reset_project_media("protected-test-owner", project_id)
+        assert reset["deleted_media_files"] == 1
+        assert not preview.exists()
+        assert original.read_bytes() == b"original-master-file"
+        rows = {a.id: a for a in svc.store.list_assets(project_id, "protected-test-owner")}
+        assert "sql-original" in rows
+        assert "sql-failed-import" in rows
+        assert "sql-preview" not in rows
+        assert hashlib.sha256(original.read_bytes()).hexdigest() == hashlib.sha256(
+            b"original-master-file"
+        ).hexdigest()
+    finally:
+        db2.close()
