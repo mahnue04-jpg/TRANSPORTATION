@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -10,6 +11,7 @@ import ssl
 from email.message import EmailMessage
 from typing import Any
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -65,10 +67,60 @@ def _test_capture_enabled() -> bool:
     }
 
 
+def _sendgrid_configured() -> bool:
+    return bool(
+        (os.getenv("SENDGRID_API_KEY") or "").strip()
+        and (os.getenv("SENDGRID_FROM_EMAIL") or "").strip()
+    )
+
+
 def password_reset_email_configured() -> bool:
+    if _sendgrid_configured():
+        return True
     host = (os.getenv("AUTH_SMTP_HOST") or os.getenv("MARKETING_SMTP_HOST") or "").strip()
     mail_from = (os.getenv("AUTH_SMTP_FROM") or os.getenv("MARKETING_SMTP_FROM") or "").strip()
     return bool(host and mail_from)
+
+
+def _send_reset_via_sendgrid(*, to_email: str, reset_url: str) -> dict[str, Any]:
+    """Send only through SendGrid's HTTPS API; never log keys, links, or tokens."""
+    mail_from = (os.getenv("SENDGRID_FROM_EMAIL") or "").strip()
+    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": mail_from},
+        "subject": "AMICOR password reset",
+        "content": [{
+            "type": "text/plain",
+            "value": (
+                "Use this one-time link to set a new password. "
+                "It expires in one hour.\n\n"
+                + reset_url
+                + "\n\nIf you did not request a reset, you can ignore this message."
+            ),
+        }],
+    }
+    request = Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            status = response.status
+        if status != 202:
+            logger.warning("password_reset_email_failed provider=sendgrid reason=unexpected_status")
+            return {"attempted": True, "sent": False, "reason": "send_failed"}
+        logger.info("password_reset_email_accepted provider=sendgrid")
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+    except Exception:
+        # Never log exception details: provider errors could contain sensitive headers.
+        logger.warning("password_reset_email_failed provider=sendgrid")
+        return {"attempted": True, "sent": False, "reason": "send_failed"}
 
 
 def _public_base_url() -> str:
@@ -76,11 +128,14 @@ def _public_base_url() -> str:
         os.getenv("AMICOR_PUBLIC_BASE_URL")
         or os.getenv("NOVA_SIGNUP_PUBLIC_BASE_URL")
         or os.getenv("PUBLIC_BASE_URL")
+        or os.getenv("AMICOR_PUBLIC_URL")
         or "https://amicor-health-isf-py.onrender.com"
     ).rstrip("/")
 
 
 def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
+    if _sendgrid_configured():
+        return _send_reset_via_sendgrid(to_email=to_email, reset_url=reset_url)
     if not password_reset_email_configured():
         logger.info("password_reset_email_skipped reason=not_configured")
         return {"attempted": False, "sent": False, "reason": "not_configured"}
