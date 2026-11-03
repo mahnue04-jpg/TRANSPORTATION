@@ -105,3 +105,46 @@ def test_no_provider_configured_skips_delivery():
             )
     assert result == {"attempted": False, "sent": False, "reason": "not_configured"}
     send.assert_not_called()
+
+
+def test_https_request_uses_verified_sender_and_private_authorization():
+    import json
+
+    with patch.dict("os.environ", {
+        "SENDGRID_API_KEY": "placeholder-test-api-key",
+        "SENDGRID_FROM_EMAIL": "noreply@example.org",
+    }):
+        with patch.object(reset, "urlopen", return_value=AcceptedResponse()) as send:
+            with patch.object(reset.smtplib, "SMTP") as smtp:
+                reset._send_reset_email(
+                    to_email="person@example.org",
+                    reset_url="https://example.org/nova/reset-password?token=one-time-value",
+                )
+    request = send.call_args.args[0]
+    assert request.full_url == "https://api.sendgrid.com/v3/mail/send"
+    assert request.get_method() == "POST"
+    assert request.get_header("Authorization") == "Bearer placeholder-test-api-key"
+    payload = json.loads(request.data)
+    assert payload["from"]["email"] == "noreply@example.org"
+    assert payload["personalizations"][0]["to"][0]["email"] == "person@example.org"
+    assert "one-time-value" in payload["content"][0]["value"]
+    smtp.assert_not_called()
+
+
+def test_incomplete_sendgrid_config_does_not_send_https():
+    config = {
+        "SENDGRID_API_KEY": "placeholder",
+        "SENDGRID_FROM_EMAIL": "",
+        "AUTH_SMTP_HOST": "",
+        "MARKETING_SMTP_HOST": "",
+        "AUTH_SMTP_FROM": "",
+        "MARKETING_SMTP_FROM": "",
+    }
+    with patch.dict("os.environ", config):
+        with patch.object(reset, "urlopen") as send:
+            result = reset._send_reset_email(
+                to_email="person@example.org",
+                reset_url="https://example.org/nova/reset-password",
+            )
+    assert result["reason"] == "not_configured"
+    send.assert_not_called()
