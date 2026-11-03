@@ -160,7 +160,7 @@ def _resolve_creative_media_url(value: str | None) -> Path | None:
         return None
     if raw.startswith(_PRIVATE_MEDIA_PREFIX):
         name = raw[len(_PRIVATE_MEDIA_PREFIX):]
-        if not re.fullmatch(r"imported_video_[a-z0-9]{12}\\.mp4", name):
+        if not re.fullmatch(r"imported_video_[a-z0-9]{12}\.mp4", name):
             return None
         return _creative_private_media_root() / name
     root, prefix = _creative_media_root_and_prefix()
