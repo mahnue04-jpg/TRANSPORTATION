@@ -245,32 +245,41 @@ def test_failed_delivery_preserves_previous_reset_tokens():
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    earlier = SimpleNamespace(used_at=None)
-    replacement = SimpleNamespace(used_at=None)
+    replacement = SimpleNamespace(email="person@example.org", token_hash="new")
     db = Mock()
-    reset._finalize_reset_delivery(
-        db, new_token=replacement, prior_tokens=[earlier], accepted=False
-    )
-    assert earlier.used_at is None
+    reset._finalize_reset_delivery(db, new_token=replacement, accepted=False)
+    db.query.assert_not_called()
     db.delete.assert_called_once_with(replacement)
     db.commit.assert_called_once()
 
 
-def test_accepted_delivery_retires_prior_reset_tokens():
+def test_accepted_delivery_retires_all_competing_reset_tokens():
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+    from app.db.models import User as UserModel
+    from app.password_reset import PasswordResetToken
+
+    replacement = SimpleNamespace(email="person@example.org", token_hash="new")
+    db = Mock()
+    account_lookup = Mock()
+    account_lookup.filter.return_value.with_for_update.return_value.one_or_none.return_value = object()
+    token_update = Mock()
+    db.query.side_effect = [account_lookup, token_update]
+    reset._finalize_reset_delivery(db, new_token=replacement, accepted=True)
+    assert db.query.call_args_list == [call(UserModel), call(PasswordResetToken)]
+    account_lookup.filter.return_value.with_for_update.assert_called_once_with()
+    token_update.filter.return_value.update.assert_called_once()
+    db.delete.assert_not_called()
+    db.commit.assert_called_once()
+
+
+def test_accepted_delivery_removes_token_if_account_was_deleted():
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    earlier = SimpleNamespace(used_at=None)
-    already_used = SimpleNamespace(used_at="previously-used")
-    replacement = SimpleNamespace(used_at=None)
+    replacement = SimpleNamespace(email="person@example.org", token_hash="new")
     db = Mock()
-    reset._finalize_reset_delivery(
-        db,
-        new_token=replacement,
-        prior_tokens=[earlier, already_used],
-        accepted=True,
-    )
-    assert earlier.used_at is not None
-    assert already_used.used_at == "previously-used"
-    db.delete.assert_not_called()
+    db.query.return_value.filter.return_value.with_for_update.return_value.one_or_none.return_value = None
+    reset._finalize_reset_delivery(db, new_token=replacement, accepted=True)
+    db.delete.assert_called_once_with(replacement)
     db.commit.assert_called_once()
