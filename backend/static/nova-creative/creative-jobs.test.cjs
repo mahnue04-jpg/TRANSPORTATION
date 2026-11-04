@@ -530,3 +530,22 @@ test('illustrated and locally animated previews never receive the motion-MP4 rea
   assert.doesNotMatch(target.innerHTML, /COMMERCIAL COMPLETE/);
 });
 
+
+test('test-account signup controls are confined to named isolated Studio preview hosts', () => {
+  const start = source.indexOf('  function isIsolatedStudioPreview() {');
+  const end = source.indexOf('  function setSignedIn(on) {', start);
+  assert.ok(start >= 0 && end > start);
+  for (const [host, expected] of [
+    ['nova-studio-validation-350.onrender.com', true],
+    ['amicor-health-isf-pr-454.onrender.com', true],
+    ['amicor-health-isf-py.onrender.com', false],
+    ['getamicor.com', false],
+    ['amicor-health-isf-pr-454.onrender.com.evil.example', false],
+  ]) {
+    const ctx = vm.createContext({location: {hostname: host}});
+    vm.runInContext(source.slice(start, end), ctx);
+    assert.equal(ctx.isIsolatedStudioPreview(), expected, host);
+  }
+  assert.match(source, /if \(isIsolatedStudioPreview\(\)\)/);
+  assert.match(source, /\(isIsolatedStudioPreview\(\) && !on\)/);
+});
