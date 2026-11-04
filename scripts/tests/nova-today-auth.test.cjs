@@ -29,3 +29,12 @@ test('reset password visibility controls remain local to their fields', () => {
   assert.match(js, /\["new_password", "confirm_password"\]\.forEach/);
   assert.match(js, /field\.type = revealed \? "text" : "password"/);
 });
+
+test('Nova Today keeps text answers visible and voice playback user-initiated', () => {
+  const html = read('backend/static/nova-today/index.html');
+  const js = read('backend/static/nova-today/today.js');
+  assert.match(html, /id="read-answer"/);
+  assert.match(js, /lastBrainAnswer = answer;/);
+  assert.match(js, /\$\("read-answer"\)\.addEventListener\("click"/);
+  assert.doesNotMatch(js, /speakNova\(answer\);/);
+});
