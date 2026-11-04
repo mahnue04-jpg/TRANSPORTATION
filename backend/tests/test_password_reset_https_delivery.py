@@ -365,3 +365,23 @@ def test_staging_requires_explicit_public_reset_origin():
     config["AMICOR_PUBLIC_BASE_URL"] = "https://staging.example.org"
     with patch.dict("os.environ", config):
         assert reset._validated_reset_base_url() == "https://staging.example.org"
+
+
+def test_plaintext_capture_is_disabled_in_staging_even_if_flag_is_set():
+    configurations = (
+        {"APP_ENV": "staging", "AMICOR_ENVIRONMENT": ""},
+        {"APP_ENV": "", "AMICOR_ENVIRONMENT": ""},
+        {"APP_ENV": "development", "AMICOR_ENVIRONMENT": ""},
+    )
+    for overrides in configurations:
+        env = {
+            "APP_ENV": "",
+            "AMICOR_ENVIRONMENT": "",
+            "ENVIRONMENT": "",
+            "FLASK_ENV": "",
+            "AMICOR_PASSWORD_RESET_TEST_CAPTURE": "true",
+            **overrides,
+        }
+        with patch.dict("os.environ", env):
+            assert reset._test_capture_enabled() is False
+            assert reset.get_test_reset_token("person@example.org") is None
