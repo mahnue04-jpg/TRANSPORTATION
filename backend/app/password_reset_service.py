@@ -144,6 +144,14 @@ def _validated_reset_base_url() -> str | None:
     Never allow a configured HTTP origin, userinfo, query, fragment, or
     embedded path to carry a one-time password-reset secret.
     """
+    # Staging must explicitly name its own public origin. Never fall back to
+    # a default production address for a staging password-reset email.
+    env_values = (
+        (os.getenv(name) or "").strip().lower()
+        for name in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
+    )
+    if "staging" in env_values and not (os.getenv("AMICOR_PUBLIC_BASE_URL") or "").strip():
+        return None
     base = _public_base_url()
     if any(ord(char) < 33 or ord(char) == 127 for char in base):
         return None
