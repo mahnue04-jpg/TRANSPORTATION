@@ -17,6 +17,15 @@
   if (!token) {
     show("This reset link is missing or invalid. Request a new password reset.");
   }
+  ["new_password", "confirm_password"].forEach(function (id) {
+    $(id + "-toggle").addEventListener("click", function () {
+      var field = $(id);
+      var revealed = field.type === "password";
+      field.type = revealed ? "text" : "password";
+      this.textContent = revealed ? "Hide password" : "Show password";
+      this.setAttribute("aria-pressed", String(revealed));
+    });
+  });
   $("reset-form").addEventListener("submit", function (event) {
     event.preventDefault();
     if (!token) {
