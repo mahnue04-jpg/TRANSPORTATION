@@ -350,3 +350,18 @@ def test_invalid_origin_never_creates_token_or_sends_email():
     assert result == {"status": "ok", "message": reset.GENERIC_REQUEST_MESSAGE}
     db.add.assert_not_called()
     send.assert_not_called()
+
+
+def test_staging_requires_explicit_public_reset_origin():
+    config = {
+        "APP_ENV": "staging",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "AMICOR_PUBLIC_BASE_URL": "",
+        "NOVA_SIGNUP_PUBLIC_BASE_URL": "https://amicor-health-isf-py.onrender.com",
+    }
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = "https://staging.example.org"
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() == "https://staging.example.org"
