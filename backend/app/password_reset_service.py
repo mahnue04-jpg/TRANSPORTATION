@@ -183,21 +183,38 @@ def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
 
 
 def _finalize_reset_delivery(
-    db: Session, *, new_token: PasswordResetToken,
-    prior_tokens: list[PasswordResetToken], accepted: bool,
+    db: Session, *, new_token: PasswordResetToken, accepted: bool,
 ) -> None:
-    """Retire prior links only after an email provider accepts the replacement.
+    """Serialize accepted sends by account; preserve prior links on failure.
 
-    If delivery fails, remove the unsent token without invalidating a prior usable
-    link. Provider acceptance means queued, not delivered to the recipient.
+    Provider acceptance means queued, not delivered. The account row lock makes
+    overlapping PostgreSQL finalizations execute in sequence, so the latest
+    accepted request revokes earlier outstanding reset tokens atomically.
     """
-    if accepted:
-        stamp = now()
-        for row in prior_tokens:
-            if row.used_at is None:
-                row.used_at = stamp
-    else:
+    from app.db.models import User as UserModel
+
+    if not accepted:
         db.delete(new_token)
+        db.commit()
+        return
+
+    account = (
+        db.query(UserModel)
+        .filter(func.lower(UserModel.email) == new_token.email.lower())
+        .with_for_update()
+        .one_or_none()
+    )
+    if account is None:
+        # The account disappeared before the email provider accepted the mail.
+        db.delete(new_token)
+        db.commit()
+        return
+
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == new_token.email,
+        PasswordResetToken.token_hash != new_token.token_hash,
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now()}, synchronize_session=False)
     db.commit()
 
 
@@ -223,16 +240,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
 
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
-    # Keep existing usable links until delivery of the replacement is accepted.
-    # A failed send must not strand a user who still has an earlier reset link.
-    pending = (
-        db.query(PasswordResetToken)
-        .filter(
-            PasswordResetToken.email == normalized,
-            PasswordResetToken.used_at.is_(None),
-        )
-        .all()
-    )
+    # Keep older usable links until the replacement email is accepted.
     new_token = PasswordResetToken(
         email=normalized,
         token_hash=token_hash,
@@ -243,7 +251,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
 
     reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
-    _finalize_reset_delivery(db, new_token=new_token, prior_tokens=pending, accepted=send_result["sent"])
+    _finalize_reset_delivery(db, new_token=new_token, accepted=send_result["sent"])
     # Test-only capture also covers configured-but-offline mail transports.
     # This flag is explicitly denied in production by _test_capture_enabled().
     if _test_capture_enabled():
