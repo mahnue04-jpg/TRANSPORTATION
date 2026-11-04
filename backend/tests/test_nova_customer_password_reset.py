@@ -228,12 +228,13 @@ def test_using_one_reset_link_revokes_other_outstanding_links(monkeypatch) -> No
         assert len(rows) == 2
         assert all(row.used_at is not None for row in rows)
 
+    replay_password = _password()
     replay = client.post(
         "/api/auth/reset-password",
         json={
             "token": other_token,
-            "new_password": _password(),
-            "confirm_password": _password(),
+            "new_password": replay_password,
+            "confirm_password": replay_password,
         },
     )
     assert replay.status_code == 400
