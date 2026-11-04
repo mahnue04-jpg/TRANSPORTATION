@@ -239,3 +239,38 @@ def test_reset_token_expiry_rejects_expired_and_naive_timestamps():
     assert token_is_expired(current - timedelta(minutes=1))
     assert not token_is_expired(current + timedelta(minutes=30))
     assert token_is_expired((current - timedelta(minutes=1)).replace(tzinfo=None))
+
+
+def test_failed_delivery_preserves_previous_reset_tokens():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    earlier = SimpleNamespace(used_at=None)
+    replacement = SimpleNamespace(used_at=None)
+    db = Mock()
+    reset._finalize_reset_delivery(
+        db, new_token=replacement, prior_tokens=[earlier], accepted=False
+    )
+    assert earlier.used_at is None
+    db.delete.assert_called_once_with(replacement)
+    db.commit.assert_called_once()
+
+
+def test_accepted_delivery_retires_prior_reset_tokens():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    earlier = SimpleNamespace(used_at=None)
+    already_used = SimpleNamespace(used_at="previously-used")
+    replacement = SimpleNamespace(used_at=None)
+    db = Mock()
+    reset._finalize_reset_delivery(
+        db,
+        new_token=replacement,
+        prior_tokens=[earlier, already_used],
+        accepted=True,
+    )
+    assert earlier.used_at is not None
+    assert already_used.used_at == "previously-used"
+    db.delete.assert_not_called()
+    db.commit.assert_called_once()
