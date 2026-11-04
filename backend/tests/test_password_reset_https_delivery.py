@@ -434,3 +434,17 @@ def test_preview_with_production_origin_does_not_persist_token_or_send_email():
         db.add.assert_not_called()
         db.commit.assert_not_called()
         send.assert_not_called()
+
+
+def test_preview_rejects_trailing_dot_production_hostname():
+    config = {
+        "APP_ENV": "preview",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "AMICOR_PUBLIC_BASE_URL": "https://getamicor.com.",
+    }
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-py.onrender.com."
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
