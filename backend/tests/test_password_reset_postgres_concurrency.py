@@ -134,3 +134,63 @@ def test_simultaneous_consumption_of_same_link_only_changes_password_once():
             assert reset_row.used_at is not None
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("PASSWORD_RESET_TEST_POSTGRES_URL"),
+    reason="Requires ephemeral PostgreSQL test container",
+)
+@pytest.mark.parametrize("accepted_results", [(True, False), (False, False)])
+def test_overlapping_accepted_and_failed_messages_preserve_a_link(accepted_results):
+    """A failed mail attempt never retires an earlier usable recovery link."""
+    url = os.environ["PASSWORD_RESET_TEST_POSTGRES_URL"]
+    engine = create_engine(url, pool_size=5, max_overflow=2)
+    suffix = "-".join("yes" if accepted else "no" for accepted in accepted_results)
+    email = f"mixed-mail-{suffix}@example.org"
+    original_hash = f"existing-{suffix}"
+    hashes = [f"replacement-{suffix}-{i}" for i in range(2)]
+    try:
+        User.__table__.create(engine, checkfirst=True)
+        PasswordResetToken.__table__.create(engine, checkfirst=True)
+        with Session(engine) as db:
+            db.add(User(
+                email=email, hashed_password="offline-test-only",
+                role="staff", is_active=True,
+            ))
+            db.add_all([
+                PasswordResetToken(
+                    email=email, token_hash=token_hash,
+                    expires_at=default_reset_expiry(),
+                )
+                for token_hash in [original_hash, *hashes]
+            ])
+            db.commit()
+
+        gate = Barrier(2, timeout=15)
+
+        def finalize(token_hash: str, accepted: bool):
+            with Session(engine) as db:
+                token = db.execute(select(PasswordResetToken).where(
+                    PasswordResetToken.token_hash == token_hash
+                )).scalar_one()
+                gate.wait()
+                _finalize_reset_delivery(db, new_token=token, accepted=accepted)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            futures = [
+                workers.submit(finalize, token_hash, accepted)
+                for token_hash, accepted in zip(hashes, accepted_results)
+            ]
+            for future in futures:
+                future.result(timeout=25)
+
+        with Session(engine) as db:
+            rows = db.execute(select(PasswordResetToken).where(
+                PasswordResetToken.email == email
+            )).scalars().all()
+            active = [row.token_hash for row in rows if row.used_at is None]
+            expected = [hashes[0]] if accepted_results[0] else [original_hash]
+            assert active == expected
+            assert len(rows) == (2 if accepted_results[0] else 1)
+    finally:
+        engine.dispose()
