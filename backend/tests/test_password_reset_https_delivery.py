@@ -218,3 +218,24 @@ def test_password_reset_request_creates_schema_on_session_database():
         assert "password_reset_tokens" in inspect(isolated).get_table_names()
     finally:
         isolated.dispose()
+
+
+def test_reset_tokens_are_hashed_and_not_recoverable_from_digest():
+    from app.password_reset_service import hash_reset_token
+
+    secret = "test-only-one-time-token-value"
+    digest = hash_reset_token(secret)
+    assert len(digest) == 64
+    assert digest != secret
+    assert digest == hash_reset_token(secret)
+    assert digest != hash_reset_token(secret + "-changed")
+
+
+def test_reset_token_expiry_rejects_expired_and_naive_timestamps():
+    from datetime import datetime, timedelta, timezone
+    from app.password_reset import token_is_expired
+
+    current = datetime.now(timezone.utc)
+    assert token_is_expired(current - timedelta(minutes=1))
+    assert not token_is_expired(current + timedelta(minutes=30))
+    assert token_is_expired((current - timedelta(minutes=1)).replace(tzinfo=None))
