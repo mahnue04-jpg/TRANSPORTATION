@@ -175,7 +175,7 @@ def _validated_reset_base_url() -> str | None:
         # Reject invalid ports and malformed hosts rather than constructing
         # an email link that could expose a token to another destination.
         _ = parsed.port
-        if isolated_env and parsed.hostname.lower() in {
+        if isolated_env and parsed.hostname.lower().rstrip(".") in {
             "amicor-health-isf-py.onrender.com",
             "amicor-health-isf.onrender.com",
             "getamicor.com",
