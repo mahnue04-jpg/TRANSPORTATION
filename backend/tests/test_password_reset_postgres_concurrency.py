@@ -19,34 +19,34 @@ from app.password_reset_service import _finalize_reset_delivery
     not os.getenv("PASSWORD_RESET_TEST_POSTGRES_URL"),
     reason="Requires ephemeral PostgreSQL test container",
 )
-def test_simultaneous_accepted_emails_leave_one_active_link():
+@pytest.mark.parametrize("request_count", [2, 3, 5])
+def test_simultaneous_accepted_emails_leave_one_active_link(request_count):
+    """All contenders start together; one valid link remains after finalization."""
     url = os.environ["PASSWORD_RESET_TEST_POSTGRES_URL"]
-    engine = create_engine(url, pool_size=4, max_overflow=2)
+    engine = create_engine(url, pool_size=max(request_count + 1, 6), max_overflow=2)
+    email = f"parallel-reset-{request_count}@example.org"
+    hashes = [f"test-token-{request_count}-{i}" for i in range(request_count)]
     try:
         User.__table__.create(engine, checkfirst=True)
         PasswordResetToken.__table__.create(engine, checkfirst=True)
         with Session(engine) as db:
             db.add(User(
-                email="parallel-reset@example.org",
+                email=email,
                 hashed_password="offline-test-only",
                 role="staff",
                 is_active=True,
             ))
             db.add_all([
                 PasswordResetToken(
-                    email="parallel-reset@example.org",
-                    token_hash="test-token-1",
+                    email=email,
+                    token_hash=token_hash,
                     expires_at=default_reset_expiry(),
-                ),
-                PasswordResetToken(
-                    email="parallel-reset@example.org",
-                    token_hash="test-token-2",
-                    expires_at=default_reset_expiry(),
-                ),
+                )
+                for token_hash in hashes
             ])
             db.commit()
 
-        gate = Barrier(2, timeout=15)
+        gate = Barrier(request_count, timeout=20)
 
         def finalize(token_hash: str):
             with Session(engine) as db:
@@ -58,15 +58,16 @@ def test_simultaneous_accepted_emails_leave_one_active_link():
                 gate.wait()
                 _finalize_reset_delivery(db, new_token=token, accepted=True)
 
-        with ThreadPoolExecutor(max_workers=2) as workers:
-            a = workers.submit(finalize, "test-token-1")
-            b = workers.submit(finalize, "test-token-2")
-            a.result(timeout=20)
-            b.result(timeout=20)
+        with ThreadPoolExecutor(max_workers=request_count) as workers:
+            futures = [workers.submit(finalize, token_hash) for token_hash in hashes]
+            for future in futures:
+                future.result(timeout=30)
 
         with Session(engine) as db:
-            tokens = db.execute(select(PasswordResetToken)).scalars().all()
-            assert len(tokens) == 2
+            tokens = db.execute(
+                select(PasswordResetToken).where(PasswordResetToken.email == email)
+            ).scalars().all()
+            assert len(tokens) == request_count
             assert sum(token.used_at is None for token in tokens) == 1
     finally:
         engine.dispose()
