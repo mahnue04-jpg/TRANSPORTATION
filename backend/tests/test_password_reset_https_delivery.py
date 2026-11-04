@@ -259,7 +259,14 @@ def test_accepted_delivery_retires_all_competing_reset_tokens():
     from app.db.models import User as UserModel
     from app.password_reset import PasswordResetToken
 
-    replacement = SimpleNamespace(email="person@example.org", token_hash="new")
+    from app.password_reset import default_reset_expiry
+
+    replacement = SimpleNamespace(
+        email="person@example.org",
+        token_hash="new",
+        used_at=None,
+        expires_at=default_reset_expiry(),
+    )
     db = Mock()
     account_lookup = Mock()
     account_lookup.filter.return_value.with_for_update.return_value.one_or_none.return_value = object()
