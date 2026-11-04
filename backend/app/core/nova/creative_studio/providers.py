@@ -119,6 +119,15 @@ def _creative_media_root_and_prefix() -> tuple[Path, str]:
     )
 
 
+_PRIVATE_IMPORT_PREFIX = "private-studio://"
+
+
+def _private_import_root() -> Path:
+    """Imported owner originals live outside the publicly mounted media tree."""
+    root, _ = _creative_media_root_and_prefix()
+    return root.with_name(root.name + "-private-imports")
+
+
 def _media_filename(raw: str) -> str | None:
     name = raw.rsplit("/", 1)[-1].strip()
     if not name or name in {".", ".."} or "/" in name or "\\" in name:
@@ -130,6 +139,11 @@ def _resolve_creative_media_url(value: str | None) -> Path | None:
     raw = str(value or "").strip()
     if not raw:
         return None
+    if raw.startswith(_PRIVATE_IMPORT_PREFIX):
+        name = _media_filename(raw)
+        if not name or not name.startswith("imported_video_") or not name.endswith(".mp4"):
+            return None
+        return _private_import_root() / name
     root, prefix = _creative_media_root_and_prefix()
     filename = None
     for known in (prefix, _MEDIA_PREFIX, _EPHEMERAL_PREFIX):
