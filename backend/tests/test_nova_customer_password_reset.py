@@ -48,6 +48,11 @@ def _free_signup(client: TestClient) -> dict:
 
 def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
     monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    # Offline tests simulate provider acceptance without sending real mail.
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
     clear_test_reset_capture()
     client = _client()
     assert client.get("/nova/forgot-password").status_code == 200
@@ -78,6 +83,11 @@ def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
 
 def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
     monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    # Offline tests simulate provider acceptance without sending real mail.
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
     clear_test_reset_capture()
     client = _client()
     payload = _free_signup(client)
