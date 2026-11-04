@@ -213,15 +213,21 @@ def _finalize_reset_delivery(
     # A concurrent accepted request may already have retired our token.
     # Do not let an obsolete finalizer invalidate the currently usable link.
     db.refresh(new_token)
-    if new_token.used_at is not None or token_is_expired(new_token.expires_at):
+    if new_token.used_at is not None:
         db.commit()
         return
 
+    # New tokens are stored with an already-expired expiry until mail acceptance.
+    # Retire only *active* older links; in-flight pending sends must not be
+    # invalidated by another sender before they have received a provider result.
+    stamp = now()
     db.query(PasswordResetToken).filter(
         PasswordResetToken.email == new_token.email,
         PasswordResetToken.token_hash != new_token.token_hash,
         PasswordResetToken.used_at.is_(None),
-    ).update({PasswordResetToken.used_at: now()}, synchronize_session=False)
+        PasswordResetToken.expires_at > stamp,
+    ).update({PasswordResetToken.used_at: stamp}, synchronize_session=False)
+    new_token.expires_at = default_reset_expiry()
     db.commit()
 
 
@@ -251,7 +257,9 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     new_token = PasswordResetToken(
         email=normalized,
         token_hash=token_hash,
-        expires_at=default_reset_expiry(),
+        # Pending/unusable until the provider accepts email; no schema change.
+        # Crashed or rejected deliveries leave only expired tokens.
+        expires_at=now(),
     )
     db.add(new_token)
     db.commit()
