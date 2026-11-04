@@ -59,6 +59,11 @@ def get_test_reset_token(email: str | None = None) -> str | None:
 
 
 def _test_capture_enabled() -> bool:
+    # This diagnostic captures plaintext one-time links; never allow it in production.
+    # Render itself is not a production signal (staging previews also run on Render).
+    production_names = ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT", "FLASK_ENV")
+    if any((os.getenv(name) or "").strip().lower() in {"production", "prod"} for name in production_names):
+        return False
     return (os.getenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE") or "").strip().lower() in {
         "1",
         "true",
