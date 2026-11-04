@@ -410,3 +410,50 @@ def test_reset_link_is_unusable_while_email_delivery_is_pending(monkeypatch) -> 
         from app.password_reset import token_is_expired
         assert token.used_at is None
         assert not token_is_expired(token.expires_at)
+
+
+def test_inflight_email_rejected_after_credential_generation_changes(monkeypatch) -> None:
+    """Provider acceptance cannot resurrect a link after account credentials change."""
+    from threading import Event, Thread
+
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    provider_entered = Event()
+    release_provider = Event()
+    responses = []
+
+    def blocked_provider(**kwargs):
+        provider_entered.set()
+        assert release_provider.wait(timeout=15)
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+
+    monkeypatch.setattr("app.password_reset_service._send_reset_email", blocked_provider)
+
+    def request_reset():
+        responses.append(client.post(
+            "/api/auth/forgot-password", json={"email": payload["email"]}
+        ))
+
+    worker = Thread(target=request_reset, daemon=True)
+    worker.start()
+    try:
+        assert provider_entered.wait(timeout=15)
+        with SessionLocal() as db:
+            user = db.query(UserModel).filter(
+                UserModel.email == payload["email"].lower()
+            ).one()
+            user.auth_version += 1
+            db.commit()
+    finally:
+        release_provider.set()
+        worker.join(timeout=20)
+
+    assert not worker.is_alive()
+    assert len(responses) == 1 and responses[0].status_code == 200
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert rows == []
