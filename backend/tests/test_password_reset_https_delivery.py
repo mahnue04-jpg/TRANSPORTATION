@@ -448,3 +448,23 @@ def test_preview_rejects_trailing_dot_production_hostname():
     config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-py.onrender.com."
     with patch.dict("os.environ", config):
         assert reset._validated_reset_base_url() is None
+
+
+def test_render_pr_preview_origin_enforces_staging_rules_without_app_env():
+    """Render's preview URL is a fallback signal when APP_ENV is absent."""
+    config = {
+        "APP_ENV": "",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "RENDER_EXTERNAL_URL": "https://amicor-health-isf-pr-458.onrender.com",
+        "AMICOR_PUBLIC_BASE_URL": "",
+        "NOVA_SIGNUP_PUBLIC_BASE_URL": "https://amicor-health-isf-py.onrender.com",
+    }
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = "https://getamicor.com"
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-pr-458.onrender.com"
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() == config["AMICOR_PUBLIC_BASE_URL"]
