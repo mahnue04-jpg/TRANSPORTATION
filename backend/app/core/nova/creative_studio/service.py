@@ -2101,7 +2101,8 @@ class CreativeStudioService(ShortDramaMixin):
                 path = _resolve_creative_media_url(existing.url)
                 if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
                     return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
-        root, prefix = _creative_media_root_and_prefix()
+        from app.core.nova.creative_studio.providers import _PRIVATE_IMPORT_PREFIX, _private_import_root
+        root = _private_import_root()
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="nova-video-import-") as temporary:
             path = Path(temporary) / "upload.mp4"
@@ -2116,7 +2117,7 @@ class CreativeStudioService(ShortDramaMixin):
         try:
             asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="video",
                 title="Imported finished video (owner review)", content="Existing MP4 imported without generation.",
-                status="GENERATED", url=prefix.rstrip("/") + "/" + name,
+                status="GENERATED", url=_PRIVATE_IMPORT_PREFIX + name,
                 metadata={**measured, "source": "owner_video_import", "sha256": digest,
                     "publish_ready": False, "commercial_complete": False, "owner_review_required": True,
                     "captions_verified": False, "lip_sync_verified": False,
@@ -3030,6 +3031,9 @@ class CreativeStudioService(ShortDramaMixin):
             message = "Caption file is not available." if requested == "captions" else "This asset has no downloadable file."
             raise CreativeStudioError("MEDIA_UNAVAILABLE", message, http_status=404)
         resolved = path.resolve()
+        from app.core.nova.creative_studio.providers import _PRIVATE_IMPORT_PREFIX, _private_import_root
+        if str(asset.url or "").startswith(_PRIVATE_IMPORT_PREFIX):
+            root = _private_import_root()
         root_resolved = root.resolve()
         if resolved != root_resolved and root_resolved not in resolved.parents:
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "Asset file is outside the studio media directory.", http_status=404)
