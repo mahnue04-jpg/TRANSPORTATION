@@ -232,6 +232,33 @@ def test_no_card_trial_expires_after_seven_days(monkeypatch) -> None:
     assert dashboard.status_code == 200
 
 
+def test_sqlite_naive_trial_expiry_allows_customer_access_and_ask() -> None:
+    """SQLite returns stored trial dates without timezone info."""
+    from datetime import timezone
+    from app.helpers import as_utc
+
+    client = _client()
+    payload = _signup_payload()
+    created = client.post("/api/nova/signup/free", json=payload)
+    assert created.status_code == 200, created.text
+
+    login = client.post("/api/auth/login", json={"email": payload["email"], "password": payload["password"]})
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    with SessionLocal() as db:
+        signup = db.query(NovaSignupAccount).filter_by(email=payload["email"]).one()
+        assert signup.intro_ends_at is not None
+        assert as_utc(signup.intro_ends_at).tzinfo == timezone.utc
+
+    access = client.get("/api/nova/signup/me/access", headers=headers)
+    assert access.status_code == 200, access.text
+    assert access.json()["trial_expired"] is False
+
+    asked = client.post("/api/nova/today/ask", headers=headers, json={"question": "What is my name?"})
+    assert asked.status_code == 200, asked.text
+
+
 def test_free_to_paid_upgrade_preserves_same_account() -> None:
     fake = FakeNovaSaasStripeClient()
     set_nova_saas_stripe_override(fake)
