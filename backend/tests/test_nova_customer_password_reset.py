@@ -313,3 +313,48 @@ def test_unavailable_email_provider_leaves_no_unusable_reset_link(monkeypatch) -
         ).all()
         assert tokens == []
     assert get_test_reset_token(payload["email"]) is None
+
+
+def test_second_accepted_reset_email_invalidates_first_link(monkeypatch) -> None:
+    """Sequential acceptance behavior; real PostgreSQL concurrency remains separate."""
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    assert client.post(
+        "/api/auth/forgot-password", json={"email": payload["email"]}
+    ).status_code == 200
+    first_token = get_test_reset_token(payload["email"])
+    assert first_token
+    assert client.post(
+        "/api/auth/forgot-password", json={"email": payload["email"]}
+    ).status_code == 200
+    second_token = get_test_reset_token(payload["email"])
+    assert second_token and second_token != first_token
+
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(rows) == 2
+        first = next(row for row in rows if row.token_hash == hash_reset_token(first_token))
+        second = next(row for row in rows if row.token_hash == hash_reset_token(second_token))
+        assert first.used_at is not None
+        assert second.used_at is None
+
+    password = _password()
+    rejected = client.post(
+        "/api/auth/reset-password",
+        json={"token": first_token, "new_password": password, "confirm_password": password},
+    )
+    assert rejected.status_code == 400
+    accepted = client.post(
+        "/api/auth/reset-password",
+        json={"token": second_token, "new_password": password, "confirm_password": password},
+    )
+    assert accepted.status_code == 200, accepted.text
