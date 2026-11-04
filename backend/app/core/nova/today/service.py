@@ -49,6 +49,7 @@ from app.core.nova.today.live_tools import (
     format_web_search,
     is_news_request,
     is_weather_request,
+    is_seven_day_weather_request,
     is_web_search_capability_question,
     is_web_search_request,
     read_user_profile,
@@ -3090,7 +3091,7 @@ def _today_live_or_memory_answer(
                 generated_at=now().isoformat(),
             )
         try:
-            result = fetch_weather(location)
+            result = fetch_weather(location, days=7) if is_seven_day_weather_request(question) else fetch_weather(location)
             update_user_profile(organization_id, user.user_id, {"preferred_location": result.get("location") or location})
             return NovaTodayBrainOut(
                 answer=format_weather(result),
