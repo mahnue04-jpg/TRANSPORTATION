@@ -16,6 +16,13 @@ def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(value: datetime) -> datetime:
+    """Normalize application UTC timestamps returned naive by SQLite."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def uuid4() -> str:
     """Generate a new UUID4 string."""
     return str(uuid.uuid4())
