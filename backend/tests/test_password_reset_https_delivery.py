@@ -468,3 +468,23 @@ def test_render_pr_preview_origin_enforces_staging_rules_without_app_env():
     config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-pr-458.onrender.com"
     with patch.dict("os.environ", config):
         assert reset._validated_reset_base_url() == config["AMICOR_PUBLIC_BASE_URL"]
+
+
+def test_render_preview_without_environment_label_requires_isolated_origin():
+    """Render PR previews must fail closed even when APP_ENV is unset."""
+    config = {
+        "APP_ENV": "",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "RENDER_EXTERNAL_URL": "https://amicor-health-isf-pr-458.onrender.com",
+        "AMICOR_PUBLIC_BASE_URL": "",
+        "NOVA_SIGNUP_PUBLIC_BASE_URL": "https://amicor-health-isf-py.onrender.com",
+    }
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = "https://getamicor.com"
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() is None
+    config["AMICOR_PUBLIC_BASE_URL"] = config["RENDER_EXTERNAL_URL"]
+    with patch.dict("os.environ", config):
+        assert reset._validated_reset_base_url() == config["RENDER_EXTERNAL_URL"]
