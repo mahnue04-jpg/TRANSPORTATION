@@ -20,10 +20,12 @@ def studio(tmp_path, monkeypatch):
     for name in ['image_provider', 'voice_provider', 'video_provider']:
         monkeypatch.setattr(service_module, name, forbidden)
     root = lambda: (tmp_path, '/media/test')
-    resolve = lambda url: tmp_path / Path(url).name if url else None
+    private_root = tmp_path.with_name(tmp_path.name + "-private-imports")
+    resolve = lambda url: (private_root / Path(url).name if str(url or "").startswith("private-studio://") else tmp_path / Path(url).name) if url else None
     for module in [service_module, providers]:
         monkeypatch.setattr(module, '_creative_media_root_and_prefix', root)
         monkeypatch.setattr(module, '_resolve_creative_media_url', resolve)
+    monkeypatch.setattr(providers, "_private_import_root", lambda: private_root)
     service = CreativeStudioService(CreativeStudioStore())
     project = service.create_project('owner', {'title':'Count to three','project_type':'explainer',
         'platform':'YouTube','audience':'Children ages 4–6','duration_target':30})
