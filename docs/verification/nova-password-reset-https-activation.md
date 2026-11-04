@@ -39,8 +39,8 @@ may be used. SMTP connectivity can be restricted by the hosting plan.
 - PR #458 Render preview is **suspended**. Its `DATABASE_URL` was copied from another environment; its isolation is unverified. Do not resume or run real password-reset requests there.
 - Render rejected creation of a second free PostgreSQL instance because the workspace already has its one active free instance. Do not modify `amicor-prod`, borrow `amicor-casting-staging-db`, or provision a paid database without owner approval.
 - SendGrid verified sender and an API key were prepared by the owner. Permission scope (Mail Send only) and saved preview configuration must still be independently verified before use.
-- Offline regression tests cover token capture prevention in production, session-database binding, expiration/hash, replaced-link revocation, and mocked successful/failed mail acceptance. The latest offline integration test for failed replacement email is not release evidence until its CI run passes.
-- A real concurrent PostgreSQL test is still required. Account-row locking on password reset reduces races, but overlapping reset *requests* and mail acceptance still need atomic state-transition review.
+- **Verified automated milestone:** Commit `6d05e7d1450fa2ab1d279805bbdd628667c1506d` passed all four GitHub workflows: Nova Password Reset HTTPS Regression, Render backend diagnostic, Work & Revenue regression, and Jekyll site CI. The password-reset workflow includes offline lifecycle tests and a disposable PostgreSQL 18 service test; none of these tests used Render production or Casting databases.
+- **Concurrency coverage limitation:** The disposable PostgreSQL test verifies that two overlapping, already-created tokens undergoing accepted-email *finalization* leave exactly one usable token. It does **not** simulate the full overlapping HTTP requests, mail-provider ordering/failures, or simultaneous consumption of the same token. Those scenarios still need dedicated verification before release.
 - Do not merge, deploy, resume staging, send a real password-reset email, or change any real administrator password until these blockers are resolved.
 
 ## Production gate
