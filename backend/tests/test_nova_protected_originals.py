@@ -289,33 +289,24 @@ def test_authenticated_http_import_download_after_reset(tmp_path, monkeypatch):
     ).status_code == 404
 
 
+
 def test_legacy_public_import_static_route_is_blocked(tmp_path):
-    """Static fallback must not expose old imported originals; previews remain public."""
+    """An old import stored in the public folder must not be anonymously served."""
     import asyncio
-    import importlib
+    from app.main import _CreativePublicMediaFiles
 
-    from starlette.responses import Response
-    from fastapi.staticfiles import StaticFiles
-
-    # A standalone media-only app uses the same denylist logic without DB or login.
     legacy = tmp_path / "imported_video_123456789abc.mp4"
     legacy.write_bytes(b"sensitive-original")
     preview = tmp_path / "safe-preview.mp4"
     preview.write_bytes(b"public-preview")
 
-    class GuardedMedia(StaticFiles):
-        async def get_response(self, path, scope):
-            from urllib.parse import unquote
-            name = unquote(str(path or "")).replace("\\\\", "/").rsplit("/", 1)[-1]
-            if name.startswith("imported_video_"):
-                return Response(status_code=404)
-            return await super().get_response(path, scope)
+    media = _CreativePublicMediaFiles(directory=str(tmp_path))
 
-    media = GuardedMedia(directory=str(tmp_path))
     async def check():
         scope = {"type": "http", "method": "GET", "path": "/"}
         blocked = await media.get_response(legacy.name, scope)
         allowed = await media.get_response(preview.name, scope)
         assert blocked.status_code == 404
         assert allowed.status_code == 200
+
     asyncio.run(check())
