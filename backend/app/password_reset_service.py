@@ -182,6 +182,25 @@ def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
         return {"attempted": True, "sent": False, "reason": "send_failed"}
 
 
+def _finalize_reset_delivery(
+    db: Session, *, new_token: PasswordResetToken,
+    prior_tokens: list[PasswordResetToken], accepted: bool,
+) -> None:
+    """Retire prior links only after an email provider accepts the replacement.
+
+    If delivery fails, remove the unsent token without invalidating a prior usable
+    link. Provider acceptance means queued, not delivered to the recipient.
+    """
+    if accepted:
+        stamp = now()
+        for row in prior_tokens:
+            if row.used_at is None:
+                row.used_at = stamp
+    else:
+        db.delete(new_token)
+    db.commit()
+
+
 def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     """Always returns a generic message. Never reveals whether the email exists."""
     from app.auth import _validate_email
@@ -204,7 +223,8 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
 
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
-    # Invalidate prior unused tokens for this email.
+    # Keep existing usable links until delivery of the replacement is accepted.
+    # A failed send must not strand a user who still has an earlier reset link.
     pending = (
         db.query(PasswordResetToken)
         .filter(
@@ -213,21 +233,18 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
         )
         .all()
     )
-    stamp = now()
-    for row in pending:
-        row.used_at = stamp
-    db.add(
-        PasswordResetToken(
-            email=normalized,
-            token_hash=token_hash,
-            expires_at=default_reset_expiry(),
-        )
+    new_token = PasswordResetToken(
+        email=normalized,
+        token_hash=token_hash,
+        expires_at=default_reset_expiry(),
     )
+    db.add(new_token)
     db.commit()
 
     reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
-    if _test_capture_enabled():
+    _finalize_reset_delivery(db, new_token=new_token, prior_tokens=pending, accepted=send_result["sent"])
+    if _test_capture_enabled() and send_result["sent"]:
         _TEST_CAPTURE[normalized] = plain
     return public_response
 
