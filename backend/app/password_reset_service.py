@@ -185,6 +185,7 @@ def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
 
 def _finalize_reset_delivery(
     db: Session, *, new_token: PasswordResetToken, accepted: bool,
+    expected_auth_version: int | None = None,
 ) -> None:
     """Serialize accepted sends by account; preserve prior links on failure.
 
@@ -205,8 +206,12 @@ def _finalize_reset_delivery(
         .with_for_update()
         .one_or_none()
     )
-    if account is None:
-        # The account disappeared before the email provider accepted the mail.
+    if account is None or (
+        expected_auth_version is not None
+        and int(getattr(account, "auth_version", 0) or 0) != expected_auth_version
+    ):
+        # Account deleted or password changed while email was in flight.
+        # A delayed provider acceptance must never revive a pre-reset link.
         db.delete(new_token)
         db.commit()
         return
@@ -252,6 +257,9 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     if user is None or not bool(getattr(user, "is_active", True)):
         return public_response
 
+    # Bind the in-flight email request to this account's credential generation.
+    # If another request resets the password before mail acceptance, reject it.
+    auth_version_at_request = int(getattr(user, "auth_version", 0) or 0)
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
     # Keep older usable links until the replacement email is accepted.
@@ -267,7 +275,10 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
 
     reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
-    _finalize_reset_delivery(db, new_token=new_token, accepted=send_result["sent"])
+    _finalize_reset_delivery(
+        db, new_token=new_token, accepted=send_result["sent"],
+        expected_auth_version=auth_version_at_request,
+    )
     # Test-only capture also covers configured-but-offline mail transports.
     # This flag is explicitly denied in production by _test_capture_enabled().
     if _test_capture_enabled():
