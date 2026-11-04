@@ -202,3 +202,19 @@ def test_plaintext_reset_capture_is_opt_in_for_local_tests():
         "AMICOR_PASSWORD_RESET_TEST_CAPTURE": "",
     }):
         assert reset._test_capture_enabled() is False
+
+
+def test_password_reset_request_creates_schema_on_session_database():
+    """The request must use its own isolated database, not the app default engine."""
+    from sqlalchemy import create_engine, inspect
+    from sqlalchemy.orm import Session
+
+    isolated = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        assert "password_reset_tokens" not in inspect(isolated).get_table_names()
+        with Session(isolated) as db:
+            result = reset.request_password_reset(db, email="not-an-email")
+        assert result == {"status": "ok", "message": reset.GENERIC_REQUEST_MESSAGE}
+        assert "password_reset_tokens" in inspect(isolated).get_table_names()
+    finally:
+        isolated.dispose()
