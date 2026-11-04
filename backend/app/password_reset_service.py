@@ -244,7 +244,9 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
     _finalize_reset_delivery(db, new_token=new_token, prior_tokens=pending, accepted=send_result["sent"])
-    if _test_capture_enabled() and send_result["sent"]:
+    # Test-only capture also covers configured-but-offline mail transports.
+    # This flag is explicitly denied in production by _test_capture_enabled().
+    if _test_capture_enabled():
         _TEST_CAPTURE[normalized] = plain
     return public_response
 
