@@ -296,3 +296,42 @@ def test_interrupted_email_leaves_pending_token_unusable_on_postgres():
             assert user.auth_version == 0
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("PASSWORD_RESET_TEST_POSTGRES_URL"),
+    reason="Requires ephemeral PostgreSQL test container",
+)
+def test_email_accepted_after_password_change_cannot_reactivate_old_link():
+    """A queued email belongs to the credential generation at request time."""
+    from app.helpers import now
+    from app.password_reset import token_is_expired
+
+    engine = create_engine(os.environ["PASSWORD_RESET_TEST_POSTGRES_URL"])
+    email = "delayed-acceptance-after-reset@example.org"
+    try:
+        User.__table__.create(engine, checkfirst=True)
+        PasswordResetToken.__table__.create(engine, checkfirst=True)
+        with Session(engine) as db:
+            db.add(User(email=email, hashed_password="changed-credentials",
+                        role="staff", is_active=True, auth_version=2))
+            db.add(PasswordResetToken(email=email, token_hash="stale-pending",
+                                      expires_at=now()))
+            db.commit()
+
+        with Session(engine) as db:
+            token = db.execute(select(PasswordResetToken).where(
+                PasswordResetToken.token_hash == "stale-pending"
+            )).scalar_one()
+            _finalize_reset_delivery(
+                db, new_token=token, accepted=True, expected_auth_version=1,
+            )
+        with Session(engine) as db:
+            token = db.execute(select(PasswordResetToken).where(
+                PasswordResetToken.token_hash == "stale-pending"
+            )).scalar_one_or_none()
+            assert token is None or token.used_at is not None or token_is_expired(token.expires_at)
+            user = db.execute(select(User).where(User.email == email)).scalar_one()
+            assert user.auth_version == 2
+    finally:
+        engine.dispose()
