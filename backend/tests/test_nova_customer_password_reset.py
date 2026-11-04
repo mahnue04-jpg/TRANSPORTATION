@@ -238,3 +238,52 @@ def test_using_one_reset_link_revokes_other_outstanding_links(monkeypatch) -> No
         },
     )
     assert replay.status_code == 400
+
+
+def test_failed_replacement_email_keeps_previous_reset_link_usable(monkeypatch) -> None:
+    """Integration regression: provider failure cannot destroy a usable reset link."""
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    attempts = iter([
+        {"attempted": True, "sent": True, "reason": "accepted"},
+        {"attempted": True, "sent": False, "reason": "send_failed"},
+    ])
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: next(attempts),
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    first = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert first.status_code == 200
+    valid_token = get_test_reset_token(payload["email"])
+    assert valid_token
+
+    second = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+    with SessionLocal() as db:
+        tokens = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(tokens) == 1
+        assert tokens[0].token_hash == hash_reset_token(valid_token)
+        assert tokens[0].used_at is None
+
+    new_password = _password()
+    completed = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": valid_token,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    login = client.post(
+        "/api/auth/login",
+        json={"email": payload["email"], "password": new_password},
+    )
+    assert login.status_code == 200, login.text
