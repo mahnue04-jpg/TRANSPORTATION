@@ -1534,8 +1534,11 @@
           licenseNote = "<p class=\"hint\">PREVIEW_ONLY. Presenter NOT USED. Lip-sync presenter: no. Commercial-use clearance: " +
             escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
         }
-        media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" src=\"" +
-          escapeHtml(row.url) + "\"" +
+        var isPrivateImportedVideo = (row.metadata || {}).source === "owner_video_import";
+        var videoSourceAttr = isPrivateImportedVideo
+          ? ("data-private-video-url=\"" + escapeHtml(filePath) + "\"")
+          : ("src=\"" + escapeHtml(row.url) + "\"");
+        media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" " + videoSourceAttr +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
@@ -1580,6 +1583,32 @@
           reader.onerror = function () { image.alt = "Preview unavailable"; };
           reader.readAsDataURL(blob);
         } catch (error) { image.alt = "Preview unavailable"; }
+      })();
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]"), function (video) {
+      var projectId = activeProjectId;
+      (async function () {
+        try {
+          var path = video.getAttribute("data-private-video-url");
+          assertDownloadUrlHasNoToken(path);
+          var shared = session();
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = shared && typeof shared.authFetch === "function"
+            ? await shared.authFetch(path, {method: "GET", headers: headers})
+            : await fetch(path, {method: "GET", headers: headers});
+          if (!response.ok || !(response.headers.get("content-type") || "").startsWith("video/")) {
+            throw new Error("Private video preview unavailable");
+          }
+          var blob = await response.blob();
+          if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
+          var objectUrl = URL.createObjectURL(blob);
+          video.src = objectUrl;
+          video.addEventListener("loadeddata", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
+          video.addEventListener("error", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
+        } catch (err) {
+          video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
+        }
       })();
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
