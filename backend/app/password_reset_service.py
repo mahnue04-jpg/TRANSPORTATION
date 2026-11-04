@@ -10,7 +10,7 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from sqlalchemy import func
@@ -138,6 +138,35 @@ def _public_base_url() -> str:
     ).rstrip("/")
 
 
+def _validated_reset_base_url() -> str | None:
+    """Fail closed on unsafe reset-link destinations before creating tokens.
+
+    Never allow a configured HTTP origin, userinfo, query, fragment, or
+    embedded path to carry a one-time password-reset secret.
+    """
+    base = _public_base_url()
+    if any(ord(char) < 33 or ord(char) == 127 for char in base):
+        return None
+    try:
+        parsed = urlsplit(base)
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        # Reject invalid ports and malformed hosts rather than constructing
+        # an email link that could expose a token to another destination.
+        _ = parsed.port
+    except ValueError:
+        return None
+    return base
+
+
 def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
     if _sendgrid_configured():
         return _send_reset_via_sendgrid(to_email=to_email, reset_url=reset_url)
@@ -260,6 +289,10 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     # Bind the in-flight email request to this account's credential generation.
     # If another request resets the password before mail acceptance, reject it.
     auth_version_at_request = int(getattr(user, "auth_version", 0) or 0)
+    base_url = _validated_reset_base_url()
+    if base_url is None:
+        logger.warning("password_reset_email_skipped reason=invalid_public_origin")
+        return public_response
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
     # Keep older usable links until the replacement email is accepted.
@@ -273,7 +306,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     db.add(new_token)
     db.commit()
 
-    reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
+    reset_url = f"{base_url}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
     _finalize_reset_delivery(
         db, new_token=new_token, accepted=send_result["sent"],
