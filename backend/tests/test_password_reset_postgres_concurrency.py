@@ -194,3 +194,59 @@ def test_overlapping_accepted_and_failed_messages_preserve_a_link(accepted_resul
             assert len(rows) == (2 if accepted_results[0] else 1)
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("PASSWORD_RESET_TEST_POSTGRES_URL"),
+    reason="Requires ephemeral PostgreSQL test container",
+)
+@pytest.mark.parametrize("request_count", [2, 5])
+def test_overlapping_pending_email_acceptances_activate_only_one_link(request_count):
+    """Start all replacement links expired, as production does before mail acceptance."""
+    from app.helpers import now
+    from app.password_reset import token_is_expired
+
+    url = os.environ["PASSWORD_RESET_TEST_POSTGRES_URL"]
+    engine = create_engine(url, pool_size=request_count + 2, max_overflow=2)
+    email = f"pending-concurrent-{request_count}@example.org"
+    original_hash = f"old-valid-{request_count}"
+    hashes = [f"new-pending-{request_count}-{i}" for i in range(request_count)]
+    try:
+        User.__table__.create(engine, checkfirst=True)
+        PasswordResetToken.__table__.create(engine, checkfirst=True)
+        with Session(engine) as db:
+            db.add(User(email=email, hashed_password="offline-test-only",
+                        role="staff", is_active=True))
+            db.add(PasswordResetToken(email=email, token_hash=original_hash,
+                                     expires_at=default_reset_expiry()))
+            for token_hash in hashes:
+                db.add(PasswordResetToken(email=email, token_hash=token_hash,
+                                          expires_at=now()))
+            db.commit()
+
+        gate = Barrier(request_count, timeout=20)
+
+        def finalize(token_hash):
+            with Session(engine) as db:
+                token = db.execute(select(PasswordResetToken).where(
+                    PasswordResetToken.token_hash == token_hash
+                )).scalar_one()
+                gate.wait()
+                _finalize_reset_delivery(db, new_token=token, accepted=True)
+
+        with ThreadPoolExecutor(max_workers=request_count) as pool:
+            futures = [pool.submit(finalize, value) for value in hashes]
+            for future in futures:
+                future.result(timeout=30)
+
+        with Session(engine) as db:
+            rows = db.execute(select(PasswordResetToken).where(
+                PasswordResetToken.email == email
+            )).scalars().all()
+            valid = [row.token_hash for row in rows
+                     if row.used_at is None and not token_is_expired(row.expires_at)]
+            assert len(rows) == request_count + 1
+            assert len(valid) == 1
+            assert valid[0] in hashes
+    finally:
+        engine.dispose()
