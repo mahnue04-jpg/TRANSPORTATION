@@ -187,7 +187,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     from app.auth import _validate_email
     from app.db.models import User as UserModel
 
-    ensure_password_reset_schema()
+    ensure_password_reset_schema(engine=db.get_bind())
     public_response = {"status": "ok", "message": GENERIC_REQUEST_MESSAGE}
     try:
         normalized = _validate_email(email)
@@ -239,7 +239,7 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
     from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
     from app.db.models import RefreshToken as RefreshTokenModel, User as UserModel
 
-    ensure_password_reset_schema()
+    ensure_password_reset_schema(engine=db.get_bind())
     _validate_password(new_password)
     raw = str(token or "").strip()
     if not raw:
