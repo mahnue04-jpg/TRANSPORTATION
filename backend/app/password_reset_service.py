@@ -178,7 +178,8 @@ def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
         logger.info("password_reset_email_sent")
         return {"attempted": True, "sent": True, "reason": "sent"}
     except Exception:
-        logger.exception("password_reset_email_failed")
+        # SMTP exception messages can contain credentials or message details.
+        logger.warning("password_reset_email_failed provider=smtp")
         return {"attempted": True, "sent": False, "reason": "send_failed"}
 
 
