@@ -118,13 +118,16 @@ class ImportTests(unittest.TestCase):
         media=ModuleType(P+'providers')
         media._creative_media_root_and_prefix=lambda:(self.root,'/media/test')
         media._PRIVATE_IMPORT_PREFIX='private-studio://'
-        media._private_import_root=lambda: self.root/'private-imports'
+        media._private_import_root=lambda: self.root.with_name(self.root.name+'-private-imports')
         media._resolve_creative_media_url=lambda url: (media._private_import_root()/Path(url).name if str(url or '').startswith(media._PRIVATE_IMPORT_PREFIX) else self.root/Path(url).name) if url else None
         sys.modules[media.__name__]=media
         ns['_creative_media_root_and_prefix']=media._creative_media_root_and_prefix
         ns['_resolve_creative_media_url']=media._resolve_creative_media_url
         ns['_download_filename']=lambda title,suffix,**kw:'imported'+suffix
-    def tearDown(self): self.directory.cleanup()
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.root.with_name(self.root.name+'-private-imports'),ignore_errors=True)
+        self.directory.cleanup()
     def test_real_import_reuse_download_and_no_implicit_approval(self):
         before=copy.deepcopy(self.svc.project.metadata)
         result=self.svc.import_finished_video('owner','project',self.data,content_type='video/mp4')
