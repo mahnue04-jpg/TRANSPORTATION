@@ -165,37 +165,49 @@ def extract_news_query(text: str) -> str | None:
     return candidate or None
 
 
-def fetch_weather(location: str) -> dict[str, Any]:
+def is_seven_day_weather_request(text: str) -> bool:
+    """Detect a requested weekly forecast rather than current conditions."""
+    return bool(re.search(r"(?i)\b(?:7[ -]?day|seven[ -]?day|weekly|next (?:seven|7) days|this week)\b", _clean(text)))
+
+
+def fetch_weather(location: str, *, days: int = 0) -> dict[str, Any]:
     place = _clean(location)
     if not place:
         raise ValueError("location is required")
 
+    # A state has many weather conditions; use a disclosed city reference, not
+    # a misleading single forecast claimed to describe the whole state.
+    statewide = place.lower() in {"minnesota", "mn", "state of minnesota"}
+    geocoding_place = "Minneapolis" if statewide else place
     with httpx.Client(timeout=12.0, follow_redirects=True) as client:
         geo = client.get(
             "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": place, "count": 1, "language": "en", "format": "json"},
+            params={"name": geocoding_place, "count": 1, "language": "en", "format": "json"},
             headers={"User-Agent": "AMICOR-Nova/1.0"},
         )
         geo.raise_for_status()
-        results = (geo.json() or {}).get("results") or []
-        if not results:
+        rows = (geo.json() or {}).get("results") or []
+        if not rows:
             raise ValueError("location not found")
-        row = results[0]
-        latitude = row["latitude"]
-        longitude = row["longitude"]
-        label_parts = [row.get("name"), row.get("admin1"), row.get("country")]
-        label = ", ".join(str(x) for x in label_parts if x)
+        row = rows[0]
+        label = ", ".join(str(x) for x in (row.get("name"), row.get("admin1"), row.get("country")) if x)
+        if statewide:
+            label += " (Minneapolis reference point; conditions vary across Minnesota)"
 
+        params = {
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+            "temperature_unit": "fahrenheit",
+            "wind_speed_unit": "mph",
+            "timezone": "auto",
+        }
+        if days:
+            params["daily"] = "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+            params["forecast_days"] = max(1, min(7, int(days)))
         forecast = client.get(
             "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": latitude,
-                "longitude": longitude,
-                "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
-                "temperature_unit": "fahrenheit",
-                "wind_speed_unit": "mph",
-                "timezone": "auto",
-            },
+            params=params,
             headers={"User-Agent": "AMICOR-Nova/1.0"},
         )
         forecast.raise_for_status()
@@ -203,7 +215,7 @@ def fetch_weather(location: str) -> dict[str, Any]:
 
     current = payload.get("current") or {}
     code = int(current.get("weather_code") or 0)
-    return {
+    result = {
         "location": label or place,
         "temperature_f": current.get("temperature_2m"),
         "apparent_f": current.get("apparent_temperature"),
@@ -213,9 +225,44 @@ def fetch_weather(location: str) -> dict[str, Any]:
         "observed_at": current.get("time"),
         "source": "Open-Meteo",
     }
+    if days:
+        daily = payload.get("daily") or {}
+        dates = daily.get("time") or []
+        highs = daily.get("temperature_2m_max") or []
+        lows = daily.get("temperature_2m_min") or []
+        precip = daily.get("precipitation_probability_max") or []
+        codes = daily.get("weather_code") or []
+        if len(dates) < int(days) or len(highs) < int(days) or len(lows) < int(days):
+            raise ValueError("weekly forecast data unavailable")
+        result["daily_forecast"] = [
+            {
+                "date": date,
+                "high_f": highs[i],
+                "low_f": lows[i],
+                "precipitation_chance_pct": precip[i] if i < len(precip) else None,
+                "condition": (
+                    _WEATHER_CODES.get(int(codes[i]), f"weather code {codes[i]}")
+                    if i < len(codes) and codes[i] is not None else "unknown"
+                ),
+            }
+            for i, date in enumerate(dates[:int(days)])
+        ]
+    return result
 
 
 def format_weather(result: dict[str, Any]) -> str:
+    daily = result.get("daily_forecast")
+    if daily:
+        lines = [f"7-day forecast for {result.get('location')}:"]
+        for item in daily:
+            rain = item.get("precipitation_chance_pct")
+            chance = f"; precipitation chance {rain}%" if rain is not None else ""
+            lines.append(
+                f"{item.get('date')}: high {item.get('high_f')}°F, low {item.get('low_f')}°F; "
+                f"{item.get('condition')}{chance}."
+            )
+        lines.append("Source: Open-Meteo daily forecast; conditions may change.")
+        return "\n".join(lines)
     return (
         f"Current weather for {result.get('location')}: "
         f"{result.get('temperature_f')}°F, {result.get('condition')}. "

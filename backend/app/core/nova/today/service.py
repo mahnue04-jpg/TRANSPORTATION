@@ -49,6 +49,7 @@ from app.core.nova.today.live_tools import (
     format_web_search,
     is_news_request,
     is_weather_request,
+    is_seven_day_weather_request,
     is_web_search_capability_question,
     is_web_search_request,
     read_user_profile,
@@ -3090,8 +3091,8 @@ def _today_live_or_memory_answer(
                 generated_at=now().isoformat(),
             )
         try:
-            result = fetch_weather(location)
-            update_user_profile(organization_id, user.user_id, {"preferred_location": result.get("location") or location})
+            result = fetch_weather(location, days=7) if is_seven_day_weather_request(question) else fetch_weather(location)
+            update_user_profile(organization_id, user.user_id, {"preferred_location": location})
             return NovaTodayBrainOut(
                 answer=format_weather(result),
                 fact_label="VERIFIED DATA",
@@ -3106,14 +3107,19 @@ def _today_live_or_memory_answer(
                 location,
             )
             try:
-                fallback = fetch_web_search(f"current weather {location}", max_results=5)
+                fallback_query = (
+                    f"7-day weather forecast {location}"
+                    if is_seven_day_weather_request(question)
+                    else f"current weather {location}"
+                )
+                fallback = fetch_web_search(fallback_query, max_results=5)
                 sources = [
                     item for item in (fallback.get("sources") or [])
                     if isinstance(item, dict) and str(item.get("url") or "").startswith(("http://", "https://"))
                 ]
                 if sources:
                     return NovaTodayBrainOut(
-                        answer=format_web_search(fallback, f"current weather {location}"),
+                        answer=format_web_search(fallback, fallback_query),
                         fact_label="VERIFIED DATA",
                         next_actions=[],
                         generated_at=now().isoformat(),

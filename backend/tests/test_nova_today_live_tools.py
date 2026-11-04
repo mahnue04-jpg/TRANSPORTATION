@@ -63,6 +63,71 @@ def test_format_weather():
     assert "Open-Meteo" in answer
 
 
+def test_seven_day_weather_request_and_formatting():
+    assert live_tools.is_seven_day_weather_request("I need the 7-day forecast in Minnesota")
+    assert live_tools.is_seven_day_weather_request("What's the seven-day forecast for Duluth?")
+    assert not live_tools.is_seven_day_weather_request("What's the weather in Minneapolis?")
+    assert live_tools.extract_weather_location("I need the 7-day forecast in Minnesota") == "Minnesota"
+
+    result = {
+        "location": "Minneapolis, Minnesota (city reference, not statewide)",
+        "daily_forecast": [
+            {"date": "2026-11-04", "high_f": 42, "low_f": 28,
+             "condition": "overcast", "precipitation_chance_pct": 30}
+        ],
+    }
+    answer = live_tools.format_weather(result)
+    assert "7-day forecast" in answer
+    assert "high 42°F" in answer
+    assert "low 28°F" in answer
+    assert "precipitation chance 30%" in answer
+    assert "city reference" in answer
+
+
+def test_seven_day_weather_fetch_uses_daily_data_not_current_only(monkeypatch):
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return self.payload
+
+    calls = []
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def get(self, url, *, params, headers):
+            calls.append((url, params))
+            if "geocoding" in url:
+                return Response({"results": [{"name": "Minneapolis", "admin1": "Minnesota",
+                                               "country": "United States", "latitude": 44.98,
+                                               "longitude": -93.26}]})
+            return Response({
+                "current": {"temperature_2m": 40, "weather_code": 3},
+                "daily": {
+                    "time": [f"2026-11-{i:02d}" for i in range(4, 11)],
+                    "temperature_2m_max": [40] * 7,
+                    "temperature_2m_min": [28] * 7,
+                    "precipitation_probability_max": [20] * 7,
+                    "weather_code": [3] * 7,
+                },
+            })
+
+    monkeypatch.setattr(live_tools.httpx, "Client", Client)
+    result = live_tools.fetch_weather("Minnesota", days=7)
+    assert len(result["daily_forecast"]) == 7
+    assert "not a statewide forecast" not in result["location"]  # explicit reference-point disclaimer
+    assert "reference point" in result["location"]
+    assert calls[0][1]["name"] == "Minneapolis"
+    assert calls[1][1]["forecast_days"] == 7
+    assert "daily" in calls[1][1]
+
+
 def test_format_news():
     answer = live_tools.format_news(
         [

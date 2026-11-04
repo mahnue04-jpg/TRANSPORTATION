@@ -11,7 +11,7 @@ from starlette.responses import Response
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, decode_access_token
 from app.db.session import SessionLocal
-from app.helpers import now
+from app.helpers import as_utc, now
 
 BLOCKED_PREFIXES = (
     "/api/admin",
@@ -160,7 +160,7 @@ class NovaCustomerProductGuardMiddleware(BaseHTTPMiddleware):
                     trial_expired = bool(
                         signup is not None
                         and signup.intro_ends_at is not None
-                        and now() >= signup.intro_ends_at
+                        and now() >= as_utc(signup.intro_ends_at)
                     )
         except Exception:
             return await call_next(request)  # type: ignore[misc]

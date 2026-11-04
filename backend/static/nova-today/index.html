@@ -74,6 +74,7 @@
     <form id="login-form" class="login-grid hidden">
       <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
       <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+      <button type="button" id="login-password-toggle" class="secondary" aria-controls="login-password" aria-pressed="false">Show password</button>
       <button type="submit">Sign in</button>
       <p class="hint"><a href="/nova/forgot-password">Forgot password?</a></p>
     </form>
@@ -174,6 +175,7 @@
             <label class="sr-only" for="ask-input">Ask Mrs. Nova Brain</label>
             <input id="ask-input" type="text" placeholder="What needs attention now?" />
             <button type="button" id="ask-mic" class="secondary" aria-label="Talk to Nova">🎤 Talk</button>
+            <button type="button" id="read-answer" class="secondary" aria-label="Read Nova answer aloud">Read aloud</button>
             <button type="button" id="stop-speaking" class="secondary" aria-label="Stop Nova speaking">⏹ Stop</button>
             <button type="submit">Ask Nova</button>
           </form>

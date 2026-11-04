@@ -52,7 +52,7 @@ from app.core.nova.signup.stripe_client import (
     stripe_runtime_mode,
 )
 from app.core.nova.tenants.provision import TenantProvisionError, provision_isolated_nova_tenant
-from app.helpers import now
+from app.helpers import as_utc, now
 
 logger = logging.getLogger("amicor.nova.signup")
 
@@ -420,7 +420,7 @@ def customer_access(db: Session, *, organization_id: str | None, user_id: str | 
     trial_expired = bool(
         no_card_trial
         and signup.intro_ends_at is not None
-        and now() >= signup.intro_ends_at
+        and now() >= as_utc(signup.intro_ends_at)
     )
     free_tier = subscription_status == STATUS_FREE
     paid_surfaces = [
