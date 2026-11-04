@@ -1008,6 +1008,12 @@
     return body;
   }
 
+  function isIsolatedStudioPreview() {
+    var host = String(location.hostname || "").toLowerCase();
+    return host === "nova-studio-validation-350.onrender.com" ||
+      host === "amicor-health-isf-pr-454.onrender.com";
+  }
+
   function setSignedIn(on) {
     // Signed in → only Sign out. Signed out → only Sign in.
     var signInBtn = $("sign-in-toggle");
@@ -1016,7 +1022,7 @@
     if (signOutBtn) signOutBtn.classList.toggle("hidden", !on);
     if ($("staging-register-panel")) {
       $("staging-register-panel").style.display =
-        (location.hostname === "nova-studio-validation-350.onrender.com" && !on) ? "block" : "none";
+        (isIsolatedStudioPreview() && !on) ? "block" : "none";
     }
     $("login-form").classList.add("hidden");
     $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
@@ -2340,7 +2346,7 @@
     }
   }
 
-  if (location.hostname === "nova-studio-validation-350.onrender.com") {
+  if (isIsolatedStudioPreview()) {
     $("staging-register-panel").style.display = "block";
     $("staging-register-toggle").addEventListener("click", function () {
       $("staging-register-form").classList.toggle("hidden");
