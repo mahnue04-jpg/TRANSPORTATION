@@ -250,3 +250,49 @@ def test_overlapping_pending_email_acceptances_activate_only_one_link(request_co
             assert valid[0] in hashes
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("PASSWORD_RESET_TEST_POSTGRES_URL"),
+    reason="Requires ephemeral PostgreSQL test container",
+)
+def test_interrupted_email_leaves_pending_token_unusable_on_postgres():
+    """An unfinalized persisted token must not change credentials."""
+    from app.helpers import now
+    from app.db.models import RefreshToken
+    from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
+    from app.password_reset_service import apply_password_reset, hash_reset_token
+
+    url = os.environ["PASSWORD_RESET_TEST_POSTGRES_URL"]
+    engine = create_engine(url)
+    email = "interrupted-email@example.org"
+    pending = "pending-never-accepted-test-token"
+    try:
+        User.__table__.create(engine, checkfirst=True)
+        RefreshToken.__table__.create(engine, checkfirst=True)
+        PasswordResetToken.__table__.create(engine, checkfirst=True)
+        ensure_nova_signup_schema(engine=engine)
+        with Session(engine) as db:
+            db.add(User(email=email, hashed_password="unchanged-test-hash",
+                        role="staff", is_active=True))
+            db.add(PasswordResetToken(
+                email=email, token_hash=hash_reset_token(pending),
+                expires_at=now(),
+            ))
+            db.commit()
+
+        # Simulates a process crash after persisting the pending token but
+        # before the provider response/finalization. Use a fresh transaction.
+        with Session(engine) as db:
+            with pytest.raises(ValueError, match="Invalid or expired reset link"):
+                apply_password_reset(
+                    db, token=pending, new_password="StrongPendingPass1!"
+                )
+            db.rollback()
+
+        with Session(engine) as db:
+            user = db.execute(select(User).where(User.email == email)).scalar_one()
+            assert user.hashed_password == "unchanged-test-hash"
+            assert user.auth_version == 0
+    finally:
+        engine.dispose()
