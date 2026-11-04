@@ -307,7 +307,7 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
         PasswordResetToken.used_at.is_(None),
     ).update({PasswordResetToken.used_at: now()}, synchronize_session=False)
 
-    ensure_nova_signup_schema()
+    ensure_nova_signup_schema(engine=db.get_bind())
     signup = (
         db.query(NovaSignupAccount)
         .filter(func.lower(NovaSignupAccount.email) == str(row.email).lower())
