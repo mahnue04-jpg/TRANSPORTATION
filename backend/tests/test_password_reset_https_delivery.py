@@ -312,3 +312,41 @@ def test_smtp_failure_logs_no_exception_secrets(caplog):
     assert result == {"attempted": True, "sent": False, "reason": "send_failed"}
     assert marker not in caplog.text
     assert "password_reset_email_failed provider=smtp" in caplog.text
+
+
+def test_reset_origin_rejects_insecure_or_malformed_destinations():
+    invalid = (
+        "http://example.org",
+        "https://user:secret@example.org",
+        "https://example.org/redirect",
+        "https://example.org/?next=other",
+        "https://example.org/#fragment",
+        "https://example.org:invalid",
+        "https://example.org\nBcc: attacker@example.org",
+        "javascript:alert(1)",
+        "https://",
+    )
+    for origin in invalid:
+        with patch.dict("os.environ", {"AMICOR_PUBLIC_BASE_URL": origin}):
+            assert reset._validated_reset_base_url() is None
+    with patch.dict("os.environ", {"AMICOR_PUBLIC_BASE_URL": "https://example.org/"}):
+        assert reset._validated_reset_base_url() == "https://example.org"
+
+
+def test_invalid_origin_never_creates_token_or_sends_email():
+    """Request handler checks the destination before persisting any token."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    db = Mock()
+    db.get_bind.return_value = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(
+        email="person@example.org", is_active=True, auth_version=0
+    )
+    with patch.object(reset, "ensure_password_reset_schema"):
+        with patch.object(reset, "_validated_reset_base_url", return_value=None):
+            with patch.object(reset, "_send_reset_email") as send:
+                result = reset.request_password_reset(db, email="person@example.org")
+    assert result == {"status": "ok", "message": reset.GENERIC_REQUEST_MESSAGE}
+    db.add.assert_not_called()
+    send.assert_not_called()
