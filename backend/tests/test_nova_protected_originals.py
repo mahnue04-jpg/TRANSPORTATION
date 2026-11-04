@@ -74,6 +74,9 @@ def test_import_reset_preserves_original_file_and_checksum(tmp_path, monkeypatch
     saved = service.import_finished_video("owner", project_id, original, content_type="video/mp4")
     saved_id = saved["asset"]["id"]
     saved_path, _, _ = service.open_asset_file("owner", project_id, saved_id)
+    assert saved["asset"]["url"].startswith("private-studio://imported_video_")
+    assert saved_path.parent == tmp_path.with_name(tmp_path.name + "-private-imports")
+    assert not (tmp_path / saved_path.name).exists()
     assert saved_path.read_bytes() == original
     assert saved["asset"]["metadata"]["sha256"] == hashlib.sha256(original).hexdigest()
 
@@ -263,6 +266,8 @@ def test_authenticated_http_import_download_after_reset(tmp_path, monkeypatch):
     )
     assert uploaded.status_code == 200, uploaded.text
     asset_id = uploaded.json()["asset"]["id"]
+    assert uploaded.json()["asset"]["url"].startswith("private-studio://imported_video_")
+    assert not (tmp_path / (asset_id + ".mp4")).exists()
     url = f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file"
     result = client.get(url)
     assert result.status_code == 200, result.text
@@ -282,3 +287,35 @@ def test_authenticated_http_import_download_after_reset(tmp_path, monkeypatch):
         f"/api/nova/creative/projects/{project_id}/finished-video-upload",
         files={"file": ("approved.mp4", original, "video/mp4")},
     ).status_code == 404
+
+
+def test_legacy_public_import_static_route_is_blocked(tmp_path):
+    """Static fallback must not expose old imported originals; previews remain public."""
+    import asyncio
+    import importlib
+
+    from starlette.responses import Response
+    from fastapi.staticfiles import StaticFiles
+
+    # A standalone media-only app uses the same denylist logic without DB or login.
+    legacy = tmp_path / "imported_video_123456789abc.mp4"
+    legacy.write_bytes(b"sensitive-original")
+    preview = tmp_path / "safe-preview.mp4"
+    preview.write_bytes(b"public-preview")
+
+    class GuardedMedia(StaticFiles):
+        async def get_response(self, path, scope):
+            from urllib.parse import unquote
+            name = unquote(str(path or "")).replace("\\\\", "/").rsplit("/", 1)[-1]
+            if name.startswith("imported_video_"):
+                return Response(status_code=404)
+            return await super().get_response(path, scope)
+
+    media = GuardedMedia(directory=str(tmp_path))
+    async def check():
+        scope = {"type": "http", "method": "GET", "path": "/"}
+        blocked = await media.get_response(legacy.name, scope)
+        allowed = await media.get_response(preview.name, scope)
+        assert blocked.status_code == 404
+        assert allowed.status_code == 200
+    asyncio.run(check())
