@@ -46,6 +46,18 @@ may be used. SMTP connectivity can be restricted by the hosting plan.
 - **Coverage limitation:** Automated tests do not prove behavior for all overlapping HTTP requests, provider timing, infrastructure failures, or delivery-order reversals. Maintain owner-controlled release gating.
 
 
+
+## Safe staging isolation verification (no live traffic)
+1. Keep PR #458 suspended while checking settings. Inspect the **preview service** in the Render dashboard, not its parent production service.
+2. In its Environment settings, inspect only the `DATABASE_URL` destination (hostname/database identity) **privately**. Do not share or log connection credentials, the full URL, or any SendGrid secret.
+3. Confirm the destination is a dedicated disposable staging database, clearly different from both `amicor-prod` and `amicor-casting-staging-db`. A database name alone is not sufficient proof if the hostname or instance still points to production.
+4. If the destination cannot be conclusively identified, **stop**. Never run migrations, startup table creation, password-reset HTTP requests, or a live SendGrid attempt against that preview.
+5. Privately confirm `AMICOR_PUBLIC_BASE_URL` is the preview HTTPS origin and the SendGrid API key has only Mail Send permission. Confirm the test-token capture flag is off outside isolated tests.
+6. Only after an isolated database, staging URL, and secret scope have been verified should a separately owner-approved staging resume and one disposable account/inbox delivery test be considered.
+7. Capture evidence as non-sensitive status values only: isolated database confirmed (yes/no), provider accepted (yes/no), inbox delivered (yes/no), link expiry and one-time behavior passed (yes/no). Never record keys, email addresses, full database URLs, or token-bearing links.
+
+**Current connector limitation:** The available Render service detail shows suspension and service metadata, but cannot independently reveal or verify the preview's effective `DATABASE_URL`. This gate remains **blocked**, not passed.
+
 ## Production gate
 Never merge/deploy PR #458 merely because the focused tests pass.
 Require review of remaining CI, verified provider/sender, isolated live send,
