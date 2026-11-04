@@ -155,6 +155,15 @@ def _validated_reset_base_url() -> str | None:
         for name in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
     }
     isolated_env = bool(env_values & {"staging", "stage", "preview"})
+    # Render preview services can lack an APP_ENV label. Also recognize the
+    # platform-provided public URL so preview links never default to production.
+    render_origin = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+    try:
+        render_host = (urlsplit(render_origin).hostname or "").lower()
+    except ValueError:
+        render_host = ""
+    if render_host.endswith(".onrender.com") and "-pr-" in render_host:
+        isolated_env = True
     if isolated_env and not (os.getenv("AMICOR_PUBLIC_BASE_URL") or "").strip():
         return None
     base = _public_base_url()
