@@ -409,3 +409,28 @@ def test_preview_requires_dedicated_https_reset_origin():
         config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-pr-458.onrender.com"
         with patch.dict("os.environ", config):
             assert reset._validated_reset_base_url() == config["AMICOR_PUBLIC_BASE_URL"]
+
+
+def test_preview_with_production_origin_does_not_persist_token_or_send_email():
+    """Fail closed before token creation when preview points to a live origin."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    config = {
+        "APP_ENV": "preview",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "AMICOR_PUBLIC_BASE_URL": "https://getamicor.com",
+    }
+    with patch.dict("os.environ", config):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(
+            email="person@example.org", is_active=True, auth_version=0
+        )
+        with patch.object(reset, "ensure_password_reset_schema"):
+            with patch.object(reset, "_send_reset_email") as send:
+                result = reset.request_password_reset(db, email="person@example.org")
+        assert result == {"status": "ok", "message": reset.GENERIC_REQUEST_MESSAGE}
+        db.add.assert_not_called()
+        db.commit.assert_not_called()
+        send.assert_not_called()
