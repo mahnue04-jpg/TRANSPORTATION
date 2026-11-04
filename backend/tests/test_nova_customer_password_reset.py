@@ -287,3 +287,29 @@ def test_failed_replacement_email_keeps_previous_reset_link_usable(monkeypatch) 
         json={"email": payload["email"], "password": new_password},
     )
     assert login.status_code == 200, login.text
+
+
+def test_unavailable_email_provider_leaves_no_unusable_reset_link(monkeypatch) -> None:
+    """No mail transport means no new stored recovery link or account enumeration."""
+    monkeypatch.delenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", raising=False)
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": False, "sent": False, "reason": "not_configured"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    missing = client.post(
+        "/api/auth/forgot-password",
+        json={"email": "absent-" + uuid4() + "@example.com"},
+    )
+    existing = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert existing.status_code == missing.status_code == 200
+    assert existing.json() == missing.json()
+    with SessionLocal() as db:
+        tokens = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert tokens == []
+    assert get_test_reset_token(payload["email"]) is None
