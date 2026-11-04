@@ -35,15 +35,16 @@ may be used. SMTP connectivity can be restricted by the hosting plan.
 - Verify account access and projects after owner-approved production release.
 
 
-## Current release blockers (reviewed November 2026)
-- PR #458 Render preview is **suspended**. Its `DATABASE_URL` was copied from another environment; its isolation is unverified. Do not resume or run real password-reset requests there.
-- Render rejected creation of a second free PostgreSQL instance because the workspace already has its one active free instance. Do not modify `amicor-prod`, borrow `amicor-casting-staging-db`, or provision a paid database without owner approval.
-- SendGrid verified sender and an API key were prepared by the owner. Permission scope (Mail Send only) and saved preview configuration must still be independently verified before use.
-- **Verified automated milestone:** Commit `16c611ec78e7963af88a6eb178eddb007c11c48c` passed all four GitHub workflows, including both password-reset CI jobs. The disposable PostgreSQL 18 job covered accepted-email finalizations with 2, 3, and 5 simultaneous contenders, plus concurrent attempts to consume the same token. The offline job covered the password-reset lifecycle and mocked email outcomes. No Render production or Casting database was used.
-- **Newly identified release blocker — token activation timing:** `request_password_reset` currently commits a reset token with `used_at=NULL` and a future expiration **before** SendGrid accepts the message. During a slow or interrupted send, that token is temporarily eligible for password reset. A failed send later deletes it, but process crashes or race conditions can strand an unsent token. Before release, implement an explicit pending-versus-active state or equivalent transactional activation so a reset token cannot be consumed until provider acceptance. Verify failed, delayed, interrupted, and simultaneous deliveries in isolated tests. Do not infer that passing existing concurrency tests resolves this risk.
-- **Verified mixed-outcome milestone:** Commit `25c775555974b8f0fabf72a9d36a428b0c2d30cb` passed both password-reset jobs, including PostgreSQL tests for one accepted/one failed and both failed attempts. The broader CI checks were still pending at that check.
-- **Remaining concurrency coverage limitation:** These tests do **not** run the complete overlapping HTTP requests with real email-provider responses, delivery-order reversals, process crashes, or real inbox delivery. Account and token lifecycle correctness must be reviewed before release; passing these bounded tests is not a blanket security guarantee.
-- Do not merge, deploy, resume staging, send a real password-reset email, or change any real administrator password until these blockers are resolved.
+## Verified draft state and remaining release gates (November 2026)
+- **PR status:** #458 remains open, draft, and unmerged. The Render preview is **suspended**; production was not deployed.
+- **Latest verified password-reset CI:** Commit `531375808e507be517d6bbdd1d771ca8c68a3b33` passed both password-reset jobs (offline and disposable PostgreSQL). Jekyll passed; the broader Render diagnostic and Work & Revenue checks were still unfinished at the last verified check.
+- **Token activation fixed in draft:** New reset tokens are created with already-expired `expires_at` until the provider accepts sending. The accepted-email finalizer locks the account, activates the token, and retires active competing tokens. Delayed-send, interrupted-send, and overlapping pending-token scenarios have passed offline/disposable PostgreSQL tests. This is *code/CI evidence only*, not live delivery evidence.
+- **SMTP log redaction fixed in draft:** Errors log a sanitized warning rather than full exception contents. The corresponding offline regression passed.
+- **Isolation blocker:** Preview `DATABASE_URL` was copied from another environment and has not been verified as isolated. **Never resume preview or trigger live reset requests against it** until its database target is verified. Do not repurpose `amicor-prod` or `amicor-casting-staging-db`. Render already rejected a second free database; obtain explicit owner consent before creating anything paid.
+- **Sender verification blocker:** The SendGrid domain/sender and an API key were prepared, but the API key's Mail Send-only scope and preview environment settings have not been independently confirmed. Never expose keys or reset URLs in issues, chats, screenshots, or logs.
+- **Live verification blocker:** No successful SendGrid HTTP 202 response from an isolated staging service, actual inbox receipt, staging-link HTTPS/expiry, or end-to-end staging reset has been established.
+- **Coverage limitation:** Automated tests do not prove behavior for all overlapping HTTP requests, provider timing, infrastructure failures, or delivery-order reversals. Maintain owner-controlled release gating.
+
 
 ## Production gate
 Never merge/deploy PR #458 merely because the focused tests pass.
