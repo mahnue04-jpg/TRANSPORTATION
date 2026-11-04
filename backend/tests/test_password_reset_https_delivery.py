@@ -385,3 +385,27 @@ def test_plaintext_capture_is_disabled_in_staging_even_if_flag_is_set():
         with patch.dict("os.environ", env):
             assert reset._test_capture_enabled() is False
             assert reset.get_test_reset_token("person@example.org") is None
+
+
+def test_preview_requires_dedicated_https_reset_origin():
+    for env_name in ("preview", "stage", "staging"):
+        config = {
+            "APP_ENV": env_name,
+            "AMICOR_ENVIRONMENT": "",
+            "ENVIRONMENT": "",
+            "AMICOR_PUBLIC_BASE_URL": "",
+            "NOVA_SIGNUP_PUBLIC_BASE_URL": "https://amicor-health-isf-py.onrender.com",
+        }
+        with patch.dict("os.environ", config):
+            assert reset._validated_reset_base_url() is None
+        for forbidden in (
+            "https://amicor-health-isf-py.onrender.com",
+            "https://amicor-health-isf.onrender.com",
+            "https://getamicor.com",
+        ):
+            config["AMICOR_PUBLIC_BASE_URL"] = forbidden
+            with patch.dict("os.environ", config):
+                assert reset._validated_reset_base_url() is None
+        config["AMICOR_PUBLIC_BASE_URL"] = "https://amicor-health-isf-pr-458.onrender.com"
+        with patch.dict("os.environ", config):
+            assert reset._validated_reset_base_url() == config["AMICOR_PUBLIC_BASE_URL"]
