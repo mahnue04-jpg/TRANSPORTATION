@@ -138,6 +138,7 @@ def test_real_h264_aac_mp4_survives_cleanup(tmp_path, monkeypatch):
         "owner", project_id, original, content_type="video/mp4"
     )["reused"] is True
 
+    media_dir.mkdir(parents=True, exist_ok=True)
     preview = media_dir / "temporary-preview.mp4"
     preview.write_bytes(b"temporary-preview")
     store.save_asset(CreativeAsset(
@@ -303,7 +304,7 @@ def test_legacy_public_import_static_route_is_blocked(tmp_path):
     media = _CreativePublicMediaFiles(directory=str(tmp_path))
 
     async def check():
-        scope = {"type": "http", "method": "GET", "path": "/"}
+        scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
         blocked = await media.get_response(legacy.name, scope)
         allowed = await media.get_response(preview.name, scope)
         assert blocked.status_code == 404
