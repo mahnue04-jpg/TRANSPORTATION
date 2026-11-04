@@ -60,6 +60,7 @@
     if ($("voice-status")) $("voice-status").textContent = message;
   }
   var novaHumanVoice = null;
+  var lastBrainAnswer = "";
   function getNovaHumanVoice() {
     if (!novaHumanVoice && window.AmiCorHumanVoice && window.AmiCorHumanVoice.createEngine) {
       novaHumanVoice = window.AmiCorHumanVoice.createEngine({
@@ -719,7 +720,8 @@
     renderBrainSources(result.sources || [], result.source_href || "");
     $("ask-input").value = "";
     $("ask-input").focus();
-    speakNova(answer);
+    lastBrainAnswer = answer;
+    setVoiceStatus("Answer ready. Select Read aloud to hear it.");
     showBanner("Mrs. Nova Brain answered. Nothing was sent or filed.", true);
     await refresh();
   }
@@ -782,6 +784,15 @@
       startVoiceInput();
     });
   }
+  if ($("read-answer")) {
+    $("read-answer").addEventListener("click", function () {
+      if (!lastBrainAnswer) {
+        setVoiceStatus("Ask Nova a question before using Read aloud.");
+        return;
+      }
+      speakNova(lastBrainAnswer);
+    });
+  }
   if ($("stop-speaking")) {
     $("stop-speaking").addEventListener("click", function () {
       stopNovaSpeaking();
@@ -798,6 +809,7 @@
     $("login-form").classList.toggle("hidden");
   });
   $("sign-out").addEventListener("click", function () {
+    lastBrainAnswer = "";
     if (session() && session().logout) {
       session().logout();
     }
