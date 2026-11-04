@@ -177,6 +177,7 @@
     return body;
   }
   function setSignedIn(on) {
+    $("sign-in-toggle").classList.toggle("hidden", !!on);
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
     var ident = identity();
@@ -786,6 +787,13 @@
       stopNovaSpeaking();
     });
   }
+  $("login-password-toggle").addEventListener("click", function () {
+    var field = $("login-password");
+    var revealed = field.type === "password";
+    field.type = revealed ? "text" : "password";
+    this.textContent = revealed ? "Hide password" : "Show password";
+    this.setAttribute("aria-pressed", String(revealed));
+  });
   $("sign-in-toggle").addEventListener("click", function () {
     $("login-form").classList.toggle("hidden");
   });
