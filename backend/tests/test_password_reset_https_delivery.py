@@ -290,3 +290,25 @@ def test_accepted_delivery_removes_token_if_account_was_deleted():
     reset._finalize_reset_delivery(db, new_token=replacement, accepted=True)
     db.delete.assert_called_once_with(replacement)
     db.commit.assert_called_once()
+
+
+def test_smtp_failure_logs_no_exception_secrets(caplog):
+    import logging
+
+    marker = "private-smtp-credential-and-reset-token"
+    env = {
+        "SENDGRID_API_KEY": "",
+        "SENDGRID_FROM_EMAIL": "",
+        "AUTH_SMTP_HOST": "smtp.example.org",
+        "AUTH_SMTP_FROM": "noreply@example.org",
+    }
+    with patch.dict("os.environ", env):
+        with patch.object(reset.smtplib, "SMTP", side_effect=OSError(marker)):
+            with caplog.at_level(logging.WARNING, logger="amicor.auth.password_reset"):
+                result = reset._send_reset_email(
+                    to_email="person@example.org",
+                    reset_url="https://example.org/nova/reset-password?token=" + marker,
+                )
+    assert result == {"attempted": True, "sent": False, "reason": "send_failed"}
+    assert marker not in caplog.text
+    assert "password_reset_email_failed provider=smtp" in caplog.text
