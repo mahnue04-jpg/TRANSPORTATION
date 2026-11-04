@@ -167,3 +167,38 @@ def test_partial_https_config_prevents_smtp_fallback():
     assert result == {"attempted": False, "sent": False, "reason": "not_configured"}
     smtp.assert_not_called()
     https_send.assert_not_called()
+
+
+def test_plaintext_reset_capture_rejected_in_production():
+    """An accidental production flag must never expose a password reset token."""
+    reset.clear_test_reset_capture()
+    for environment_name in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT", "FLASK_ENV"):
+        with patch.dict("os.environ", {
+            "APP_ENV": "",
+            "AMICOR_ENVIRONMENT": "",
+            "ENVIRONMENT": "",
+            "FLASK_ENV": "",
+            environment_name: "production",
+            "AMICOR_PASSWORD_RESET_TEST_CAPTURE": "true",
+        }):
+            assert reset._test_capture_enabled() is False
+            assert reset.get_test_reset_token("person@example.org") is None
+
+
+def test_plaintext_reset_capture_is_opt_in_for_local_tests():
+    with patch.dict("os.environ", {
+        "APP_ENV": "test",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "FLASK_ENV": "",
+        "AMICOR_PASSWORD_RESET_TEST_CAPTURE": "true",
+    }):
+        assert reset._test_capture_enabled() is True
+    with patch.dict("os.environ", {
+        "APP_ENV": "test",
+        "AMICOR_ENVIRONMENT": "",
+        "ENVIRONMENT": "",
+        "FLASK_ENV": "",
+        "AMICOR_PASSWORD_RESET_TEST_CAPTURE": "",
+    }):
+        assert reset._test_capture_enabled() is False
