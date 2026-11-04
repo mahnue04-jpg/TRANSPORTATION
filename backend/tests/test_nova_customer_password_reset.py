@@ -182,3 +182,58 @@ def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
         } == before_snap
         assert verify_password(new_password, after.hashed_password)
         assert not verify_password(old_password, after.hashed_password)
+
+
+def test_using_one_reset_link_revokes_other_outstanding_links(monkeypatch) -> None:
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    asked = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert asked.status_code == 200
+    active_token = get_test_reset_token(payload["email"])
+    assert active_token
+
+    # Represent a second outstanding reset request using offline-only test data.
+    other_token = "second-test-only-reset-" + uuid4()
+    with SessionLocal() as db:
+        from app.password_reset import default_reset_expiry
+
+        db.add(PasswordResetToken(
+            email=payload["email"].lower(),
+            token_hash=hash_reset_token(other_token),
+            expires_at=default_reset_expiry(),
+        ))
+        db.commit()
+
+    new_password = _password()
+    accepted = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": active_token,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(rows) == 2
+        assert all(row.used_at is not None for row in rows)
+
+    replay = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": other_token,
+            "new_password": _password(),
+            "confirm_password": _password(),
+        },
+    )
+    assert replay.status_code == 400
