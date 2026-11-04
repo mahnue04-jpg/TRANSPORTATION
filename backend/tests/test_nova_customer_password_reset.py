@@ -358,3 +358,55 @@ def test_second_accepted_reset_email_invalidates_first_link(monkeypatch) -> None
         json={"token": second_token, "new_password": password, "confirm_password": password},
     )
     assert accepted.status_code == 200, accepted.text
+
+
+def test_reset_link_is_unusable_while_email_delivery_is_pending(monkeypatch) -> None:
+    """A blocked mail provider must not expose a usable token prematurely."""
+    from threading import Event, Thread
+
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    reached_provider = Event()
+    release_provider = Event()
+    responses = []
+
+    def blocked_provider(**kwargs):
+        reached_provider.set()
+        assert release_provider.wait(timeout=15)
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+
+    monkeypatch.setattr("app.password_reset_service._send_reset_email", blocked_provider)
+
+    def request_reset():
+        responses.append(client.post(
+            "/api/auth/forgot-password", json={"email": payload["email"]}
+        ))
+
+    worker = Thread(target=request_reset, daemon=True)
+    worker.start()
+    try:
+        assert reached_provider.wait(timeout=15)
+        with SessionLocal() as db:
+            rows = db.query(PasswordResetToken).filter(
+                PasswordResetToken.email == payload["email"].lower()
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].used_at is None
+            from app.password_reset import token_is_expired
+            assert token_is_expired(rows[0].expires_at)
+    finally:
+        release_provider.set()
+        worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert len(responses) == 1 and responses[0].status_code == 200
+    captured = get_test_reset_token(payload["email"])
+    assert captured
+    with SessionLocal() as db:
+        token = db.query(PasswordResetToken).filter(
+            PasswordResetToken.token_hash == hash_reset_token(captured)
+        ).one()
+        from app.password_reset import token_is_expired
+        assert token.used_at is None
+        assert not token_is_expired(token.expires_at)
