@@ -150,11 +150,12 @@ def _validated_reset_base_url() -> str | None:
     """
     # Staging must explicitly name its own public origin. Never fall back to
     # a default production address for a staging password-reset email.
-    env_values = (
+    env_values = {
         (os.getenv(name) or "").strip().lower()
         for name in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
-    )
-    if "staging" in env_values and not (os.getenv("AMICOR_PUBLIC_BASE_URL") or "").strip():
+    }
+    isolated_env = bool(env_values & {"staging", "stage", "preview"})
+    if isolated_env and not (os.getenv("AMICOR_PUBLIC_BASE_URL") or "").strip():
         return None
     base = _public_base_url()
     if any(ord(char) < 33 or ord(char) == 127 for char in base):
@@ -174,6 +175,13 @@ def _validated_reset_base_url() -> str | None:
         # Reject invalid ports and malformed hosts rather than constructing
         # an email link that could expose a token to another destination.
         _ = parsed.port
+        if isolated_env and parsed.hostname.lower() in {
+            "amicor-health-isf-py.onrender.com",
+            "amicor-health-isf.onrender.com",
+            "getamicor.com",
+            "www.getamicor.com",
+        }:
+            return None
     except ValueError:
         return None
     return base
