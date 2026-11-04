@@ -64,6 +64,10 @@ def _test_capture_enabled() -> bool:
     production_names = ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT", "FLASK_ENV")
     if any((os.getenv(name) or "").strip().lower() in {"production", "prod"} for name in production_names):
         return False
+    # Opt-in alone is insufficient: staging and unspecified environments must
+    # not expose plaintext reset tokens through the diagnostic test helper.
+    if (os.getenv("APP_ENV") or "").strip().lower() != "test":
+        return False
     return (os.getenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE") or "").strip().lower() in {
         "1",
         "true",
