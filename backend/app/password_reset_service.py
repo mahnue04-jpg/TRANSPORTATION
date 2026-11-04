@@ -210,6 +210,13 @@ def _finalize_reset_delivery(
         db.commit()
         return
 
+    # A concurrent accepted request may already have retired our token.
+    # Do not let an obsolete finalizer invalidate the currently usable link.
+    db.refresh(new_token)
+    if new_token.used_at is not None or token_is_expired(new_token.expires_at):
+        db.commit()
+        return
+
     db.query(PasswordResetToken).filter(
         PasswordResetToken.email == new_token.email,
         PasswordResetToken.token_hash != new_token.token_hash,
