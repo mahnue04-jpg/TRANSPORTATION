@@ -272,14 +272,20 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
     if row is None or row.used_at is not None or token_is_expired(row.expires_at):
         raise ValueError("Invalid or expired reset link")
 
+    # Serialize resets for the same account on PostgreSQL. A concurrent
+    # request must re-check its token after the account row lock is obtained.
     users = (
         db.query(UserModel)
         .filter(func.lower(UserModel.email) == str(row.email).lower())
+        .with_for_update()
         .all()
     )
     if len(users) != 1:
         raise ValueError("Invalid or expired reset link")
     user = users[0]
+    db.refresh(row)
+    if row.used_at is not None or token_is_expired(row.expires_at):
+        raise ValueError("Invalid or expired reset link")
     # Snapshot identity fields so callers can assert they did not change.
     before = {
         "role": user.role,
@@ -294,7 +300,12 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
         RefreshTokenModel.user_id == user.id,
         RefreshTokenModel.revoked == False,  # noqa: E712
     ).update({RefreshTokenModel.revoked: True}, synchronize_session=False)
-    row.used_at = now()
+    # Consumption of one link revokes every other outstanding link for
+    # the account, in the same transaction as the password change.
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == str(row.email).lower(),
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now()}, synchronize_session=False)
 
     ensure_nova_signup_schema()
     signup = (
