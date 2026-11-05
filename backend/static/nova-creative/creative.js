@@ -79,11 +79,9 @@
 
   async function ensureSecondCommercialSelected() {
     // Always refresh so we never trust a stale empty cache or a dead localStorage id.
-    try {
-      await refreshProjects();
-    } catch (err) {
-      // Keep going with whatever cache we have; caller shows a clear banner.
-    }
+    // Project selection requires an authenticated, fresh server response.
+    // Never misreport an expired session or failed project request as missing media.
+    await refreshProjects();
     var match = findSecondCommercialProject(projectRowsCache);
     if (match) {
       setActiveProjectId(match.id);
@@ -2044,11 +2042,11 @@
       try {
         var projectId = await ensureSecondCommercialSelected();
         if (!projectId) {
-          showBanner("AMICOR Second Commercial was not found. Create a 30s promo project first.", false);
+          showBanner("No second-commercial project is visible in this staging account. Check Projects below; an approved original may exist in another account. Do not regenerate.", false);
           return;
         }
         var match = findSecondCommercialProject(projectRowsCache);
-        showBanner("Active project: " + ((match && match.title) || projectId) + ". Accept voice license, then Build 30s.", true);
+        showBanner("Active project: " + ((match && match.title) || projectId) + ". Review saved assets before generating or spending.", true);
       } catch (err) {
         showBanner(err.message || "Could not select Second Commercial.", false);
       } finally {
