@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -1423,12 +1423,31 @@ def download_asset_file(
             detail="Send the bearer token in the Authorization header, not the URL.",
         )
     _require_owner(user)
+    studio = get_service(db)
     try:
-        path, media_type, filename = get_service(db).open_asset_file(
-            user.user_id,
-            project_id,
-            asset_id,
-            part=part,
+        remote = studio.open_private_remote_asset(user.user_id, project_id, asset_id, part=part)
+        if remote is not None:
+            stream, media_type, filename = remote
+            def chunks():
+                try:
+                    while True:
+                        chunk = stream.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    stream.close()
+            from urllib.parse import quote
+            return StreamingResponse(
+                chunks(), media_type=media_type,
+                headers={
+                    "Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename),
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        path, media_type, filename = studio.open_asset_file(
+            user.user_id, project_id, asset_id, part=part,
         )
     except CreativeStudioError as exc:
         _raise(exc)
