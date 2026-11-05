@@ -963,7 +963,12 @@
     var body = null;
     try { body = await res.json(); } catch (err) { body = null; }
     if (res.status === 401) {
-      if (isLogin) throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
+      if (isLogin) {
+        if (isIsolatedStudioPreview()) {
+          throw new Error("Staging sign-in rejected (401). This preview uses separate temporary accounts, which can be lost after a deployment. If your test account was previously working, use Create test account with a fresh staging-only address and password. Do not change or reuse your production password.");
+        }
+        throw new Error("Sign-in failed. " + detailText(body, "Check your email and password.") + " (401)");
+      }
       if (typeof setToken === "function") setToken("");
       var currentSession = (typeof window !== "undefined" && window.AmiCorSession) ? window.AmiCorSession : null;
       if (currentSession && typeof currentSession.clear === "function") currentSession.clear("studio_unauthorized");
