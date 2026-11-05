@@ -563,3 +563,11 @@ test('second-commercial selection reports project-list authentication failure in
   await assert.rejects(ctx.ensureSecondCommercialSelected(), /Session expired.*401/);
   assert.doesNotMatch(source.slice(start, end), /catch \(err\) \{\s*\/\/ Keep going/);
 });
+
+test('staging 401 message distinguishes temporary staging accounts from production login', () => {
+  const script = fs.readFileSync(__dirname + '/creative.js', 'utf8');
+  assert.match(script, /if \(isLogin\) \{/);
+  assert.match(script, /if \(isIsolatedStudioPreview\(\)\)/);
+  assert.match(script, /Staging sign-in rejected \(401\)/);
+  assert.match(script, /Do not change or reuse your production password/);
+});
