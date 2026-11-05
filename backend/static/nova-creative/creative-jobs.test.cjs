@@ -261,6 +261,7 @@ test('sign-in uses one unauthenticated request and surfaces the login error with
   const ctx = vm.createContext({
     window: {AmiCorSession: {ensureReady: async () => { throw new Error('login must not refresh the old session'); }, authFetch: async () => { throw new Error('login must not replay through authFetch'); }}},
     token: () => 'old-token',
+    location: {hostname: 'amicor-health-isf-py.onrender.com'},
     detailText: body => body.detail,
     setToken: () => { throw new Error('login rejection must not clear the existing session'); },
     setSignedIn: () => { throw new Error('login rejection is not session expiry'); },
