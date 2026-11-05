@@ -2129,6 +2129,18 @@ class CreativeStudioService(ShortDramaMixin):
                 try:
                     stored_url = private_store.put_original(owner_id, project_id, name, data, digest)
                 except Exception as exc:
+                    # Never log the exception message: SDK messages may contain URLs or credentials.
+                    import logging
+                    from botocore.exceptions import ClientError
+                    aws_code = "none"
+                    if isinstance(exc, ClientError):
+                        raw_code = str((exc.response or {}).get("Error", {}).get("Code", "unknown"))
+                        # Limit diagnostic to a safe alphanumeric class; omit request and host data.
+                        aws_code = "".join(c for c in raw_code if c.isalnum() or c == "_")[:48]
+                    logging.getLogger(__name__).warning(
+                        "Creative Studio private MP4 import rejected: error_class=%s s3_code=%s",
+                        type(exc).__name__, aws_code,
+                    )
                     raise CreativeStudioError(
                         "PRIVATE_STORAGE_UNAVAILABLE",
                         "Secure imported-video storage is unavailable; no video was saved.",
