@@ -11,7 +11,7 @@ import re
 
 _REMOTE_PREFIX = "private-studio-s3://"
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
-_FILENAME = re.compile(r"^imported_video_[A-Za-z0-9_-]+\\.mp4$")
+_FILENAME = re.compile(r"^imported_video_[A-Za-z0-9_-]+\.mp4$")
 
 
 class PrivateStorageError(RuntimeError):
