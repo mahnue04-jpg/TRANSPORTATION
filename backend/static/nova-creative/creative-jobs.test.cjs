@@ -549,3 +549,17 @@ test('test-account signup controls are confined to named isolated Studio preview
   assert.match(source, /if \(isIsolatedStudioPreview\(\)\)/);
   assert.match(source, /\(isIsolatedStudioPreview\(\) && !on\)/);
 });
+
+test('second-commercial selection reports project-list authentication failure instead of missing commercial', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  const ctx = vm.createContext({
+    refreshProjects: async () => { throw new Error('Session expired. Sign in again. (401)'); },
+    projectRowsCache: [], activeProjectId: null,
+    findSecondCommercialProject: () => null,
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  await assert.rejects(ctx.ensureSecondCommercialSelected(), /Session expired.*401/);
+  assert.doesNotMatch(source.slice(start, end), /catch \(err\) \{\s*\/\/ Keep going/);
+});
