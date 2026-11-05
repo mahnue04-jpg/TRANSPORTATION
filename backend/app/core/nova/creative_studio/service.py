@@ -2091,7 +2091,15 @@ class CreativeStudioService(ShortDramaMixin):
     def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str) -> dict[str, Any]:
         """Archive an existing video, without changing scripts, approvals, or provider gates."""
         from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES, validate_video
+        from app.core.nova.creative_studio import private_object_storage as private_store
+        import os
         self._project_or_404(owner_id, project_id)
+        if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not private_store.enabled():
+            raise CreativeStudioError(
+                "PRIVATE_STORAGE_UNAVAILABLE",
+                "Private original storage has not been enabled. No file was accepted.",
+                http_status=503,
+            )
         if content_type != "video/mp4" or not data or len(data) > MAX_VIDEO_BYTES:
             raise CreativeStudioError("INVALID_VIDEO", "Choose an MP4 between 1 byte and 128 MB.", http_status=422)
         digest = hashlib.sha256(data).hexdigest()
