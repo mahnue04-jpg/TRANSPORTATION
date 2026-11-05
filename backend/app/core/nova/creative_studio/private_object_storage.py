@@ -24,6 +24,7 @@ def enabled() -> bool:
 
 def _client():
     import boto3
+    from botocore.config import Config
     endpoint = os.getenv("NOVA_STUDIO_S3_ENDPOINT", "").strip()
     access = os.getenv("NOVA_STUDIO_S3_ACCESS_KEY_ID", "").strip()
     secret = os.getenv("NOVA_STUDIO_S3_SECRET_ACCESS_KEY", "").strip()
@@ -31,7 +32,9 @@ def _client():
         raise PrivateStorageError("Private object storage is not configured")
     return boto3.client("s3", endpoint_url=endpoint,
                         aws_access_key_id=access, aws_secret_access_key=secret,
-                        region_name=os.getenv("NOVA_STUDIO_S3_REGION", "us-east-1"))
+                        region_name=os.getenv("NOVA_STUDIO_S3_REGION", "us-east-1"),
+                        config=Config(s3={"addressing_style": "path"},
+                                      retries={"max_attempts": 2, "mode": "standard"}))
 
 
 def _bucket() -> str:
