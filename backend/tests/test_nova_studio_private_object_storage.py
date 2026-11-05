@@ -97,3 +97,22 @@ def test_remote_original_deduped_without_provider_charge(storage, tmp_path, monk
     assert media_type == "video/mp4"
     with pytest.raises(Exception):
         service.open_private_remote_asset("wrong-owner", project["id"], result["asset"]["id"])
+
+
+def test_required_durable_imports_reject_ephemeral_fallback(monkeypatch, tmp_path):
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.setenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "true")
+    monkeypatch.delenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", raising=False)
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "temporary"))
+    service = CreativeStudioService(CreativeStudioStore())
+    project = service.create_project("owner", {
+        "title": "Safe staging imports", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    with pytest.raises(CreativeStudioError) as error:
+        service.import_finished_video("owner", project["id"], b"unverified fake mp4", content_type="video/mp4")
+    assert error.value.code == "PRIVATE_STORAGE_UNAVAILABLE"
+    assert error.value.http_status == 503
+    assert not list(tmp_path.rglob("*.mp4"))
