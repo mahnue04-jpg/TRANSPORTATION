@@ -2095,12 +2095,17 @@ class CreativeStudioService(ShortDramaMixin):
         if content_type != "video/mp4" or not data or len(data) > MAX_VIDEO_BYTES:
             raise CreativeStudioError("INVALID_VIDEO", "Choose an MP4 between 1 byte and 128 MB.", http_status=422)
         digest = hashlib.sha256(data).hexdigest()
+        from app.core.nova.creative_studio import private_object_storage as private_store
         for existing in self.store.list_assets(project_id, owner_id):
             meta = existing.metadata or {}
             if meta.get("source") == "owner_video_import" and meta.get("sha256") == digest:
-                path = _resolve_creative_media_url(existing.url)
-                if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
-                    return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
+                if private_store.enabled() and str(existing.url or "").startswith("private-studio-s3://"):
+                    if private_store.object_exists(existing.url, owner_id, project_id, digest):
+                        return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
+                elif not str(existing.url or "").startswith("private-studio-s3://"):
+                    path = _resolve_creative_media_url(existing.url)
+                    if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+                        return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
         from app.core.nova.creative_studio.providers import _PRIVATE_IMPORT_PREFIX, _private_import_root
         root = _private_import_root()
         root.mkdir(parents=True, exist_ok=True)
@@ -2112,18 +2117,33 @@ class CreativeStudioService(ShortDramaMixin):
             except ValueError as exc:
                 raise CreativeStudioError("INVALID_VIDEO", str(exc), http_status=422) from exc
             name = new_id("imported_video") + ".mp4"
-            target = root / name
-            target.write_bytes(data)
+            if private_store.enabled():
+                try:
+                    stored_url = private_store.put_original(owner_id, project_id, name, data, digest)
+                except Exception as exc:
+                    raise CreativeStudioError(
+                        "PRIVATE_STORAGE_UNAVAILABLE",
+                        "Secure imported-video storage is unavailable; no video was saved.",
+                        http_status=503,
+                    ) from exc
+                target = None
+            else:
+                target = root / name
+                target.write_bytes(data)
+                stored_url = _PRIVATE_IMPORT_PREFIX + name
         try:
             asset = self._save_text_asset(owner_id=owner_id, project_id=project_id, kind="video",
                 title="Imported finished video (owner review)", content="Existing MP4 imported without generation.",
-                status="GENERATED", url=_PRIVATE_IMPORT_PREFIX + name,
+                status="GENERATED", url=stored_url,
                 metadata={**measured, "source": "owner_video_import", "sha256": digest,
                     "publish_ready": False, "commercial_complete": False, "owner_review_required": True,
                     "captions_verified": False, "lip_sync_verified": False,
                     "provider_clearance_verified": False, "paid_request_submitted": False})
         except Exception:
-            target.unlink(missing_ok=True)
+            if target is not None:
+                target.unlink(missing_ok=True)
+            else:
+                private_store.delete_original(stored_url, owner_id, project_id)
             raise
         return {"asset": asset.as_dict(), "reused": False, "paid_request_submitted": False}
 
@@ -3002,6 +3022,25 @@ class CreativeStudioService(ShortDramaMixin):
             "commercial_complete": commercial_complete,
             "pipeline": pipeline,
         }
+
+    def open_private_remote_asset(
+        self, owner_id: str, project_id: str, asset_id: str, *, part: str = "media"
+    ):
+        """Authorize an owner-scoped remote MP4 download before opening bucket bytes."""
+        from app.core.nova.creative_studio import private_object_storage as private_store
+        if part != "media":
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Remote captions unavailable.", http_status=404)
+        self._project_or_404(owner_id, project_id)
+        asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
+        if asset is None or not str(asset.url or "").startswith("private-studio-s3://"):
+            return None
+        if not private_store.enabled():
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private media storage is disabled.", http_status=503)
+        try:
+            stream = private_store.open_original(asset.url, owner_id, project_id)
+        except Exception as exc:
+            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503) from exc
+        return stream, "video/mp4", _download_filename(asset.title, ".mp4")
 
     def open_asset_file(
         self,
