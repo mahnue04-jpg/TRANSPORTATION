@@ -551,6 +551,13 @@ test('test-account signup controls are confined to named isolated Studio preview
   assert.match(source, /\(isIsolatedStudioPreview\(\) && !on\)/);
 });
 
+test('second commercial controls link directly to saved project history', () => {
+  const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.match(html, /href="#studio-project-history"/);
+  assert.match(html, /<section id="studio-project-history"[^>]*aria-label="Project history"/);
+  assert.match(html, /id="project-list"/);
+});
+
 test('second-commercial selection reports project-list authentication failure instead of missing commercial', async () => {
   const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
   const end = source.indexOf('  function $(id) {', start);
