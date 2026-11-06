@@ -565,6 +565,46 @@ test('second-commercial selection reports project-list authentication failure in
   assert.doesNotMatch(source.slice(start, end), /catch \(err\) \{\s*\/\/ Keep going/);
 });
 
+test('second-commercial selection never falls back to unrelated active 30s project', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  let selected = null;
+  let assetsRefreshed = false;
+  const ctx = vm.createContext({
+    refreshProjects: async () => {},
+    projectRowsCache: [{id: 'cproj_social', title: 'social media', duration_target: 30, project_type: 'short_video'}],
+    activeProjectId: 'cproj_social',
+    findSecondCommercialProject: () => null,
+    setActiveProjectId: id => { selected = id; },
+    refreshAssets: async () => { assetsRefreshed = true; }
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  assert.equal(await ctx.ensureSecondCommercialSelected(), null);
+  assert.equal(selected, null);
+  assert.equal(assetsRefreshed, false);
+  assert.equal(ctx.activeProjectId, 'cproj_social');
+});
+
+test('second-commercial selection uses exact project when found', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  let selected = null;
+  let assetsRefreshed = false;
+  const ctx = vm.createContext({
+    refreshProjects: async () => {},
+    projectRowsCache: [{id: 'cproj_original', title: 'AMICOR Second Commercial', duration_target: 30}],
+    findSecondCommercialProject: rows => rows[0],
+    setActiveProjectId: id => { selected = id; },
+    refreshAssets: async () => { assetsRefreshed = true; }
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  assert.equal(await ctx.ensureSecondCommercialSelected(), 'cproj_original');
+  assert.equal(selected, 'cproj_original');
+  assert.equal(assetsRefreshed, true);
+});
+
 test('staging 401 message distinguishes temporary staging accounts from production login', () => {
   const script = fs.readFileSync(__dirname + '/creative.js', 'utf8');
   assert.match(script, /if \(isLogin\) \{/);
