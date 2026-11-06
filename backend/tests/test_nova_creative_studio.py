@@ -1840,3 +1840,50 @@ def test_project_media_reset_includes_presenter_video() -> None:
     service = (CREATIVE_PY / "service.py").read_text(encoding="utf-8")
     assert '"presenter_video"' in service
     assert 'removable_kinds = {"image_prompt", "image", "video", "audio", "presenter_video"}' in service
+
+
+def test_private_import_asset_availability_uses_owner_scoped_object_storage(monkeypatch):
+    """Remote imports must not be treated as absent local files, or exposed across owners."""
+    from app.core.nova.creative_studio import private_object_storage as private_store
+
+    svc = _svc()
+    owner_id = "owner-a"
+    project = svc.create_project(owner_id, {
+        "title": "Private import visibility", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    digest = "a" * 64
+    remote_ref = f"private-studio-s3://{owner_id}/{project['id']}/imported_video_test.mp4"
+    asset = svc._save_text_asset(
+        owner_id=owner_id, project_id=project["id"], kind="video",
+        title="Imported finished video (owner review)", content="Existing MP4",
+        status="GENERATED", url=remote_ref,
+        metadata={"source": "owner_video_import", "sha256": digest},
+    )
+    seen = []
+    monkeypatch.setattr(private_store, "enabled", lambda: True)
+
+    def verify(ref, owner, project_id, sha256):
+        seen.append((ref, owner, project_id, sha256))
+        return True
+
+    monkeypatch.setattr(private_store, "object_exists", verify)
+    detail = svc.get_project(owner_id, project["id"])
+    row = next(item for item in detail["assets"] if item["id"] == asset.id)
+    assert row["media_available"] is True
+    assert seen == [(remote_ref, owner_id, project["id"], digest)]
+
+    monkeypatch.setattr(private_store, "object_exists", lambda *args: False)
+    unavailable = svc.get_project(owner_id, project["id"])["assets"][0]
+    assert unavailable["media_available"] is False
+
+    def storage_error(*args):
+        raise RuntimeError("private storage unavailable")
+
+    monkeypatch.setattr(private_store, "object_exists", storage_error)
+    unavailable = svc.get_project(owner_id, project["id"])["assets"][0]
+    assert unavailable["media_available"] is False
+
+    with pytest.raises(CreativeStudioError) as error:
+        svc.get_project("another-owner", project["id"])
+    assert error.value.code == "NOT_FOUND"
