@@ -318,11 +318,26 @@ class CreativeStudioService(ShortDramaMixin):
         def asset_payload(asset: CreativeAsset) -> dict[str, Any]:
             payload = asset.as_dict()
             if asset.url and asset.kind in {"image", "video", "audio"}:
-                local_path = _resolve_creative_media_url(asset.url)
-                if local_path is not None:
-                    payload["media_available"] = local_path.is_file()
+                if asset.kind == "video" and str(asset.url).startswith("private-studio-s3://"):
+                    # Imported originals are private objects, not Render-local files.
+                    from app.core.nova.creative_studio import private_object_storage as private_store
+                    try:
+                        payload["media_available"] = (
+                            private_store.enabled()
+                            and private_store.object_exists(
+                                asset.url, owner_id, project_id,
+                                str((asset.metadata or {}).get("sha256") or ""),
+                            )
+                        )
+                    except Exception:
+                        # Fail closed without leaking private storage errors.
+                        payload["media_available"] = False
                 else:
-                    payload["media_available"] = str(asset.url).startswith(("http://", "https://"))
+                    local_path = _resolve_creative_media_url(asset.url)
+                    if local_path is not None:
+                        payload["media_available"] = local_path.is_file()
+                    else:
+                        payload["media_available"] = str(asset.url).startswith(("http://", "https://"))
             else:
                 payload["media_available"] = None
             return payload
