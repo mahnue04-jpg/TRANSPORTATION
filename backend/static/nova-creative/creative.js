@@ -88,17 +88,10 @@
       try { await refreshAssets(); } catch (err2) { /* non-fatal */ }
       return match.id;
     }
-    if (activeProjectId && projectRowsCache.some(function (row) { return row.id === activeProjectId; })) {
-      updateActiveProjectLabel();
-      return activeProjectId;
-    }
-    var fallback = projectRowsCache.find(function (row) {
-      return row.project_type === "promo_video" || Number(row.duration_target) === 30;
-    }) || projectRowsCache[0] || null;
-    if (!fallback) return null;
-    setActiveProjectId(fallback.id);
-    try { await refreshAssets(); } catch (err3) { /* non-fatal */ }
-    return fallback.id;
+    // Selection is explicit: never silently substitute an unrelated 30s
+    // project (e.g. "social media") for the approved second commercial.
+    // Keep the existing active project unchanged and block render/license actions.
+    return null;
   }
 
   function $(id) { return document.getElementById(id); }
@@ -1931,7 +1924,7 @@
       // Never rely on a bare localStorage id — always resolve against the live project list.
       var projectId = await ensureSecondCommercialSelected();
       if (!projectId) {
-        showBanner("No Studio project found. Sign in, then click Select Second Commercial (or create a 30s project).", false);
+        showBanner("AMICOR Second Commercial was not found. No video generated. Choose the original project explicitly before rendering.", false);
         return;
       }
       showBanner(startMessage + " Active: " + projectId, true);
@@ -2047,7 +2040,7 @@
       try {
         var projectId = await ensureSecondCommercialSelected();
         if (!projectId) {
-          showBanner("No second-commercial project is visible in this staging account. Check Projects below; an approved original may exist in another account. Do not regenerate.", false);
+          showBanner("AMICOR Second Commercial was not found in this account. The active project was not changed. Check the Projects list or original account; do not generate.", false);
           return;
         }
         var match = findSecondCommercialProject(projectRowsCache);
