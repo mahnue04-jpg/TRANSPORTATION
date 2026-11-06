@@ -2703,6 +2703,7 @@ class CreativeStudioService(ShortDramaMixin):
             **{key: value for key, value in rendered.items() if key not in {"subtitle_path", "audio_path"}},
             "subtitle_url": subtitle_url,
             "click_destination": click,
+            "lip_sync": False,  # Local animation is not verified presenter lip-sync.
             "body_lipsync": False,
             "external_publishing": False,
             "quality_state": "OWNER_REVIEW_READY",
