@@ -551,6 +551,16 @@ test('test-account signup controls are confined to named isolated Studio preview
   assert.match(source, /\(isIsolatedStudioPreview\(\) && !on\)/);
 });
 
+test('Operations Agent narration QC is review-only and keeps publication gated', () => {
+  const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.match(html, /Operations Agent narration QC/);
+  assert.match(html, /Describe your task/);
+  assert.match(html, /customer-support drafts/);
+  assert.match(html, /Ami-h-core/);
+  assert.match(html, /NOT APPROVED FOR PUBLISHING/);
+  assert.match(html, /does not transcribe audio, correct the MP4, approve publication, or call a paid provider/);
+});
+
 test('second commercial controls link directly to saved project history', () => {
   const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
   assert.match(html, /href="#studio-project-history"/);
