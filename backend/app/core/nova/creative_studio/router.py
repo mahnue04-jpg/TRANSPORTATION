@@ -9,8 +9,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -345,6 +345,7 @@ class BudgetConfirmIn(BaseModel):
     confirmed: bool = True
     acknowledged_estimate_usd: float | None = None
     note: str = Field(default="", max_length=500)
+    quote_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 @router.get("/projects/{project_id}/preflight")
@@ -377,6 +378,7 @@ def confirm_project_render_budget(
             confirmed=payload.confirmed,
             acknowledged_estimate_usd=payload.acknowledged_estimate_usd,
             note=payload.note,
+            quote_fingerprint=payload.quote_fingerprint,
         )
     except CreativeStudioError as exc:
         _raise(exc)
@@ -1421,12 +1423,31 @@ def download_asset_file(
             detail="Send the bearer token in the Authorization header, not the URL.",
         )
     _require_owner(user)
+    studio = get_service(db)
     try:
-        path, media_type, filename = get_service(db).open_asset_file(
-            user.user_id,
-            project_id,
-            asset_id,
-            part=part,
+        remote = studio.open_private_remote_asset(user.user_id, project_id, asset_id, part=part)
+        if remote is not None:
+            stream, media_type, filename = remote
+            def chunks():
+                try:
+                    while True:
+                        chunk = stream.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    stream.close()
+            from urllib.parse import quote
+            return StreamingResponse(
+                chunks(), media_type=media_type,
+                headers={
+                    "Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename),
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        path, media_type, filename = studio.open_asset_file(
+            user.user_id, project_id, asset_id, part=part,
         )
     except CreativeStudioError as exc:
         _raise(exc)
@@ -1572,6 +1593,122 @@ def accept_project_voice_license(
         raise
 
 
+class GenovaImageApprovalIn(BaseModel):
+    asset_id: str | None = None
+
+
+@router.get("/projects/{project_id}/genova-narration")
+def genova_narration_readiness(project_id: str, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).genova_narration_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/projects/{project_id}/genova-narration-approval")
+def approve_genova_narration(project_id: str, payload: GenovaImageApprovalIn, user: UserContext = Depends(get_current_user_context), db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_narration_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/genova-narration-upload")
+async def upload_genova_narration(
+    project_id: str,
+    file: UploadFile = File(...),
+    script: str = Form(..., min_length=1, max_length=10000),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        data = await file.read(32 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_narration(user.user_id, project_id, data, script, content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    finally:
+        await file.close()
+
+
+@router.post("/projects/{project_id}/finished-video-upload")
+async def import_finished_video(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES
+    from starlette.concurrency import run_in_threadpool
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        data = await file.read(MAX_VIDEO_BYTES + 1)
+        return await run_in_threadpool(get_service(db).import_finished_video,
+            user.user_id, project_id, data, content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    finally:
+        await file.close()
+
+
+@router.post("/projects/{project_id}/genova-image-upload")
+async def upload_genova_image(
+    project_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        content_type = str(file.content_type or "").split(";", 1)[0].strip().lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            raise CreativeStudioError("INVALID_IMAGE", "Declare a PNG, JPEG, or WebP image type.", http_status=422)
+        data = await file.read(8 * 1024 * 1024 + 1)
+        return get_service(db).upload_genova_presenter_image(
+            user.user_id, project_id, data, file.filename or "presenter.png", content_type=content_type)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/projects/{project_id}/genova-image-approval")
+def approve_genova_image(
+    project_id: str,
+    payload: GenovaImageApprovalIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_owner(user)
+    try:
+        return get_service(db).set_genova_presenter_approval(user.user_id, project_id, payload.asset_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/genova-avatar-readiness")
+def genova_avatar_readiness(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-only Genova provider preflight, no generation or billing."""
+    _require_owner(user)
+    try:
+        return get_service(db).genova_avatar_readiness(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/assemble/walking-presenter-proof")
 def assemble_walking_presenter_proof(
     project_id: str,
@@ -1600,10 +1737,101 @@ def assemble_walking_commercial_30s(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """30s walking talking commercial (H.264/AAC). No paid provider charges."""
+    """Labeled offline 30s demo. Does not submit Fal, Kling, D-ID, or OpenAI."""
     _require_owner(user)
     try:
         return get_service(db).render_walking_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+class ProviderCommercial30sIn(BaseModel):
+    authorize_provider_submit: bool = False
+    price_card: dict[str, Any] | None = None
+
+
+@router.get("/projects/{project_id}/provider-commercial-30s")
+def provider_commercial_30s_plan(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Non-billable 30s provider plan. Credentials are booleans and no job is submitted."""
+    _require_owner(user)
+    try:
+        return get_service(db).plan_provider_commercial_30s(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/reserve")
+def provider_commercial_30s_reserve(
+    project_id: str,
+    payload: ProviderCommercial30sIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Durable idempotent cost hold at or under the internal ceiling. No provider post."""
+    _require_owner(user)
+    try:
+        return get_service(db).reserve_provider_commercial_30s(
+            user.user_id,
+            project_id,
+            payload.price_card,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/assemble-offline")
+def provider_commercial_30s_assemble_offline(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Assemble existing saved scenes only; no paid provider submission."""
+    _require_owner(user)
+    try:
+        return get_service(db).assemble_provider_commercial_30s_offline(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/resume")
+def provider_commercial_30s_resume(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Validate a saved reservation and download. Does not contact a provider."""
+    _require_owner(user)
+    try:
+        return get_service(db).validate_provider_commercial_30s_resume(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/projects/{project_id}/provider-commercial-30s/submit")
+def provider_commercial_30s_submit(
+    project_id: str,
+    payload: ProviderCommercial30sIn | None = None,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Provider motion plus lip-sync. Refuses unless this body explicitly authorizes submit."""
+    _require_owner(user)
+    body = payload or ProviderCommercial30sIn()
+    try:
+        return get_service(db).render_walking_commercial_30s(
+            user.user_id,
+            project_id,
+            authorize_provider_submit=body.authorize_provider_submit is True,
+        )
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -1677,3 +1905,4 @@ def export_project(
         raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+

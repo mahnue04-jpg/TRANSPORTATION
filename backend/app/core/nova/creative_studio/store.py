@@ -50,6 +50,16 @@ def _loads(raw: str | None, default: Any) -> Any:
         return default
 
 
+def _protected_original(asset: CreativeAsset) -> bool:
+    """Preserve owner imports and approved masters during routine cleanup."""
+    metadata = asset.metadata or {}
+    return (
+        metadata.get("source") in {"owner_video_import", "owner_import"}
+        or metadata.get("render_mode") == "owner_import"
+        or metadata.get("approved_master") is True
+    )
+
+
 class CreativeStudioStore:
     """In-process Creative Studio store with owner isolation (tests / fallback)."""
 
@@ -108,6 +118,7 @@ class CreativeStudioStore:
             and a.owner_id == owner_id
             and a.kind == "video"
             and str(a.status or "").upper() == "ERROR"
+            and not _protected_original(a)
         ]
         for asset_id in ids:
             self.assets.pop(asset_id, None)
@@ -118,6 +129,7 @@ class CreativeStudioStore:
             a
             for a in self.assets.values()
             if a.project_id == project_id and a.owner_id == owner_id and a.kind in kinds
+            and not _protected_original(a)
         ]
         for row in rows:
             self.assets.pop(row.id, None)
@@ -128,6 +140,7 @@ class CreativeStudioStore:
             a
             for a in self.assets.values()
             if a.project_id == project_id and a.owner_id == owner_id and a.id in asset_ids
+            and not _protected_original(a)
         ]
         for row in rows:
             self.assets.pop(row.id, None)
@@ -230,6 +243,32 @@ class DbCreativeStudioStore:
         self.db.refresh(orm)
         return self._project_from_orm(orm)
 
+    def compare_and_swap_project_metadata(
+        self, project_id: str, owner_id: str, expected_metadata: dict[str, Any], new_metadata: dict[str, Any]
+    ) -> bool:
+        """Atomically replace owner-scoped metadata only if unchanged.
+
+        Used to claim a billable job *before* contacting providers. Unlike
+        save_project(), the conditional UPDATE prevents two workers from both
+        claiming the same persisted reservation snapshot.
+        """
+        from sqlalchemy import update
+
+        stmt = (
+            update(NovaCreativeProject)
+            .where(
+                NovaCreativeProject.id == project_id,
+                NovaCreativeProject.owner_id == owner_id,
+                NovaCreativeProject.metadata_json == _dumps(expected_metadata),
+            )
+            .values(metadata_json=_dumps(new_metadata))
+        )
+        result = self.db.execute(stmt)
+        changed = result.rowcount == 1
+        self.db.commit()
+        self.db.expire_all()
+        return changed
+
     def get_project(self, project_id: str, owner_id: str) -> CreativeProject | None:
         orm = (
             self.db.query(NovaCreativeProject)
@@ -277,18 +316,17 @@ class DbCreativeStudioStore:
         return [self._asset_from_orm(row) for row in rows]
 
     def delete_failed_video_assets(self, project_id: str, owner_id: str) -> int:
-        count = (
-            self.db.query(NovaCreativeAsset)
-            .filter(
-                NovaCreativeAsset.project_id == project_id,
-                NovaCreativeAsset.owner_id == owner_id,
-                NovaCreativeAsset.kind == "video",
-                NovaCreativeAsset.status == "ERROR",
-            )
-            .delete(synchronize_session=False)
-        )
+        rows = self.db.query(NovaCreativeAsset).filter(
+            NovaCreativeAsset.project_id == project_id,
+            NovaCreativeAsset.owner_id == owner_id,
+            NovaCreativeAsset.kind == "video",
+            NovaCreativeAsset.status == "ERROR",
+        ).all()
+        removable = [row for row in rows if not _protected_original(self._asset_from_orm(row))]
+        for row in removable:
+            self.db.delete(row)
         self.db.commit()
-        return int(count or 0)
+        return len(removable)
 
     def delete_assets_by_kinds(self, project_id: str, owner_id: str, kinds: set[str]) -> list[CreativeAsset]:
         rows = (
@@ -300,9 +338,12 @@ class DbCreativeStudioStore:
             )
             .all()
         )
-        payload = [self._asset_from_orm(row) for row in rows]
+        payload = [asset for row in rows
+                   if not _protected_original(asset := self._asset_from_orm(row))]
+        allowed = {asset.id for asset in payload}
         for row in rows:
-            self.db.delete(row)
+            if row.id in allowed:
+                self.db.delete(row)
         self.db.commit()
         return payload
 
@@ -318,9 +359,12 @@ class DbCreativeStudioStore:
             )
             .all()
         )
-        payload = [self._asset_from_orm(row) for row in rows]
+        payload = [asset for row in rows
+                   if not _protected_original(asset := self._asset_from_orm(row))]
+        allowed = {asset.id for asset in payload}
         for row in rows:
-            self.db.delete(row)
+            if row.id in allowed:
+                self.db.delete(row)
         self.db.commit()
         return payload
 
