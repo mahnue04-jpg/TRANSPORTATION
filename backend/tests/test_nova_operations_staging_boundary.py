@@ -124,3 +124,38 @@ def test_fastapi_runtime_router_keeps_guards_and_denies_owner_calls(monkeypatch)
                 user=SimpleNamespace(organization_id="global", user_id="owner-a"),
             )
         assert denied.value.status_code == 403
+
+
+    # Exercise request routing and dependency overrides through a real ASGI
+    # TestClient. These overrides are synthetic and do not validate JWTs.
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_nova_access] = lambda: None
+    paths = [
+        "/api/nova/work/operations/owner-approvals/synthetic-opportunity",
+        "/api/nova/work/operations/owner-approvals/synthetic-opportunity/review",
+    ]
+    with TestClient(app) as client:
+        def no_session():
+            raise HTTPException(status_code=401, detail="synthetic unauthenticated")
+
+        app.dependency_overrides[require_work_revenue_owner] = no_session
+        for path in paths:
+            response = client.post(path)
+            assert response.status_code == 401
+        app.dependency_overrides[require_work_revenue_owner] = lambda: SimpleNamespace(
+            organization_id="synthetic-tenant", user_id="owner-a",
+        )
+        for path in paths:
+            response = client.post(path)
+            assert response.status_code == 503
+            assert "disabled" in response.json()["detail"].lower()
+        app.dependency_overrides[require_work_revenue_owner] = lambda: SimpleNamespace(
+            organization_id="global", user_id="owner-a",
+        )
+        for path in paths:
+            response = client.post(path)
+            assert response.status_code == 403
