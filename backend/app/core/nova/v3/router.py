@@ -721,6 +721,8 @@ def v3_live_job_prepare(
             "rejected_from_live_results": len(ranked) - len(visible_ranked),
             "ranked_jobs": visible_ranked,
             "persistent_results": persistent_results,
+            "durably_saved_count": len(retained_ids),
+            "durably_saved_ids": sorted(retained_ids),
         }
     except work_service.NovaWorkError as exc:
         _raise_work(exc)
