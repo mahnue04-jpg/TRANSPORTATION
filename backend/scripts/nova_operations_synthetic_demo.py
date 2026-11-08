@@ -35,7 +35,7 @@ TENANT = "synthetic-tenant"
 ACTOR = "synthetic-reviewer"
 OPPORTUNITY = "synthetic-csv-cleanup-assignment"
 APPROVAL = "synthetic-fixture-approval"
-RAW_CSV = "Name,Department\nAda,Operations\nAda,Operations\n\",\"\nMina,Research\n"
+RAW_CSV = "Name,Department\nAda,Operations\nAda,Operations\n,\nMina,Research\n"
 
 
 def run(output_dir: Path) -> dict[str, object]:
