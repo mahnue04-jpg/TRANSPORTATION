@@ -634,3 +634,94 @@ def test_session_rejection_remains_blocked_across_restart(tmp_path):
         ).fetchone() == ("rejected", "owner-a")
     finally:
         reopened.close()
+
+
+
+def test_session_release_eligibility_only_for_original_approver(db):
+    """Approved artifact metadata requires matching tenant and actor identity."""
+    from app.core.nova.work_revenue.operations_authenticated_handoff import (
+        session_release_eligibility_offline,
+    )
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+
+    raw = "Name\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    with pytest.raises(JobConflict, match="owner-reviewed"):
+        session_release_eligibility_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        )
+    job = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    complete_and_store_review_artifact(
+        db, job=job, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    assert review_approved_assignment_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1", approve=True,
+    ) == "approved"
+    allowed = session_release_eligibility_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+    )
+    assert allowed.job_id == link.job_id
+    assert allowed.reviewer_id == "owner-a"
+    assert not hasattr(allowed, "csv_text")
+    with pytest.raises(JobConflict, match="Release reviewer"):
+        session_release_eligibility_offline(
+            db, authenticated_owner=owner(actor="different-owner"),
+            opportunity_id="synthetic-opportunity-1",
+        )
+    with pytest.raises(JobConflict, match="not found"):
+        session_release_eligibility_offline(
+            db, authenticated_owner=owner(tenant="tenant-b"),
+            opportunity_id="synthetic-opportunity-1",
+        )
+
+
+def test_session_release_denies_rejected_artifact(db):
+    from app.core.nova.work_revenue.operations_authenticated_handoff import (
+        session_release_eligibility_offline,
+    )
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+
+    raw = "Name\nSynthetic\n"
+    approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    job = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    complete_and_store_review_artifact(
+        db, job=job, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    assert review_approved_assignment_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1", approve=False,
+    ) == "rejected"
+    with pytest.raises(JobConflict, match="owner-reviewed"):
+        session_release_eligibility_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        )
