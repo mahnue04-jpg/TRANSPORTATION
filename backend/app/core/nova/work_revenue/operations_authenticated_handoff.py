@@ -220,3 +220,29 @@ def preview_approved_assignment_offline(
     ):
         raise JobConflict("Preview artifact integrity check failed")
     return review_state, csv_text
+
+
+
+def session_release_eligibility_offline(
+    db: sqlite3.Connection, *,
+    authenticated_owner: UserContext,
+    opportunity_id: str,
+):
+    """Return read-only synthetic release metadata to the original owner only.
+
+    This function never returns file bytes, sends a delivery, or authorizes a
+    production release. Caller must first verify JWT and owner-only access.
+    """
+    from .operations_release_gate import check_offline_release_eligibility
+
+    tenant_id, reviewer_id = owner_approval_identity(authenticated_owner)
+    if not _identifier(opportunity_id):
+        raise JobConflict("Valid opportunity required for release eligibility")
+    if len(reviewer_id) > 128:
+        raise JobConflict("Reviewer identity exceeds release limit")
+    eligibility = check_offline_release_eligibility(
+        db, acting_tenant_id=tenant_id, opportunity_id=opportunity_id,
+    )
+    if eligibility.reviewer_id != reviewer_id:
+        raise JobConflict("Release reviewer does not match authenticated owner")
+    return eligibility
