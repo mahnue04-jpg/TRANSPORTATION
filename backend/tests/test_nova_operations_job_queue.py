@@ -164,3 +164,12 @@ def test_fail_rejects_invalid_clock(db, clock):
     with pytest.raises(JobConflict, match="clock"):
         fail_job(db, job=claim, error_code="RETRY", now=clock)
     assert get_job_state(db, tenant_id="a", job_id=claim.job_id) == "running"
+
+
+@pytest.mark.parametrize("bad_time", [None, True, -1, "101"])
+def test_complete_rejects_invalid_clock_without_changing_job(db, bad_time):
+    job_id = put(db)
+    claim = claim_job(db, tenant_id="a", now=100, lease_seconds=60)
+    with pytest.raises(JobConflict, match="completion timestamp"):
+        complete_job(db, job=claim, output_sha256="b" * 64, now=bad_time)
+    assert get_job_state(db, tenant_id="a", job_id=job_id) == "running"
