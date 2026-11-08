@@ -267,7 +267,7 @@
       "6. Review final footage, audio, captions, rights, and costs before any future publishing.",
       "This guide is an initial deterministic planning helper. Conversational AI assistance remains a separate integration milestone."
     ];
-    result.textContent = guidance.join("\\n");
+    result.textContent = guidance.join("\n");
   });
   $("calendar-clear").addEventListener("click", clearForm);
   $("calendar-refresh").addEventListener("click", load);
