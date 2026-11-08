@@ -1345,7 +1345,7 @@
       var query = $("live-job-query").value.trim();
       if (!query) return;
       if (searchButton) searchButton.disabled = true;
-      $("live-job-status").textContent = "Nova is resetting the prior live-search list, searching only the requested capability family, and keeping only revenue-ready QUALIFIED matches...";
+      $("live-job-status").textContent = "Nova is searching for qualified paid work and saving valid matches without removing previous leads...";
       $("live-job-results").innerHTML = "";
       try {
         var body = await api("/api/nova/v3/live/jobs/prepare", {
@@ -1371,7 +1371,7 @@
             ? "PARTIAL: some live sources failed. These are only the results returned by working sources. "
             : "";
           $("live-job-status").textContent = partialSourceWarning +
-            "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
+            "Previously saved leads retained · search " + ((body.reset_result && body.reset_result.archived_count) || 0) +
             " · search " + (body.live_search_status || "ok") +
             " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
             " · found/ranked " + (body.ranked_count || 0) +
