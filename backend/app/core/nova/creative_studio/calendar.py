@@ -6,6 +6,7 @@ They NEVER trigger generation, billing, social authorization or publishing.
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -15,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject
-from app.core.nova.creative_studio.models import new_id
+from app.core.nova.creative_studio.models import CreativeAsset, new_id
+from app.core.nova.creative_studio.store import DbCreativeStudioStore
 from app.core.nova.router import require_nova_access
 from app.db.session import get_db
 
@@ -193,3 +195,64 @@ def cancel_calendar_entry(
     db.commit()
     db.refresh(row)
     return _as_dict(row)
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/prepare")
+def prepare_calendar_content(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Save approved script as real Studio text assets, without launching providers.
+
+    Repeated preparation of the same approved revision reuses existing assets;
+    edits revoke approval and require another review before preparing again.
+    """
+    _project(db, user.user_id, project_id)
+    row = _entry(db, user.user_id, project_id, entry_id)
+    if row.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the reviewed script before preparing production assets.")
+    script = row.script.strip()
+    if not script:
+        raise HTTPException(status_code=422, detail="An approved script is required.")
+    digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
+    store = DbCreativeStudioStore(db)
+    existing = {}
+    for asset in store.list_assets(project_id, user.user_id):
+        meta = asset.metadata or {}
+        if (meta.get("source") == "autopilot_calendar" and
+                meta.get("calendar_entry_id") == entry_id and
+                meta.get("script_sha256") == digest and
+                asset.kind in {"script", "voiceover", "subtitle"}):
+            existing[asset.kind] = asset
+
+    generated = []
+    for kind, title in (
+        ("script", "Calendar — approved script"),
+        ("voiceover", "Calendar — reviewed narration"),
+        ("subtitle", "Calendar — caption source text"),
+    ):
+        asset = existing.get(kind)
+        if asset is None:
+            asset = store.save_asset(CreativeAsset(
+                id=new_id("casset"), owner_id=user.user_id, project_id=project_id,
+                kind=kind, title=title, content=script,
+                status="GENERATED",
+                metadata={
+                    "source": "autopilot_calendar",
+                    "calendar_entry_id": entry_id,
+                    "script_sha256": digest,
+                    "content_mode": row.content_mode,
+                    "reviewed_text_only": True,
+                    "media_generated": False,
+                    "publish_ready": False,
+                },
+            ))
+        generated.append(asset)
+    return {
+        "status": "PREPARED_TEXT_ONLY", "entry_id": entry_id,
+        "assets": [asset.as_dict() for asset in generated],
+        "reused": len(existing) == 3,
+        "media_generated": False, "published": False,
+        "message": "Approved script, narration text and caption text saved in this Studio project. No video, speech or social post was generated.",
+    }
