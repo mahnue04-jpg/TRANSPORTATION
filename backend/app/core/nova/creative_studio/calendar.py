@@ -387,3 +387,132 @@ async def render_calendar_preview(
 ):
     # Do not occupy the event loop during local ffmpeg rendering. Uses no paid provider.
     return await run_in_threadpool(_render_calendar_preview, db, user.user_id, project_id, entry_id)
+
+
+class LongFormAssemblyIn(BaseModel):
+    """Ordered video asset IDs already saved in this same owner's Studio project."""
+    asset_ids: list[str] = Field(min_length=2, max_length=16)
+
+
+def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
+                             entry_id: str, asset_ids: list[str]):
+    import os
+    from app.core.nova.creative_studio import private_object_storage as remote
+    from app.core.nova.creative_studio.long_form_assembly import (
+        LongFormAssemblyError, assemble_clips,
+    )
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the plan before assembling its video.")
+    if not 120 <= entry.duration_seconds <= 600:
+        raise HTTPException(status_code=422, detail="This first long-form assembler supports 2–10 minutes. Longer productions need the queued storage workflow.")
+    if len(set(asset_ids)) != len(asset_ids):
+        raise HTTPException(status_code=422, detail="Choose unique source segments.")
+    if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
+        raise HTTPException(status_code=503, detail="Durable private video storage is required.")
+    service = get_service(db)
+    store = DbCreativeStudioStore(db)
+    available = {item.id: item for item in store.list_assets(project_id, owner_id)}
+    sources = []
+    for asset_id in asset_ids:
+        asset = available.get(asset_id)
+        if asset is None or asset.kind != "video" or not asset.url:
+            raise HTTPException(status_code=422, detail="Every segment must be a saved video in your selected Studio project.")
+        sources.append(asset)
+    signature = hashlib.sha256(
+        (entry_id + "|" + str(entry.duration_seconds) + "|" + "|".join(
+            f"{a.id}:{(a.metadata or {}).get('sha256', '')}" for a in sources
+        )).encode("utf-8")
+    ).hexdigest()
+    for asset in available.values():
+        meta = asset.metadata or {}
+        if asset.kind != "video" or meta.get("assembly_signature") != signature:
+            continue
+        try:
+            if str(asset.url).startswith("private-studio-s3://"):
+                if remote.enabled() and remote.object_exists(asset.url, owner_id, project_id, meta.get("sha256", "")):
+                    return _assembly_result(project_id, asset, reused=True)
+            else:
+                path, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == meta.get("sha256"):
+                    return _assembly_result(project_id, asset, reused=True)
+        except Exception:
+            pass
+
+    with tempfile.TemporaryDirectory(prefix="nova-calendar-assembly-") as scratch:
+        directory = Path(scratch)
+        clip_paths = []
+        for index, asset in enumerate(sources):
+            target = directory / f"clip-{index:02d}.mp4"
+            if str(asset.url).startswith("private-studio-s3://"):
+                stream, _, _ = service.open_private_remote_asset(owner_id, project_id, asset.id)
+                try:
+                    with target.open("wb") as handle:
+                        while True:
+                            chunk = stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            if handle.tell() > 128 * 1024 * 1024:
+                                raise HTTPException(status_code=422, detail="Source clip exceeds the size limit.")
+                finally:
+                    stream.close()
+            else:
+                path, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                if path.stat().st_size > 128 * 1024 * 1024:
+                    raise HTTPException(status_code=422, detail="Source clip exceeds the size limit.")
+                import shutil
+                shutil.copyfile(path, target)
+            clip_paths.append(target)
+        output = directory / "long-form.mp4"
+        try:
+            measured = assemble_clips(clip_paths, output, target_seconds=entry.duration_seconds)
+        except LongFormAssemblyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
+            saved = service.import_finished_video(
+                owner_id, project_id, output.read_bytes(),
+                content_type="video/mp4", max_duration_seconds=600,
+            )
+        except CreativeStudioError as exc:
+            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+        assembled = next(
+            (a for a in store.list_assets(project_id, owner_id)
+             if a.id == saved["asset"]["id"]), None
+        )
+        if assembled is None:
+            raise HTTPException(status_code=500, detail="Assembled video was not saved.")
+        assembled.metadata = {
+            **(assembled.metadata or {}),
+            "assembly_signature": signature, "calendar_entry_id": entry_id,
+            "source_asset_ids": asset_ids, "segment_count": measured["segment_count"],
+            "pipeline": "calendar_saved_clip_assembly", "duration_seconds": measured["duration_seconds"],
+            "quality_state": "OWNER_REVIEW_REQUIRED", "publish_ready": False,
+            "commercial_complete": False, "captions_verified": False,
+            "audio_review_required": True, "rights_review_required": True,
+            "paid_provider_charges": False, "external_publishing": False,
+        }
+        assembled = store.save_asset(assembled)
+    return _assembly_result(project_id, assembled, reused=False)
+
+
+def _assembly_result(project_id: str, asset: CreativeAsset, *, reused: bool):
+    return {
+        "status": "ASSEMBLED_REVIEW_REQUIRED", "asset": asset.as_dict(),
+        "download_url": f"/api/nova/creative/projects/{project_id}/assets/{asset.id}/file",
+        "reused": reused, "media_generated": True,
+        "published": False, "publish_ready": False,
+        "message": "Combined saved clips into one MP4. Review audio, captions, visual continuity, rights, and completeness before publishing.",
+    }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assemble")
+async def assemble_calendar_video(
+    project_id: str, entry_id: str, payload: LongFormAssemblyIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return await run_in_threadpool(
+        _assemble_calendar_video, db, user.user_id, project_id, entry_id, payload.asset_ids,
+    )
