@@ -2109,7 +2109,8 @@ class CreativeStudioService(ShortDramaMixin):
         from app.core.nova.creative_studio import private_object_storage as private_store
         import os
         self._project_or_404(owner_id, project_id)
-        if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not private_store.enabled():
+        require_durable_imports = os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"}
+        if require_durable_imports and not private_store.enabled():
             raise CreativeStudioError(
                 "PRIVATE_STORAGE_UNAVAILABLE",
                 "Private original storage has not been enabled. No file was accepted.",
@@ -2125,7 +2126,10 @@ class CreativeStudioService(ShortDramaMixin):
                 if private_store.enabled() and str(existing.url or "").startswith("private-studio-s3://"):
                     if private_store.object_exists(existing.url, owner_id, project_id, digest):
                         return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
-                elif not str(existing.url or "").startswith("private-studio-s3://"):
+                elif not require_durable_imports and not str(existing.url or "").startswith("private-studio-s3://"):
+                    # A valid legacy local file is not proof of durable storage.
+                    # When durable imports are required, re-import into private
+                    # object storage instead of returning an ephemeral original.
                     path = _resolve_creative_media_url(existing.url)
                     if path and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
                         return {"asset": existing.as_dict(), "reused": True, "paid_request_submitted": False}
