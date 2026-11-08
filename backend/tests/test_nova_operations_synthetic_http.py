@@ -129,7 +129,7 @@ def test_synthetic_download_rejects_tampered_file(monkeypatch):
 
 
 def test_synthetic_adapter_is_not_registered():
-    root = SOURCE.parents[3]
+    root = SOURCE.parents[4]
     # Registration must be an explicit, separately reviewed change.
     for entrypoint in (root / "main.py", root / "app/main.py"):
         if entrypoint.exists():
