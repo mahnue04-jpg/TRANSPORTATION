@@ -9,14 +9,14 @@ import pytest
 
 from app.core.nova.work_revenue.operations_assignment_handoff import (
     ensure_handoff_schema, handoff_approved_opportunity,
-    record_verified_owner_approval,
+    record_verified_owner_approval, claim_approved_assignment,
 )
 from app.core.nova.work_revenue.operations_artifact_review import (
     complete_and_store_review_artifact, ensure_artifact_schema, review_artifact,
 )
 from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
 from app.core.nova.work_revenue.operations_job_queue import (
-    JobConflict, claim_job, ensure_schema, get_job_state,
+    JobConflict, ensure_schema, get_job_state,
 )
 from app.core.nova.work_revenue.operations_release_gate import (
     check_offline_release_eligibility,
@@ -74,7 +74,9 @@ def test_synthetic_opportunity_to_reviewed_csv_survives_restart(tmp_path):
     db = sqlite3.connect(path)
     with pytest.raises(JobConflict, match="owner-reviewed"):
         release(db)
-    claim = claim_job(db, tenant_id=TENANT, job_id=assignment.job_id, now=100)
+    claim = claim_approved_assignment(
+        db, acting_tenant_id=TENANT, opportunity_id=OPPORTUNITY, now=100,
+    )
     assert claim.input_sha256 == fingerprint
     report = clean_csv_text(RAW)
     assert report.input_sha256 == fingerprint
@@ -102,8 +104,9 @@ def test_synthetic_opportunity_to_reviewed_csv_survives_restart(tmp_path):
     reopened = sqlite3.connect(path)
     try:
         assert release(reopened) == allowed
-        assert claim_job(
-            reopened, tenant_id=TENANT, job_id=assignment.job_id, now=1000,
+        assert claim_approved_assignment(
+            reopened, acting_tenant_id=TENANT,
+            opportunity_id=OPPORTUNITY, now=1000,
         ) is None
         assert reopened.execute(
             "SELECT COUNT(*) FROM nova_operations_offline_jobs"
@@ -131,7 +134,9 @@ def test_rejected_synthetic_assignment_stays_blocked_after_restart(tmp_path):
         opportunity_id=OPPORTUNITY, approval_reference="approval-002",
         input_sha256=fingerprint,
     )
-    claim = claim_job(db, tenant_id=TENANT, job_id=assignment.job_id, now=100)
+    claim = claim_approved_assignment(
+        db, acting_tenant_id=TENANT, opportunity_id=OPPORTUNITY, now=100,
+    )
     report = clean_csv_text(RAW)
     complete_and_store_review_artifact(
         db, job=claim, csv_text=report.cleaned_csv,
