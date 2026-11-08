@@ -29,6 +29,7 @@ on:
       - 'backend/tests/test_nova_operations_runner_storage_failure.py'
       - 'backend/scripts/nova_operations_synthetic_demo.py'
       - 'backend/app/core/nova/work_revenue/operations_synthetic_http.py'
+      - 'backend/app/core/nova/work_revenue/operations_synthetic_review.html'
       - 'backend/tests/test_nova_operations_synthetic_http.py'
       - '.github/workflows/nova-offline-durability.yml'
   workflow_dispatch:
