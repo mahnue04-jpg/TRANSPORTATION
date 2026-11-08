@@ -75,6 +75,9 @@
       if (entry.status !== "approved" && entry.status !== "canceled") {
         actions.appendChild(button("Approve script", approve, entry));
       }
+      if (entry.status === "approved") {
+        actions.appendChild(button("Prepare in Studio", prepare, entry));
+      }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
       list.appendChild(article);
@@ -152,6 +155,30 @@
   function cancel(entry) {
     if (window.confirm("Cancel this planned video? It will not be posted.")) {
       mutate(entry, {}, "cancel");
+    }
+  }
+  async function prepare(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    var currentRevision = revision;
+    busy = true;
+    feedback("Saving the approved script and narration text into Creative Studio...");
+    try {
+      var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/prepare", {
+        method: "POST"
+      });
+      if (active() !== project || currentRevision !== revision) return;
+      if (!result || result.status !== "PREPARED_TEXT_ONLY") {
+        throw new Error("Studio did not confirm production-text preparation.");
+      }
+      feedback(result.reused ?
+        "Existing reviewed script, narration and caption assets are ready in Studio." :
+        "Reviewed script, narration and caption source saved in Studio. Generate the video separately after reviewing settings.");
+      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+    } catch (err) {
+      feedback(err.message || "Unable to prepare Studio content.", true);
+    } finally {
+      busy = false;
     }
   }
   $("calendar-form").addEventListener("submit", async function (event) {
