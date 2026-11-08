@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -43,7 +43,7 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
         or (isinstance(node, ast.FunctionDef) and node.name in {
             "_require_isolated_demo", "_review_db", "_reviewer", "_synthetic_csv",
             "preview_synthetic_acceptance", "review_synthetic_acceptance",
-            "download_synthetic_acceptance"
+            "download_synthetic_acceptance", "synthetic_review_ui"
         })
     ]
     tree = ast.Module(body=[
@@ -67,7 +67,7 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
 
     namespace = dict(
         APIRouter=APIRouter, Depends=Depends, HTTPException=HTTPException,
-        Response=Response, UserContext=SimpleNamespace,
+        Response=Response, HTMLResponse=HTMLResponse, UserContext=SimpleNamespace,
         require_nova_access=require_nova_access,
         require_work_revenue_owner=require_work_revenue_owner,
         run_synthetic_demo=run_synthetic_demo,
@@ -161,8 +161,28 @@ def test_synthetic_download_rejects_tampered_file(monkeypatch, tmp_path):
         assert client.get(ENDPOINT).status_code == 503
 
 
+
+def test_synthetic_review_screen_requires_owner_and_staging(monkeypatch, tmp_path):
+    _enable_preview(monkeypatch, tmp_path)
+    app, owner = _isolated_adapter(monkeypatch)
+    with TestClient(app) as client:
+        assert client.get(BASE + "/ui").status_code == 401
+        app.dependency_overrides[owner] = lambda: SimpleNamespace(user_id="owner-demo")
+        response = client.get(BASE + "/ui")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert response.headers["cache-control"] == "no-store"
+        assert "id=\"approve\"" in response.text
+        assert "id=\"reject\"" in response.text
+        assert "id=\"download\"" in response.text
+        assert '"/preview"' in response.text
+        assert '"/review"' in response.text
+        assert '"/download"' in response.text
+        monkeypatch.setenv("APP_ENV", "production")
+        assert client.get(BASE + "/ui").status_code == 503
+
 def test_synthetic_adapter_is_not_registered():
-    root = SOURCE.parents[4]
+    root = SOURCE.parents[1]
     # Registration must be an explicit, separately reviewed change.
     for entrypoint in (root / "main.py", root / "app/main.py"):
         if entrypoint.exists():
