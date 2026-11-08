@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import urlsplit
 from datetime import datetime
 from typing import Any
 
@@ -48,6 +50,50 @@ from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live
 from app.core.nova.work_revenue import first_client_pipeline
 from app.core.nova.work_revenue import service as work_service
 from app.db.session import get_db
+
+def _guard_preview_discovery_storage() -> None:
+    """Fail closed for paid-job writes on a Render PR preview.
+
+    A running preview is not proof of isolated, durable storage. The expected
+    production DB host and confirmed staging DB host are nonsecret values set
+    only after the operator checks Render's actual database attachments.
+    This gate protects the live paid-job preparation endpoint and does not
+    authorize any other external action or production deployment.
+    """
+    service_name = str(os.getenv("RENDER_SERVICE_NAME") or "").strip().lower()
+    service_url = str(os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+    preview_host = (urlsplit(service_url).hostname or "").lower()
+    is_preview = bool(
+        re.fullmatch(r".+-pr-\\d+\\.onrender\\.com", preview_host)
+        or re.search(r"\\bpr\\s*#\\s*\\d+\\b", service_name)
+    )
+    if not is_preview:
+        return
+    actual_url = str(os.getenv("DATABASE_URL") or "").strip()
+    try:
+        actual_host = (urlsplit(actual_url).hostname or "").lower()
+    except ValueError:
+        actual_host = ""
+    expected_staging = str(os.getenv("NOVA_STAGING_DATABASE_HOST") or "").strip().lower()
+    production_host = str(os.getenv("AMICOR_PRODUCTION_DATABASE_HOST") or "").strip().lower()
+    confirmed = str(os.getenv("NOVA_STAGING_DB_ISOLATION_VERIFIED") or "").lower() == "true"
+    if not (
+        confirmed
+        and actual_url.lower().startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"))
+        and actual_host
+        and expected_staging
+        and production_host
+        and actual_host == expected_staging
+        and actual_host != production_host
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Staging paid-job writes disabled: verify an isolated persistent PostgreSQL "
+                "database, its host, and the separate production host in Render."
+            ),
+        )
+
 
 def _nova_v3_owner_emails() -> set[str]:
     configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
@@ -496,6 +542,7 @@ def v3_live_job_prepare(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
+    _guard_preview_discovery_storage()
     org_id = _org(user, payload.organization_id)
     try:
         requested_families = resolve_requested_families(payload.query)
