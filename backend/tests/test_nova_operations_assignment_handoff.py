@@ -160,3 +160,34 @@ def test_same_opportunity_identifier_is_isolated_between_tenants(db):
     assert get_assignment_handoff(
         db, acting_tenant_id="tenant-b", opportunity_id="lead-one",
     ) == second
+
+
+@pytest.mark.parametrize("table,column,value", [
+    ("nova_operations_offline_approvals", "approval_reference", "tampered-approval"),
+    ("nova_operations_offline_approvals", "input_sha256", "b" * 64),
+    ("nova_operations_offline_handoffs", "input_sha256", "b" * 64),
+    ("nova_operations_offline_jobs", "tenant_id", "tenant-b"),
+    ("nova_operations_offline_jobs", "kind", "other_job"),
+    ("nova_operations_offline_jobs", "input_sha256", "b" * 64),
+])
+def test_corrupted_assignment_links_fail_closed(db, table, column, value):
+    original = handoff(db)
+    db.execute(
+        f"UPDATE {table} SET {column}=?",
+        (value,),
+    )
+    db.commit()
+    with pytest.raises(JobConflict, match="inconsistent"):
+        get_assignment_handoff(
+            db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+        )
+
+
+def test_missing_linked_job_fails_closed(db):
+    first = handoff(db)
+    db.execute("DELETE FROM nova_operations_offline_jobs WHERE job_id=?", (first.job_id,))
+    db.commit()
+    with pytest.raises(JobConflict, match="inconsistent"):
+        get_assignment_handoff(
+            db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+        )
