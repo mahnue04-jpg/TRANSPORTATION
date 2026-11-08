@@ -590,10 +590,17 @@ def v3_live_job_prepare(
             and bool((job.get("live_qualification") or {}).get("revenue_ready", job.get("revenue_ready")))
         ][: payload.save_limit]
 
-        reset_result = reset_live_discovery_opportunities(
-            db,
-            organization_id=org_id,
-            user=user,
+        # A successful source search may still yield no qualified opportunities.
+        # Keep the owner's previously discovered leads until replacement work
+        # is genuinely available; no-match results are not a deletion signal.
+        reset_result = (
+            reset_live_discovery_opportunities(
+                db,
+                organization_id=org_id,
+                user=user,
+            )
+            if selected else
+            {"archived_count": 0, "skipped_reason": "no_qualified_replacement"}
         )
         # Persist only revenue-ready QUALIFIED matches for this search session.
         saved = get_kernel().ingest_live_jobs(
