@@ -372,8 +372,9 @@ def reset_live_discovery_opportunities(
     *,
     organization_id: str,
     user: UserContext,
+    retain_opportunity_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Archive the previous live-discovery search set before a new owner search.
+    """Archive superseded live leads only after replacement records are saved.
 
     Manual records and simulated fixtures are untouched. Opportunities with
     submitted/won/active downstream work are preserved so a new search cannot
@@ -387,6 +388,7 @@ def reset_live_discovery_opportunities(
     )
     archived_ids: list[str] = []
     preserved_ids: list[str] = []
+    retained = retain_opportunity_ids or set()
     protected_statuses = {
         "SUBMITTED", "FOLLOW_UP_DUE", "INTERVIEW", "OFFER", "WON",
         "APPLICATION_PREPARED", "APPROVED_TO_APPLY",
@@ -403,7 +405,8 @@ def reset_live_discovery_opportunities(
             user=user,
         )
         protected = (
-            row.status in protected_statuses
+            row.opportunity_id in retained
+            or row.status in protected_statuses
             or bool(app and (
                 app.approved_for_future_submission
                 or app.externally_submitted
