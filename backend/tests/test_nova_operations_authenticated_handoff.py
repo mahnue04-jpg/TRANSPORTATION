@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.core.nova.work_revenue import operations_owner_scope as scope
 from app.core.nova.work_revenue.operations_authenticated_handoff import (
     approve_and_handoff_offline, review_approved_assignment_offline,
+    preview_approved_assignment_offline,
 )
 from app.core.nova.work_revenue.operations_assignment_handoff import (
     claim_approved_assignment, ensure_handoff_schema,
@@ -310,6 +311,10 @@ def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_
                 conn, acting_tenant_id="tenant-a",
                 opportunity_id="synthetic-opportunity-1",
             )
+        assert preview_approved_assignment_offline(
+            conn, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        ) == ("awaiting_review", cleaned.cleaned_csv)
         assert review_approved_assignment_offline(
             conn, authenticated_owner=owner(),
             opportunity_id="synthetic-opportunity-1", approve=True,
@@ -319,6 +324,10 @@ def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_
 
     reopened = sqlite3.connect(path)
     try:
+        assert preview_approved_assignment_offline(
+            reopened, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        ) == ("approved", cleaned.cleaned_csv)
         ready = check_offline_release_eligibility(
             reopened, acting_tenant_id="tenant-a",
             opportunity_id="synthetic-opportunity-1",
