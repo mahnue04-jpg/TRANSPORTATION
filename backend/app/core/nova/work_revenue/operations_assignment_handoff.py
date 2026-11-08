@@ -34,6 +34,16 @@ def ensure_handoff_schema(db: sqlite3.Connection) -> None:
         raise JobConflict("Handoff schema requires a separate transaction")
     with db:
         db.execute(
+            """CREATE TABLE IF NOT EXISTS nova_operations_offline_approvals (
+                tenant_id TEXT NOT NULL,
+                opportunity_id TEXT NOT NULL,
+                approval_reference TEXT NOT NULL,
+                input_sha256 TEXT NOT NULL,
+                reviewer_id TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, opportunity_id)
+            )"""
+        )
+        db.execute(
             """CREATE TABLE IF NOT EXISTS nova_operations_offline_handoffs (
                 tenant_id TEXT NOT NULL,
                 opportunity_id TEXT NOT NULL,
@@ -47,14 +57,57 @@ def ensure_handoff_schema(db: sqlite3.Connection) -> None:
         )
 
 
+def record_verified_owner_approval(
+    db: sqlite3.Connection, *, acting_tenant_id: str,
+    record_tenant_id: str, opportunity_id: str,
+    approval_reference: str, input_sha256: str,
+    reviewer_id: str, reviewer_authorized: bool,
+) -> None:
+    """Register approval evidence after trusted server-side authorization.
+
+    This OFFLINE helper cannot authenticate a reviewer. Production callers must
+    derive reviewer_id and reviewer_authorized from verified server context,
+    never a client-supplied request flag.
+    """
+    if (
+        not _identifier(acting_tenant_id)
+        or acting_tenant_id != record_tenant_id
+        or not all(_identifier(value) for value in (
+            opportunity_id, approval_reference, reviewer_id
+        ))
+        or reviewer_authorized is not True
+        or not _valid_sha(input_sha256)
+    ):
+        raise JobConflict("Authenticated owner approval evidence required")
+    if db.in_transaction:
+        raise JobConflict("Approval registration requires a dedicated transaction")
+    with db:
+        db.execute(
+            """INSERT INTO nova_operations_offline_approvals
+               (tenant_id, opportunity_id, approval_reference, input_sha256, reviewer_id)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(tenant_id, opportunity_id) DO NOTHING""",
+            (acting_tenant_id, opportunity_id, approval_reference, input_sha256, reviewer_id),
+        )
+        row = db.execute(
+            """SELECT approval_reference, input_sha256, reviewer_id
+               FROM nova_operations_offline_approvals
+               WHERE tenant_id=? AND opportunity_id=?""",
+            (acting_tenant_id, opportunity_id),
+        ).fetchone()
+        if row != (approval_reference, input_sha256, reviewer_id):
+            raise JobConflict("Conflicting owner approval evidence")
+
+
 def handoff_approved_opportunity(
     db: sqlite3.Connection, *, acting_tenant_id: str, record_tenant_id: str,
     opportunity_id: str, approval_reference: str, input_sha256: str,
 ) -> AssignmentHandoff:
     """Atomically create a stable assignment link and its queued CSV job.
 
-    An approval reference is an opaque externally verified identifier, NOT proof
-    of authorization. No user-provided tenant identity is trusted here.
+    A matching persisted approval record is required before queue creation.
+    Registration itself requires verified caller-side authorization; this
+    offline module must never be used as a production authentication boundary.
     """
     if not _identifier(acting_tenant_id) or acting_tenant_id != record_tenant_id:
         raise JobConflict("Tenant mismatch or missing authenticated tenant")
@@ -68,6 +121,14 @@ def handoff_approved_opportunity(
     key = "opportunity:" + opportunity_id
     db.execute("BEGIN IMMEDIATE")
     try:
+        approved = db.execute(
+            """SELECT approval_reference, input_sha256
+               FROM nova_operations_offline_approvals
+               WHERE tenant_id=? AND opportunity_id=?""",
+            (acting_tenant_id, opportunity_id),
+        ).fetchone()
+        if approved != (approval_reference, input_sha256):
+            raise JobConflict("Verified owner approval record required")
         db.execute(
             """INSERT INTO nova_operations_offline_jobs
                 (tenant_id, idempotency_key, kind, input_sha256, max_attempts)
