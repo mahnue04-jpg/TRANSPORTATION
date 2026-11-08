@@ -147,6 +147,8 @@ def complete_job(
 ) -> None:
     if not _valid_sha(output_sha256):
         raise JobConflict("Invalid output checksum")
+    if isinstance(now, bool) or not isinstance(now, int) or now < 0:
+        raise JobConflict("Invalid completion timestamp")
     with db:
         cur = db.execute(
             """UPDATE nova_operations_offline_jobs
