@@ -662,3 +662,27 @@ def start_calendar_assembly_job(
         with _calendar_assembly_lock:
             _calendar_assembly_active.discard(key)
         raise
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/assembly-status")
+def calendar_assembly_status(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Return the latest durable assembly record without creating work or charges."""
+    _project(db, user.user_id, project_id)
+    _entry(db, user.user_id, project_id, entry_id)
+    jobs = DbCreativeStudioStore(db).list_jobs(project_id, user.user_id)
+    latest = next((job for job in jobs if job.kind == "calendar_assembly:" + entry_id), None)
+    if latest is None:
+        return {"status": "NOT_STARTED", "job": None}
+    key = (user.user_id, project_id, entry_id)
+    with _calendar_assembly_lock:
+        running_here = key in _calendar_assembly_active
+    if latest.status in {"QUEUED", "RUNNING"} and not running_here:
+        return {
+            "status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
+            "message": "The saved job was not found in this process. No new generation was submitted. Check saved assets before retrying.",
+        }
+    return {"status": latest.status, "job": latest.as_dict()}
