@@ -173,11 +173,30 @@ def get_assignment_handoff(
     if not _identifier(acting_tenant_id) or not _identifier(opportunity_id):
         raise JobConflict("Valid tenant and opportunity identifiers required")
     row = db.execute(
-        """SELECT approval_reference, job_id FROM nova_operations_offline_handoffs
-           WHERE tenant_id=? AND opportunity_id=?""",
+        """SELECT h.approval_reference, h.job_id, h.input_sha256,
+                  a.approval_reference, a.input_sha256,
+                  j.tenant_id, j.idempotency_key, j.kind, j.input_sha256
+           FROM nova_operations_offline_handoffs AS h
+           LEFT JOIN nova_operations_offline_approvals AS a
+             ON a.tenant_id=h.tenant_id
+            AND a.opportunity_id=h.opportunity_id
+           LEFT JOIN nova_operations_offline_jobs AS j
+             ON j.job_id=h.job_id
+           WHERE h.tenant_id=? AND h.opportunity_id=?""",
         (acting_tenant_id, opportunity_id),
     ).fetchone()
-    return (
-        AssignmentHandoff(acting_tenant_id, opportunity_id, row[0], int(row[1]))
-        if row else None
-    )
+    if row is None:
+        return None
+    (approval, job_id, fingerprint, stored_approval, approved_fingerprint,
+     job_tenant, idempotency_key, kind, job_fingerprint) = row
+    if (
+        approval != stored_approval
+        or fingerprint != approved_fingerprint
+        or job_tenant != acting_tenant_id
+        or idempotency_key != "opportunity:" + opportunity_id
+        or kind != "csv_cleanup"
+        or job_fingerprint != fingerprint
+        or not _valid_sha(fingerprint)
+    ):
+        raise JobConflict("Assignment ownership or approval link is inconsistent")
+    return AssignmentHandoff(acting_tenant_id, opportunity_id, approval, int(job_id))
