@@ -171,3 +171,52 @@ def review_approved_assignment_offline(
     except BaseException:
         db.rollback()
         raise
+
+
+
+def preview_approved_assignment_offline(
+    db: sqlite3.Connection, *,
+    authenticated_owner: UserContext,
+    opportunity_id: str,
+) -> tuple[str, str]:
+    """Read a bounded synthetic CSV for its recorded approving actor only.
+
+    This is an offline review preview, NOT an externally callable download.
+    The server boundary must independently validate JWT and owner access.
+    """
+    from .operations_assignment_handoff import get_assignment_handoff
+
+    tenant_id, actor_id = owner_approval_identity(authenticated_owner)
+    if not _identifier(opportunity_id) or len(actor_id) > 128:
+        raise JobConflict("Valid opportunity and reviewer identity required")
+    handoff = get_assignment_handoff(
+        db, acting_tenant_id=tenant_id, opportunity_id=opportunity_id,
+    )
+    if handoff is None:
+        raise JobConflict("Assignment unavailable for owner preview")
+    row = db.execute(
+        """SELECT a.csv_text, a.output_sha256, j.output_sha256,
+                  a.review_state, p.reviewer_id
+           FROM nova_operations_offline_artifacts AS a
+           JOIN nova_operations_offline_jobs AS j
+             ON j.tenant_id=a.tenant_id AND j.job_id=a.job_id
+           JOIN nova_operations_offline_approvals AS p
+             ON p.tenant_id=a.tenant_id AND p.opportunity_id=?
+           WHERE a.tenant_id=? AND a.job_id=? AND j.state='completed'""",
+        (opportunity_id, tenant_id, handoff.job_id),
+    ).fetchone()
+    if row is None:
+        raise JobConflict("Completed artifact unavailable for owner preview")
+    csv_text, artifact_hash, job_hash, review_state, recorded_reviewer = row
+    if recorded_reviewer != actor_id:
+        raise JobConflict("Preview actor does not match recorded approval")
+    if (
+        not isinstance(csv_text, str)
+        or len(csv_text.encode("utf-8")) > 1_000_000
+        or not _valid_sha(artifact_hash)
+        or artifact_hash != job_hash
+        or hashlib.sha256(csv_text.encode("utf-8")).hexdigest() != artifact_hash
+        or review_state not in ("awaiting_review", "approved", "rejected")
+    ):
+        raise JobConflict("Preview artifact integrity check failed")
+    return review_state, csv_text
