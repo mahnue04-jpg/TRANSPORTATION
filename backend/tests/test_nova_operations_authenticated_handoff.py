@@ -493,3 +493,61 @@ def test_review_rejects_corrupt_synthetic_artifact_before_approval(db, corruptio
            WHERE tenant_id=? AND job_id=?""",
         ("tenant-a", link.job_id),
     ).fetchone() == ("awaiting_review", None)
+
+
+
+def test_offline_preview_requires_approving_actor_and_intact_csv(db):
+    from app.core.nova.work_revenue.operations_authenticated_handoff import (
+        preview_approved_assignment_offline,
+    )
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+
+    raw = "Name\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    with pytest.raises(JobConflict, match="Completed artifact"):
+        preview_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        )
+    claim = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    complete_and_store_review_artifact(
+        db, job=claim, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    assert preview_approved_assignment_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+    ) == ("awaiting_review", cleaned.cleaned_csv)
+    with pytest.raises(JobConflict, match="Preview actor"):
+        preview_approved_assignment_offline(
+            db, authenticated_owner=owner(actor="different-owner"),
+            opportunity_id="synthetic-opportunity-1",
+        )
+    with pytest.raises(JobConflict, match="unavailable"):
+        preview_approved_assignment_offline(
+            db, authenticated_owner=owner(tenant="other-tenant"),
+            opportunity_id="synthetic-opportunity-1",
+        )
+    db.execute(
+        """UPDATE nova_operations_offline_artifacts SET csv_text=?
+           WHERE tenant_id=? AND job_id=?""",
+        ("modified\n", "tenant-a", link.job_id),
+    )
+    db.commit()
+    with pytest.raises(JobConflict, match="integrity"):
+        preview_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        )
