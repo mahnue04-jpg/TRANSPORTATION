@@ -85,6 +85,9 @@
           actions.appendChild(button("Assemble saved clips", assembleSelect, entry));
         }
       }
+      if (entry.status !== "canceled" && entry.duration_seconds >= 120 && entry.duration_seconds <= 600) {
+        if (entry.status !== "approved") actions.appendChild(button("Edit saved timeline", assembleSelect, entry));
+      }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
       list.appendChild(article);
@@ -184,7 +187,10 @@
       explain.className = "hint";
       explain.textContent = "Choose 2–16 existing saved videos. Click Add in sequence; their combined length should match your planned duration. Each must have H.264 video and AAC audio. No paid generation.";
       host.appendChild(explain);
-      var ordered = [];
+      var selectedById = new Map(videos.map(function (asset) { return [asset.id, asset]; }));
+      var ordered = (entry.timeline_asset_ids || []).map(function (id) {
+        return selectedById.get(id);
+      }).filter(Boolean);
       var sequence = document.createElement("ol");
       host.appendChild(sequence);
       function showOrder() {
@@ -199,6 +205,7 @@
           sequence.appendChild(row);
         });
       }
+      showOrder();
       videos.forEach(function (asset) {
         var line = document.createElement("div");
         line.className = "actions wrap";
@@ -220,6 +227,26 @@
         }, asset));
         host.appendChild(line);
       });
+      host.appendChild(button("Save timeline", async function () {
+        if (busy || active() !== project) return;
+        busy = true;
+        feedback("Saving your ordered video timeline...");
+        try {
+          var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/timeline", {
+            method: "PUT",
+            body: JSON.stringify({ asset_ids: ordered.map(function (asset) { return asset.id; }) })
+          });
+          if (active() !== project) return;
+          entry.timeline_asset_ids = saved.timeline_asset_ids || [];
+          entry.status = saved.status;
+          feedback(saved.status === "ready_for_review"
+            ? "Timeline saved. Changes require approval again before assembly."
+            : "Timeline saved. You can return to this project and resume.");
+          await load();
+        } catch (err) {
+          feedback(err.message || "Could not save timeline.", true);
+        } finally { busy = false; }
+      }, entry));
       host.appendChild(button("Build combined MP4", async function () {
         if (ordered.length < 2 || busy) {
           feedback("Choose at least two clips first.", true);
