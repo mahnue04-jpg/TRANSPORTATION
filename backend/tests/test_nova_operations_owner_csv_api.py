@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
 
@@ -40,11 +40,11 @@ def _load_app():
     function = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "owner_csv_cleanup")
     ns = {
         "__name__": "isolated_http_contract", "router": router,
-        "os": os, "Depends": Depends, "File": File, "Header": Header,
-        "UploadFile": UploadFile, "HTTPException": HTTPException,
+        "os": os, "Depends": Depends, "Request": Request, "Header": Header,
+        "HTTPException": HTTPException,
         "Response": Response, "UserContext": object,
         "LIMIT_BYTES": 1_000_000,
-        "CSV_MIME_TYPES": {"text/csv", "application/csv", "application/vnd.ms-excel", "application/octet-stream"},
+        "CSV_MIME_TYPES": {"text/csv", "application/csv", "application/vnd.ms-excel"},
         "SpreadsheetInputError": cleanup.SpreadsheetInputError,
         "clean_csv_text": cleanup.clean_csv_text,
         "require_work_revenue_owner": require_owner,
@@ -64,9 +64,19 @@ def client(monkeypatch):
 
 
 def post(client, content, *, headers=None, name="sample.csv", mime="text/csv"):
-    return client.post("/api/nova/work/operations/csv-clean",
-        files={"file": (name, content, mime)},
-        headers=headers if headers is not None else {"X-Nova-Owner-Action": "process-csv-for-owner-review"})
+    request_headers = {
+        "X-Nova-File-Name": name,
+        "Content-Type": mime,
+    }
+    if headers is None:
+        request_headers["X-Nova-Owner-Action"] = "process-csv-for-owner-review"
+    else:
+        request_headers.update(headers)
+    return client.post(
+        "/api/nova/work/operations/csv-clean",
+        content=content,
+        headers=request_headers,
+    )
 
 
 def test_real_csv_bytes_downloaded_for_review_without_persistence(client):
@@ -87,7 +97,7 @@ def test_default_disabled(monkeypatch, client):
 
 
 def test_requires_explicit_owner_action_header(client):
-    assert post(client, b"A\n1\n", headers={}).status_code == 403
+    assert post(client, b"A\n1\n", headers={"X-Nova-Owner-Action": "not-approved"}).status_code == 403
 
 
 @pytest.mark.parametrize("name,mime,expected", [
