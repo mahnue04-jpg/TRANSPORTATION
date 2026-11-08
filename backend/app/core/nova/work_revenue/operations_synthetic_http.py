@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 
 from app.auth import UserContext
 from app.core.nova.router import require_nova_access
@@ -100,6 +100,20 @@ def _synthetic_csv() -> tuple[bytes, str]:
         if digest != report.get("sha256"):
             raise HTTPException(status_code=503, detail="Synthetic CSV integrity failure")
         return data, digest
+
+
+@router.get("/ui")
+def synthetic_review_ui(
+    user: UserContext = Depends(require_work_revenue_owner),
+) -> HTMLResponse:
+    """Owner-facing staging-only sample review screen. Never mounted by default."""
+    _require_isolated_demo()
+    _reviewer(user)
+    page = Path(__file__).with_name("operations_synthetic_review.html")
+    return HTMLResponse(
+        content=page.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/preview")
