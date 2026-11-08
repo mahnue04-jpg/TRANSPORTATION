@@ -438,3 +438,58 @@ def test_session_review_denies_uncompleted_job_and_nonboolean_choice(db):
             db, authenticated_owner=owner(),
             opportunity_id="synthetic-opportunity-1", approve=True,
         )
+
+
+
+@pytest.mark.parametrize("corruption", ["csv_text", "artifact_hash", "job_hash"])
+def test_review_rejects_corrupt_synthetic_artifact_before_approval(db, corruption):
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+
+    raw = "Name\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    job = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    complete_and_store_review_artifact(
+        db, job=job, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    if corruption == "csv_text":
+        db.execute(
+            """UPDATE nova_operations_offline_artifacts SET csv_text=?
+               WHERE tenant_id=? AND job_id=?""",
+            ("Tampered\n", "tenant-a", link.job_id),
+        )
+    elif corruption == "artifact_hash":
+        db.execute(
+            """UPDATE nova_operations_offline_artifacts SET output_sha256=?
+               WHERE tenant_id=? AND job_id=?""",
+            ("f" * 64, "tenant-a", link.job_id),
+        )
+    else:
+        db.execute(
+            """UPDATE nova_operations_offline_jobs SET output_sha256=?
+               WHERE tenant_id=? AND job_id=?""",
+            ("f" * 64, "tenant-a", link.job_id),
+        )
+    db.commit()
+    with pytest.raises(JobConflict, match="integrity"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1", approve=True,
+        )
+    assert db.execute(
+        """SELECT review_state, reviewer_id FROM nova_operations_offline_artifacts
+           WHERE tenant_id=? AND job_id=?""",
+        ("tenant-a", link.job_id),
+    ).fetchone() == ("awaiting_review", None)
