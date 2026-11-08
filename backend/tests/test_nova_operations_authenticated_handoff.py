@@ -96,3 +96,65 @@ def test_invalid_session_cannot_register_approval(db, bad):
     assert db.execute(
         "SELECT COUNT(*) FROM nova_operations_offline_approvals"
     ).fetchone()[0] == 0
+
+
+
+def test_restart_after_approval_before_handoff_recovers_once(tmp_path):
+    """Simulate interruption between two independently committed operations."""
+    from app.core.nova.work_revenue.operations_assignment_handoff import (
+        handoff_approved_opportunity, record_verified_owner_approval,
+    )
+
+    path = tmp_path / "approval-recovery.sqlite"
+    conn = sqlite3.connect(path)
+    ensure_schema(conn)
+    ensure_handoff_schema(conn)
+    record_verified_owner_approval(
+        conn, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=DIGEST, reviewer_id="owner-a",
+        reviewer_authorized=True,
+    )
+    assert conn.execute(
+        "SELECT COUNT(*) FROM nova_operations_offline_jobs"
+    ).fetchone()[0] == 0
+    conn.close()
+
+    recovered = sqlite3.connect(path)
+    try:
+        first = approve(recovered)
+        assert approve(recovered) == first
+        assert recovered.execute(
+            "SELECT COUNT(*) FROM nova_operations_offline_jobs"
+        ).fetchone()[0] == 1
+        assert recovered.execute(
+            "SELECT COUNT(*) FROM nova_operations_offline_handoffs"
+        ).fetchone()[0] == 1
+        with pytest.raises(JobConflict, match="Verified owner approval"):
+            handoff_approved_opportunity(
+                recovered, acting_tenant_id="tenant-a",
+                record_tenant_id="tenant-a",
+                opportunity_id="synthetic-opportunity-1",
+                approval_reference="synthetic-approval-1",
+                input_sha256="a" * 64,
+            )
+        assert recovered.execute(
+            "SELECT COUNT(*) FROM nova_operations_offline_jobs"
+        ).fetchone()[0] == 1
+    finally:
+        recovered.close()
+
+
+def test_replay_with_different_fingerprint_cannot_change_approved_job(db):
+    first = approve(db)
+    with pytest.raises(JobConflict, match="Conflicting owner approval"):
+        approve_and_handoff_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+            approval_reference="synthetic-approval-1",
+            input_sha256="b" * 64,
+        )
+    assert db.execute(
+        "SELECT job_id, input_sha256 FROM nova_operations_offline_jobs"
+    ).fetchone() == (first.job_id, DIGEST)
