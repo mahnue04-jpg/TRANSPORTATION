@@ -33,3 +33,23 @@ def resolve_operations_owner_scope(user: UserContext) -> str:
     ):
         raise HTTPException(status_code=403, detail="Tenant-specific organization required")
     return org_id
+
+
+
+def owner_approval_identity(user: UserContext) -> tuple[str, str]:
+    """Return tenant and actor IDs sourced only from the authenticated session.
+
+    The HTTP boundary must enforce owner access first. This function does not
+    record an approval or imply that a particular opportunity was approved.
+    """
+    tenant_id = resolve_operations_owner_scope(user)
+    actor_id = getattr(user, "user_id", None)
+    if (
+        not isinstance(actor_id, str)
+        or not actor_id.strip()
+        or actor_id != actor_id.strip()
+        or len(actor_id) > 256
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in actor_id)
+    ):
+        raise HTTPException(status_code=403, detail="Authenticated actor required")
+    return tenant_id, actor_id
