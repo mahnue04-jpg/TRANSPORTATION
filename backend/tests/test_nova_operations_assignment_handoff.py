@@ -222,9 +222,10 @@ def test_guarded_claim_rejects_changed_approval_without_mutating_job(db):
         "UPDATE nova_operations_offline_approvals SET approval_reference='tampered'"
     )
     db.commit()
-    assert claim_approved_assignment(
-        db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
-    ) is None
+    with pytest.raises(JobConflict, match="inconsistent"):
+        claim_approved_assignment(
+            db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
+        )
     assert get_job_state(db, tenant_id="tenant-a", job_id=link.job_id) == "queued"
 
 
