@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.core.nova.work_revenue import operations_owner_scope as scope
 from app.core.nova.work_revenue.operations_authenticated_handoff import (
-    approve_and_handoff_offline,
+    approve_and_handoff_offline, review_approved_assignment_offline,
 )
 from app.core.nova.work_revenue.operations_assignment_handoff import (
     claim_approved_assignment, ensure_handoff_schema,
@@ -370,4 +370,71 @@ def test_wrong_reviewer_cannot_make_session_approved_artifact_releasable(db):
         check_offline_release_eligibility(
             db, acting_tenant_id="tenant-a",
             opportunity_id="synthetic-opportunity-1",
+        )
+
+
+
+def test_session_review_uses_approved_actor_and_rejects_replay(db):
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+    from app.core.nova.work_revenue.operations_release_gate import (
+        check_offline_release_eligibility,
+    )
+
+    raw = "Name\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    job = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    complete_and_store_review_artifact(
+        db, job=job, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    with pytest.raises(JobConflict, match="Review actor"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(actor="other-owner"),
+            opportunity_id="synthetic-opportunity-1", approve=True,
+        )
+    with pytest.raises(JobConflict, match="unavailable"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(tenant="tenant-b"),
+            opportunity_id="synthetic-opportunity-1", approve=True,
+        )
+    assert review_approved_assignment_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1", approve=True,
+    ) == "approved"
+    with pytest.raises(JobConflict, match="already reviewed"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1", approve=False,
+        )
+    ready = check_offline_release_eligibility(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1",
+    )
+    assert ready.job_id == link.job_id
+    assert ready.reviewer_id == "owner-a"
+
+
+def test_session_review_denies_uncompleted_job_and_nonboolean_choice(db):
+    approve(db)
+    with pytest.raises(JobConflict, match="boolean"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1", approve="yes",
+        )
+    with pytest.raises(JobConflict, match="Completed artifact"):
+        review_approved_assignment_offline(
+            db, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1", approve=True,
         )
