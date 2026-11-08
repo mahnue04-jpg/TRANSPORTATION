@@ -45,6 +45,7 @@ from app.core.nova.v3.live_qualification import (
 )
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
+from app.core.nova.work_revenue import first_client_pipeline
 from app.core.nova.work_revenue import service as work_service
 from app.db.session import get_db
 
@@ -671,6 +672,19 @@ def v3_live_job_prepare(
             elif live_status == OUTCOME_NEEDS_OWNER_REVIEW and work_id not in held_for_owner_review:
                 held_for_owner_review.append(work_id)
 
+        # Report actual owner-board visibility, distinct from durable storage.
+        # The board displays a capped top-ten list and may filter records that
+        # lack adequate provenance or fail its separate qualification rules.
+        board_snapshot = first_client_pipeline.build_board(
+            db, organization_id=org_id, user=user,
+        )
+        visible_ids = {
+            str(card.get("opportunity_id"))
+            for card in (board_snapshot.get("top_matches") or [])
+            if card.get("opportunity_id")
+        }
+        saved_visible_ids = retained_ids & visible_ids
+
         # Diagnostics must describe the full ranked set. The selected set is
         # intentionally QUALIFIED-only, so counting only selected rows hides why
         # a live search returned zero saveable opportunities.
@@ -719,6 +733,9 @@ def v3_live_job_prepare(
             "persistent_results": persistent_results,
             "durably_saved_count": len(retained_ids),
             "durably_saved_ids": sorted(retained_ids),
+            "saved_visible_on_board_count": len(saved_visible_ids),
+            "saved_visible_on_board_ids": sorted(saved_visible_ids),
+            "owner_board_top_matches_count": len(visible_ids),
         }
     except work_service.NovaWorkError as exc:
         _raise_work(exc)
