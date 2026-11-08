@@ -187,6 +187,7 @@ class NovaCreativeCalendarEntry(Base):
     content_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     channels_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     scheduled_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
