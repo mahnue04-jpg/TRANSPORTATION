@@ -5,6 +5,7 @@ import pytest
 
 from app.core.nova.work_revenue.operations_assignment_handoff import (
     ensure_handoff_schema, get_assignment_handoff, handoff_approved_opportunity,
+    record_verified_owner_approval,
 )
 from app.core.nova.work_revenue.operations_job_queue import (
     JobConflict, claim_job, ensure_schema, get_job_state,
@@ -23,6 +24,12 @@ def db(tmp_path):
 def handoff(db, tenant="tenant-a", record_tenant="tenant-a",
             opportunity="lead-one", approval="owner-approved-1",
             fingerprint="a" * 64):
+    record_verified_owner_approval(
+        db, acting_tenant_id=tenant, record_tenant_id=record_tenant,
+        opportunity_id=opportunity, approval_reference=approval,
+        input_sha256=fingerprint, reviewer_id="owner-1",
+        reviewer_authorized=True,
+    )
     return handoff_approved_opportunity(
         db, acting_tenant_id=tenant, record_tenant_id=record_tenant,
         opportunity_id=opportunity, approval_reference=approval,
@@ -82,3 +89,40 @@ def test_restart_retains_approved_handoff(tmp_path):
     ) == original
     assert handoff(second) == original
     second.close()
+
+
+def test_unregistered_approval_cannot_create_job(db):
+    with pytest.raises(JobConflict, match="Verified owner approval"):
+        handoff_approved_opportunity(
+            db, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+            opportunity_id="lead-one", approval_reference="fake-reference",
+            input_sha256="a" * 64,
+        )
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 0
+
+
+def test_unverified_reviewer_cannot_register_approval(db):
+    with pytest.raises(JobConflict, match="Authenticated owner approval"):
+        record_verified_owner_approval(
+            db, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+            opportunity_id="lead-one", approval_reference="owner-approved-1",
+            input_sha256="a" * 64, reviewer_id="owner-1",
+            reviewer_authorized=False,
+        )
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_approvals").fetchone()[0] == 0
+
+
+def test_matching_approval_is_required_for_same_fingerprint(db):
+    record_verified_owner_approval(
+        db, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+        opportunity_id="lead-one", approval_reference="owner-approved-1",
+        input_sha256="a" * 64, reviewer_id="owner-1",
+        reviewer_authorized=True,
+    )
+    with pytest.raises(JobConflict, match="Verified owner approval"):
+        handoff_approved_opportunity(
+            db, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+            opportunity_id="lead-one", approval_reference="different",
+            input_sha256="a" * 64,
+        )
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 0
