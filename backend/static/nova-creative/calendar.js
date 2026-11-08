@@ -247,26 +247,43 @@
           feedback(err.message || "Could not save timeline.", true);
         } finally { busy = false; }
       }, entry));
-      host.appendChild(button("Build combined MP4", async function () {
+      host.appendChild(button("Start MP4 assembly job", async function () {
         if (ordered.length < 2 || busy) {
           feedback("Choose at least two clips first.", true);
           return;
         }
         if (active() !== project) return;
         busy = true;
-        feedback("Combining existing clips into one video. This may take time; do not start a second assembly.");
+        feedback("Submitting the saved clips for background assembly. No paid provider is used.");
         try {
-          var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/assemble", {
+          var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/assemble-job", {
             method: "POST",
             body: JSON.stringify({ asset_ids: ordered.map(function (item) { return item.id; }) })
           });
           if (active() !== project) return;
-          if (result.status !== "ASSEMBLED_REVIEW_REQUIRED") throw new Error("No completed MP4 was confirmed.");
-          feedback("Combined MP4 saved. Review and download it from Studio's Asset list.");
-          host.replaceChildren();
-          if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+          var job = result.job;
+          if (!job || !job.id || (result.status !== "QUEUED" && result.status !== "ALREADY_RUNNING")) {
+            throw new Error(result.message || "No saved assembly job was returned.");
+          }
+          feedback("Assembly queued. Checking saved job progress...");
+          // Poll a saved job only. Refreshing status never creates another assembly.
+          for (var attempt = 0; attempt < 90 && active() === project; attempt++) {
+            await new Promise(function (resolve) { setTimeout(resolve, 3000); });
+            var snapshot = await bridge.api("/api/nova/creative/projects/" +
+              encodeURIComponent(project) + "/jobs/" + encodeURIComponent(job.id), { method: "GET" });
+            var state = (snapshot.job || {}).status;
+            if (state === "GENERATED") {
+              feedback("Combined MP4 saved. Review and download from Studio's Asset list.");
+              host.replaceChildren();
+              if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+              return;
+            }
+            if (state === "ERROR") throw new Error((snapshot.job || {}).message || "Assembly failed.");
+            feedback("Video assembly: " + (state || "pending") + ". Your source clips remain saved.");
+          }
+          feedback("Assembly is still processing or its status could not be confirmed. Reopen the Studio project to check saved jobs.");
         } catch (err) {
-          feedback(err.message || "Assembly failed; saved source clips were preserved.", true);
+          feedback(err.message || "Assembly could not be confirmed; source clips are preserved.", true);
         } finally { busy = false; }
       }, entry));
       host.scrollIntoView({ behavior: "smooth", block: "start" });
