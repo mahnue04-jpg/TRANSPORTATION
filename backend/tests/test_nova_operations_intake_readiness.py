@@ -1,7 +1,17 @@
 """Contract tests for read-only Work & Revenue -> Operations intake readiness."""
 from types import SimpleNamespace
+from pathlib import Path
+import importlib.util
 
-from app.core.nova.work_revenue.operations_intake_readiness import assess_operations_readiness
+# This pure read-only contract deliberately runs without the production app,
+# whose package initializer imports FastAPI and live application services.
+SOURCE = (Path(__file__).resolve().parents[1] /
+          "app/core/nova/work_revenue/operations_intake_readiness.py")
+_spec = importlib.util.spec_from_file_location("nova_intake_contract_only", SOURCE)
+assert _spec is not None and _spec.loader is not None
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+assess_operations_readiness = _module.assess_operations_readiness
 
 
 def opportunity(**kwargs):
