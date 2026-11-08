@@ -64,8 +64,8 @@ def _guard_preview_discovery_storage() -> None:
     service_url = str(os.getenv("RENDER_EXTERNAL_URL") or "").strip()
     preview_host = (urlsplit(service_url).hostname or "").lower()
     is_preview = bool(
-        re.fullmatch(r".+-pr-\\d+\\.onrender\\.com", preview_host)
-        or re.search(r"\\bpr\\s*#\\s*\\d+\\b", service_name)
+        re.fullmatch(r".+-pr-\d+\.onrender\.com", preview_host)
+        or re.search(r"\bpr\s*#\s*\d+\b", service_name)
     )
     if not is_preview:
         return
