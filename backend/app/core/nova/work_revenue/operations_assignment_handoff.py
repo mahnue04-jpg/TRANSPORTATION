@@ -200,3 +200,76 @@ def get_assignment_handoff(
     ):
         raise JobConflict("Assignment ownership or approval link is inconsistent")
     return AssignmentHandoff(acting_tenant_id, opportunity_id, approval, int(job_id))
+
+
+
+def claim_approved_assignment(
+    db: sqlite3.Connection, *, acting_tenant_id: str,
+    opportunity_id: str, now: int, lease_seconds: int = 60,
+):
+    """Atomically recheck approved linkage before leasing an offline CSV job.
+
+    This entry point is for synthetic offline processing only. Callers still
+    must authenticate the tenant and reviewer in a separate trusted layer.
+    The generic queue claim is not a production authorization boundary.
+    """
+    import secrets
+    from .operations_job_queue import ClaimedJob
+
+    if (
+        not _identifier(acting_tenant_id) or not _identifier(opportunity_id)
+        or isinstance(now, bool) or not isinstance(now, int) or now < 0
+        or isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int)
+        or not 1 <= lease_seconds <= 3600
+    ):
+        raise JobConflict("Invalid assignment claim inputs")
+    if db.in_transaction:
+        raise JobConflict("Assignment claim requires dedicated transaction")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute(
+            """SELECT j.job_id, j.kind, j.input_sha256, j.attempts
+               FROM nova_operations_offline_handoffs AS h
+               JOIN nova_operations_offline_approvals AS a
+                 ON a.tenant_id=h.tenant_id
+                AND a.opportunity_id=h.opportunity_id
+                AND a.approval_reference=h.approval_reference
+                AND a.input_sha256=h.input_sha256
+               JOIN nova_operations_offline_jobs AS j
+                 ON j.tenant_id=h.tenant_id
+                AND j.job_id=h.job_id
+                AND j.idempotency_key=('opportunity:' || h.opportunity_id)
+                AND j.kind='csv_cleanup'
+                AND j.input_sha256=h.input_sha256
+               WHERE h.tenant_id=? AND h.opportunity_id=?
+                 AND a.reviewer_id IS NOT NULL AND length(trim(a.reviewer_id))>0
+                 AND j.attempts<j.max_attempts
+                 AND ((j.state='queued' AND j.available_at<=?)
+                   OR (j.state='running' AND j.lease_until<=?))""",
+            (acting_tenant_id, opportunity_id, now, now),
+        ).fetchone()
+        if row is None:
+            db.commit()
+            return None
+        job_id, kind, fingerprint, attempts = row
+        if not _valid_sha(fingerprint):
+            raise JobConflict("Invalid approved job fingerprint")
+        token = secrets.token_hex(24)
+        updated = db.execute(
+            """UPDATE nova_operations_offline_jobs
+               SET state='running', attempts=attempts+1,
+                   lease_until=?, lease_token=?, last_error_code=NULL
+               WHERE job_id=? AND tenant_id=?
+                 AND attempts=? AND attempts<max_attempts""",
+            (now+lease_seconds, token, job_id, acting_tenant_id, attempts),
+        )
+        if updated.rowcount != 1:
+            raise JobConflict("Approved job claim conflict")
+        db.commit()
+        return ClaimedJob(
+            int(job_id), acting_tenant_id, kind, fingerprint,
+            int(attempts)+1, token,
+        )
+    except BaseException:
+        db.rollback()
+        raise
