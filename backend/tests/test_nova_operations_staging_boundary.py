@@ -233,3 +233,109 @@ def test_real_work_revenue_owner_guard_denies_nonowners():
     with pytest.raises(HTTPException) as denied_again:
         guard(user=customer, db=object())
     assert denied_again.value.status_code == 403
+
+
+
+def test_http_routes_enforce_actual_owner_guard_with_synthetic_session(monkeypatch):
+    """HTTP wiring with the production owner guard body; JWT is substituted.
+
+    Both real functions are extracted from source to avoid unrelated imports.
+    We substitute session lookup and customer lookup, not the owner guard.
+    """
+    from types import SimpleNamespace
+    from fastapi import APIRouter, Depends, FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+    from app.core.nova.work_revenue import operations_owner_scope as scope
+
+    owner_tree = ast.parse(
+        (ROOT / "app/core/nova/work_revenue/router.py").read_text(encoding="utf-8")
+    )
+    guard_node = next(
+        node for node in owner_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "require_work_revenue_owner"
+    )
+    namespace = {
+        "Depends": Depends,
+        "HTTPException": HTTPException,
+        "get_current_user_context": lambda: None,
+        "get_db": lambda: None,
+        "_work_revenue_owner_emails": lambda: {"owner@synthetic.invalid"},
+        "customer_access": lambda db, **kwargs: {"nova_saas_customer": True},
+    }
+    guard_tree = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__", names=[ast.alias(name="annotations")], level=0,
+            ),
+            guard_node,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(guard_tree)
+    exec(compile(guard_tree, "work_revenue/router.py", "exec"), namespace)
+    real_guard = namespace["require_work_revenue_owner"]
+
+    def require_nova_access():
+        return None
+
+    stage_tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    selected = [
+        node for node in stage_tree.body
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "router" for t in node.targets)
+        ) or (
+            isinstance(node, ast.FunctionDef)
+            and node.name in {"disabled_approval_staging", "disabled_review_staging"}
+        )
+    ]
+    stage_module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__", names=[ast.alias(name="annotations")], level=0,
+            ),
+            *selected,
+        ], type_ignores=[],
+    )
+    ast.fix_missing_locations(stage_module)
+    stage_ns = {
+        "APIRouter": APIRouter, "Depends": Depends,
+        "HTTPException": HTTPException,
+        "require_nova_access": require_nova_access,
+        "require_work_revenue_owner": real_guard,
+        "owner_approval_identity": scope.owner_approval_identity,
+    }
+    exec(compile(stage_module, str(SOURCE), "exec"), stage_ns)
+    monkeypatch.setattr(
+        scope.NovaCoreService, "resolve_organization_scope",
+        lambda user, requested: user.organization_id,
+    )
+    app = FastAPI()
+    app.include_router(stage_ns["router"])
+    app.dependency_overrides[real_guard.__defaults__[0].dependency] = (
+        lambda: SimpleNamespace(
+            email="customer@synthetic.invalid",
+            organization_id="tenant-a",
+            user_id="customer-001",
+        )
+    )
+    app.dependency_overrides[real_guard.__defaults__[1].dependency] = lambda: object()
+    paths = [
+        "/api/nova/work/operations/owner-approvals/example",
+        "/api/nova/work/operations/owner-approvals/example/review",
+    ]
+    with TestClient(app) as client:
+        for path in paths:
+            assert client.post(path).status_code == 403
+        app.dependency_overrides[real_guard.__defaults__[0].dependency] = (
+            lambda: SimpleNamespace(
+                email="owner@synthetic.invalid",
+                organization_id="tenant-a",
+                user_id="owner-001",
+            )
+        )
+        for path in paths:
+            response = client.post(path)
+            assert response.status_code == 503
+            assert "disabled" in response.json()["detail"].lower()
