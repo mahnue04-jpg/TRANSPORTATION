@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterator
 import re
 from urllib.parse import urlsplit
 import tempfile
@@ -51,7 +53,8 @@ class SyntheticReviewDecision(BaseModel):
     approve: bool
 
 
-def _review_db() -> sqlite3.Connection:
+@contextmanager
+def _review_db() -> Iterator[sqlite3.Connection]:
     """Synthetic-only review ledger separate from all application databases."""
     configured = str(os.getenv("NOVA_OPERATIONS_SYNTHETIC_LEDGER") or "").strip()
     p = Path(configured) if configured else None
@@ -61,14 +64,22 @@ def _review_db() -> sqlite3.Connection:
     ):
         raise HTTPException(status_code=503, detail="Isolated synthetic review ledger missing")
     db = sqlite3.connect(str(p), timeout=5)
-    db.execute("""CREATE TABLE IF NOT EXISTS synthetic_owner_reviews (
-        reviewer_id TEXT NOT NULL,
-        csv_sha256 TEXT NOT NULL,
-        decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')),
-        PRIMARY KEY(reviewer_id, csv_sha256)
-    )""")
-    db.commit()
-    return db
+    try:
+        db.execute("""CREATE TABLE IF NOT EXISTS synthetic_owner_reviews (
+            reviewer_id TEXT NOT NULL,
+            csv_sha256 TEXT NOT NULL,
+            decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')),
+            PRIMARY KEY(reviewer_id, csv_sha256)
+        )""")
+        db.commit()
+        try:
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+    finally:
+        db.close()
 
 
 def _reviewer(user: UserContext) -> str:
