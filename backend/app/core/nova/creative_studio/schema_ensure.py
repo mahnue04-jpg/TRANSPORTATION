@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from app.core.nova.creative_studio.db_models import (
@@ -35,6 +35,17 @@ def ensure_nova_creative_schema(engine: Engine | None = None) -> None:
     eng = engine or default_engine
     Base.metadata.create_all(bind=eng, tables=list(CREATIVE_TABLES))
     # Defensive: confirm expected tables exist without touching unrelated schemas.
+    # Existing installations already have this table. CREATE TABLE does not add
+    # newly introduced columns, so migrate it additively without data loss.
+    inspector = inspect(eng)
+    if "nova_creative_calendar_entries" in inspector.get_table_names():
+        existing = {column["name"] for column in inspector.get_columns("nova_creative_calendar_entries")}
+        if "duration_seconds" not in existing:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE nova_creative_calendar_entries "
+                    "ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 30"
+                ))
     inspector = inspect(eng)
     names = set(inspector.get_table_names())
     missing = [table.name for table in CREATIVE_TABLES if table.name not in names]
