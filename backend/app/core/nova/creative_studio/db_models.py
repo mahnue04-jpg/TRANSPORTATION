@@ -168,3 +168,25 @@ class NovaCreativeWebhookEvent(Base):
     order_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     processing_result: Mapped[str] = mapped_column(String(48), nullable=False, default="ok")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeCalendarEntry(Base):
+    """An owner-controlled content plan, never an automatic publishing job."""
+
+    __tablename__ = "nova_creative_calendar_entries"
+    __table_args__ = (
+        Index("ix_nova_creative_calendar_owner_date", "owner_id", "scheduled_at"),
+        Index("ix_nova_creative_calendar_owner_project", "owner_id", "project_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    topic: Mapped[str] = mapped_column(String(300), nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    channels_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    scheduled_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
