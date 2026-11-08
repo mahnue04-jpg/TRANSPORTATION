@@ -332,6 +332,40 @@
       <p class="hint">Saving the plan is free. Motion and voice generation use the configured providers and may consume credits. A failed motion request stays failed. The rendered video is a preview for review before publishing.</p>
     </section>
 
+    <section class="card" id="autopilot-calendar" aria-labelledby="autopilot-calendar-title">
+      <h2 id="autopilot-calendar-title">Nova Autopilot — Content Calendar</h2>
+      <p class="hint">Plan daily faceless, presenter, educational or drama videos. Entries are saved to your selected Creative Studio project. This is a planning tool: approval does not generate or publish a video.</p>
+      <p id="calendar-project-status" class="hint" role="status">Select a Creative Studio project to manage your content calendar.</p>
+      <form id="calendar-form">
+        <input type="hidden" id="calendar-edit-id" value="">
+        <div class="grid">
+          <label>Video topic<input id="calendar-topic" maxlength="300" required placeholder="Episode idea or video topic"></label>
+          <label>Content type<select id="calendar-mode">
+            <option value="faceless">Faceless short</option><option value="presenter">AI presenter</option>
+            <option value="drama">Short drama</option><option value="education">Educational</option>
+          </select></label>
+        </div>
+        <label>Script<textarea id="calendar-script" rows="4" maxlength="15000" placeholder="Write or paste the reviewed narration or story"></textarea></label>
+        <fieldset><legend>Target platforms</legend>
+          <div class="actions wrap">
+            <label><input type="checkbox" name="calendar-channel" value="TikTok"> TikTok</label>
+            <label><input type="checkbox" name="calendar-channel" value="Instagram"> Instagram</label>
+            <label><input type="checkbox" name="calendar-channel" value="Facebook"> Facebook</label>
+            <label><input type="checkbox" name="calendar-channel" value="YouTube Shorts"> YouTube Shorts</label>
+          </div>
+        </fieldset>
+        <label>Planned date and time (your device time zone)<input id="calendar-date" type="datetime-local" required></label>
+        <div class="actions wrap">
+          <button id="calendar-save" type="submit">Save video plan</button>
+          <button id="calendar-clear" type="button" class="secondary">New plan</button>
+          <button id="calendar-refresh" type="button" class="secondary">Refresh calendar</button>
+        </div>
+      </form>
+      <p id="calendar-feedback" class="hint" role="status" aria-live="polite"></p>
+      <h3>Saved video plans</h3>
+      <div id="calendar-list" class="list" aria-live="polite">Select a project to view its calendar.</div>
+    </section>
+
     <section id="studio-project-history" class="card" aria-label="Project history">
       <h2>11. Project history</h2>
       <div id="project-list" class="list"></div>
@@ -380,7 +414,8 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope"></script>
+  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope-calendar"></script>
+  <script src="/static/nova-creative/calendar.js?v=20261108"></script>
 </body>
 </html>
 
