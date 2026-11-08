@@ -1340,8 +1340,11 @@
   if ($("live-job-form")) {
     $("live-job-form").addEventListener("submit", async function (event) {
       event.preventDefault();
+      var searchButton = event.currentTarget.querySelector('button[type="submit"]');
+      if (searchButton && searchButton.disabled) return;
       var query = $("live-job-query").value.trim();
       if (!query) return;
+      if (searchButton) searchButton.disabled = true;
       $("live-job-status").textContent = "Nova is resetting the prior live-search list, searching only the requested capability family, and keeping only revenue-ready QUALIFIED matches...";
       $("live-job-results").innerHTML = "";
       try {
@@ -1364,7 +1367,10 @@
             "Live search was not completed. " + failedSources +
             " failed, so this is not a zero-match result. Nothing was submitted.";
         } else {
-          $("live-job-status").textContent =
+          var partialSourceWarning = body.live_search_status === "partial" || (body.providers_failed || []).length > 0
+            ? "PARTIAL: some live sources failed. These are only the results returned by working sources. "
+            : "";
+          $("live-job-status").textContent = partialSourceWarning +
             "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
             " · search " + (body.live_search_status || "ok") +
             " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
@@ -1399,6 +1405,8 @@
         if (body.live_search_claimed === false || body.live_search_status === "unavailable") {
           $("live-job-results").textContent = "Live sources unavailable. No verified search results were returned. Please retry after the source recovers.";
           showBanner("Live job sources were unavailable. This is not a zero-match search. No applications were submitted.");
+        } else if (body.live_search_status === "partial" || (body.providers_failed || []).length > 0) {
+          showBanner("Only partial live-source results are available. Check each listing before acting; nothing was submitted.");
         } else {
           showBanner("Live search completed. Review qualified leads below and on the owner board. Nothing was submitted.", true);
         }
@@ -1406,6 +1414,8 @@
       } catch (err) {
         $("live-job-status").textContent = err.message;
         showBanner(err.message);
+      } finally {
+        if (searchButton) searchButton.disabled = false;
       }
     });
   }
