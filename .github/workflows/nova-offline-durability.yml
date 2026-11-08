@@ -27,6 +27,7 @@ on:
       - 'backend/tests/test_nova_operations_offline_assignment_acceptance.py'
       - 'backend/tests/test_nova_operations_exact_claim_recovery.py'
       - 'backend/tests/test_nova_operations_runner_storage_failure.py'
+      - 'backend/scripts/nova_operations_synthetic_demo.py'
       - '.github/workflows/nova-offline-durability.yml'
   workflow_dispatch:
 
@@ -54,3 +55,27 @@ jobs:
           done
           test -n "$files"
           PYTHONPATH=. python -m pytest --noconftest -q $files
+      - name: Execute synthetic owner-reviewed CSV deliverable
+        working-directory: backend
+        run: |
+          PYTHONPATH=. python -m scripts.nova_operations_synthetic_demo --output-dir ../nova-demo-artifacts
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          root = Path('../nova-demo-artifacts')
+          report = json.loads((root / 'nova_synthetic_acceptance.json').read_text())
+          with (root / 'nova_synthetic_cleaned.csv').open(newline='') as stream:
+              rows = list(csv.reader(stream))
+          assert rows == [['Name', 'Department'], ['Ada', 'Operations'], ['Mina', 'Research']]
+          assert report['review_state'] == 'approved_by_synthetic_fixture'
+          assert report['external_delivery_performed'] is False
+          assert report['customer_upload_enabled'] is False
+          print('Synthetic CSV acceptance succeeded without network, customer data, or release.')
+          PY
+      - name: Publish synthetic CSV and acceptance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-synthetic-offline-acceptance
+          path: nova-demo-artifacts/
+          if-no-files-found: error
+          retention-days: 7
