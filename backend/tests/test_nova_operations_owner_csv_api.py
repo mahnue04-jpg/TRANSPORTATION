@@ -93,7 +93,7 @@ def test_requires_explicit_owner_action_header(client):
 @pytest.mark.parametrize("name,mime,expected", [
     ("notes.txt", "text/csv", 400),
     ("bad.csv", "application/pdf", 415),
-    ("bad\x00.csv", "text/csv", 400),
+    ("huge" + "x" * 190 + ".csv", "text/csv", 400),
 ])
 def test_rejects_non_csv(client, name, mime, expected):
     assert post(client, b"A\n1\n", name=name, mime=mime).status_code == expected
