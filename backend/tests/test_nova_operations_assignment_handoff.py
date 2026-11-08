@@ -128,3 +128,35 @@ def test_matching_approval_is_required_for_same_fingerprint(db):
             input_sha256="a" * 64,
         )
     assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 0
+
+
+def test_conflicting_approval_registration_preserves_original(db):
+    first = handoff(db)
+    with pytest.raises(JobConflict, match="Conflicting owner approval"):
+        record_verified_owner_approval(
+            db, acting_tenant_id="tenant-a", record_tenant_id="tenant-a",
+            opportunity_id="lead-one", approval_reference="second-approval",
+            input_sha256="a" * 64, reviewer_id="owner-1",
+            reviewer_authorized=True,
+        )
+    assert get_assignment_handoff(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+    ) == first
+    row = db.execute(
+        """SELECT approval_reference FROM nova_operations_offline_approvals
+           WHERE tenant_id=? AND opportunity_id=?""",
+        ("tenant-a", "lead-one"),
+    ).fetchone()
+    assert row == ("owner-approved-1",)
+
+
+def test_same_opportunity_identifier_is_isolated_between_tenants(db):
+    first = handoff(db)
+    second = handoff(db, tenant="tenant-b", record_tenant="tenant-b")
+    assert second.job_id != first.job_id
+    assert get_assignment_handoff(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+    ) == first
+    assert get_assignment_handoff(
+        db, acting_tenant_id="tenant-b", opportunity_id="lead-one",
+    ) == second
