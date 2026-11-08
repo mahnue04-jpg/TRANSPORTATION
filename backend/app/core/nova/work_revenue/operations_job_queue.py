@@ -56,9 +56,21 @@ def enqueue_job(
     db: sqlite3.Connection, *, tenant_id: str, idempotency_key: str,
     kind: str, input_sha256: str, max_attempts: int = 3,
 ) -> int:
-    if not all((tenant_id.strip(), idempotency_key.strip(), kind.strip())):
-        raise JobConflict("Missing job identity")
-    if not _valid_sha(input_sha256) or not 1 <= max_attempts <= 10:
+    identities = (tenant_id, idempotency_key, kind)
+    if any(
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 256
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+        for value in identities
+    ):
+        raise JobConflict("Invalid job identity")
+    if (
+        not _valid_sha(input_sha256)
+        or isinstance(max_attempts, bool)
+        or not isinstance(max_attempts, int)
+        or not 1 <= max_attempts <= 10
+    ):
         raise JobConflict("Invalid fingerprint or retry limit")
     # Atomic upsert and consistency check: same key cannot silently replace input.
     with db:
