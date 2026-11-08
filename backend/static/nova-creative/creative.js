@@ -2775,7 +2775,8 @@
   // It cannot bypass Creative Studio authentication or trigger publishing.
   window.NovaCreativeCalendarBridge = {
     api: api,
-    selectedProject: function () { return activeProjectId; }
+    selectedProject: function () { return activeProjectId; },
+    refreshProductionAssets: refreshAssets
   };
 
   boot();
