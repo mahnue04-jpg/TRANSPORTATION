@@ -6,7 +6,6 @@ workers, no external provider calls and no claims of contract completion.
 from __future__ import annotations
 
 import os
-import secrets
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -19,7 +18,7 @@ from app.core.nova.work_revenue.operations_csv_cleanup import (
 )
 
 router = APIRouter(
-    prefix="/api/nova/work/operations",
+    prefix="/operations",
     tags=["nova-operations-owner-csv"],
     dependencies=[Depends(require_nova_access), Depends(require_work_revenue_owner)],
 )
