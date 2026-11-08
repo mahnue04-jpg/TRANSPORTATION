@@ -27,6 +27,7 @@
     $("calendar-edit-id").value = "";
     $("calendar-save").textContent = "Save video plan";
     $("calendar-date").value = localTime(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+    $("calendar-duration").value = "30";
   }
   function active() { return bridge.selectedProject(); }
   function requestProject() {
@@ -65,7 +66,7 @@
       var description = document.createElement("p");
       description.className = "hint";
       var when = new Date(entry.scheduled_at);
-      description.textContent = entry.content_mode + " · " + (entry.channels || []).join(", ") +
+      description.textContent = entry.content_mode + " · " + Math.round((entry.duration_seconds || 30) / 60 * 10) / 10 + " min · " + (entry.channels || []).join(", ") +
         " · " + (Number.isFinite(when.getTime()) ? when.toLocaleString() : "Unknown time") +
         " · " + entry.status;
       article.appendChild(description);
@@ -77,7 +78,7 @@
       }
       if (entry.status === "approved") {
         actions.appendChild(button("Prepare in Studio", prepare, entry));
-        if (entry.content_mode === "faceless" || entry.content_mode === "education") {
+        if ((entry.content_mode === "faceless" || entry.content_mode === "education") && entry.duration_seconds === 30) {
           actions.appendChild(button("Render preview MP4", renderPreview, entry));
         }
       }
@@ -121,6 +122,7 @@
     $("calendar-topic").value = entry.topic || "";
     $("calendar-script").value = entry.script || "";
     $("calendar-mode").value = entry.content_mode || "faceless";
+    $("calendar-duration").value = String(entry.duration_seconds || 30);
     $("calendar-date").value = localTime(entry.scheduled_at);
     document.querySelectorAll('input[name="calendar-channel"]').forEach(function (box) {
       box.checked = (entry.channels || []).includes(box.value);
@@ -217,6 +219,7 @@
       topic: $("calendar-topic").value.trim(),
       script: $("calendar-script").value.trim(),
       content_mode: $("calendar-mode").value,
+      duration_seconds: Number($("calendar-duration").value),
       channels: Array.from(document.querySelectorAll('input[name="calendar-channel"]:checked')).map(function (node) { return node.value; }),
       scheduled_at: datetime.toISOString()
     };
@@ -235,6 +238,36 @@
       await load();
     } catch (err) { feedback(err.message || "Unable to save plan.", true); }
     finally { busy = false; $("calendar-save").disabled = false; }
+  });
+  $("studio-guide-help").addEventListener("click", function () {
+    var request = $("studio-guide-request").value.trim();
+    var topic = $("calendar-topic").value.trim() || request;
+    var seconds = Number($("calendar-duration").value);
+    var mode = $("calendar-mode").value;
+    var words = Math.round(seconds / 60 * 130);
+    var sections = Math.max(2, Math.ceil(seconds / 60));
+    var result = $("studio-guide-response");
+    if (!topic) {
+      result.textContent = "Tell me the subject of your video or enter a video topic above.";
+      return;
+    }
+    var guidance = [
+      "Nova Studio Guide — production outline (not AI-generated footage)",
+      "Subject: " + topic,
+      "Format: " + mode + " • Target duration: " + Math.round(seconds / 60 * 10) / 10 + " minutes",
+      "Suggested script size: approximately " + words + " spoken words.",
+      "Suggested structure: introduction, " + sections + " planned story/lesson beats, and a closing.",
+      "1. Draft the story, lesson, or narration in the Script field.",
+      "2. Divide it into logical sections and review the complete storyline.",
+      "3. Save the plan, then approve the exact reviewed script.",
+      "4. Prepare in Studio to store narration and caption source text.",
+      seconds === 30 && (mode === "faceless" || mode === "education")
+        ? "5. A local 30-second title-card preview is available after approval."
+        : "5. Long-form or presenter/video-scene rendering is not yet connected; don't expect a complete MP4 from this plan.",
+      "6. Review final footage, audio, captions, rights, and costs before any future publishing.",
+      "This guide is an initial deterministic planning helper. Conversational AI assistance remains a separate integration milestone."
+    ];
+    result.textContent = guidance.join("\\n");
   });
   $("calendar-clear").addEventListener("click", clearForm);
   $("calendar-refresh").addEventListener("click", load);
