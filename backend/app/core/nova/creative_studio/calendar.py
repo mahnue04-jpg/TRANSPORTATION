@@ -647,6 +647,9 @@ def start_calendar_assembly_job(
             id=new_id("cjob"), owner_id=user.user_id, project_id=project_id,
             kind="calendar_assembly:" + entry_id, status="QUEUED",
             message="Queued offline assembly; paid providers are off.",
+            # Before completion these IDs are the ordered source clips, so a
+            # restart can reconcile any finished output without resubmitting.
+            result_asset_ids=list(order),
             created_at=now, updated_at=now,
         )
         saved = DbCreativeStudioStore(db).save_job(job)
