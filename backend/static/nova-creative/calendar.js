@@ -283,13 +283,17 @@
           // Poll a saved job only. Refreshing status never creates another assembly.
           for (var attempt = 0; attempt < 90 && active() === project; attempt++) {
             await new Promise(function (resolve) { setTimeout(resolve, 3000); });
-            var snapshot = await bridge.api("/api/nova/creative/projects/" +
-              encodeURIComponent(project) + "/jobs/" + encodeURIComponent(job.id), { method: "GET" });
-            var state = (snapshot.job || {}).status;
+            var snapshot = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(entry.id) + "/assembly-status", { method: "GET" });
+            var state = snapshot.status;
             if (state === "GENERATED") {
               feedback("Combined MP4 saved. Review and download from Studio's Asset list.");
               host.replaceChildren();
               if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+              return;
+            }
+            if (state === "INTERRUPTED_UNCONFIRMED") {
+              feedback(snapshot.message || "Worker status is unconfirmed. Check saved output before retrying.", true);
               return;
             }
             if (state === "ERROR") throw new Error((snapshot.job || {}).message || "Assembly failed.");
