@@ -611,18 +611,14 @@ def v3_live_job_prepare(
             organization_id=org_id,
             owner_user_id=user.user_id,
         )
-        # Only rotate obsolete leads after both the durable store and the
-        # in-memory owner work queue accepted the replacement search.
-        reset_result = (
-            reset_live_discovery_opportunities(
-                db,
-                organization_id=org_id,
-                user=user,
-                retain_opportunity_ids=retained_ids,
-            )
-            if retained_ids else
-            {"archived_count": 0, "skipped_reason": "no_persisted_replacement"}
-        )
+        # First-client discovery is additive: a fresh search is not owner
+        # authorization to discard previous paying opportunities. Existing
+        # URLs are deduplicated by the persistent store; only an explicit
+        # owner lifecycle action should archive a previously saved lead.
+        reset_result = {
+            "archived_count": 0,
+            "skipped_reason": "additive_first_client_discovery",
+        }
 
         prepared = []
         skipped_not_qualified = []
