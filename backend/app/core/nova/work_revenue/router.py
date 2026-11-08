@@ -23,6 +23,7 @@ from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue import autonomous_executor
 from app.core.nova.work_revenue import work_inputs
 from app.core.nova.work_revenue import owner_completion
+from app.core.nova.work_revenue.operations_intake_readiness import assess_operations_readiness
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -136,6 +137,32 @@ def _raise(exc: Exception) -> None:
     if isinstance(exc, service.NovaWorkError):
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     raise exc
+
+
+@router.get("/operations/intake-readiness/{opportunity_id}")
+def operations_intake_readiness(
+    opportunity_id: str,
+    user: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-only, read-only intake assessment; no approval or queue mutation."""
+    org_id = _resolve_org(user, None)
+    if not isinstance(org_id, str) or not org_id.strip() or org_id.lower() == "global":
+        raise HTTPException(status_code=403, detail="Tenant-specific organization required")
+    try:
+        opportunity = service.get_opportunity(
+            db, opportunity_id, organization_id=org_id, user=user,
+        )
+        engagements = service.list_engagements(db, organization_id=org_id, user=user)
+        linked = next(
+            (engagement for engagement in engagements
+             if engagement.get("opportunity_id") == opportunity_id
+             and engagement.get("organization_id") == org_id),
+            None,
+        )
+        return assess_operations_readiness(opportunity, linked)
+    except service.NovaWorkError as exc:
+        _raise(exc)
 
 
 @router.get("/first-client/board")
