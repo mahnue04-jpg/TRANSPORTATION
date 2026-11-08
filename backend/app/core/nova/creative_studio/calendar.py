@@ -152,10 +152,15 @@ def edit_calendar_entry(
     _project(db, user.user_id, project_id)
     row = _entry(db, user.user_id, project_id, entry_id)
     updates = payload.model_dump(exclude_unset=True)
-    if row.status == "canceled" and updates.get("status") not in (None, "canceled"):
-        raise HTTPException(status_code=409, detail="A canceled entry cannot be reactivated.")
-    if updates.get("status") == "approved" and not (updates.get("script", row.script)).strip():
+    if row.status == "canceled" and updates:
+        raise HTTPException(status_code=409, detail="A canceled entry cannot be edited or reactivated.")
+    if updates.get("status") == "approved" and not (updates.get("script", row.script) or "").strip():
         raise HTTPException(status_code=422, detail="Save a reviewed script before approval.")
+    # Editing an approved plan invalidates its earlier approval unless the
+    # same request explicitly reapproves the reviewed replacement.
+    substantial = {"topic", "script", "content_mode", "channels", "scheduled_at"}
+    if row.status == "approved" and substantial.intersection(updates) and "status" not in updates:
+        updates["status"] = "ready_for_review"
     for key in ("topic", "script", "content_mode"):
         if key in updates:
             setattr(row, key, updates[key])
