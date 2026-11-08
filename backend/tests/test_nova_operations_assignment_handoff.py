@@ -5,7 +5,7 @@ import pytest
 
 from app.core.nova.work_revenue.operations_assignment_handoff import (
     ensure_handoff_schema, get_assignment_handoff, handoff_approved_opportunity,
-    record_verified_owner_approval,
+    record_verified_owner_approval, claim_approved_assignment,
 )
 from app.core.nova.work_revenue.operations_job_queue import (
     JobConflict, claim_job, ensure_schema, get_job_state,
@@ -190,4 +190,64 @@ def test_missing_linked_job_fails_closed(db):
     with pytest.raises(JobConflict, match="inconsistent"):
         get_assignment_handoff(
             db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+        )
+
+
+def test_guarded_claim_requires_approved_link(db):
+    with pytest.raises(JobConflict, match="Tenant"):
+        handoff_approved_opportunity(
+            db, acting_tenant_id="tenant-b", record_tenant_id="tenant-a",
+            opportunity_id="lead-one", approval_reference="owner-approved-1",
+            input_sha256="a" * 64,
+        )
+    assert claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
+    ) is None
+    job = handoff(db)
+    claim = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
+    )
+    assert claim is not None and claim.job_id == job.job_id
+    assert claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=101,
+    ) is None
+    assert claim_approved_assignment(
+        db, acting_tenant_id="tenant-b", opportunity_id="lead-one", now=101,
+    ) is None
+
+
+def test_guarded_claim_rejects_changed_approval_without_mutating_job(db):
+    link = handoff(db)
+    db.execute(
+        "UPDATE nova_operations_offline_approvals SET approval_reference='tampered'"
+    )
+    db.commit()
+    assert claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
+    ) is None
+    assert get_job_state(db, tenant_id="tenant-a", job_id=link.job_id) == "queued"
+
+
+def test_guarded_claim_expiry_retry_fences_old_worker(db):
+    link = handoff(db)
+    first = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+        now=100, lease_seconds=10,
+    )
+    second = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a", opportunity_id="lead-one",
+        now=110, lease_seconds=20,
+    )
+    assert first.job_id == second.job_id == link.job_id
+    assert first.lease_token != second.lease_token
+    assert second.attempts == 2
+
+
+@pytest.mark.parametrize("bad_clock", [None, True, -1, "100"])
+def test_guarded_claim_rejects_invalid_clock(db, bad_clock):
+    handoff(db)
+    with pytest.raises(JobConflict, match="Invalid assignment claim"):
+        claim_approved_assignment(
+            db, acting_tenant_id="tenant-a",
+            opportunity_id="lead-one", now=bad_clock,
         )
