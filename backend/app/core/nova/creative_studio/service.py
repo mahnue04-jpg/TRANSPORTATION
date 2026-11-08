@@ -2103,7 +2103,7 @@ class CreativeStudioService(ShortDramaMixin):
         }
 
     @serialized_media
-    def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str) -> dict[str, Any]:
+    def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str, max_duration_seconds: int = 120) -> dict[str, Any]:
         """Archive an existing video, without changing scripts, approvals, or provider gates."""
         from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES, validate_video
         from app.core.nova.creative_studio import private_object_storage as private_store
@@ -2118,6 +2118,8 @@ class CreativeStudioService(ShortDramaMixin):
             )
         if content_type != "video/mp4" or not data or len(data) > MAX_VIDEO_BYTES:
             raise CreativeStudioError("INVALID_VIDEO", "Choose an MP4 between 1 byte and 128 MB.", http_status=422)
+        if max_duration_seconds not in {120, 600}:
+            raise CreativeStudioError("INVALID_VIDEO", "Unsupported import duration limit.", http_status=422)
         digest = hashlib.sha256(data).hexdigest()
         from app.core.nova.creative_studio import private_object_storage as private_store
         for existing in self.store.list_assets(project_id, owner_id):
@@ -2140,7 +2142,7 @@ class CreativeStudioService(ShortDramaMixin):
             path = Path(temporary) / "upload.mp4"
             path.write_bytes(data)
             try:
-                measured = validate_video(path)
+                measured = validate_video(path, max_duration_seconds=max_duration_seconds)
             except ValueError as exc:
                 raise CreativeStudioError("INVALID_VIDEO", str(exc), http_status=422) from exc
             name = new_id("imported_video") + ".mp4"
