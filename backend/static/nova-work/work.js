@@ -1371,12 +1371,13 @@
             ? "PARTIAL: some live sources failed. These are only the results returned by working sources. "
             : "";
           $("live-job-status").textContent = partialSourceWarning +
-            "Previously saved leads retained · search " + ((body.reset_result && body.reset_result.archived_count) || 0) +
+            "Previously saved leads retained" +
             " · search " + (body.live_search_status || "ok") +
             " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
             " · found/ranked " + (body.ranked_count || 0) +
             " · selected " + (body.selected_count || 0) +
-            " · saved to owner board " + (body.durably_saved_count || 0) +
+            " · saved in database " + (body.durably_saved_count || 0) +
+            " · visible on first-client board " + (body.saved_visible_on_board_count || 0) +
             " · QUALIFIED " + (counts.QUALIFIED || 0) +
             " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
             " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
@@ -1407,11 +1408,13 @@
           $("live-job-results").textContent = "Live sources unavailable. No verified search results were returned. Please retry after the source recovers.";
           showBanner("Live job sources were unavailable. This is not a zero-match search. No applications were submitted.");
         } else if (body.live_search_status === "partial" || (body.providers_failed || []).length > 0) {
-          showBanner("Only partial live-source results are available. " +
-            (body.durably_saved_count || 0) + " leads saved to your first-client board. Nothing was submitted.");
+          showBanner("Partial live-source results. " +
+            (body.durably_saved_count || 0) + " qualified records saved; " +
+            (body.saved_visible_on_board_count || 0) + " visible on the first-client board. Nothing submitted.");
         } else if ((body.durably_saved_count || 0) > 0) {
-          showBanner((body.durably_saved_count || 0) +
-            " verified leads saved to your first-client board. Nothing was submitted.", true);
+          showBanner((body.durably_saved_count || 0) + " qualified records saved; " +
+            (body.saved_visible_on_board_count || 0) +
+            " visible on the first-client board. Nothing submitted.", true);
         } else {
           showBanner("Search completed, but no qualified opportunities were saved. Existing leads remain available.");
         }
