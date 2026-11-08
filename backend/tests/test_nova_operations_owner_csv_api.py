@@ -66,7 +66,7 @@ def client(monkeypatch):
 def post(client, content, *, headers=None, name="sample.csv", mime="text/csv"):
     return client.post("/api/nova/work/operations/csv-clean",
         files={"file": (name, content, mime)},
-        headers=headers or {"X-Nova-Owner-Action": "process-csv-for-owner-review"})
+        headers=headers if headers is not None else {"X-Nova-Owner-Action": "process-csv-for-owner-review"})
 
 
 def test_real_csv_bytes_downloaded_for_review_without_persistence(client):
