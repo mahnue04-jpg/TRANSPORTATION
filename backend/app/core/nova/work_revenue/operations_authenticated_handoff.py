@@ -93,3 +93,59 @@ def approve_and_handoff_offline(
     except BaseException:
         db.rollback()
         raise
+
+
+
+def review_approved_assignment_offline(
+    db: sqlite3.Connection, *,
+    authenticated_owner: UserContext,
+    opportunity_id: str,
+    approve: bool,
+) -> str:
+    """Review a synthetic deliverable only as its original approving actor.
+
+    The caller must first authenticate and authorize the session at the
+    server boundary. This helper does not grant roles or deliver artifacts.
+    """
+    from .operations_assignment_handoff import get_assignment_handoff
+
+    tenant_id, actor_id = owner_approval_identity(authenticated_owner)
+    if not _identifier(opportunity_id) or type(approve) is not bool:
+        raise JobConflict("Valid opportunity and boolean review decision required")
+    if db.in_transaction:
+        raise JobConflict("Owner review requires a dedicated transaction")
+
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        handoff = get_assignment_handoff(
+            db, acting_tenant_id=tenant_id, opportunity_id=opportunity_id,
+        )
+        if handoff is None:
+            raise JobConflict("Assignment unavailable for owner review")
+        approved = db.execute(
+            """SELECT reviewer_id FROM nova_operations_offline_approvals
+               WHERE tenant_id=? AND opportunity_id=?""",
+            (tenant_id, opportunity_id),
+        ).fetchone()
+        if approved is None or approved[0] != actor_id:
+            raise JobConflict("Review actor does not match recorded approval")
+        state = "approved" if approve else "rejected"
+        updated = db.execute(
+            """UPDATE nova_operations_offline_artifacts
+               SET review_state=?, reviewer_id=?
+               WHERE tenant_id=? AND job_id=?
+                 AND review_state='awaiting_review'
+                 AND EXISTS (
+                   SELECT 1 FROM nova_operations_offline_jobs AS j
+                   WHERE j.tenant_id=? AND j.job_id=? AND j.state='completed'
+                     AND j.output_sha256=nova_operations_offline_artifacts.output_sha256
+                 )""",
+            (state, actor_id, tenant_id, handoff.job_id, tenant_id, handoff.job_id),
+        )
+        if updated.rowcount != 1:
+            raise JobConflict("Completed artifact unavailable or already reviewed")
+        db.commit()
+        return state
+    except BaseException:
+        db.rollback()
+        raise
