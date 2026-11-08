@@ -339,3 +339,76 @@ def test_http_routes_enforce_actual_owner_guard_with_synthetic_session(monkeypat
             response = client.post(path)
             assert response.status_code == 503
             assert "disabled" in response.json()["detail"].lower()
+
+
+
+def test_real_jwt_verifier_rejects_tampered_expired_and_wrong_audience():
+    """Exercise the repository's JWT verification function with synthetic keys.
+
+    This is isolated verification of signature/time/claim policy, not a login,
+    database lookup, or live application JWT integration.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+    from fastapi import HTTPException
+    import pytest
+
+    auth_path = ROOT / "app/auth.py"
+    tree = ast.parse(auth_path.read_text(encoding="utf-8"))
+    selected = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {
+            "_b64url_encode", "_b64url_decode", "_jwt_sign", "_jwt_verify"
+        }
+    ]
+    isolated = ast.Module(body=selected, type_ignores=[])
+    ast.fix_missing_locations(isolated)
+    namespace = {
+        "base64": base64,
+        "hashlib": hashlib,
+        "hmac": hmac,
+        "_json": json,
+        "time": time,
+        "HTTPException": HTTPException,
+        "TOKEN_SIGNING_SECRET": "synthetic-test-signing-secret-only",
+        "JWT_ISSUER": "nova-synthetic-test",
+        "JWT_AUDIENCE": "nova-operations-test",
+    }
+    exec(compile(isolated, str(auth_path), "exec"), namespace)
+    sign = namespace["_jwt_sign"]
+    verify = namespace["_jwt_verify"]
+
+    payload = {
+        "sub": "synthetic-owner-001",
+        "iss": "nova-synthetic-test",
+        "aud": "nova-operations-test",
+        "exp": time.time() + 300,
+    }
+    good = sign(payload)
+    assert verify(good)["sub"] == "synthetic-owner-001"
+
+    header, body, signature = good.split(".")
+    tampered_body = namespace["_b64url_encode"](
+        json.dumps({**payload, "sub": "synthetic-impostor"}).encode()
+    )
+    with pytest.raises(HTTPException) as exc:
+        verify(f"{header}.{tampered_body}.{signature}")
+    assert exc.value.status_code == 401
+
+    cases = [
+        {**payload, "exp": time.time() - 300},
+        {**payload, "aud": "other-audience"},
+        {**payload, "iss": "other-issuer"},
+    ]
+    for bad in cases:
+        with pytest.raises(HTTPException) as denied:
+            verify(sign(bad))
+        assert denied.value.status_code == 401
+
+    with pytest.raises(HTTPException) as malformed:
+        verify("bad.jwt")
+    assert malformed.value.status_code == 401
