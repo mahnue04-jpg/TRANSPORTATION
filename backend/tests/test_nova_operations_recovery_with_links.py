@@ -12,7 +12,7 @@ from app.core.nova.work_revenue.operations_recovery_triage import (
 from app.core.nova.work_revenue.operations_recovery_with_links import (
     audit_with_artifact_links,
 )
-from app.core.nova.work_revenue.operations_tenant_scope import TenantJobScope
+from app.core.nova.work_revenue.operations_tenant_scope import TenantJobScope, TenantAccessDenied
 from app.core.nova.work_revenue.operations_upload_leases import (
     acquire_upload_lease, finish_upload_lease, initialize_upload_leases,
 )
@@ -95,4 +95,38 @@ def test_missing_link_table_raises_instead_of_treating_files_as_orphan():
             audit_with_artifact_links(
                 connection, previous=_scan(3700, (name,)),
                 current=_scan(4100, (name,)),
+            )
+
+
+def test_corrupted_link_storage_key_fails_closed():
+    with sqlite3.connect(":memory:") as connection:
+        initialize_upload_leases(connection)
+        initialize_upload_artifact_links(connection)
+        tenant, lease, linked = _new_link(connection)
+        connection.execute(
+            """UPDATE operations_csv_upload_artifact_links
+               SET storage_key = ? WHERE tenant_id = ? AND job_id = ?""",
+            ("operations-csv/invalid-path", tenant, lease.job.job_id),
+        )
+        with pytest.raises(TenantAccessDenied, match="inconsistent"):
+            audit_with_artifact_links(
+                connection, previous=_scan(3700, (linked,)),
+                current=_scan(4100, (linked,)),
+            )
+
+
+def test_malformed_link_identity_fails_closed():
+    with sqlite3.connect(":memory:") as connection:
+        initialize_upload_leases(connection)
+        initialize_upload_artifact_links(connection)
+        tenant, lease, linked = _new_link(connection)
+        connection.execute(
+            """UPDATE operations_csv_upload_artifact_links
+               SET artifact_id = ? WHERE tenant_id = ? AND job_id = ?""",
+            ("invalid-id", tenant, lease.job.job_id),
+        )
+        with pytest.raises(TenantAccessDenied):
+            audit_with_artifact_links(
+                connection, previous=_scan(3700, (linked,)),
+                current=_scan(4100, (linked,)),
             )
