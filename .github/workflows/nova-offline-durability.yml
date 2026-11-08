@@ -29,6 +29,7 @@ on:
       - 'backend/tests/test_nova_operations_runner_storage_failure.py'
       - 'backend/scripts/nova_operations_synthetic_demo.py'
       - 'backend/scripts/nova_operations_standalone_demo.py'
+      - 'backend/scripts/nova_operations_browser_acceptance.py'
       - 'backend/scripts/launch_nova_operations_demo.py'
       - 'backend/tests/test_nova_operations_demo_launcher.py'
       - 'backend/tests/test_nova_operations_standalone_demo.py'
@@ -86,3 +87,24 @@ jobs:
           path: nova-demo-artifacts/
           if-no-files-found: error
           retention-days: 7
+
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated browser demo dependencies
+        run: python -m pip install 'fastapi>=0.100,<1' 'sqlalchemy>=2,<3' 'uvicorn>=0.27,<1' 'playwright>=1.50,<2'
+      - name: Install Chromium browser
+        run: python -m playwright install --with-deps chromium
+      - name: Run real browser owner-review and CSV download
+        working-directory: backend
+        env:
+          DATABASE_URL: ''
+          RENDER: ''
+          RENDER_SERVICE_NAME: ''
+          RENDER_EXTERNAL_URL: ''
+        run: PYTHONPATH=. python -m scripts.nova_operations_browser_acceptance
