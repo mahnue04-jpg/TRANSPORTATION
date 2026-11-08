@@ -276,7 +276,14 @@ def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_
     ensure_schema(conn)
     ensure_handoff_schema(conn)
     ensure_artifact_schema(conn)
-    link = approve(conn)
+    raw = "Name\nSynthetic\nSynthetic\n"
+    raw_digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    link = approve_and_handoff_offline(
+        conn, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=raw_digest,
+    )
     conn.close()
 
     conn = sqlite3.connect(path)
@@ -291,7 +298,8 @@ def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_
             opportunity_id="synthetic-opportunity-1", now=100,
         )
         assert job.job_id == link.job_id
-        cleaned = clean_csv_text("Name\nSynthetic\nSynthetic\n")
+        cleaned = clean_csv_text(raw)
+        assert cleaned.input_sha256 == job.input_sha256
         assert cleaned.duplicate_rows_removed == 1
         complete_and_store_review_artifact(
             conn, job=job, csv_text=cleaned.cleaned_csv,
@@ -337,12 +345,19 @@ def test_wrong_reviewer_cannot_make_session_approved_artifact_releasable(db):
         check_offline_release_eligibility,
     )
 
-    link = approve(db)
+    raw = "Name\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        db, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
     job = claim_approved_assignment(
         db, acting_tenant_id="tenant-a",
         opportunity_id="synthetic-opportunity-1", now=100,
     )
-    cleaned = clean_csv_text("Name\nSynthetic\n")
+    cleaned = clean_csv_text(raw)
+    assert cleaned.input_sha256 == job.input_sha256
     complete_and_store_review_artifact(
         db, job=job, csv_text=cleaned.cleaned_csv,
         output_sha256=cleaned.output_sha256, now=101,
