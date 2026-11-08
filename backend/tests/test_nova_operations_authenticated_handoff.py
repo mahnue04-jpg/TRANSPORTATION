@@ -258,3 +258,101 @@ def test_concurrent_write_lock_cannot_create_partial_assignment(tmp_path):
             first_db.rollback()
         first_db.close()
         second_db.close()
+
+
+
+def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_path):
+    """Exercise the complete synthetic handoff; release stays metadata-only."""
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact, review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+    from app.core.nova.work_revenue.operations_release_gate import (
+        check_offline_release_eligibility,
+    )
+
+    path = tmp_path / "full-session-flow.sqlite"
+    conn = sqlite3.connect(path)
+    ensure_schema(conn)
+    ensure_handoff_schema(conn)
+    ensure_artifact_schema(conn)
+    link = approve(conn)
+    conn.close()
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(JobConflict, match="owner-reviewed"):
+            check_offline_release_eligibility(
+                conn, acting_tenant_id="tenant-a",
+                opportunity_id="synthetic-opportunity-1",
+            )
+        job = claim_approved_assignment(
+            conn, acting_tenant_id="tenant-a",
+            opportunity_id="synthetic-opportunity-1", now=100,
+        )
+        assert job.job_id == link.job_id
+        cleaned = clean_csv_text("Name\nSynthetic\nSynthetic\n")
+        assert cleaned.duplicate_rows_removed == 1
+        complete_and_store_review_artifact(
+            conn, job=job, csv_text=cleaned.cleaned_csv,
+            output_sha256=cleaned.output_sha256, now=101,
+        )
+        with pytest.raises(JobConflict, match="owner-reviewed"):
+            check_offline_release_eligibility(
+                conn, acting_tenant_id="tenant-a",
+                opportunity_id="synthetic-opportunity-1",
+            )
+        assert review_artifact(
+            conn, tenant_id="tenant-a", job_id=link.job_id,
+            reviewer_id="owner-a", approve=True,
+        ) == "approved"
+    finally:
+        conn.close()
+
+    reopened = sqlite3.connect(path)
+    try:
+        ready = check_offline_release_eligibility(
+            reopened, acting_tenant_id="tenant-a",
+            opportunity_id="synthetic-opportunity-1",
+        )
+        assert ready.job_id == link.job_id
+        assert ready.reviewer_id == "owner-a"
+        assert ready.output_sha256 == cleaned.output_sha256
+        assert not hasattr(ready, "csv_text")
+        with pytest.raises(JobConflict, match="not found"):
+            check_offline_release_eligibility(
+                reopened, acting_tenant_id="tenant-b",
+                opportunity_id="synthetic-opportunity-1",
+            )
+    finally:
+        reopened.close()
+
+
+def test_wrong_reviewer_cannot_make_session_approved_artifact_releasable(db):
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact, review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+    from app.core.nova.work_revenue.operations_release_gate import (
+        check_offline_release_eligibility,
+    )
+
+    link = approve(db)
+    job = claim_approved_assignment(
+        db, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text("Name\nSynthetic\n")
+    complete_and_store_review_artifact(
+        db, job=job, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    review_artifact(
+        db, tenant_id="tenant-a", job_id=link.job_id,
+        reviewer_id="different-reviewer", approve=True,
+    )
+    with pytest.raises(JobConflict, match="integrity"):
+        check_offline_release_eligibility(
+            db, acting_tenant_id="tenant-a",
+            opportunity_id="synthetic-opportunity-1",
+        )
