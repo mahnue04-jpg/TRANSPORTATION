@@ -69,7 +69,7 @@ def _require_isolated_demo() -> None:
         and db_identity == stage_identity
         and all(a != b for a, b in zip(db_identity, production_identity))
     )
-        if not (staging and opted_in and is_preview and branch not in {"", "main", "master"} and isolation):
+    if not (staging and opted_in and is_preview and branch not in {"", "main", "master"} and isolation):
         raise HTTPException(
             status_code=503,
             detail="Synthetic acceptance download disabled; isolated staging opt-in required.",
