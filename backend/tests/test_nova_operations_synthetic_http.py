@@ -6,6 +6,7 @@ assert signed-JWT validation, public accessibility, or customer readiness.
 from __future__ import annotations
 
 import ast
+from contextlib import contextmanager
 import hashlib
 import os
 import re
@@ -72,6 +73,7 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
         run_synthetic_demo=run_synthetic_demo,
         tempfile=tempfile, Path=Path, hashlib=hashlib, os=os, re=re,
         urlsplit=urlsplit, sqlite3=sqlite3, BaseModel=BaseModel,
+        contextmanager=contextmanager,
     )
     exec(compile(tree, str(SOURCE), "exec"), namespace)
     app = FastAPI()
