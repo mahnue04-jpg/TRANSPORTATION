@@ -42,7 +42,34 @@ def _require_isolated_demo() -> None:
     host = (urlsplit(str(os.getenv("RENDER_EXTERNAL_URL") or "")).hostname or "").lower()
     branch = str(os.getenv("RENDER_GIT_BRANCH") or "").strip().lower()
     is_preview = bool(re.fullmatch(r".+-pr-\d+\.onrender\.com", host))
-    if not (staging and opted_in and is_preview and branch not in {"", "main", "master"}):
+    # These are independently verified database identifiers, not passwords.
+    # A preview hostname or an "enabled" flag is insufficient evidence that
+    # the running app did not connect to production during startup.
+    url = str(os.getenv("DATABASE_URL") or "").strip()
+    try:
+        parsed = urlsplit(url)
+        db_identity = ((parsed.hostname or "").lower(), (parsed.path or "").lstrip("/"), parsed.username or "")
+    except ValueError:
+        db_identity = ("", "", "")
+        parsed = urlsplit("")
+    stage_identity = (
+        str(os.getenv("NOVA_STAGING_DATABASE_HOST") or "").strip().lower(),
+        str(os.getenv("NOVA_STAGING_DATABASE_NAME") or "").strip(),
+        str(os.getenv("NOVA_STAGING_DATABASE_USER") or "").strip(),
+    )
+    production_identity = (
+        str(os.getenv("AMICOR_PRODUCTION_DATABASE_HOST") or "").strip().lower(),
+        str(os.getenv("AMICOR_PRODUCTION_DATABASE_NAME") or "").strip(),
+        str(os.getenv("AMICOR_PRODUCTION_DATABASE_USER") or "").strip(),
+    )
+    isolation = (
+        str(os.getenv("NOVA_STAGING_DB_ISOLATION_VERIFIED") or "").strip().lower() == "true"
+        and parsed.scheme in {"postgresql", "postgresql+psycopg", "postgresql+psycopg2"}
+        and all(db_identity) and all(stage_identity) and all(production_identity)
+        and db_identity == stage_identity
+        and all(a != b for a, b in zip(db_identity, production_identity))
+    )
+        if not (staging and opted_in and is_preview and branch not in {"", "main", "master"} and isolation):
         raise HTTPException(
             status_code=503,
             detail="Synthetic acceptance download disabled; isolated staging opt-in required.",
