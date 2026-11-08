@@ -136,3 +136,31 @@ def test_claim_rejects_invalid_job_id(db, requested_id):
     put(db)
     with pytest.raises(JobConflict, match="job ID"):
         claim_job(db, tenant_id="a", now=100, job_id=requested_id)
+
+
+
+@pytest.mark.parametrize("error_code", [None, 7, "", " ", "bad\ncode", "bad\x00code", "x" * 81])
+def test_fail_rejects_invalid_error_code_without_releasing_claim(db, error_code):
+    put(db)
+    claim = claim_job(db, tenant_id="a", now=10, lease_seconds=60)
+    with pytest.raises(JobConflict, match="Invalid error code"):
+        fail_job(db, job=claim, error_code=error_code, now=11)
+    assert get_job_state(db, tenant_id="a", job_id=claim.job_id) == "running"
+
+
+@pytest.mark.parametrize("delay", [None, "30", True, -1, 86401])
+def test_fail_rejects_invalid_retry_delay(db, delay):
+    put(db)
+    claim = claim_job(db, tenant_id="a", now=10)
+    with pytest.raises(JobConflict, match="retry delay"):
+        fail_job(db, job=claim, error_code="RETRY", now=11, retry_delay_seconds=delay)
+    assert get_job_state(db, tenant_id="a", job_id=claim.job_id) == "running"
+
+
+@pytest.mark.parametrize("clock", [None, True, -1, "11"])
+def test_fail_rejects_invalid_clock(db, clock):
+    put(db)
+    claim = claim_job(db, tenant_id="a", now=10)
+    with pytest.raises(JobConflict, match="clock"):
+        fail_job(db, job=claim, error_code="RETRY", now=clock)
+    assert get_job_state(db, tenant_id="a", job_id=claim.job_id) == "running"
