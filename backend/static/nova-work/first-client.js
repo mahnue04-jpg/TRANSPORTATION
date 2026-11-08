@@ -36,6 +36,16 @@
     if (!items || !items.length) return "<li>" + escapeHtml(empty || "No qualification reason stored yet.") + "</li>";
     return items.map(function (item) { return "<li>" + escapeHtml(item) + "</li>"; }).join("");
   }
+  function verifiedSourceLink(value) {
+    try {
+      var url = new URL(String(value || ""));
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+      return "<a href=\"" + escapeHtml(url.href) +
+        "\" target=\"_blank\" rel=\"noopener noreferrer\">Open original listing</a>";
+    } catch (_) {
+      return "";
+    }
+  }
   function card(row) {
     var sent = row.actually_sent ? "Sent, with a receipt." : "Draft. This has not been sent.";
     var receipt = row.mock_only
@@ -68,7 +78,7 @@
       " · " + escapeHtml(row.source || "source not stored") + "</p>" +
       "<p>Stage: " + escapeHtml(row.stage) + "</p>" +
       "<p>Sent vs draft: " + escapeHtml(sent) + "</p>" +
-      "<p>Source URL: " + escapeHtml(row.source_url || "none stored") + "</p>" +
+      "<p>Source: " + (verifiedSourceLink(row.source_url) || escapeHtml(row.source_url || "none stored")) + "</p>" +
       "<p>Fetched at: " + fetched + " (" + escapeHtml(row.provenance_basis || "not stored") + ")</p>" +
       "<p>Blocker: " + blocker + "</p>" +
       "<p>Qualification: " + escapeHtml(row.qualification_outcome || "not qualified yet") + "</p>" +
