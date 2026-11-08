@@ -9,6 +9,7 @@ import ast
 import hashlib
 import os
 import re
+import sqlite3
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,9 +19,11 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 SOURCE = Path(__file__).resolve().parents[1] / "app/core/nova/work_revenue/operations_synthetic_http.py"
-ENDPOINT = "/api/nova/work/operations/synthetic-acceptance/download"
+BASE = "/api/nova/work/operations/synthetic-acceptance"
+ENDPOINT = BASE + "/download"
 SAMPLE = b"Name,Department\nAda,Operations\nMina,Research\n"
 
 
@@ -31,11 +34,15 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
     selected = [
         node for node in tree.body
         if (
-            isinstance(node, ast.Assign)
-            and any(isinstance(x, ast.Name) and x.id == "router" for x in node.targets)
+            isinstance(node, (ast.Assign, ast.ClassDef))
+            and (isinstance(node, ast.ClassDef) and node.name == "SyntheticReviewDecision"
+                 or isinstance(node, ast.Assign) and any(
+                     isinstance(x, ast.Name) and x.id == "router" for x in node.targets))
         )
         or (isinstance(node, ast.FunctionDef) and node.name in {
-            "_require_isolated_demo", "download_synthetic_acceptance"
+            "_require_isolated_demo", "_review_db", "_reviewer", "_synthetic_csv",
+            "preview_synthetic_acceptance", "review_synthetic_acceptance",
+            "download_synthetic_acceptance"
         })
     ]
     tree = ast.Module(body=[
@@ -64,7 +71,7 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
         require_work_revenue_owner=require_work_revenue_owner,
         run_synthetic_demo=run_synthetic_demo,
         tempfile=tempfile, Path=Path, hashlib=hashlib, os=os, re=re,
-        urlsplit=urlsplit,
+        urlsplit=urlsplit, sqlite3=sqlite3, BaseModel=BaseModel,
     )
     exec(compile(tree, str(SOURCE), "exec"), namespace)
     app = FastAPI()
@@ -73,7 +80,8 @@ def _isolated_adapter(monkeypatch, *, tamper=False):
     return app, require_work_revenue_owner
 
 
-def _enable_preview(monkeypatch):
+def _enable_preview(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOVA_OPERATIONS_SYNTHETIC_LEDGER", str(tmp_path / "demo-review.sqlite"))
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
     monkeypatch.setenv("NOVA_OPERATIONS_SYNTHETIC_HTTP_ENABLED", "true")
@@ -81,8 +89,8 @@ def _enable_preview(monkeypatch):
     monkeypatch.setenv("RENDER_GIT_BRANCH", "feat/nova-operations-auth-handoff-integration-20261107")
 
 
-def test_synthetic_download_requires_session(monkeypatch):
-    _enable_preview(monkeypatch)
+def test_synthetic_download_requires_session(monkeypatch, tmp_path):
+    _enable_preview(monkeypatch, tmp_path)
     app, owner = _isolated_adapter(monkeypatch)
     with TestClient(app) as client:
         assert client.get(ENDPOINT).status_code == 401
@@ -96,8 +104,8 @@ def test_synthetic_download_requires_session(monkeypatch):
     {"RENDER_GIT_BRANCH": "main"},
     {"RENDER_GIT_BRANCH": ""},
 ])
-def test_synthetic_download_fails_closed_if_not_isolated(monkeypatch, change):
-    _enable_preview(monkeypatch)
+def test_synthetic_download_fails_closed_if_not_isolated(monkeypatch, tmp_path, change):
+    _enable_preview(monkeypatch, tmp_path)
     for key, val in change.items():
         monkeypatch.setenv(key, val)
     app, owner = _isolated_adapter(monkeypatch)
@@ -106,25 +114,48 @@ def test_synthetic_download_fails_closed_if_not_isolated(monkeypatch, change):
         assert client.get(ENDPOINT).status_code == 503
 
 
-def test_synthetic_download_returns_only_verified_csv(monkeypatch):
-    _enable_preview(monkeypatch)
+def test_synthetic_download_requires_explicit_review(monkeypatch, tmp_path):
+    _enable_preview(monkeypatch, tmp_path)
     app, owner = _isolated_adapter(monkeypatch)
     app.dependency_overrides[owner] = lambda: SimpleNamespace(user_id="synthetic-owner")
     with TestClient(app) as client:
-        response = client.get(ENDPOINT)
-        assert response.status_code == 200
-        assert response.content == SAMPLE
-        assert response.headers["content-type"].startswith("text/csv")
-        assert "attachment;" in response.headers["content-disposition"]
-        assert response.headers["cache-control"] == "no-store"
-        assert response.headers["x-nova-data-class"] == "synthetic-only"
+        assert client.get(ENDPOINT).status_code == 403
+        preview = client.get(BASE + "/preview")
+        assert preview.status_code == 200
+        assert preview.json()["review_state"] == "awaiting_owner_review"
+        assert preview.json()["csv_text"].encode() == SAMPLE
+        decision = client.post(BASE + "/review", json={"approve": True})
+        assert decision.status_code == 200
+        assert decision.json()["review_state"] == "approved"
+        result = client.get(ENDPOINT)
+        assert result.status_code == 200
+        assert result.content == SAMPLE
+        assert result.headers["content-type"].startswith("text/csv")
+        assert "attachment;" in result.headers["content-disposition"]
+        assert result.headers["cache-control"] == "no-store"
+        assert result.headers["x-nova-data-class"] == "synthetic-only"
+        assert client.post(BASE + "/review", json={"approve": False}).status_code == 409
 
 
-def test_synthetic_download_rejects_tampered_file(monkeypatch):
-    _enable_preview(monkeypatch)
+def test_rejection_and_different_owner_cannot_download(monkeypatch, tmp_path):
+    _enable_preview(monkeypatch, tmp_path)
+    app, owner = _isolated_adapter(monkeypatch)
+    app.dependency_overrides[owner] = lambda: SimpleNamespace(user_id="reviewer-one")
+    with TestClient(app) as client:
+        assert client.post(BASE + "/review", json={"approve": False}).status_code == 200
+        assert client.get(ENDPOINT).status_code == 403
+        app.dependency_overrides[owner] = lambda: SimpleNamespace(user_id="reviewer-two")
+        assert client.get(ENDPOINT).status_code == 403
+        assert client.get(BASE + "/preview").json()["review_state"] == "awaiting_owner_review"
+
+
+def test_synthetic_download_rejects_tampered_file(monkeypatch, tmp_path):
+    _enable_preview(monkeypatch, tmp_path)
     app, owner = _isolated_adapter(monkeypatch, tamper=True)
     app.dependency_overrides[owner] = lambda: SimpleNamespace(user_id="synthetic-owner")
     with TestClient(app) as client:
+        assert client.get(BASE + "/preview").status_code == 503
+        assert client.post(BASE + "/review", json={"approve": True}).status_code == 503
         assert client.get(ENDPOINT).status_code == 503
 
 
