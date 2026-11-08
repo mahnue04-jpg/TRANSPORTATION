@@ -10,7 +10,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from .operations_tenant_scope import (
-    TenantAccessDenied, artifact_storage_key, authorize_tenant_job,
+    TenantAccessDenied, TenantJobScope, artifact_storage_key, authorize_tenant_job,
 )
 from .operations_upload_leases import UploadLease, _now
 
@@ -109,8 +109,19 @@ def list_job_artifact_links(
 
 def linked_storage_keys(connection: sqlite3.Connection) -> frozenset[str]:
     """Internal recovery inventory only, not exposed to customer requests."""
-    return frozenset(
-        row[0] for row in connection.execute(
-            "SELECT storage_key FROM operations_csv_upload_artifact_links"
-        ).fetchall()
-    )
+    rows = connection.execute(
+        """SELECT tenant_id, job_id, artifact_id, storage_key
+           FROM operations_csv_upload_artifact_links"""
+    ).fetchall()
+    keys = set()
+    for tenant_id, job_id, artifact_id, stored_key in rows:
+        # Inconsistent ownership records must stop recovery, not silently
+        # turn an otherwise protected customer artifact into an orphan.
+        job = TenantJobScope(tenant_id=tenant_id, job_id=job_id)
+        expected = artifact_storage_key(
+            acting_tenant_id=tenant_id, job=job, artifact_id=artifact_id,
+        )
+        if stored_key != expected:
+            raise TenantAccessDenied("Artifact ownership link is inconsistent")
+        keys.add(expected)
+    return frozenset(keys)
