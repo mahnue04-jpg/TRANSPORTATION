@@ -84,3 +84,44 @@ def test_malformed_evidence_references_are_rejected(reference):
 def test_non_mapping_evidence_is_rejected():
     with pytest.raises(EvidenceError, match="mapping"):
         event(evidence=None)
+
+
+def test_synthetic_revenue_to_operations_delivery_lifecycle():
+    """Offline first-client journey: evidence gates only; no live sends or jobs."""
+    steps = (
+        (Stage.DISCOVERED, Stage.QUALIFIED, {"source_url": "https://example.com/lead"}),
+        (Stage.QUALIFIED, Stage.DRAFTED, {"draft_id": "synthetic-draft-1"}),
+        (Stage.DRAFTED, Stage.OWNER_APPROVED, {"owner_approval_id": "synthetic-approval-1"}),
+        (Stage.OWNER_APPROVED, Stage.SENT_VERIFIED, {
+            "transport_receipt_id": "synthetic-verified-transport-1",
+            "receipt_kind": "external_verified",
+        }),
+        (Stage.SENT_VERIFIED, Stage.REPLIED, {"reply_message_id": "synthetic-reply-1"}),
+        (Stage.REPLIED, Stage.CONTRACTED, {"contract_reference": "synthetic-contract-1"}),
+        (Stage.CONTRACTED, Stage.JOB_COMPLETED, {"artifact_sha256": "a" * 64}),
+        (Stage.JOB_COMPLETED, Stage.DELIVERED_VERIFIED, {
+            "delivery_receipt_id": "synthetic-delivery-1",
+        }),
+        (Stage.DELIVERED_VERIFIED, Stage.RECEIVED_VERIFIED, {
+            "payment_confirmation_id": "synthetic-processor-1",
+            "payment_kind": "independently_verified",
+        }),
+    )
+    events = []
+    for previous, current, evidence in steps:
+        events.append(event(previous=previous, current=current, evidence=evidence))
+    assert len(events) == 9
+    assert len({item.idempotency_key for item in events}) == 9
+    assert events[0].previous == Stage.DISCOVERED
+    assert events[-1].current == Stage.RECEIVED_VERIFIED
+    # This test only validates evidence contracts. It does not independently
+    # verify the synthetic references or execute an actual customer workflow.
+
+
+def test_synthetic_handoff_rejects_unverified_customer_delivery():
+    with pytest.raises(EvidenceError, match="Unsupported stage transition"):
+        event(
+            previous=Stage.CONTRACTED,
+            current=Stage.DELIVERED_VERIFIED,
+            evidence={"delivery_receipt_id": "synthetic-delivery"},
+        )
