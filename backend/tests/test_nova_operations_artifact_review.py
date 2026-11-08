@@ -53,3 +53,31 @@ def test_checksum_and_tenant_guard(db):
             db, tenant_id="tenant-b", job_id=result.job_id,
             csv_text=result.report.cleaned_csv, output_sha256=result.report.output_sha256,
         )
+
+
+@pytest.mark.parametrize("decision", [None, 0, 1, "yes", "", []])
+def test_invalid_review_decision_keeps_artifact_awaiting_review(db, decision):
+    result = prepare_csv_job(
+        db, tenant_id="tenant-a", request_id="review-invalid",
+        raw_csv="Name\nAna\n", now=100,
+    )
+    with pytest.raises(JobConflict, match="boolean decision"):
+        review_artifact(
+            db, tenant_id="tenant-a", job_id=result.job_id,
+            reviewer_id="owner", approve=decision,
+        )
+    assert read_review_artifact(db, tenant_id="tenant-a", job_id=result.job_id)[0] == "awaiting_review"
+
+
+@pytest.mark.parametrize("reviewer", [None, "", " ", "bad\nreviewer", "x" * 129])
+def test_invalid_reviewer_does_not_approve_artifact(db, reviewer):
+    result = prepare_csv_job(
+        db, tenant_id="tenant-a", request_id="reviewer-invalid",
+        raw_csv="Name\nAna\n", now=100,
+    )
+    with pytest.raises(JobConflict, match="review identity"):
+        review_artifact(
+            db, tenant_id="tenant-a", job_id=result.job_id,
+            reviewer_id=reviewer, approve=True,
+        )
+    assert read_review_artifact(db, tenant_id="tenant-a", job_id=result.job_id)[0] == "awaiting_review"
