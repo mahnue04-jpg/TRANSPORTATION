@@ -86,9 +86,17 @@ def make_event(
         required = "draft_id"
     if required is None:
         raise EvidenceError("No evidence contract for requested stage")
-    reference = evidence.get(required, "").strip()
-    if not reference or len(reference) > 1024:
+    if not isinstance(evidence, Mapping):
+        raise EvidenceError("Evidence must be a mapping")
+    reference = evidence.get(required, "")
+    if (
+        not isinstance(reference, str)
+        or not reference.strip()
+        or len(reference) > 1024
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in reference)
+    ):
         raise EvidenceError(f"Missing or invalid {required}")
+    reference = reference.strip()
     if current == Stage.SENT_VERIFIED and evidence.get("receipt_kind") != "external_verified":
         raise EvidenceError("Mock or unverified receipt cannot count as sent")
     if current == Stage.RECEIVED_VERIFIED and evidence.get("payment_kind") != "independently_verified":
