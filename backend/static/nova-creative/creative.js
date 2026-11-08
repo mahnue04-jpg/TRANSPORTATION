@@ -39,6 +39,9 @@
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nova-studio-project-selected", { detail: { projectId: activeProjectId } }));
+    }
   }
 
   function syncContentBrief(detail, projectId, revision) {
