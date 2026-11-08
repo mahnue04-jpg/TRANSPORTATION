@@ -12,7 +12,7 @@
     const session = window.AmiCorSession;
     const headers = session && typeof session.getAuthHeaders === "function"
       ? session.getAuthHeaders() : {};
-    if (!headers || !headers.Authorization) {
+    if (!headers || !(headers.Authorization || headers.authorization)) {
       message.textContent = "Sign in as the AMICOR Work & Revenue owner first.";
       return;
     }
@@ -43,7 +43,7 @@
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(downloadUrl);
+      window.setTimeout(function () { URL.revokeObjectURL(downloadUrl); }, 10000);
       message.textContent = "Review required: " +
         (response.headers.get("X-Nova-Input-Rows") || "?") + " input rows, " +
         (response.headers.get("X-Nova-Output-Rows") || "?") +
