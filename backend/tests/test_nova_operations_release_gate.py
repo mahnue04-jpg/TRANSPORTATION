@@ -191,7 +191,7 @@ def test_release_gate_rejects_missing_approval_reviewer(assignment):
         reviewer_id="owner-1", approve=True,
     )
     db.execute(
-        "UPDATE nova_operations_offline_approvals SET reviewer_id=NULL"
+        "UPDATE nova_operations_offline_approvals SET reviewer_id=''"
     )
     db.commit()
     with pytest.raises(JobConflict, match="integrity"):
