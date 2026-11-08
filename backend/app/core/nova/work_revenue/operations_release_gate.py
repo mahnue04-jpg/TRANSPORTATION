@@ -34,16 +34,21 @@ def check_offline_release_eligibility(
         raise JobConflict("Assignment not found for tenant")
     row = db.execute(
         """SELECT j.state, j.output_sha256,
-                  a.output_sha256, a.csv_text, a.review_state, a.reviewer_id
+                  a.output_sha256, a.csv_text, a.review_state, a.reviewer_id,
+                  p.reviewer_id
            FROM nova_operations_offline_jobs AS j
            LEFT JOIN nova_operations_offline_artifacts AS a
              ON a.tenant_id=j.tenant_id AND a.job_id=j.job_id
-           WHERE j.tenant_id=? AND j.job_id=?""",
-        (acting_tenant_id, handoff.job_id),
+           LEFT JOIN nova_operations_offline_handoffs AS h
+             ON h.tenant_id=j.tenant_id AND h.job_id=j.job_id
+           LEFT JOIN nova_operations_offline_approvals AS p
+             ON p.tenant_id=h.tenant_id AND p.opportunity_id=h.opportunity_id
+           WHERE j.tenant_id=? AND j.job_id=? AND h.opportunity_id=?""",
+        (acting_tenant_id, handoff.job_id, opportunity_id),
     ).fetchone()
     if row is None:
         raise JobConflict("Assignment job missing")
-    state, job_hash, artifact_hash, csv_text, review_state, reviewer_id = row
+    state, job_hash, artifact_hash, csv_text, review_state, reviewer_id, approval_reviewer_id = row
     if state != "completed" or review_state != "approved":
         raise JobConflict("Completed and owner-reviewed artifact required")
     if (
@@ -51,6 +56,7 @@ def check_offline_release_eligibility(
         or job_hash != artifact_hash
         or not isinstance(csv_text, str)
         or hashlib.sha256(csv_text.encode("utf-8")).hexdigest() != job_hash
+        or reviewer_id != approval_reviewer_id
         or not isinstance(reviewer_id, str)
         or not reviewer_id.strip()
         or len(reviewer_id) > 128
