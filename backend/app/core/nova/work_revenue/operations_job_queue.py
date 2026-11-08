@@ -96,8 +96,20 @@ def claim_job(
     db: sqlite3.Connection, *, tenant_id: str, now: int, lease_seconds: int = 60,
     job_id: int | None = None,
 ) -> ClaimedJob | None:
-    if not tenant_id or lease_seconds < 1 or lease_seconds > 3600 or (job_id is not None and (not isinstance(job_id, int) or job_id <= 0)) :
-        raise JobConflict("Invalid tenant or lease duration")
+    if (
+        not isinstance(tenant_id, str)
+        or not tenant_id.strip()
+        or len(tenant_id) > 256
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in tenant_id)
+        or isinstance(now, bool) or not isinstance(now, int) or now < 0
+        or isinstance(lease_seconds, bool)
+        or not isinstance(lease_seconds, int)
+        or not 1 <= lease_seconds <= 3600
+        or (job_id is not None and (
+            isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0
+        ))
+    ):
+        raise JobConflict("Invalid tenant, clock, job ID or lease duration")
     token = secrets.token_hex(24)
     # BEGIN IMMEDIATE serializes claims across independent SQLite connections.
     db.execute("BEGIN IMMEDIATE")
