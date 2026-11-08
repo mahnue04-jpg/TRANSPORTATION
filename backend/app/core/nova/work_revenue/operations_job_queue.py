@@ -163,8 +163,18 @@ def fail_job(
     db: sqlite3.Connection, *, job: ClaimedJob, error_code: str,
     now: int, retry_delay_seconds: int = 30,
 ) -> None:
-    if not error_code or len(error_code) > 80 or retry_delay_seconds < 0:
-        raise JobConflict("Invalid error code or retry delay")
+    if (
+        not isinstance(error_code, str)
+        or not error_code.strip()
+        or len(error_code) > 80
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in error_code)
+        or isinstance(now, bool) or not isinstance(now, int) or now < 0
+        or isinstance(retry_delay_seconds, bool)
+        or not isinstance(retry_delay_seconds, int)
+        or retry_delay_seconds < 0
+        or retry_delay_seconds > 86400
+    ):
+        raise JobConflict("Invalid error code, clock or retry delay")
     with db:
         cur = db.execute(
             """UPDATE nova_operations_offline_jobs
