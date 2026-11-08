@@ -341,10 +341,12 @@
         <div class="grid">
           <label>Video topic<input id="calendar-topic" maxlength="300" required placeholder="Episode idea or video topic"></label>
           <label>Content type<select id="calendar-mode">
-            <option value="faceless">Faceless short</option><option value="presenter">AI presenter</option>
-            <option value="drama">Short drama</option><option value="education">Educational</option>
+            <option value="faceless">Faceless video</option><option value="presenter">AI presenter</option>
+            <option value="drama">Drama / series</option><option value="education">Educational</option>
           </select></label>
         </div>
+        <label>Video length<select id="calendar-duration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="60">1 minute</option><option value="180">3 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="1200">20 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option></select></label>
+        <p class="hint">Long-form planning supports up to 2 hours. Rendering long videos is a separate production capability and is not yet live. The free title-card preview currently supports 30 seconds.</p>
         <label>Script<textarea id="calendar-script" rows="4" maxlength="15000" placeholder="Write or paste the reviewed narration or story"></textarea></label>
         <fieldset><legend>Target platforms</legend>
           <div class="actions wrap">
@@ -361,6 +363,13 @@
           <button id="calendar-refresh" type="button" class="secondary">Refresh calendar</button>
         </div>
       </form>
+      <details class="studio-details" id="studio-guide-panel" open>
+        <summary>Nova Studio Guide — Video Creation Assistant</summary>
+        <p class="hint">Tell the Studio Guide what you want to create. It gives an actionable production outline based on your selected length and format. This initial guided assistant does not yet use a conversational AI model, generate footage, or make paid provider requests.</p>
+        <label>What would you like help creating?<textarea id="studio-guide-request" rows="3" maxlength="1000" placeholder="Help me plan a 10-minute educational video about..."></textarea></label>
+        <button type="button" id="studio-guide-help" class="secondary">Help me plan my video</button>
+        <div id="studio-guide-response" class="output" role="status" aria-live="polite"></div>
+      </details>
       <p id="calendar-feedback" class="hint" role="status" aria-live="polite"></p>
       <h3>Saved video plans</h3>
       <div id="calendar-list" class="list" aria-live="polite">Select a project to view its calendar.</div>
