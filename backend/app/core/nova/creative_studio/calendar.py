@@ -47,6 +47,7 @@ class CalendarCreate(BaseModel):
     content_mode: Mode = "faceless"
     channels: list[Channel] = Field(default_factory=list, max_length=4)
     scheduled_at: datetime
+    duration_seconds: int = Field(default=30, ge=15, le=7200)
 
     @field_validator("topic")
     @classmethod
@@ -70,6 +71,7 @@ class CalendarUpdate(BaseModel):
     content_mode: Mode | None = None
     channels: list[Channel] | None = Field(default=None, max_length=4)
     scheduled_at: datetime | None = None
+    duration_seconds: int | None = Field(default=None, ge=15, le=7200)
     status: State | None = None
 
     @field_validator("topic")
@@ -110,6 +112,7 @@ def _as_dict(row: NovaCreativeCalendarEntry) -> dict:
         "id": row.id, "project_id": row.project_id, "topic": row.topic,
         "script": row.script, "content_mode": row.content_mode,
         "channels": json.loads(row.channels_json), "scheduled_at": row.scheduled_at,
+        "duration_seconds": row.duration_seconds,
         "status": row.status, "created_at": row.created_at,
         "updated_at": row.updated_at, "publishing_enabled": False,
         "message": "Planning only. Approval does not schedule or publish a post.",
@@ -128,7 +131,8 @@ def add_calendar_entry(
         id=new_id("calendar"), owner_id=user.user_id, project_id=project_id,
         topic=payload.topic, script=payload.script, content_mode=payload.content_mode,
         channels_json=json.dumps(sorted(set(payload.channels))),
-        scheduled_at=payload.scheduled_at.isoformat(), status="draft",
+        scheduled_at=payload.scheduled_at.isoformat(), duration_seconds=payload.duration_seconds,
+        status="draft",
         created_at=now, updated_at=now,
     )
     db.add(row)
@@ -166,10 +170,10 @@ def edit_calendar_entry(
         raise HTTPException(status_code=422, detail="Save a reviewed script before approval.")
     # Editing an approved plan invalidates its earlier approval unless the
     # same request explicitly reapproves the reviewed replacement.
-    substantial = {"topic", "script", "content_mode", "channels", "scheduled_at"}
+    substantial = {"topic", "script", "content_mode", "channels", "scheduled_at", "duration_seconds"}
     if row.status == "approved" and substantial.intersection(updates) and "status" not in updates:
         updates["status"] = "ready_for_review"
-    for key in ("topic", "script", "content_mode"):
+    for key in ("topic", "script", "content_mode", "duration_seconds"):
         if key in updates:
             setattr(row, key, updates[key])
     if "channels" in updates:
@@ -301,6 +305,8 @@ def _render_calendar_preview(db: Session, owner_id: str, project_id: str, entry_
         raise HTTPException(status_code=422, detail="This offline preview supports faceless and education only. Presenter and drama need their dedicated renderers.")
     if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
         raise HTTPException(status_code=503, detail="Durable private video storage must be enabled before rendering.")
+    if entry.duration_seconds != 30:
+        raise HTTPException(status_code=422, detail="The current offline renderer only supports the 30-second preview. Longer videos require the long-form production workflow, which is not yet enabled.")
     script = entry.script.strip()
     scenes = _preview_scenes(script)
     digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
