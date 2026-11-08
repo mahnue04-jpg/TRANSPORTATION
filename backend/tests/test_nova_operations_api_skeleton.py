@@ -96,3 +96,64 @@ def test_scope_rejects_global_fallback_and_blank_tenant():
         isinstance(node, ast.Raise)
         for node in ast.walk(scope)
     )
+
+
+
+def test_owner_scope_requires_session_tenant_even_for_privileged_user(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.nova.work_revenue import operations_csv_api as api
+
+    seen = []
+
+    def resolve(_user, requested):
+        seen.append(requested)
+        return "tenant-a"
+
+    monkeypatch.setattr(api.NovaCoreService, "resolve_organization_scope", resolve)
+
+    for invalid in (None, "", " ", "global", "GLOBAL"):
+        with pytest.raises(HTTPException) as exc:
+            api._owner_scope(SimpleNamespace(organization_id=invalid))
+        assert exc.value.status_code == 403
+    assert seen == []
+
+    assert api._owner_scope(SimpleNamespace(organization_id="tenant-a")) == "tenant-a"
+    assert seen == [None]
+
+
+def test_owner_scope_rejects_resolver_tenant_switch(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.nova.work_revenue import operations_csv_api as api
+
+    monkeypatch.setattr(
+        api.NovaCoreService, "resolve_organization_scope",
+        lambda _user, _requested: "different-tenant",
+    )
+    with pytest.raises(HTTPException) as exc:
+        api._owner_scope(SimpleNamespace(organization_id="tenant-a"))
+    assert exc.value.status_code == 403
+
+
+def test_owner_scope_does_not_override_missing_authorization(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.nova.work_revenue import operations_csv_api as api
+
+    def reject(_user, _requested):
+        raise ValueError("Cross-tenant Nova access denied")
+
+    monkeypatch.setattr(api.NovaCoreService, "resolve_organization_scope", reject)
+    with pytest.raises(HTTPException) as exc:
+        api._owner_scope(SimpleNamespace(organization_id="tenant-a"))
+    assert exc.value.status_code == 403
