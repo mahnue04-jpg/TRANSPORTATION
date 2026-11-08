@@ -1,0 +1,35 @@
+name: Nova Operations real CSV owner MVP
+
+on:
+  pull_request:
+    branches: [main, fix/creative-studio-restore-page-20261031]
+    paths:
+      - 'backend/app/core/nova/work_revenue/operations_csv_cleanup.py'
+      - 'backend/app/core/nova/work_revenue/operations_owner_csv_api.py'
+      - 'backend/app/core/nova/work_revenue/router.py'
+      - 'backend/static/nova-work/index.html'
+      - 'backend/static/nova-work/operations-csv.js'
+      - 'backend/tests/test_nova_operations_owner_csv_api.py'
+      - '.github/workflows/nova-operations-owner-csv.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-csv-mvp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated HTTP test runtime
+        run: python -m pip install 'pytest>=8,<9' 'fastapi>=0.100,<1' 'httpx>=0.27,<1' 'python-multipart>=0.0.9'
+      - name: Run real CSV owner API tests
+        working-directory: backend
+        env:
+          DATABASE_URL: ''
+          NOVA_OPERATIONS_OWNER_CSV_ENABLED: 'false'
+        run: PYTHONPATH=. python -m pytest --noconftest -q tests/test_nova_operations_owner_csv_api.py
