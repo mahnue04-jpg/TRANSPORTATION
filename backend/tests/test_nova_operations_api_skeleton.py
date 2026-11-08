@@ -78,3 +78,21 @@ def test_disabled_routes_resolve_scope_using_owner_dependency():
         for node in ast.walk(scope)
     )
     assert "get_current_user_context" not in SOURCE.read_text(encoding="utf-8")
+
+
+def test_scope_rejects_global_fallback_and_blank_tenant():
+    """Source contract: the disabled API must never accept a broad scope."""
+    source = SOURCE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    scope = functions["_owner_scope"]
+    literals = {
+        node.value for node in ast.walk(scope)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert "global" in literals
+    assert "Tenant-specific organization required" in literals
+    assert any(
+        isinstance(node, ast.Raise)
+        for node in ast.walk(scope)
+    )
