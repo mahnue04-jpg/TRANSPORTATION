@@ -33,7 +33,7 @@ def validate_video(path: Path, *, max_duration_seconds: int = 120) -> dict:
             raise ValueError("Choose an H.264/AAC MP4 within the configured duration and 4096 pixels per side.")
         subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-err_detect", "explode",
             "-threads", "1", *common, "-i", str(path), "-map", "0:v:0", "-map", "0:a:0",
-            "-threads", "1", "-f", "null", "-"], capture_output=True, check=True, timeout=45)
+            "-threads", "1", "-f", "null", "-"], capture_output=True, check=True, timeout=45 if max_duration_seconds <= 120 else 240)
     except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Choose a fully playable H.264/AAC MP4 with audio within the permitted duration.") from exc
     return {"duration_seconds": duration, "width": width, "height": height,
