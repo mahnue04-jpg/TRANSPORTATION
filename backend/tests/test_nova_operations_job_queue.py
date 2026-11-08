@@ -109,7 +109,7 @@ def test_invalid_enqueue_does_not_store_job(db):
 
 
 
-@pytest.mark.parametrize("tenant", [None, 123, "", " ", "bad\\nidentity", "x" * 257])
+@pytest.mark.parametrize("tenant", [None, 123, "", " ", "bad\nidentity", "x" * 257])
 def test_claim_rejects_invalid_tenant_without_claiming_job(db, tenant):
     job_id = put(db)
     with pytest.raises(JobConflict, match="Invalid tenant"):
