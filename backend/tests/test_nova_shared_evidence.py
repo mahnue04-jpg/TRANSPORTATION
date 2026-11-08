@@ -75,7 +75,7 @@ def test_job_artifact_accepts_sha256():
     assert result.evidence_type == "artifact_sha256"
 
 
-@pytest.mark.parametrize("reference", [None, 123, "\\nforged-event", "id\\x00suffix", "x" * 1025])
+@pytest.mark.parametrize("reference", [None, 123, "\nforged-event", "id\x00suffix", "x" * 1025])
 def test_malformed_evidence_references_are_rejected(reference):
     with pytest.raises(EvidenceError, match="Missing or invalid"):
         event(evidence={"transport_receipt_id": reference, "receipt_kind": "external_verified"})
