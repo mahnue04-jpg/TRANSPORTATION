@@ -560,3 +560,77 @@ def test_offline_preview_requires_approving_actor_and_intact_csv(db):
             db, authenticated_owner=owner(),
             opportunity_id="synthetic-opportunity-1",
         )
+
+
+
+def test_session_rejection_remains_blocked_across_restart(tmp_path):
+    """A rejected synthetic CSV must never become release-eligible."""
+    from app.core.nova.work_revenue.operations_artifact_review import (
+        complete_and_store_review_artifact,
+    )
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+    from app.core.nova.work_revenue.operations_release_gate import (
+        check_offline_release_eligibility,
+    )
+
+    path = tmp_path / "rejected-session-workflow.sqlite"
+    conn = sqlite3.connect(path)
+    ensure_schema(conn)
+    ensure_handoff_schema(conn)
+    ensure_artifact_schema(conn)
+    raw = "Name\nSynthetic\nSynthetic\n"
+    link = approve_and_handoff_offline(
+        conn, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+        approval_reference="synthetic-approval-1",
+        input_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    )
+    claim = claim_approved_assignment(
+        conn, acting_tenant_id="tenant-a",
+        opportunity_id="synthetic-opportunity-1", now=100,
+    )
+    cleaned = clean_csv_text(raw)
+    assert cleaned.input_sha256 == claim.input_sha256
+    complete_and_store_review_artifact(
+        conn, job=claim, csv_text=cleaned.cleaned_csv,
+        output_sha256=cleaned.output_sha256, now=101,
+    )
+    assert preview_approved_assignment_offline(
+        conn, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1",
+    ) == ("awaiting_review", cleaned.cleaned_csv)
+    with pytest.raises(JobConflict, match="Review actor"):
+        review_approved_assignment_offline(
+            conn, authenticated_owner=owner(actor="different-owner"),
+            opportunity_id="synthetic-opportunity-1", approve=False,
+        )
+    assert review_approved_assignment_offline(
+        conn, authenticated_owner=owner(),
+        opportunity_id="synthetic-opportunity-1", approve=False,
+    ) == "rejected"
+    conn.close()
+
+    reopened = sqlite3.connect(path)
+    try:
+        assert preview_approved_assignment_offline(
+            reopened, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1",
+        ) == ("rejected", cleaned.cleaned_csv)
+        with pytest.raises(JobConflict, match="owner-reviewed"):
+            check_offline_release_eligibility(
+                reopened, acting_tenant_id="tenant-a",
+                opportunity_id="synthetic-opportunity-1",
+            )
+        with pytest.raises(JobConflict, match="already reviewed"):
+            review_approved_assignment_offline(
+                reopened, authenticated_owner=owner(),
+                opportunity_id="synthetic-opportunity-1", approve=True,
+            )
+        assert reopened.execute(
+            """SELECT review_state, reviewer_id
+               FROM nova_operations_offline_artifacts
+               WHERE tenant_id=? AND job_id=?""",
+            ("tenant-a", link.job_id),
+        ).fetchone() == ("rejected", "owner-a")
+    finally:
+        reopened.close()
