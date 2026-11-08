@@ -85,6 +85,20 @@
           actions.appendChild(button("Assemble saved clips", assembleSelect, entry));
         }
       }
+      if (entry.duration_seconds >= 120 && entry.duration_seconds <= 600) {
+        actions.appendChild(button("Assembly job status", async function (selected) {
+          var project = requestProject();
+          if (!project) return;
+          try {
+            var info = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(selected.id) + "/assembly-status", { method: "GET" });
+            feedback(info.message || ("Saved assembly: " + info.status));
+            if (info.status === "GENERATED" && typeof bridge.refreshProductionAssets === "function") {
+              await bridge.refreshProductionAssets();
+            }
+          } catch (err) { feedback(err.message || "Could not retrieve assembly status.", true); }
+        }, entry));
+      }
       if (entry.status !== "canceled" && entry.duration_seconds >= 120 && entry.duration_seconds <= 600) {
         if (entry.status !== "approved") actions.appendChild(button("Edit saved timeline", assembleSelect, entry));
       }
