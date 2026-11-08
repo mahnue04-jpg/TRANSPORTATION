@@ -311,3 +311,82 @@ def test_legacy_public_import_static_route_is_blocked(tmp_path):
         assert allowed.status_code == 200
 
     asyncio.run(check())
+
+
+def test_real_mp4_http_upload_download_and_cleanup(tmp_path, monkeypatch):
+    """Real codec validation through HTTP, without mocking ffprobe or media bytes.
+
+    This is an in-process TestClient test, NOT proof of real browser/staging behavior.
+    """
+    import hashlib
+    import importlib
+    import shutil
+    import subprocess
+
+    import pytest
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.auth import UserContext, get_current_user_context
+    from app.core.nova.creative_studio.router import router
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.router import require_nova_access
+    from app.db.session import get_db
+
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("Real MP4 HTTP regression requires ffmpeg and ffprobe")
+
+    video = tmp_path / "real-http-clip.mp4"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=green:size=256x256:rate=24",
+        "-f", "lavfi", "-i", "sine=frequency=523:sample_rate=44100",
+        "-t", "1", "-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", "-movflags", "+faststart", str(video),
+    ], check=True, timeout=30)
+    original = video.read_bytes()
+    sha = hashlib.sha256(original).hexdigest()
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "private-test-media"))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "false")
+    monkeypatch.delenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", raising=False)
+
+    service = CreativeStudioService(CreativeStudioStore())
+    module = importlib.import_module("app.core.nova.creative_studio.router")
+    monkeypatch.setattr(module, "get_service", lambda db=None: service)
+    identity = {"id": "http-real-owner"}
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_nova_access] = lambda: None
+    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_current_user_context] = lambda: UserContext(
+        user_id=identity["id"], email="test-owner@example.invalid",
+        role="staff", organization_id="test-org",
+    )
+    project_id = service.create_project(identity["id"], {
+        "title": "Real HTTP MP4 test", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    url = f"/api/nova/creative/projects/{project_id}/finished-video-upload"
+    with TestClient(app) as client:
+        uploaded = client.post(url, files={"file": ("clip.mp4", original, "video/mp4")})
+        assert uploaded.status_code == 200, uploaded.text
+        payload = uploaded.json()
+        assert payload["asset"]["metadata"]["decode_verified"] is True
+        assert payload["asset"]["metadata"]["sha256"] == sha
+        assert payload["asset"]["metadata"]["publish_ready"] is False
+        asset_id = payload["asset"]["id"]
+        download_url = f"/api/nova/creative/projects/{project_id}/assets/{asset_id}/file"
+        response = client.get(download_url)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("video/mp4")
+        assert "no-store" in response.headers["cache-control"]
+        assert hashlib.sha256(response.content).hexdigest() == sha
+        assert client.get(download_url + "?access_token=forbidden").status_code == 400
+        assert client.post(url, files={"file": ("clip.mp4", original, "video/mp4")}).json()["reused"] is True
+        service.reset_project_media(identity["id"], project_id)
+        assert hashlib.sha256(client.get(download_url).content).hexdigest() == sha
+
+        identity["id"] = "unrelated-owner"
+        assert client.get(download_url).status_code == 404
+        assert client.post(url, files={"file": ("clip.mp4", original, "video/mp4")}).status_code == 404

@@ -116,3 +116,141 @@ def test_required_durable_imports_reject_ephemeral_fallback(monkeypatch, tmp_pat
     assert error.value.code == "PRIVATE_STORAGE_UNAVAILABLE"
     assert error.value.http_status == 503
     assert not list(tmp_path.rglob("*.mp4"))
+
+
+def test_remote_original_survives_service_recreation_and_cleanup(storage, tmp_path, monkeypatch):
+    """Simulate a service restart over the same durable asset records and remote bucket.
+
+    This is a unit-level persistence test, not a real staging process/disk restart.
+    """
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.models import CreativeAsset
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.setenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "ephemeral-previews"))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    monkeypatch.setattr(video_import, "validate_video", lambda _path: {
+        "duration_seconds": 30.0, "width": 720, "height": 1280,
+        "video_codec": "h264", "audio_codec": "aac", "decode_verified": True,
+    })
+    store = CreativeStudioStore()
+    first = CreativeStudioService(store)
+    project_id = first.create_project("owner", {
+        "title": "Remote original retention", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"fixture-bytes-only-not-playable-video"
+    digest = hashlib.sha256(original).hexdigest()
+    uploaded = first.import_finished_video("owner", project_id, original, content_type="video/mp4")
+    asset_id = uploaded["asset"]["id"]
+    ref = uploaded["asset"]["url"]
+    assert ref.startswith("private-studio-s3://")
+    assert objects.object_exists(ref, "owner", project_id, digest)
+
+    # A disposable preview should be deleted, but the private original should
+    # not be removed from remote storage or from the asset metadata.
+    preview_root = tmp_path / "ephemeral-previews"
+    preview_root.mkdir()
+    preview = preview_root / "disposable-preview.mp4"
+    preview.write_bytes(b"preview")
+    store.save_asset(CreativeAsset(
+        id="disposable-preview", project_id=project_id, owner_id="owner",
+        kind="video", title="Preview", content="",
+        url="/media/nova-creative/disposable-preview.mp4",
+    ))
+    assert first.reset_project_media("owner", project_id)["deleted_media_files"] == 1
+    assert not preview.exists()
+    assert objects.object_exists(ref, "owner", project_id, digest)
+
+    # Recreate the service while retaining the same backing store to emulate
+    # application-object replacement. Actual SQL/storage restart is a separate gate.
+    second = CreativeStudioService(store)
+    stream, mime, _filename = second.open_private_remote_asset("owner", project_id, asset_id)
+    assert mime == "video/mp4"
+    assert hashlib.sha256(stream.read()).hexdigest() == digest
+    assert second.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )["reused"] is True
+    assert len(storage.objects) == 1
+    with pytest.raises(Exception):
+        second.open_private_remote_asset("other-owner", project_id, asset_id)
+    with pytest.raises(Exception):
+        second.open_private_remote_asset("owner", "other-project", asset_id)
+
+
+def test_private_storage_disconnection_fails_closed_and_recovers(storage, tmp_path, monkeypatch):
+    """A temporary object-store configuration outage must not serve stale public media."""
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.service import CreativeStudioService, CreativeStudioError
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.setenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "media"))
+    monkeypatch.setattr(video_import, "validate_video", lambda _path: {
+        "duration_seconds": 30.0, "width": 720, "height": 1280,
+        "video_codec": "h264", "audio_codec": "aac", "decode_verified": True,
+    })
+    service = CreativeStudioService(CreativeStudioStore())
+    project_id = service.create_project("owner", {
+        "title": "Storage outage", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"offline-test-fixture"
+    asset = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )["asset"]
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "false")
+    with pytest.raises(CreativeStudioError) as failure:
+        service.open_private_remote_asset("owner", project_id, asset["id"])
+    assert failure.value.http_status == 503
+
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "true")
+    stream, _, _ = service.open_private_remote_asset("owner", project_id, asset["id"])
+    assert stream.read() == original
+
+
+def test_durable_mode_does_not_reuse_legacy_ephemeral_import(storage, tmp_path, monkeypatch):
+    """Require remote persistence even when identical bytes exist on local disk."""
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "media"))
+    monkeypatch.setattr(video_import, "validate_video", lambda _path: {
+        "duration_seconds": 30.0, "width": 720, "height": 1280,
+        "video_codec": "h264", "audio_codec": "aac", "decode_verified": True,
+    })
+    service = CreativeStudioService(CreativeStudioStore())
+    project_id = service.create_project("owner", {
+        "title": "Legacy to durable migration", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"synthetic-mp4-migration-fixture"
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "false")
+    monkeypatch.delenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", raising=False)
+    legacy = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )["asset"]
+    assert legacy["url"].startswith("private-studio://")
+
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "true")
+    monkeypatch.setenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "true")
+    migrated = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )
+    assert migrated["reused"] is False
+    assert migrated["asset"]["url"].startswith("private-studio-s3://")
+    assert migrated["asset"]["id"] != legacy["id"]
+    assert len(storage.objects) == 1
+    stream, mime, _ = service.open_private_remote_asset(
+        "owner", project_id, migrated["asset"]["id"]
+    )
+    assert mime == "video/mp4"
+    assert stream.read() == original
+    repeated = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )
+    assert repeated["reused"] is True
+    assert repeated["asset"]["id"] == migrated["asset"]["id"]
