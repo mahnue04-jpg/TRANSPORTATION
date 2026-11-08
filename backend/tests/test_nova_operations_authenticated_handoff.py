@@ -202,3 +202,59 @@ def test_atomic_handoff_rolls_back_when_link_insert_fails(db):
         "nova_operations_offline_jobs",
     ):
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+
+def test_two_connections_reuse_one_approved_job_after_restart(tmp_path):
+    """Independent sessions must not multiply jobs for the same approval."""
+    path = tmp_path / "two-session-handoff.sqlite"
+    first_db = sqlite3.connect(path)
+    ensure_schema(first_db)
+    ensure_handoff_schema(first_db)
+    second_db = sqlite3.connect(path)
+    try:
+        first = approve(first_db)
+        second = approve(second_db)
+        assert second == first
+        for table in (
+            "nova_operations_offline_approvals",
+            "nova_operations_offline_jobs",
+            "nova_operations_offline_handoffs",
+        ):
+            assert first_db.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0] == 1
+        with pytest.raises(JobConflict, match="Conflicting owner approval"):
+            approve(second_db, owner(actor="different-owner"))
+        assert approve(first_db) == first
+    finally:
+        first_db.close()
+        second_db.close()
+
+
+def test_concurrent_write_lock_cannot_create_partial_assignment(tmp_path):
+    """Second connection fails safely while another SQLite writer holds the lock."""
+    path = tmp_path / "locked-approval.sqlite"
+    first_db = sqlite3.connect(path)
+    ensure_schema(first_db)
+    ensure_handoff_schema(first_db)
+    second_db = sqlite3.connect(path, timeout=0)
+    try:
+        first_db.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            approve(second_db)
+        first_db.rollback()
+        assert approve(second_db).tenant_id == "tenant-a"
+        for table in (
+            "nova_operations_offline_approvals",
+            "nova_operations_offline_jobs",
+            "nova_operations_offline_handoffs",
+        ):
+            assert first_db.execute(
+                f"SELECT COUNT(*) FROM {table}"
+            ).fetchone()[0] == 1
+    finally:
+        if first_db.in_transaction:
+            first_db.rollback()
+        first_db.close()
+        second_db.close()
