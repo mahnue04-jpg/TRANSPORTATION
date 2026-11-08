@@ -46,3 +46,35 @@ def test_no_implicit_router_registration_in_application_entrypoint():
         if candidate.exists():
             source = candidate.read_text(encoding="utf-8")
             assert "operations_csv_api" not in source
+
+
+
+def test_disabled_routes_resolve_scope_using_owner_dependency():
+    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    for name in ("submit_csv_job", "csv_job_status", "csv_job_review", "csv_job_download"):
+        fn = functions[name]
+        calls = [
+            node.func.id for node in ast.walk(fn)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        ]
+        assert "_owner_scope" in calls
+        assert "_disabled" in calls
+        assert calls.index("_owner_scope") < calls.index("_disabled")
+        assert any(
+            isinstance(default, ast.Call)
+            and isinstance(default.func, ast.Name)
+            and default.func.id == "Depends"
+            and any(
+                isinstance(arg, ast.Name) and arg.id == "require_work_revenue_owner"
+                for arg in default.args
+            )
+            for default in fn.args.defaults
+        )
+    scope = functions["_owner_scope"]
+    assert any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "resolve_organization_scope"
+        for node in ast.walk(scope)
+    )
+    assert "get_current_user_context" not in SOURCE.read_text(encoding="utf-8")
