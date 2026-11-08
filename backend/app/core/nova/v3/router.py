@@ -12,7 +12,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
-from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
+from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context, seed_password_is_weak_default
 from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 from app.core.nova.v3.errors import V3Error
@@ -74,6 +74,11 @@ def _guard_preview_discovery_storage() -> None:
     )
     if not is_preview:
         return
+    if seed_password_is_weak_default():
+        raise HTTPException(
+            status_code=503,
+            detail="Staging paid-job writes disabled: preview uses the default development sign-in password.",
+        )
     actual_url = str(os.getenv("DATABASE_URL") or "").strip()
     parsed = urlsplit("")
     try:
