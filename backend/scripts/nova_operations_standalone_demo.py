@@ -18,7 +18,8 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from contextlib import contextmanager
+from collections.abc import Iterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -41,6 +42,7 @@ def _safe_environment() -> None:
         and not os.getenv("DATABASE_URL")
         and not os.getenv("RENDER_EXTERNAL_URL")
         and not os.getenv("RENDER_SERVICE_NAME")
+        and not os.getenv("RENDER")
     ):
         raise HTTPException(status_code=503, detail="Isolated local demo is not enabled")
     username = os.getenv("NOVA_DEMO_OWNER_USER") or ""
@@ -82,14 +84,18 @@ def _csv() -> tuple[bytes, str]:
         return data, digest
 
 
-def _db() -> sqlite3.Connection:
+@contextmanager
+def _db() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(_ledger, timeout=5)
     conn.execute("""CREATE TABLE IF NOT EXISTS review (
         owner TEXT NOT NULL, digest TEXT NOT NULL,
         decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')),
         PRIMARY KEY(owner,digest))""")
     conn.commit()
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 class Review(BaseModel):
@@ -101,6 +107,8 @@ def ui(owner: str = Depends(_owner)) -> HTMLResponse:
     # The standalone demo has no AMICOR session manager and uses Basic login.
     html = _HTML.read_text(encoding="utf-8")
     html = html.replace('<script src="/static/ux/sessionManager.js"></script>', "")
+    html = html.replace('method: "POST", body: JSON.stringify({ approve: approve })',
+                        'method: "POST", headers: Object.assign(headers(), { "X-Nova-Demo-Action": "review" }), body: JSON.stringify({ approve: approve })')
     return HTMLResponse(html, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
@@ -130,8 +138,7 @@ def review(
         raise HTTPException(status_code=403, detail="Demo review request rejected")
     _, digest = _csv()
     decision = "approved" if payload.approve else "rejected"
-    db = _db()
-    try:
+    with _db() as db:
         db.execute(
             "INSERT INTO review(owner,digest,decision) VALUES (?,?,?) ON CONFLICT(owner,digest) DO NOTHING",
             (owner, digest, decision),
@@ -143,8 +150,6 @@ def review(
             db.rollback()
             raise HTTPException(status_code=409, detail="Prior demo decision cannot be changed")
         db.commit()
-    finally:
-        db.close()
     return {"review_state": decision, "sha256": digest}
 
 
