@@ -76,29 +76,45 @@ def _guard_preview_discovery_storage() -> None:
         return
     actual_url = str(os.getenv("DATABASE_URL") or "").strip()
     try:
-        actual_host = (urlsplit(actual_url).hostname or "").lower()
+        parsed = urlsplit(actual_url)
+        actual_host = (parsed.hostname or "").lower()
+        actual_name = (parsed.path or "").lstrip("/").split("?")[0]
+        actual_user = parsed.username or ""
     except ValueError:
         actual_host = ""
-    expected_staging = str(os.getenv("NOVA_STAGING_DATABASE_HOST") or "").strip().lower()
+        actual_name = ""
+        actual_user = ""
+    expected_staging_host = str(os.getenv("NOVA_STAGING_DATABASE_HOST") or "").strip().lower()
+    expected_staging_name = str(os.getenv("NOVA_STAGING_DATABASE_NAME") or "").strip()
+    expected_staging_user = str(os.getenv("NOVA_STAGING_DATABASE_USER") or "").strip()
     production_host = str(os.getenv("AMICOR_PRODUCTION_DATABASE_HOST") or "").strip().lower()
-    confirmed = str(os.getenv("NOVA_STAGING_DB_ISOLATION_VERIFIED") or "").lower() == "true"
+    production_name = str(os.getenv("AMICOR_PRODUCTION_DATABASE_NAME") or "").strip()
+    production_user = str(os.getenv("AMICOR_PRODUCTION_DATABASE_USER") or "").strip()
+    confirmed = str(os.getenv("NOVA_STAGING_DB_ISOLATION_VERIFIED") or "").strip().lower() == "true"
+    # A different server name alone is not evidence of isolation. Compare the
+    # database name and principal as well, using owner-verified Render metadata.
     if not (
         confirmed
-        and actual_url.lower().startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"))
+        and parsed.scheme in {"postgresql", "postgresql+psycopg2", "postgresql+psycopg"}
         and actual_host
-        and expected_staging
+        and actual_name
+        and actual_user
+        and expected_staging_host
+        and expected_staging_name
+        and expected_staging_user
         and production_host
-        and actual_host == expected_staging
+        and production_name
+        and production_user
+        and (actual_host, actual_name, actual_user)
+        == (expected_staging_host, expected_staging_name, expected_staging_user)
         and actual_host != production_host
+        and actual_name != production_name
+        and actual_user != production_user
     ):
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Staging paid-job writes disabled: verify an isolated persistent PostgreSQL "
-                "database, its host, and the separate production host in Render."
-            ),
+            detail="Staging paid-job writes disabled: separately verify staging DB host, name, and user against production.",
         )
-
 
 def _nova_v3_owner_emails() -> set[str]:
     configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
