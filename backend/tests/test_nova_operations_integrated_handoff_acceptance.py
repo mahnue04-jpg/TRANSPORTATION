@@ -110,3 +110,80 @@ def test_synthetic_opportunity_to_reviewed_csv_survives_restart(tmp_path):
         ).fetchone()[0] == 1
     finally:
         reopened.close()
+
+
+
+def test_rejected_synthetic_assignment_stays_blocked_after_restart(tmp_path):
+    path = tmp_path / "rejected-workflow.sqlite"
+    db = sqlite3.connect(path)
+    ensure_schema(db)
+    ensure_handoff_schema(db)
+    ensure_artifact_schema(db)
+    fingerprint = hashlib.sha256(RAW.encode("utf-8")).hexdigest()
+    record_verified_owner_approval(
+        db, acting_tenant_id=TENANT, record_tenant_id=TENANT,
+        opportunity_id=OPPORTUNITY, approval_reference="approval-002",
+        input_sha256=fingerprint, reviewer_id=REVIEWER,
+        reviewer_authorized=True,
+    )
+    assignment = handoff_approved_opportunity(
+        db, acting_tenant_id=TENANT, record_tenant_id=TENANT,
+        opportunity_id=OPPORTUNITY, approval_reference="approval-002",
+        input_sha256=fingerprint,
+    )
+    claim = claim_job(db, tenant_id=TENANT, job_id=assignment.job_id, now=100)
+    report = clean_csv_text(RAW)
+    complete_and_store_review_artifact(
+        db, job=claim, csv_text=report.cleaned_csv,
+        output_sha256=report.output_sha256, now=101,
+    )
+    assert review_artifact(
+        db, tenant_id=TENANT, job_id=assignment.job_id,
+        reviewer_id=REVIEWER, approve=False,
+    ) == "rejected"
+    db.close()
+
+    reopened = sqlite3.connect(path)
+    try:
+        with pytest.raises(JobConflict, match="owner-reviewed"):
+            release(reopened)
+        with pytest.raises(JobConflict, match="already reviewed"):
+            review_artifact(
+                reopened, tenant_id=TENANT, job_id=assignment.job_id,
+                reviewer_id="another-reviewer", approve=True,
+            )
+        assert get_job_state(
+            reopened, tenant_id=TENANT, job_id=assignment.job_id,
+        ) == "completed"
+    finally:
+        reopened.close()
+
+
+def test_opportunity_input_change_cannot_replace_approved_assignment(tmp_path):
+    db = sqlite3.connect(tmp_path / "changed-input.sqlite")
+    ensure_schema(db)
+    ensure_handoff_schema(db)
+    fingerprint = hashlib.sha256(RAW.encode("utf-8")).hexdigest()
+    record_verified_owner_approval(
+        db, acting_tenant_id=TENANT, record_tenant_id=TENANT,
+        opportunity_id=OPPORTUNITY, approval_reference="approval-003",
+        input_sha256=fingerprint, reviewer_id=REVIEWER,
+        reviewer_authorized=True,
+    )
+    first = handoff_approved_opportunity(
+        db, acting_tenant_id=TENANT, record_tenant_id=TENANT,
+        opportunity_id=OPPORTUNITY, approval_reference="approval-003",
+        input_sha256=fingerprint,
+    )
+    changed_fingerprint = hashlib.sha256(b"different input").hexdigest()
+    with pytest.raises(JobConflict, match="Verified owner approval"):
+        handoff_approved_opportunity(
+            db, acting_tenant_id=TENANT, record_tenant_id=TENANT,
+            opportunity_id=OPPORTUNITY, approval_reference="approval-003",
+            input_sha256=changed_fingerprint,
+        )
+    assert db.execute(
+        "SELECT COUNT(*) FROM nova_operations_offline_jobs"
+    ).fetchone()[0] == 1
+    assert get_job_state(db, tenant_id=TENANT, job_id=first.job_id) == "queued"
+    db.close()
