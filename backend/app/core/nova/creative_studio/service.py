@@ -2142,7 +2142,8 @@ class CreativeStudioService(ShortDramaMixin):
             path = Path(temporary) / "upload.mp4"
             path.write_bytes(data)
             try:
-                measured = validate_video(path, max_duration_seconds=max_duration_seconds)
+                measured = (validate_video(path) if max_duration_seconds == 120
+                            else validate_video(path, max_duration_seconds=max_duration_seconds))
             except ValueError as exc:
                 raise CreativeStudioError("INVALID_VIDEO", str(exc), http_status=422) from exc
             name = new_id("imported_video") + ".mp4"
