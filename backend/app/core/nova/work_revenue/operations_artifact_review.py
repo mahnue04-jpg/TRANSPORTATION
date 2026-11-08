@@ -65,8 +65,14 @@ def review_artifact(
     db: sqlite3.Connection, *, tenant_id: str, job_id: int,
     reviewer_id: str, approve: bool,
 ) -> str:
-    if not tenant_id or not reviewer_id:
-        raise JobConflict("Owner review identity required")
+    if (
+        not isinstance(tenant_id, str) or not tenant_id.strip()
+        or not isinstance(reviewer_id, str) or not reviewer_id.strip()
+        or len(reviewer_id) > 128
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in reviewer_id)
+        or type(approve) is not bool
+    ):
+        raise JobConflict("Valid owner review identity and boolean decision required")
     state = "approved" if approve else "rejected"
     with db:
         cur = db.execute(
@@ -101,6 +107,8 @@ def complete_and_store_review_artifact(
     """
     from .operations_job_queue import _valid_sha
 
+    if isinstance(now, bool) or not isinstance(now, int) or now < 0:
+        raise JobConflict("Invalid artifact completion timestamp")
     if not isinstance(csv_text, str):
         raise JobConflict("Invalid CSV artifact")
     encoded = csv_text.encode("utf-8")
