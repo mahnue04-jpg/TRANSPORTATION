@@ -46,6 +46,8 @@ def test_launcher_binds_only_loopback():
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute) and n.func.attr == "execve"]
     assert len(calls) == 1
-    args = ast.unparse(calls[0])
-    assert '"127.0.0.1"' in args
-    assert '"0.0.0.0"' not in args
+    args = calls[0].args[1]
+    assert isinstance(args, ast.List)
+    literals = [x.value for x in args.elts if isinstance(x, ast.Constant)]
+    assert "127.0.0.1" in literals
+    assert "0.0.0.0" not in literals
