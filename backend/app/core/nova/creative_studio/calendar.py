@@ -113,6 +113,7 @@ def _as_dict(row: NovaCreativeCalendarEntry) -> dict:
         "script": row.script, "content_mode": row.content_mode,
         "channels": json.loads(row.channels_json), "scheduled_at": row.scheduled_at,
         "duration_seconds": row.duration_seconds,
+        "timeline_asset_ids": json.loads(row.timeline_json or "[]"),
         "status": row.status, "created_at": row.created_at,
         "updated_at": row.updated_at, "publishing_enabled": False,
         "message": "Planning only. Approval does not schedule or publish a post.",
@@ -389,9 +390,42 @@ async def render_calendar_preview(
     return await run_in_threadpool(_render_calendar_preview, db, user.user_id, project_id, entry_id)
 
 
+class TimelineIn(BaseModel):
+    asset_ids: list[str] = Field(default_factory=list, max_length=16)
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/timeline")
+def save_calendar_timeline(
+    project_id: str, entry_id: str, payload: TimelineIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Persist ordered clip choices; no rendering, billing or publishing."""
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be edited.")
+    if len(payload.asset_ids) != len(set(payload.asset_ids)):
+        raise HTTPException(status_code=422, detail="The timeline cannot contain duplicate clips.")
+    assets = {a.id: a for a in DbCreativeStudioStore(db).list_assets(project_id, user.user_id)}
+    for asset_id in payload.asset_ids:
+        asset = assets.get(asset_id)
+        if not asset or asset.kind != "video" or not asset.url:
+            raise HTTPException(status_code=422, detail="Timeline clips must belong to this Studio project.")
+    previous = json.loads(entry.timeline_json or "[]")
+    if previous != payload.asset_ids:
+        entry.timeline_json = json.dumps(payload.asset_ids)
+        if entry.status == "approved":
+            entry.status = "ready_for_review"
+        entry.updated_at = _now()
+        db.commit()
+        db.refresh(entry)
+    return _as_dict(entry)
+
+
 class LongFormAssemblyIn(BaseModel):
     """Ordered video asset IDs already saved in this same owner's Studio project."""
-    asset_ids: list[str] = Field(min_length=2, max_length=16)
+    asset_ids: list[str] = Field(default_factory=list, max_length=16)
 
 
 def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
@@ -407,8 +441,15 @@ def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
         raise HTTPException(status_code=409, detail="Approve the plan before assembling its video.")
     if not 120 <= entry.duration_seconds <= 600:
         raise HTTPException(status_code=422, detail="This first long-form assembler supports 2–10 minutes. Longer productions need the queued storage workflow.")
-    if len(set(asset_ids)) != len(asset_ids):
-        raise HTTPException(status_code=422, detail="Choose unique source segments.")
+    # The stored timeline is authoritative once configured. The client can
+    # send an empty list to request the saved order on later sessions.
+    stored_timeline = json.loads(entry.timeline_json or "[]")
+    if not asset_ids:
+        asset_ids = stored_timeline
+    elif stored_timeline and asset_ids != stored_timeline:
+        raise HTTPException(status_code=409, detail="Your saved timeline differs. Save the new order and reapprove before assembling.")
+    if not 2 <= len(asset_ids) <= 16 or len(set(asset_ids)) != len(asset_ids):
+        raise HTTPException(status_code=422, detail="Choose 2–16 distinct saved video clips.")
     if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
         raise HTTPException(status_code=503, detail="Durable private video storage is required.")
     service = get_service(db)
