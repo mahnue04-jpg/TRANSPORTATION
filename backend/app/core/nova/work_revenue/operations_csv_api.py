@@ -37,8 +37,12 @@ def _owner_scope(user: UserContext) -> str:
         org_id = NovaCoreService.resolve_organization_scope(user, None)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Authenticated organization required") from exc
-    if not isinstance(org_id, str) or not org_id.strip():
-        raise HTTPException(status_code=403, detail="Authenticated organization required")
+    if (
+        not isinstance(org_id, str)
+        or not org_id.strip()
+        or org_id.strip().lower() == "global"
+    ):
+        raise HTTPException(status_code=403, detail="Tenant-specific organization required")
     return org_id
 
 
