@@ -105,23 +105,21 @@ def test_owner_scope_requires_session_tenant_even_for_privileged_user(monkeypatc
     import pytest
     from fastapi import HTTPException
 
-    from app.core.nova.work_revenue import operations_csv_api as api
-
     seen = []
 
     def resolve(_user, requested):
         seen.append(requested)
         return "tenant-a"
 
-    monkeypatch.setattr(api.NovaCoreService, "resolve_organization_scope", resolve)
+    owner_scope = _load_scoped_function(resolve)
 
     for invalid in (None, "", " ", "global", "GLOBAL"):
         with pytest.raises(HTTPException) as exc:
-            api._owner_scope(SimpleNamespace(organization_id=invalid))
+            owner_scope(SimpleNamespace(organization_id=invalid))
         assert exc.value.status_code == 403
     assert seen == []
 
-    assert api._owner_scope(SimpleNamespace(organization_id="tenant-a")) == "tenant-a"
+    assert owner_scope(SimpleNamespace(organization_id="tenant-a")) == "tenant-a"
     assert seen == [None]
 
 
@@ -131,14 +129,11 @@ def test_owner_scope_rejects_resolver_tenant_switch(monkeypatch):
     import pytest
     from fastapi import HTTPException
 
-    from app.core.nova.work_revenue import operations_csv_api as api
-
-    monkeypatch.setattr(
-        api.NovaCoreService, "resolve_organization_scope",
+    owner_scope = _load_scoped_function(
         lambda _user, _requested: "different-tenant",
     )
     with pytest.raises(HTTPException) as exc:
-        api._owner_scope(SimpleNamespace(organization_id="tenant-a"))
+        owner_scope(SimpleNamespace(organization_id="tenant-a"))
     assert exc.value.status_code == 403
 
 
@@ -148,12 +143,43 @@ def test_owner_scope_does_not_override_missing_authorization(monkeypatch):
     import pytest
     from fastapi import HTTPException
 
-    from app.core.nova.work_revenue import operations_csv_api as api
-
     def reject(_user, _requested):
         raise ValueError("Cross-tenant Nova access denied")
 
-    monkeypatch.setattr(api.NovaCoreService, "resolve_organization_scope", reject)
+    owner_scope = _load_scoped_function(reject)
     with pytest.raises(HTTPException) as exc:
-        api._owner_scope(SimpleNamespace(organization_id="tenant-a"))
+        owner_scope(SimpleNamespace(organization_id="tenant-a"))
     assert exc.value.status_code == 403
+
+
+def _load_scoped_function(resolver):
+    """Execute only the real scope function without loading API router imports."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    target = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_owner_scope"
+    )
+    # The source uses UserContext as an annotation. Postponed annotations are
+    # enabled for this isolated test module.
+    isolated = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias(name="annotations")],
+                level=0,
+            ),
+            target,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(isolated)
+    namespace = {
+        "NovaCoreService": SimpleNamespace(resolve_organization_scope=resolver),
+        "HTTPException": HTTPException,
+    }
+    exec(compile(isolated, str(SOURCE), "exec"), namespace)
+    return namespace["_owner_scope"]
