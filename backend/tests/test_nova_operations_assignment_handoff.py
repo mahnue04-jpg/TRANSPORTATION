@@ -251,3 +251,20 @@ def test_guarded_claim_rejects_invalid_clock(db, bad_clock):
             db, acting_tenant_id="tenant-a",
             opportunity_id="lead-one", now=bad_clock,
         )
+
+
+@pytest.mark.parametrize("table,column,value", [
+    ("nova_operations_offline_approvals", "approval_reference", "tampered"),
+    ("nova_operations_offline_approvals", "reviewer_id", "bad\nreviewer"),
+    ("nova_operations_offline_handoffs", "input_sha256", "b" * 64),
+    ("nova_operations_offline_jobs", "kind", "different"),
+])
+def test_guarded_claim_rejects_corrupt_link_before_lease(db, table, column, value):
+    assigned = handoff(db)
+    db.execute(f"UPDATE {table} SET {column}=?", (value,))
+    db.commit()
+    with pytest.raises(JobConflict, match="inconsistent|reviewer"):
+        claim_approved_assignment(
+            db, acting_tenant_id="tenant-a", opportunity_id="lead-one", now=100,
+        )
+    assert get_job_state(db, tenant_id="tenant-a", job_id=assigned.job_id) == "queued"
