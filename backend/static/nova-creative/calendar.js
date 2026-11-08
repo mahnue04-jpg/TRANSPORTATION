@@ -81,6 +81,9 @@
         if ((entry.content_mode === "faceless" || entry.content_mode === "education") && entry.duration_seconds === 30) {
           actions.appendChild(button("Render preview MP4", renderPreview, entry));
         }
+        if (entry.duration_seconds >= 120 && entry.duration_seconds <= 600) {
+          actions.appendChild(button("Assemble saved clips", assembleSelect, entry));
+        }
       }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
@@ -157,6 +160,95 @@
     }
     mutate(entry, { status: "approved" }, "approve");
   }
+  async function assembleSelect(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    feedback("Loading saved video clips for assembly...");
+    try {
+      var detail = await bridge.api("/api/nova/creative/projects/" + encodeURIComponent(project), { method: "GET" });
+      if (active() !== project) return;
+      var videos = (detail.assets || []).filter(function (asset) {
+        return asset.kind === "video" && asset.url && asset.media_available !== false &&
+          asset.id && !(asset.metadata || {}).assembly_signature;
+      });
+      if (videos.length < 2) {
+        feedback("Save at least two finished video clips in this project before assembling. No generation was started.", true);
+        return;
+      }
+      var host = $("calendar-assembly");
+      host.replaceChildren();
+      var header = document.createElement("h4");
+      header.textContent = "Select clips in playback order for: " + entry.topic;
+      host.appendChild(header);
+      var explain = document.createElement("p");
+      explain.className = "hint";
+      explain.textContent = "Choose 2–16 existing saved videos. Click Add in sequence; their combined length should match your planned duration. Each must have H.264 video and AAC audio. No paid generation.";
+      host.appendChild(explain);
+      var ordered = [];
+      var sequence = document.createElement("ol");
+      host.appendChild(sequence);
+      function showOrder() {
+        sequence.replaceChildren();
+        ordered.forEach(function (asset, index) {
+          var row = document.createElement("li");
+          row.textContent = (index + 1) + ". " + (asset.title || asset.id);
+          row.appendChild(button("Remove", function () {
+            ordered.splice(index, 1);
+            showOrder();
+          }, asset));
+          sequence.appendChild(row);
+        });
+      }
+      videos.forEach(function (asset) {
+        var line = document.createElement("div");
+        line.className = "actions wrap";
+        var label = document.createElement("span");
+        var duration = (asset.metadata || {}).duration_seconds;
+        label.textContent = (asset.title || asset.id) + (duration ? " · " + Math.round(duration) + "s" : "");
+        line.appendChild(label);
+        line.appendChild(button("Add to sequence", function () {
+          if (ordered.some(function (item) { return item.id === asset.id; })) {
+            feedback("That clip is already selected.", true);
+            return;
+          }
+          if (ordered.length >= 16) {
+            feedback("Maximum 16 clips in this first assembly mode.", true);
+            return;
+          }
+          ordered.push(asset);
+          showOrder();
+        }, asset));
+        host.appendChild(line);
+      });
+      host.appendChild(button("Build combined MP4", async function () {
+        if (ordered.length < 2 || busy) {
+          feedback("Choose at least two clips first.", true);
+          return;
+        }
+        if (active() !== project) return;
+        busy = true;
+        feedback("Combining existing clips into one video. This may take time; do not start a second assembly.");
+        try {
+          var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/assemble", {
+            method: "POST",
+            body: JSON.stringify({ asset_ids: ordered.map(function (item) { return item.id; }) })
+          });
+          if (active() !== project) return;
+          if (result.status !== "ASSEMBLED_REVIEW_REQUIRED") throw new Error("No completed MP4 was confirmed.");
+          feedback("Combined MP4 saved. Review and download it from Studio's Asset list.");
+          host.replaceChildren();
+          if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+        } catch (err) {
+          feedback(err.message || "Assembly failed; saved source clips were preserved.", true);
+        } finally { busy = false; }
+      }, entry));
+      host.scrollIntoView({ behavior: "smooth", block: "start" });
+      feedback("Choose clips in the correct order and build the combined video.");
+    } catch (err) {
+      feedback(err.message || "Unable to load saved videos.", true);
+    }
+  }
+
   async function renderPreview(entry) {
     var project = requestProject();
     if (!project || busy) return;
