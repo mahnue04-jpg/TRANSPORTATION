@@ -43,7 +43,7 @@ def _now() -> str:
 
 class CalendarCreate(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
-    script: str = Field(default="", max_length=15000)
+    script: str = Field(default="", max_length=120000)
     content_mode: Mode = "faceless"
     channels: list[Channel] = Field(default_factory=list, max_length=4)
     scheduled_at: datetime
@@ -67,7 +67,7 @@ class CalendarCreate(BaseModel):
 
 class CalendarUpdate(BaseModel):
     topic: str | None = Field(default=None, min_length=1, max_length=300)
-    script: str | None = Field(default=None, max_length=15000)
+    script: str | None = Field(default=None, max_length=120000)
     content_mode: Mode | None = None
     channels: list[Channel] | None = Field(default=None, max_length=4)
     scheduled_at: datetime | None = None
