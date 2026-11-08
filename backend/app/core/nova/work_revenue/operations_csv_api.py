@@ -33,6 +33,15 @@ def _owner_scope(user: UserContext) -> str:
 
     No database access, state change, queue creation or API activation here.
     """
+    # Even privileged support accounts require a concrete session tenant.
+    # A broad or absent scope must never reach an Operations assignment.
+    session_org = getattr(user, "organization_id", None)
+    if (
+        not isinstance(session_org, str)
+        or not session_org.strip()
+        or session_org.strip().lower() == "global"
+    ):
+        raise HTTPException(status_code=403, detail="Tenant-specific organization required")
     try:
         org_id = NovaCoreService.resolve_organization_scope(user, None)
     except ValueError as exc:
@@ -41,6 +50,7 @@ def _owner_scope(user: UserContext) -> str:
         not isinstance(org_id, str)
         or not org_id.strip()
         or org_id.strip().lower() == "global"
+        or org_id != session_org
     ):
         raise HTTPException(status_code=403, detail="Tenant-specific organization required")
     return org_id
