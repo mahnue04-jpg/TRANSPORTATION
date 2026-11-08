@@ -310,9 +310,9 @@ def test_session_approved_csv_lifecycle_requires_owner_review_after_restart(tmp_
                 conn, acting_tenant_id="tenant-a",
                 opportunity_id="synthetic-opportunity-1",
             )
-        assert review_artifact(
-            conn, tenant_id="tenant-a", job_id=link.job_id,
-            reviewer_id="owner-a", approve=True,
+        assert review_approved_assignment_offline(
+            conn, authenticated_owner=owner(),
+            opportunity_id="synthetic-opportunity-1", approve=True,
         ) == "approved"
     finally:
         conn.close()
