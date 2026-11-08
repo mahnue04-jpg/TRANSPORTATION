@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -18,6 +22,8 @@ from app.auth import UserContext, get_current_user_context
 from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject
 from app.core.nova.creative_studio.models import CreativeAsset, new_id
 from app.core.nova.creative_studio.store import DbCreativeStudioStore
+from app.core.nova.creative_studio.service import CreativeStudioError, get_service
+from app.core.nova.creative_studio.offline_commercial import OfflineCommercialError, render_offline_montage
 from app.core.nova.router import require_nova_access
 from app.db.session import get_db
 
@@ -256,3 +262,122 @@ def prepare_calendar_content(
         "media_generated": False, "published": False,
         "message": "Approved script, narration text and caption text saved in this Studio project. No video, speech or social post was generated.",
     }
+
+
+def _preview_scenes(script: str) -> list[dict]:
+    """Fit short owner-reviewed narration into six beats, without rewriting it."""
+    text = " ".join(script.split())
+    words = text.split()
+    if not 8 <= len(words) <= 55 or len(text) > 450:
+        raise HTTPException(
+            status_code=422,
+            detail="The offline 30-second preview needs 8–55 words (up to 450 characters). Shorten or split longer scripts into episodes.",
+        )
+    # Split by word counts, preserving the exact reviewed words and their order.
+    beats = min(6, max(2, (len(words) + 9) // 10))
+    result = []
+    for index in range(beats):
+        segment = words[index * len(words) // beats:(index + 1) * len(words) // beats]
+        line = " ".join(segment)
+        result.append({
+            "heading": ("Hook", "Problem", "Capabilities", "Process", "Progress", "CTA")[index],
+            "voiceover_text": line,
+            "subtitle_text": line,
+            "duration_seconds": 30.0 / beats,
+        })
+    return result
+
+
+def _render_calendar_preview(db: Session, owner_id: str, project_id: str, entry_id: str):
+    """Render a local AMICOR-branded preview and archive its bytes as an owner import."""
+    from app.core.nova.creative_studio import private_object_storage as remote
+    import os
+
+    project = _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the reviewed script before rendering.")
+    if entry.content_mode not in {"faceless", "education"}:
+        raise HTTPException(status_code=422, detail="This offline preview supports faceless and education only. Presenter and drama need their dedicated renderers.")
+    if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
+        raise HTTPException(status_code=503, detail="Durable private video storage must be enabled before rendering.")
+    script = entry.script.strip()
+    scenes = _preview_scenes(script)
+    digest = hashlib.sha256(script.encode("utf-8")).hexdigest()
+    store = DbCreativeStudioStore(db)
+    service = get_service(db)
+
+    for asset in store.list_assets(project_id, owner_id):
+        meta = asset.metadata or {}
+        if (asset.kind == "video" and meta.get("calendar_entry_id") == entry_id and
+                meta.get("script_sha256") == digest and
+                meta.get("pipeline") == "calendar_offline_preview"):
+            try:
+                if str(asset.url or "").startswith("private-studio-s3://"):
+                    if remote.enabled() and remote.object_exists(asset.url, owner_id, project_id, meta.get("sha256", "")):
+                        return _preview_result(project_id, asset, reused=True)
+                else:
+                    path, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == meta.get("sha256"):
+                        return _preview_result(project_id, asset, reused=True)
+            except Exception:
+                pass  # A missing preview can safely be rerendered without provider fees.
+
+    with tempfile.TemporaryDirectory(prefix="nova-calendar-preview-") as scratch:
+        root = Path(scratch)
+        video = root / "preview.mp4"
+        narration = root / "narration.wav"
+        try:
+            rendered = render_offline_montage(scenes, output_mp4=video, audio_wav=narration, vertical=True)
+        except OfflineCommercialError as exc:
+            raise HTTPException(status_code=422, detail=exc.message) from exc
+        if not rendered.get("audio_present") or not video.is_file():
+            raise HTTPException(status_code=422, detail="No playable narrated video was produced.")
+        try:
+            imported = service.import_finished_video(
+                owner_id, project_id, video.read_bytes(), content_type="video/mp4"
+            )
+        except CreativeStudioError as exc:
+            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+        asset = next((a for a in store.list_assets(project_id, owner_id)
+                      if a.id == imported["asset"]["id"]), None)
+        if asset is None:
+            raise HTTPException(status_code=500, detail="Video asset was not saved.")
+        asset.metadata = {
+            **(asset.metadata or {}),
+            "calendar_entry_id": entry_id, "script_sha256": digest,
+            "pipeline": "calendar_offline_preview", "quality_state": "PREVIEW_ONLY",
+            "preview_brand": "AMICOR Nova", "paid_provider_charges": False,
+            "captions_burned_in": bool(rendered.get("captions_burned_in")),
+            "captions_timing_verified": False, "narration_license_status": "AMBER",
+            "publish_ready": False, "commercial_complete": False,
+            "media_generated": True, "external_publishing": False,
+        }
+        asset = store.save_asset(asset)
+    return _preview_result(project_id, asset, reused=False)
+
+
+def _preview_result(project_id: str, asset: CreativeAsset, *, reused: bool):
+    return {
+        "status": "PREVIEW_RENDERED", "asset": asset.as_dict(),
+        "reused": reused, "media_generated": True, "published": False,
+        "publish_ready": False, "quality_state": "PREVIEW_ONLY",
+        "download_url": (
+            f"/api/nova/creative/projects/{project_id}/assets/{asset.id}/file"
+        ),
+        "message": (
+            "AMICOR-branded local title-card MP4 with narration and captions. "
+            "Not AI-generated scene footage, presenter lip-sync, or commercial-ready. "
+            "Narration license and caption timing require review before publication."
+        ),
+    }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/render-preview")
+async def render_calendar_preview(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    # Do not occupy the event loop during local ffmpeg rendering. Uses no paid provider.
+    return await run_in_threadpool(_render_calendar_preview, db, user.user_id, project_id, entry_id)
