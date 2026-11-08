@@ -9,23 +9,25 @@ import json
 import hashlib
 import re
 import tempfile
+import threading
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject
-from app.core.nova.creative_studio.models import CreativeAsset, new_id
+from app.core.nova.creative_studio.models import CreativeAsset, GenerationJob, new_id
 from app.core.nova.creative_studio.store import DbCreativeStudioStore
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
 from app.core.nova.creative_studio.offline_commercial import OfflineCommercialError, render_offline_montage
 from app.core.nova.router import require_nova_access
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 
 router = APIRouter(
     prefix="/api/nova/creative",
@@ -557,3 +559,106 @@ async def assemble_calendar_video(
     return await run_in_threadpool(
         _assemble_calendar_video, db, user.user_id, project_id, entry_id, payload.asset_ids,
     )
+
+
+# This bounded in-process worker is for local/staging feature development.
+# A durable, distributed queue is required for unattended production long renders.
+_calendar_assembly_lock = threading.Lock()
+_calendar_assembly_active: set[tuple[str, str, str]] = set()
+_calendar_assembly_logger = logging.getLogger(__name__)
+
+
+def _run_calendar_assembly_job(owner_id: str, project_id: str, entry_id: str,
+                               job_id: str, asset_ids: list[str]) -> None:
+    key = (owner_id, project_id, entry_id)
+    db = SessionLocal()
+    try:
+        store = DbCreativeStudioStore(db)
+        job = next((j for j in store.list_jobs(project_id, owner_id) if j.id == job_id), None)
+        if job is None:
+            return
+        job.status = "RUNNING"
+        job.message = "Assembling saved clips; no paid provider calls."
+        job.updated_at = _now()
+        store.save_job(job)
+        try:
+            output = _assemble_calendar_video(db, owner_id, project_id, entry_id, asset_ids)
+            asset = output["asset"]
+            job.status = "GENERATED"
+            job.result_asset_ids = [asset["id"]]
+            job.message = "Combined MP4 saved. Review video and audio before publishing."
+        except Exception as exc:
+            db.rollback()
+            _calendar_assembly_logger.warning(
+                "Studio calendar assembly failed: job=%s error_class=%s",
+                job_id, type(exc).__name__,
+            )
+            job.status = "ERROR"
+            job.message = "Assembly could not be completed. Saved source clips were preserved."
+        job.updated_at = _now()
+        store.save_job(job)
+    finally:
+        db.close()
+        with _calendar_assembly_lock:
+            _calendar_assembly_active.discard(key)
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assemble-job")
+def start_calendar_assembly_job(
+    project_id: str, entry_id: str, payload: LongFormAssemblyIn,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Start a non-paid background assembly, then poll the persisted Studio job.
+
+    This staging worker is in-process; it does not resume after worker restarts.
+    It must not be marketed as a durable distributed long-form queue.
+    """
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the timeline before assembling.")
+    if not 120 <= entry.duration_seconds <= 600:
+        raise HTTPException(status_code=422, detail="Background assembly currently supports 2–10 minutes.")
+    order = payload.asset_ids or json.loads(entry.timeline_json or "[]")
+    if len(order) < 2 or len(order) > 16 or len(order) != len(set(order)):
+        raise HTTPException(status_code=422, detail="Select 2–16 distinct saved clips.")
+    saved_order = json.loads(entry.timeline_json or "[]")
+    if saved_order and saved_order != order:
+        raise HTTPException(status_code=409, detail="Timeline changed; save and reapprove it.")
+    assets = {a.id: a for a in DbCreativeStudioStore(db).list_assets(project_id, user.user_id)}
+    if any(aid not in assets or assets[aid].kind != "video" or not assets[aid].url for aid in order):
+        raise HTTPException(status_code=422, detail="Selected clips must exist in your project.")
+    key = (user.user_id, project_id, entry_id)
+    with _calendar_assembly_lock:
+        if key in _calendar_assembly_active:
+            return {"status": "ALREADY_RUNNING", "message": "This calendar plan is already assembling."}
+        # Do not launch a duplicate against a persisted queued/running job.
+        jobs = DbCreativeStudioStore(db).list_jobs(project_id, user.user_id)
+        for previous in jobs:
+            if previous.kind == "calendar_assembly:" + entry_id and previous.status in {"QUEUED", "RUNNING"}:
+                return {"status": "ALREADY_RUNNING", "job": previous.as_dict(),
+                        "message": "An unfinished assembly exists; inspect its status before retrying."}
+        _calendar_assembly_active.add(key)
+    try:
+        now = _now()
+        job = GenerationJob(
+            id=new_id("cjob"), owner_id=user.user_id, project_id=project_id,
+            kind="calendar_assembly:" + entry_id, status="QUEUED",
+            message="Queued offline assembly; paid providers are off.",
+            created_at=now, updated_at=now,
+        )
+        saved = DbCreativeStudioStore(db).save_job(job)
+        background_tasks.add_task(
+            _run_calendar_assembly_job, user.user_id, project_id, entry_id, saved.id, list(order)
+        )
+        return {
+            "status": "QUEUED", "job": saved.as_dict(),
+            "poll_url": f"/api/nova/creative/projects/{project_id}/jobs/{saved.id}",
+            "publishing_enabled": False, "paid_provider_charges": False,
+        }
+    except Exception:
+        with _calendar_assembly_lock:
+            _calendar_assembly_active.discard(key)
+        raise
