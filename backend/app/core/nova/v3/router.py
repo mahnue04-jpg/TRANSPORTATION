@@ -412,6 +412,7 @@ def v3_live_job_autopilot_cycle(
     db: Session = Depends(get_db),
 ):
     """Run one bounded search/qualify/prepare cycle. Never submits externally."""
+    _guard_preview_discovery_storage()
     org_id = _org(user, payload.organization_id)
     try:
         return run_autopilot_cycle(
@@ -469,6 +470,7 @@ def v3_live_job_discover(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
+    _guard_preview_discovery_storage()
     org_id = _org(user, payload.organization_id)
     try:
         multi = search_multi_source_jobs(payload.query, limit=payload.limit)
