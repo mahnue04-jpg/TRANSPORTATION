@@ -63,9 +63,14 @@ def _guard_preview_discovery_storage() -> None:
     service_name = str(os.getenv("RENDER_SERVICE_NAME") or "").strip().lower()
     service_url = str(os.getenv("RENDER_EXTERNAL_URL") or "").strip()
     preview_host = (urlsplit(service_url).hostname or "").lower()
+    render_branch = str(os.getenv("RENDER_GIT_BRANCH") or "").strip().lower()
     is_preview = bool(
         re.fullmatch(r".+-pr-\d+\.onrender\.com", preview_host)
         or re.search(r"\bpr\s*#\s*\d+\b", service_name)
+        or (
+            str(os.getenv("RENDER") or "").strip().lower() in {"true", "1"}
+            and render_branch not in {"main", "master"}
+        )
     )
     if not is_preview:
         return
