@@ -89,6 +89,14 @@ def _enable_preview(monkeypatch, tmp_path):
     monkeypatch.setenv("NOVA_OPERATIONS_SYNTHETIC_HTTP_ENABLED", "true")
     monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://amicor-health-isf-pr-462.onrender.com")
     monkeypatch.setenv("RENDER_GIT_BRANCH", "feat/nova-operations-auth-handoff-integration-20261107")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://demo_owner:dummy@isolated-staging.internal:5432/isolated_demo")
+    monkeypatch.setenv("NOVA_STAGING_DATABASE_HOST", "isolated-staging.internal")
+    monkeypatch.setenv("NOVA_STAGING_DATABASE_NAME", "isolated_demo")
+    monkeypatch.setenv("NOVA_STAGING_DATABASE_USER", "demo_owner")
+    monkeypatch.setenv("AMICOR_PRODUCTION_DATABASE_HOST", "production.internal")
+    monkeypatch.setenv("AMICOR_PRODUCTION_DATABASE_NAME", "production_db")
+    monkeypatch.setenv("AMICOR_PRODUCTION_DATABASE_USER", "prod_owner")
+    monkeypatch.setenv("NOVA_STAGING_DB_ISOLATION_VERIFIED", "true")
 
 
 def test_synthetic_download_requires_session(monkeypatch, tmp_path):
@@ -105,6 +113,12 @@ def test_synthetic_download_requires_session(monkeypatch, tmp_path):
     {"RENDER_EXTERNAL_URL": "https://amicor-health-isf.onrender.com"},
     {"RENDER_GIT_BRANCH": "main"},
     {"RENDER_GIT_BRANCH": ""},
+    {"NOVA_STAGING_DB_ISOLATION_VERIFIED": "false"},
+    {"DATABASE_URL": "postgresql://prod_owner:dummy@production.internal/production_db"},
+    {"NOVA_STAGING_DATABASE_NAME": "different_demo"},
+    {"AMICOR_PRODUCTION_DATABASE_HOST": "isolated-staging.internal"},
+    {"AMICOR_PRODUCTION_DATABASE_NAME": "isolated_demo"},
+    {"AMICOR_PRODUCTION_DATABASE_USER": "demo_owner"},
 ])
 def test_synthetic_download_fails_closed_if_not_isolated(monkeypatch, tmp_path, change):
     _enable_preview(monkeypatch, tmp_path)
