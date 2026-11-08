@@ -6,6 +6,7 @@ No customer data, routes, providers, or outbound actions are used here.
 """
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 
 from app.auth import UserContext
@@ -129,6 +130,27 @@ def review_approved_assignment_offline(
         ).fetchone()
         if approved is None or approved[0] != actor_id:
             raise JobConflict("Review actor does not match recorded approval")
+        artifact = db.execute(
+            """SELECT a.csv_text, a.output_sha256, j.output_sha256
+               FROM nova_operations_offline_artifacts AS a
+               JOIN nova_operations_offline_jobs AS j
+                 ON j.tenant_id=a.tenant_id AND j.job_id=a.job_id
+               WHERE a.tenant_id=? AND a.job_id=?
+                 AND a.review_state='awaiting_review' AND j.state='completed'""",
+            (tenant_id, handoff.job_id),
+        ).fetchone()
+        if artifact is None:
+            raise JobConflict("Completed artifact unavailable or already reviewed")
+        csv_text, artifact_hash, job_hash = artifact
+        if (
+            not isinstance(csv_text, str)
+            or not _valid_sha(artifact_hash)
+            or artifact_hash != job_hash
+            or hashlib.sha256(csv_text.encode("utf-8")).hexdigest() != artifact_hash
+        ):
+            raise JobConflict("Review artifact integrity check failed")
+        if len(actor_id) > 128:
+            raise JobConflict("Reviewer identity exceeds artifact review limit")
         state = "approved" if approve else "rejected"
         updated = db.execute(
             """UPDATE nova_operations_offline_artifacts
