@@ -2771,6 +2771,13 @@
     });
   });
 
+  // The calendar shares the same session-aware API and selected project.
+  // It cannot bypass Creative Studio authentication or trigger publishing.
+  window.NovaCreativeCalendarBridge = {
+    api: api,
+    selectedProject: function () { return activeProjectId; }
+  };
+
   boot();
 })();
 
