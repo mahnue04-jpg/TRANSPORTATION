@@ -106,3 +106,33 @@ def test_invalid_enqueue_does_not_store_job(db):
             kind="spreadsheet", input_sha256="a" * 64,
         )
     assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 0
+
+
+
+@pytest.mark.parametrize("tenant", [None, 123, "", " ", "bad\\nidentity", "x" * 257])
+def test_claim_rejects_invalid_tenant_without_claiming_job(db, tenant):
+    job_id = put(db)
+    with pytest.raises(JobConflict, match="Invalid tenant"):
+        claim_job(db, tenant_id=tenant, now=100)
+    assert get_job_state(db, tenant_id="a", job_id=job_id) == "queued"
+
+
+@pytest.mark.parametrize("clock", [None, "100", True, -1])
+def test_claim_rejects_invalid_clock(db, clock):
+    put(db)
+    with pytest.raises(JobConflict, match="clock"):
+        claim_job(db, tenant_id="a", now=clock)
+
+
+@pytest.mark.parametrize("duration", [None, "60", True, 0, 3601])
+def test_claim_rejects_invalid_lease_duration(db, duration):
+    put(db)
+    with pytest.raises(JobConflict, match="lease duration"):
+        claim_job(db, tenant_id="a", now=100, lease_seconds=duration)
+
+
+@pytest.mark.parametrize("requested_id", [True, "1", 0, -1])
+def test_claim_rejects_invalid_job_id(db, requested_id):
+    put(db)
+    with pytest.raises(JobConflict, match="job ID"):
+        claim_job(db, tenant_id="a", now=100, job_id=requested_id)
