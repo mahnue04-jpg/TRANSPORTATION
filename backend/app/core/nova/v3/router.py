@@ -606,6 +606,13 @@ def v3_live_job_prepare(
             for item in persistent_results
             if item.get("persisted") and item.get("work_opportunity_id")
         }
+        saved = get_kernel().ingest_live_jobs(
+            selected,
+            organization_id=org_id,
+            owner_user_id=user.user_id,
+        )
+        # Only rotate obsolete leads after both the durable store and the
+        # in-memory owner work queue accepted the replacement search.
         reset_result = (
             reset_live_discovery_opportunities(
                 db,
@@ -615,11 +622,6 @@ def v3_live_job_prepare(
             )
             if retained_ids else
             {"archived_count": 0, "skipped_reason": "no_persisted_replacement"}
-        )
-        saved = get_kernel().ingest_live_jobs(
-            selected,
-            organization_id=org_id,
-            owner_user_id=user.user_id,
         )
 
         prepared = []
