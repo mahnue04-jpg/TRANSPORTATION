@@ -62,4 +62,5 @@ def csv_job_review(job_id: int, user: UserContext = Depends(require_work_revenue
 
 @router.get("/{job_id}/download", status_code=503)
 def csv_job_download(job_id: int, user: UserContext = Depends(require_work_revenue_owner)):
+    _owner_scope(user)
     _disabled()
