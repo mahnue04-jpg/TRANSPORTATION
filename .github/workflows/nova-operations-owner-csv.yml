@@ -2,7 +2,7 @@ name: Nova Operations real CSV owner MVP
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, fix/creative-studio-restore-page-20261031]
     paths:
       - 'backend/app/core/nova/work_revenue/operations_csv_cleanup.py'
       - 'backend/app/core/nova/work_revenue/operations_owner_csv_api.py'
