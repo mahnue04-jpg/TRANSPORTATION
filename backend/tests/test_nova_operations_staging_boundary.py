@@ -159,3 +159,77 @@ def test_fastapi_runtime_router_keeps_guards_and_denies_owner_calls(monkeypatch)
         for path in paths:
             response = client.post(path)
             assert response.status_code == 403
+
+
+
+def test_real_work_revenue_owner_guard_denies_nonowners():
+    """Execute the genuine owner guard body, not a replacement allowlist check.
+
+    Only heavy router imports are isolated. This does not verify signed JWT
+    parsing, persistence of owner grants, or a production user session.
+    """
+    from types import SimpleNamespace
+    from fastapi import Depends, HTTPException
+    import pytest
+
+    owner_source = (
+        ROOT / "app/core/nova/work_revenue/router.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(owner_source)
+    target = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "require_work_revenue_owner"
+    )
+    isolated = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias(name="annotations")], level=0,
+            ),
+            target,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(isolated)
+    grants = {"owner@synthetic.invalid"}
+    access_seen = []
+
+    def customer_access(_db, *, organization_id, user_id):
+        access_seen.append((organization_id, user_id))
+        return {"nova_saas_customer": True}
+
+    namespace = {
+        "Depends": Depends,
+        "get_current_user_context": lambda: None,
+        "get_db": lambda: None,
+        "HTTPException": HTTPException,
+        "_work_revenue_owner_emails": lambda: grants,
+        "customer_access": customer_access,
+    }
+    exec(compile(isolated, "work_revenue/router.py", "exec"), namespace)
+    guard = namespace["require_work_revenue_owner"]
+    owner = SimpleNamespace(
+        email="owner@synthetic.invalid",
+        organization_id="tenant-a",
+        user_id="owner-001",
+    )
+    assert guard(user=owner, db=object()) is owner
+    assert access_seen == []
+    customer = SimpleNamespace(
+        email="customer@synthetic.invalid",
+        organization_id="tenant-a",
+        user_id="customer-001",
+    )
+    with pytest.raises(HTTPException) as denied:
+        guard(user=customer, db=object())
+    assert denied.value.status_code == 403
+    assert access_seen == [("tenant-a", "customer-001")]
+    access_seen.clear()
+    # Non-owner must also be denied when SaaS classification is absent.
+    namespace["customer_access"] = lambda _db, **kwargs: {
+        "nova_saas_customer": False,
+    }
+    with pytest.raises(HTTPException) as denied_again:
+        guard(user=customer, db=object())
+    assert denied_again.value.status_code == 403
