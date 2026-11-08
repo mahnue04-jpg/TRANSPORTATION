@@ -209,3 +209,48 @@ def test_private_storage_disconnection_fails_closed_and_recovers(storage, tmp_pa
     monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "true")
     stream, _, _ = service.open_private_remote_asset("owner", project_id, asset["id"])
     assert stream.read() == original
+
+
+def test_durable_mode_does_not_reuse_legacy_ephemeral_import(storage, tmp_path, monkeypatch):
+    """Require remote persistence even when identical bytes exist on local disk."""
+    from app.core.nova.creative_studio import video_import
+    from app.core.nova.creative_studio.service import CreativeStudioService
+    from app.core.nova.creative_studio.store import CreativeStudioStore
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path / "media"))
+    monkeypatch.setattr(video_import, "validate_video", lambda _path: {
+        "duration_seconds": 30.0, "width": 720, "height": 1280,
+        "video_codec": "h264", "audio_codec": "aac", "decode_verified": True,
+    })
+    service = CreativeStudioService(CreativeStudioStore())
+    project_id = service.create_project("owner", {
+        "title": "Legacy to durable migration", "project_type": "promo_video",
+        "platform": "TikTok", "duration_target": 30,
+    })["id"]
+    original = b"synthetic-mp4-migration-fixture"
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "false")
+    monkeypatch.delenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", raising=False)
+    legacy = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )["asset"]
+    assert legacy["url"].startswith("private-studio://")
+
+    monkeypatch.setenv("NOVA_STUDIO_PRIVATE_OBJECT_STORAGE", "true")
+    monkeypatch.setenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "true")
+    migrated = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )
+    assert migrated["reused"] is False
+    assert migrated["asset"]["url"].startswith("private-studio-s3://")
+    assert migrated["asset"]["id"] != legacy["id"]
+    assert len(storage.objects) == 1
+    stream, mime, _ = service.open_private_remote_asset(
+        "owner", project_id, migrated["asset"]["id"]
+    )
+    assert mime == "video/mp4"
+    assert stream.read() == original
+    repeated = service.import_finished_video(
+        "owner", project_id, original, content_type="video/mp4"
+    )
+    assert repeated["reused"] is True
+    assert repeated["asset"]["id"] == migrated["asset"]["id"]
