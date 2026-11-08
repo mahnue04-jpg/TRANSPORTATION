@@ -46,6 +46,12 @@ def ensure_nova_creative_schema(engine: Engine | None = None) -> None:
                     "ALTER TABLE nova_creative_calendar_entries "
                     "ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 30"
                 ))
+        if "timeline_json" not in existing:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE nova_creative_calendar_entries "
+                    "ADD COLUMN timeline_json TEXT NOT NULL DEFAULT '[]'"
+                ))
     inspector = inspect(eng)
     names = set(inspector.get_table_names())
     missing = [table.name for table in CREATIVE_TABLES if table.name not in names]
