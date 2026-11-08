@@ -1396,7 +1396,12 @@
           "No live opportunities matched. Try a broader search.",
           liveJobItem
         );
-        showBanner("New search session loaded. Prior unprotected live-search results were archived; only revenue-ready QUALIFIED matches were saved. External submission remains off.", true);
+        if (body.live_search_claimed === false || body.live_search_status === "unavailable") {
+          $("live-job-results").textContent = "Live sources unavailable. No verified search results were returned. Please retry after the source recovers.";
+          showBanner("Live job sources were unavailable. This is not a zero-match search. No applications were submitted.");
+        } else {
+          showBanner("Live search completed. Review qualified leads below and on the owner board. Nothing was submitted.", true);
+        }
         await refresh();
       } catch (err) {
         $("live-job-status").textContent = err.message;
