@@ -91,9 +91,10 @@ def make_event(
     reference = evidence.get(required, "")
     if (
         not isinstance(reference, str)
-        or not reference.strip()
+        or not reference
         or len(reference) > 1024
         or any(ord(ch) < 32 or ord(ch) == 127 for ch in reference)
+        or not reference.strip()
     ):
         raise EvidenceError(f"Missing or invalid {required}")
     reference = reference.strip()
