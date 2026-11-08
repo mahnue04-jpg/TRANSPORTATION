@@ -75,6 +75,7 @@ def _guard_preview_discovery_storage() -> None:
     if not is_preview:
         return
     actual_url = str(os.getenv("DATABASE_URL") or "").strip()
+    parsed = urlsplit("")
     try:
         parsed = urlsplit(actual_url)
         actual_host = (parsed.hostname or "").lower()
