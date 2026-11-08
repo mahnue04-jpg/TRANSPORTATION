@@ -7,7 +7,7 @@ from app.core.nova.work_revenue.operations_artifact_review import (
     complete_and_store_review_artifact, ensure_artifact_schema, read_review_artifact,
 )
 from app.core.nova.work_revenue.operations_job_queue import (
-    claim_job, enqueue_job, ensure_schema, get_job_state,
+    JobConflict, claim_job, enqueue_job, ensure_schema, get_job_state,
 )
 
 
@@ -50,3 +50,25 @@ def test_storage_failure_rolls_back_completion_and_recovers(tmp_path):
     )
     assert read_review_artifact(restarted, tenant_id="tenant-b", job_id=job_id) is None
     restarted.close()
+
+
+@pytest.mark.parametrize("bad_time", [None, True, -1, "101"])
+def test_invalid_completion_time_does_not_change_claim(tmp_path, bad_time):
+    db = sqlite3.connect(tmp_path / "completion_time.sqlite")
+    ensure_schema(db)
+    ensure_artifact_schema(db)
+    job_id = enqueue_job(
+        db, tenant_id="tenant-a", idempotency_key="time-test",
+        kind="csv_cleanup", input_sha256="a" * 64,
+    )
+    claim = claim_job(db, tenant_id="tenant-a", now=100, lease_seconds=60)
+    content = "Name\nAna\n"
+    with pytest.raises(JobConflict, match="timestamp"):
+        complete_and_store_review_artifact(
+            db, job=claim, csv_text=content,
+            output_sha256=__import__("hashlib").sha256(content.encode()).hexdigest(),
+            now=bad_time,
+        )
+    assert get_job_state(db, tenant_id="tenant-a", job_id=job_id) == "running"
+    assert read_review_artifact(db, tenant_id="tenant-a", job_id=job_id) is None
+    db.close()
