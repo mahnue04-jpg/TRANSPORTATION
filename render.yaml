@@ -32,9 +32,9 @@ services:
       - key: ALLOWED_ORIGINS
         value: https://amicor-health-isf-py.onrender.com
       - key: AMICOR_SEED_PASSWORD
-        value: Amicor123!
+        sync: false
       - key: AMICOR_DEPLOYMENT_SYNC_KEY
-        value: Amicor123!
+        sync: false
       - key: AMICOR_PUBLIC_URL
         value: https://amicor-health-isf-py.onrender.com
       - key: HEALTH_ISF_AUTO_DISPATCH_ENABLED
