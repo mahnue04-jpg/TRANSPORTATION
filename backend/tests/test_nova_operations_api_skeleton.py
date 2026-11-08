@@ -100,3 +100,38 @@ def test_owner_scope_preserves_authorization_denial(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         scope.resolve_operations_owner_scope(SimpleNamespace(organization_id="tenant-a"))
     assert exc.value.status_code == 403
+
+
+
+def test_approval_identity_uses_authenticated_session_fields(monkeypatch):
+    monkeypatch.setattr(
+        scope.NovaCoreService, "resolve_organization_scope",
+        lambda user, requested: user.organization_id,
+    )
+    user = SimpleNamespace(organization_id="tenant-a", user_id="owner-123")
+    assert scope.owner_approval_identity(user) == ("tenant-a", "owner-123")
+
+
+@pytest.mark.parametrize("invalid_actor", [
+    None, "", " ", " owner ", "bad\nuser", "x" * 257, 123,
+])
+def test_approval_identity_rejects_missing_or_invalid_actor(monkeypatch, invalid_actor):
+    monkeypatch.setattr(
+        scope.NovaCoreService, "resolve_organization_scope",
+        lambda user, requested: user.organization_id,
+    )
+    user = SimpleNamespace(organization_id="tenant-a", user_id=invalid_actor)
+    with pytest.raises(HTTPException) as exc:
+        scope.owner_approval_identity(user)
+    assert exc.value.status_code == 403
+
+
+def test_approval_identity_rejects_cross_tenant_scope(monkeypatch):
+    monkeypatch.setattr(
+        scope.NovaCoreService, "resolve_organization_scope",
+        lambda user, requested: "other-tenant",
+    )
+    user = SimpleNamespace(organization_id="tenant-a", user_id="owner-123")
+    with pytest.raises(HTTPException) as exc:
+        scope.owner_approval_identity(user)
+    assert exc.value.status_code == 403
