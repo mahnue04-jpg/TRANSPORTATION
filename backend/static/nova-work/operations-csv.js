@@ -16,8 +16,6 @@
       message.textContent = "Sign in as the AMICOR Work & Revenue owner first.";
       return;
     }
-    const body = new FormData();
-    body.append("file", file);
     button.disabled = true;
     message.textContent = "Processing CSV for owner review...";
     try {
@@ -25,9 +23,11 @@
         method: "POST",
         credentials: "same-origin",
         headers: Object.assign({}, headers, {
-          "X-Nova-Owner-Action": "process-csv-for-owner-review"
+          "X-Nova-Owner-Action": "process-csv-for-owner-review",
+          "X-Nova-File-Name": file.name,
+          "Content-Type": "text/csv"
         }),
-        body: body
+        body: file
       });
       if (!response.ok) {
         let detail = "Request failed (" + response.status + ").";
@@ -47,7 +47,7 @@
       message.textContent = "Review required: " +
         (response.headers.get("X-Nova-Input-Rows") || "?") + " input rows, " +
         (response.headers.get("X-Nova-Output-Rows") || "?") +
-        " cleaned rows. Downloaded for your inspection. No data was saved.";
+        " cleaned rows. Downloaded for your inspection. No file was saved by the application.";
     } catch (_) {
       message.textContent = "Could not connect. Please check your sign-in and network.";
     } finally {
