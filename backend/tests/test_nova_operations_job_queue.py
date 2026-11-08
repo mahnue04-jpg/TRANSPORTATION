@@ -77,3 +77,32 @@ def test_expired_lease_cannot_complete(db):
     job = claim_job(db, tenant_id="a", now=0, lease_seconds=5)
     with pytest.raises(JobConflict):
         complete_job(db, job=job, output_sha256="b" * 64, now=5)
+
+
+
+@pytest.mark.parametrize("invalid", [None, 123, "", " ", "bad\nidentity", "bad\x00identity", "x" * 257])
+def test_enqueue_rejects_invalid_identity(db, invalid):
+    with pytest.raises(JobConflict, match="Invalid job identity"):
+        enqueue_job(
+            db, tenant_id=invalid, idempotency_key="key",
+            kind="spreadsheet", input_sha256="a" * 64,
+        )
+
+
+@pytest.mark.parametrize("retries", [None, "3", True, 0, 11])
+def test_enqueue_rejects_invalid_retry_limits(db, retries):
+    with pytest.raises(JobConflict, match="Invalid fingerprint or retry limit"):
+        enqueue_job(
+            db, tenant_id="tenant-a", idempotency_key="key",
+            kind="spreadsheet", input_sha256="a" * 64,
+            max_attempts=retries,
+        )
+
+
+def test_invalid_enqueue_does_not_store_job(db):
+    with pytest.raises(JobConflict):
+        enqueue_job(
+            db, tenant_id="tenant-a", idempotency_key="bad\nkey",
+            kind="spreadsheet", input_sha256="a" * 64,
+        )
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 0
