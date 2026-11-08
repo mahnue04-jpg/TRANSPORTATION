@@ -227,8 +227,17 @@ def claim_approved_assignment(
         raise JobConflict("Assignment claim requires dedicated transaction")
     db.execute("BEGIN IMMEDIATE")
     try:
+        # Inspect the complete link while holding the same writer lock.
+        # Corrupted metadata must fail closed rather than appear unclaimable.
+        if get_assignment_handoff(
+            db, acting_tenant_id=acting_tenant_id,
+            opportunity_id=opportunity_id,
+        ) is None:
+            db.commit()
+            return None
         row = db.execute(
-            """SELECT j.job_id, j.kind, j.input_sha256, j.attempts
+            """SELECT j.job_id, j.kind, j.input_sha256, j.attempts,
+                      a.reviewer_id
                FROM nova_operations_offline_handoffs AS h
                JOIN nova_operations_offline_approvals AS a
                  ON a.tenant_id=h.tenant_id
@@ -251,7 +260,9 @@ def claim_approved_assignment(
         if row is None:
             db.commit()
             return None
-        job_id, kind, fingerprint, attempts = row
+        job_id, kind, fingerprint, attempts, reviewer_id = row
+        if not _identifier(reviewer_id):
+            raise JobConflict("Invalid recorded owner reviewer")
         if not _valid_sha(fingerprint):
             raise JobConflict("Invalid approved job fingerprint")
         token = secrets.token_hex(24)
