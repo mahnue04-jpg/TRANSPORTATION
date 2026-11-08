@@ -246,6 +246,12 @@ def persist_live_job(
     if decision:
         stored["eligibility_decision"] = decision[:80]
     work_row.qualification_json = json.dumps(stored)
+    # An identical qualified listing may reappear after having been archived by
+    # an earlier search. Restore the canonical saved record, not a duplicate.
+    if work_row.archived and _live_status(job) == OUTCOME_QUALIFIED:
+        work_row.archived = False
+        work_row.archive_reason = None
+        work_row.updated_at = work_service.now()
     db.commit()
     db.refresh(work_row)
 
