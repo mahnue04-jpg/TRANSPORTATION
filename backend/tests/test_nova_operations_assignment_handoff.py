@@ -48,8 +48,10 @@ def test_repeated_handoff_is_idempotent_and_exactly_one_job(db):
 
 def test_cross_tenant_handoff_denied_and_invisible(db):
     first = handoff(db)
-    with pytest.raises(JobConflict, match="Tenant"):
+    with pytest.raises(JobConflict, match="owner approval|Tenant"):
         handoff(db, tenant="tenant-b", record_tenant="tenant-a")
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_approvals").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM nova_operations_offline_jobs").fetchone()[0] == 1
     assert get_assignment_handoff(db, acting_tenant_id="tenant-b",
                                   opportunity_id="lead-one") is None
     assert get_assignment_handoff(db, acting_tenant_id="tenant-a",
