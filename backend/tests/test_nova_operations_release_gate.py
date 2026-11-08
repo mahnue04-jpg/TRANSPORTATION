@@ -113,3 +113,30 @@ def test_approval_link_tampering_blocks_release(assignment):
     db.commit()
     with pytest.raises(JobConflict, match="inconsistent"):
         gate(db)
+
+
+def test_different_reviewer_cannot_pass_release_gate(assignment):
+    db, job_id = assignment
+    finish(db, job_id)
+    review_artifact(
+        db, tenant_id="tenant-a", job_id=job_id,
+        reviewer_id="other-owner", approve=True,
+    )
+    with pytest.raises(JobConflict, match="integrity"):
+        gate(db)
+
+
+def test_tampered_approval_reviewer_blocks_release(assignment):
+    db, job_id = assignment
+    finish(db, job_id)
+    review_artifact(
+        db, tenant_id="tenant-a", job_id=job_id,
+        reviewer_id="owner-1", approve=True,
+    )
+    db.execute(
+        "UPDATE nova_operations_offline_approvals SET reviewer_id=?",
+        ("different-owner",),
+    )
+    db.commit()
+    with pytest.raises(JobConflict, match="integrity"):
+        gate(db)
