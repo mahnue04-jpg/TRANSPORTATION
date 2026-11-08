@@ -667,6 +667,52 @@ def start_calendar_assembly_job(
         raise
 
 
+def _reconcile_saved_assembly(db: Session, owner_id: str, project_id: str,
+                              entry_id: str, job: GenerationJob) -> bool:
+    """Confirm a saved result if the worker stopped after storing the MP4.
+
+    Only a real, accessible owner-scoped output matching the ordered job
+    inputs is eligible; no work is submitted or billed during reconciliation.
+    """
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    original_order = list(job.result_asset_ids or [])
+    if len(original_order) < 2:
+        return False
+    service = get_service(db)
+    store = DbCreativeStudioStore(db)
+    candidates = [
+        asset for asset in store.list_assets(project_id, owner_id)
+        if asset.kind == "video"
+        and (asset.metadata or {}).get("pipeline") == "calendar_saved_clip_assembly"
+        and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+        and (asset.metadata or {}).get("source_asset_ids") == original_order
+        and asset.created_at >= job.created_at
+    ]
+    for asset in reversed(candidates):
+        digest = str((asset.metadata or {}).get("sha256") or "")
+        if not digest:
+            continue
+        try:
+            if str(asset.url or "").startswith("private-studio-s3://"):
+                confirmed = remote.enabled() and remote.object_exists(
+                    asset.url, owner_id, project_id, digest
+                )
+            else:
+                path, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                confirmed = path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest
+        except Exception:
+            confirmed = False
+        if confirmed:
+            job.status = "GENERATED"
+            job.result_asset_ids = [asset.id]
+            job.message = "Recovered verified assembled MP4 after interrupted job status update; owner review required."
+            job.updated_at = _now()
+            store.save_job(job)
+            return True
+    return False
+
+
 @router.get("/projects/{project_id}/calendar/{entry_id}/assembly-status")
 def calendar_assembly_status(
     project_id: str, entry_id: str,
@@ -684,8 +730,17 @@ def calendar_assembly_status(
     with _calendar_assembly_lock:
         running_here = key in _calendar_assembly_active
     if latest.status in {"QUEUED", "RUNNING"} and not running_here:
+        if _reconcile_saved_assembly(db, user.user_id, project_id, entry_id, latest):
+            return {
+                "status": "GENERATED", "job": latest.as_dict(),
+                "message": "Verified saved MP4 recovered. Review and download it in Studio.",
+            }
         return {
             "status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
-            "message": "The saved job was not found in this process. No new generation was submitted. Check saved assets before retrying.",
+            "message": (
+                "This process has no active worker. Another worker may still be processing, "
+                "or the render may have been interrupted. No work was restarted and no "
+                "completion was claimed without a verified output."
+            ),
         }
     return {"status": latest.status, "job": latest.as_dict()}
