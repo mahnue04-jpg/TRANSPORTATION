@@ -7,8 +7,9 @@ records. Enable it only in a separately configured, isolated staging app.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
+import re
+from urllib.parse import urlsplit
 import tempfile
 from pathlib import Path
 
@@ -34,7 +35,10 @@ def _require_isolated_demo() -> None:
         and str(os.getenv("AMICOR_ENVIRONMENT") or "").strip().lower() == "staging"
     )
     opted_in = str(os.getenv("NOVA_OPERATIONS_SYNTHETIC_HTTP_ENABLED") or "").strip().lower() == "true"
-    if not (staging and opted_in):
+    host = (urlsplit(str(os.getenv("RENDER_EXTERNAL_URL") or "")).hostname or "").lower()
+    branch = str(os.getenv("RENDER_GIT_BRANCH") or "").strip().lower()
+    is_preview = bool(re.fullmatch(r".+-pr-\d+\.onrender\.com", host))
+    if not (staging and opted_in and is_preview and branch not in {"", "main", "master"}):
         raise HTTPException(
             status_code=503,
             detail="Synthetic acceptance download disabled; isolated staging opt-in required.",
