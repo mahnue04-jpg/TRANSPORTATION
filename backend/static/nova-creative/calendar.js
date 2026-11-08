@@ -77,6 +77,9 @@
       }
       if (entry.status === "approved") {
         actions.appendChild(button("Prepare in Studio", prepare, entry));
+        if (entry.content_mode === "faceless" || entry.content_mode === "education") {
+          actions.appendChild(button("Render preview MP4", renderPreview, entry));
+        }
       }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
@@ -151,6 +154,26 @@
       return;
     }
     mutate(entry, { status: "approved" }, "approve");
+  }
+  async function renderPreview(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    busy = true;
+    var currentRevision = revision;
+    feedback("Rendering local 30-second video preview. No paid provider is used.");
+    try {
+      var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/render-preview", {
+        method: "POST"
+      });
+      if (active() !== project || currentRevision !== revision) return;
+      if (!result || result.status !== "PREVIEW_RENDERED" || !result.download_url) {
+        throw new Error("No verified preview MP4 was returned.");
+      }
+      feedback("Preview MP4 saved to this project. Open Asset list to review/download. Publishing is disabled.");
+      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+    } catch (err) {
+      feedback(err.message || "Preview rendering failed. Your reviewed plan was preserved.", true);
+    } finally { busy = false; }
   }
   function cancel(entry) {
     if (window.confirm("Cancel this planned video? It will not be posted.")) {
