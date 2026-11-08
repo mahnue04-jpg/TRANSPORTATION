@@ -49,7 +49,7 @@ def _load_app():
         "clean_csv_text": cleanup.clean_csv_text,
         "require_work_revenue_owner": require_owner,
     }
-    code = compile(ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), function], type_ignores=[]), str(API_FILE), "exec")
+    code = compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), function], type_ignores=[])), str(API_FILE), "exec")
     exec(code, ns)
     app = FastAPI()
     app.include_router(router, prefix="/api/nova/work")
