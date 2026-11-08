@@ -158,3 +158,47 @@ def test_replay_with_different_fingerprint_cannot_change_approved_job(db):
     assert db.execute(
         "SELECT job_id, input_sha256 FROM nova_operations_offline_jobs"
     ).fetchone() == (first.job_id, DIGEST)
+
+
+
+def test_atomic_handoff_rolls_back_when_job_insert_fails(db):
+    """A failed job write must not leave a fresh approval behind."""
+    db.execute(
+        """CREATE TRIGGER reject_synthetic_job
+           BEFORE INSERT ON nova_operations_offline_jobs
+           BEGIN
+             SELECT RAISE(ABORT, 'synthetic job insert failure');
+           END"""
+    )
+    db.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic job insert failure"):
+        approve(db)
+    assert db.execute(
+        "SELECT COUNT(*) FROM nova_operations_offline_approvals"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM nova_operations_offline_handoffs"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM nova_operations_offline_jobs"
+    ).fetchone()[0] == 0
+
+
+def test_atomic_handoff_rolls_back_when_link_insert_fails(db):
+    """A failed handoff write must not leave approval or orphaned job."""
+    db.execute(
+        """CREATE TRIGGER reject_synthetic_handoff
+           BEFORE INSERT ON nova_operations_offline_handoffs
+           BEGIN
+             SELECT RAISE(ABORT, 'synthetic handoff insert failure');
+           END"""
+    )
+    db.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic handoff insert failure"):
+        approve(db)
+    for table in (
+        "nova_operations_offline_approvals",
+        "nova_operations_offline_handoffs",
+        "nova_operations_offline_jobs",
+    ):
+        assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
