@@ -531,6 +531,49 @@ def v3_live_job_prepare(
         # Collapse the combined set once more before qualification so the owner
         # sees one canonical opportunity, not one copy per search variant.
         collected = dedupe_opportunities(collected)
+        search_health = classify_live_search({
+            "providers_queried": sources,
+            "provider_result_counts": provider_counts,
+            "provider_errors": provider_errors,
+            "jobs": collected,
+        })
+        if not search_health["live_search_claimed"]:
+            # A failed provider run must not archive previously saved leads.
+            # No persistence, in-memory ingest, or proposal creation occurs.
+            return {
+                "query": payload.query,
+                "source": "multi_source",
+                "sources": sources,
+                "provider_result_counts": provider_counts,
+                "provider_errors": provider_errors,
+                "provider_health": provider_health,
+                "funnel": merge_search_funnels(funnel_parts),
+                "search_plan": search_plan,
+                "reset_result": {"archived_count": 0, "skipped_reason": "source_unavailable"},
+                "external_action_taken": False,
+                "external_submission": False,
+                "financial_execution": False,
+                **search_health,
+                "ranked_count": 0,
+                "raw_ranked_count": 0,
+                "selected_count": 0,
+                "prepared_count": 0,
+                "prepared": [],
+                "duplicates": [],
+                "saved": {"created": [], "duplicates": []},
+                "qualification_counts": {
+                    OUTCOME_QUALIFIED: 0,
+                    OUTCOME_NEEDS_OWNER_REVIEW: 0,
+                    OUTCOME_NOT_QUALIFIED: 0,
+                },
+                "qualification_reconciled": True,
+                "auto_prepared_only_qualified": True,
+                "held_for_owner_review": [],
+                "skipped_not_qualified": [],
+                "rejected_from_live_results": 0,
+                "ranked_jobs": [],
+                "persistent_results": [],
+            }
         ranked = qualify_and_rank_live_jobs(payload.query, collected)
         visible_ranked = [
             job for job in ranked
