@@ -7,6 +7,7 @@ from sqlalchemy.engine import Engine
 
 from app.core.nova.creative_studio.db_models import (
     NovaCreativeAsset,
+    NovaCreativeCalendarEntry,
     NovaCreativeBrand,
     NovaCreativeBrief,
     NovaCreativeJob,
@@ -19,6 +20,7 @@ from app.db.session import Base, engine as default_engine
 
 CREATIVE_TABLES = (
     NovaCreativeBrand.__table__,
+    NovaCreativeCalendarEntry.__table__,
     NovaCreativeBrief.__table__,
     NovaCreativeProject.__table__,
     NovaCreativeAsset.__table__,
