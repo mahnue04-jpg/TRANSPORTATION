@@ -11,6 +11,7 @@ from app.core.nova.creative_studio.db_models import (
     NovaCreativeBrand,
     NovaCreativeBrief,
     NovaCreativeJob,
+    NovaCreativeRenderClaim,
     NovaCreativeOrder,
     NovaCreativeProject,
     NovaCreativeScene,
@@ -26,6 +27,7 @@ CREATIVE_TABLES = (
     NovaCreativeAsset.__table__,
     NovaCreativeScene.__table__,
     NovaCreativeJob.__table__,
+    NovaCreativeRenderClaim.__table__,
     NovaCreativeOrder.__table__,
     NovaCreativeWebhookEvent.__table__,
 )
