@@ -631,6 +631,7 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             "status": "REUSABLE" if verified is not None else "NEEDS_REBUILD",
             "asset_id": verified.id if verified is not None else None,
             "asset_sha256": str((verified.metadata or {}).get("sha256") or "") if verified is not None else None,
+            "quality_review": (verified.metadata or {}).get("chapter_quality_review") if verified is not None else None,
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
     missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
@@ -658,6 +659,62 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             if entry.status != "approved"
             else "Rebuild only missing or changed chapters; completed originals remain saved."
         ),
+    }
+
+
+class ChapterQualityReviewIn(BaseModel):
+    visuals_ok: bool
+    audio_ok: bool
+    captions_ok: bool
+    continuity_ok: bool
+    notes: str = Field(default="", max_length=2000)
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/chapters/{chapter_index}/review/{asset_id}")
+def review_saved_chapter(
+    project_id: str, entry_id: str, chapter_index: int, asset_id: str,
+    payload: ChapterQualityReviewIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Review a chapter's exact current MP4, without clearing publishing gates."""
+    plan = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+    chapter = next((item for item in plan["chapters"]
+                    if item["chapter_index"] == chapter_index), None)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    if chapter["status"] != "REUSABLE" or chapter["asset_id"] != asset_id:
+        raise HTTPException(status_code=409, detail="This chapter video no longer matches the current saved chapter.")
+    store = DbCreativeStudioStore(db)
+    asset = next((item for item in store.list_assets(project_id, user.user_id)
+                  if item.id == asset_id), None)
+    if asset is None or (asset.metadata or {}).get("sha256") != chapter["asset_sha256"]:
+        raise HTTPException(status_code=409, detail="Chapter MP4 changed or could not be verified.")
+    passed = all((payload.visuals_ok, payload.audio_ok,
+                  payload.captions_ok, payload.continuity_ok))
+    review = {
+        "status": "REVIEW_PASSED" if passed else "CHANGES_REQUIRED",
+        "visuals_ok": payload.visuals_ok,
+        "audio_ok": payload.audio_ok,
+        "captions_ok": payload.captions_ok,
+        "continuity_ok": payload.continuity_ok,
+        "notes": payload.notes.strip(),
+        "reviewed_by": user.user_id,
+        "reviewed_at": _now(),
+        "file_sha256": chapter["asset_sha256"],
+        "chapter_index": chapter_index,
+    }
+    asset.metadata = {
+        **(asset.metadata or {}), "chapter_quality_review": review,
+        "publish_ready": False, "commercial_complete": False,
+        "external_publishing": False,
+    }
+    store.save_asset(asset)
+    return {
+        "status": review["status"], "chapter_index": chapter_index,
+        "asset_id": asset_id, "review": review,
+        "published": False, "publish_ready": False,
+        "message": "Chapter quality review saved. Full master and publishing approvals remain separate.",
     }
 
 
