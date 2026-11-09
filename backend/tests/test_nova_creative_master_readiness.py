@@ -126,3 +126,81 @@ def test_chapter_plan_missing_file_blocks_without_review(monkeypatch, tmp_path):
     assert plan["needs_rebuild_indices"] == [1]
     assert plan["needs_review_indices"] == []
     assert plan["chapters"][1]["review_status"] == "NEEDS_REBUILD"
+
+
+def test_final_master_endpoint_rejects_unreviewed_chapters(monkeypatch):
+    """API guard: approved source MP4s alone never authorize a master."""
+    from types import SimpleNamespace
+    import pytest
+    from fastapi import BackgroundTasks, HTTPException
+    from app.core.nova.creative_studio import calendar as studio
+
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "master_ready": False,
+        "needs_rebuild_indices": [],
+        "needs_review_indices": [1],
+        "needs_correction_indices": [1],
+        "version_sha256": "a" * 64,
+    })
+    monkeypatch.setattr(studio, "start_chapter_master_job",
+                        lambda *args: pytest.fail("Unreviewed export must not queue"))
+    with pytest.raises(HTTPException) as error:
+        studio.update_final_master(
+            "project", "entry",
+            studio.ConfirmedMasterUpdateIn(version_sha256="a" * 64,
+                                            confirm_rebuild=True),
+            BackgroundTasks(), SimpleNamespace(user_id="owner"), object(),
+        )
+    assert error.value.status_code == 409
+    assert error.value.detail["needs_review_indices"] == [1]
+    assert error.value.detail["needs_correction_indices"] == [1]
+
+
+def test_final_master_endpoint_rejects_stale_review_version(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    from fastapi import BackgroundTasks, HTTPException
+    from app.core.nova.creative_studio import calendar as studio
+
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "master_ready": True, "version_sha256": "b" * 64
+    })
+    monkeypatch.setattr(studio, "start_chapter_master_job",
+                        lambda *args: pytest.fail("Stale export must not queue"))
+    with pytest.raises(HTTPException) as error:
+        studio.update_final_master(
+            "project", "entry",
+            studio.ConfirmedMasterUpdateIn(version_sha256="a" * 64,
+                                            confirm_rebuild=True),
+            BackgroundTasks(), SimpleNamespace(user_id="owner"), object(),
+        )
+    assert error.value.status_code == 409
+    assert "Refresh readiness" in error.value.detail
+
+
+def test_failed_chapter_review_requires_actionable_notes(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    from fastapi import HTTPException
+    from app.core.nova.creative_studio import calendar as studio
+
+    sha = "a" * 64
+    asset = SimpleNamespace(id="asset-a", metadata={"sha256": sha})
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "chapters": [{"chapter_index": 0, "status": "REUSABLE",
+                      "asset_id": "asset-a", "asset_sha256": sha}]
+    })
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_assets=lambda *args: [asset],
+        save_asset=lambda *args: pytest.fail("Invalid review must not persist"),
+    ))
+    with pytest.raises(HTTPException) as error:
+        studio.review_saved_chapter(
+            "project", "entry", 0, "asset-a",
+            studio.ChapterQualityReviewIn(
+                visuals_ok=False, audio_ok=True, captions_ok=True,
+                continuity_ok=True, notes="   ",
+            ),
+            SimpleNamespace(user_id="owner"), object(),
+        )
+    assert error.value.status_code == 422
