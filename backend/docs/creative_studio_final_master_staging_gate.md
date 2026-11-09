@@ -51,6 +51,10 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 19. **Worker failure isolation:** Queue two independent project exports. Inject an exception in one worker invocation. The other project must still be attempted; the failed claim is preserved for explicit operator reconciliation, not silently retried as success.
 20. **Cross-process duplicate prevention:** Submit the same export from two web processes at nearly the same time. Confirm SQL compare-and-swap is the authoritative claim gate; never rely solely on a process-local lock.
 21. **Dedicated worker restart:** Kill the dedicated worker mid-export. Confirm a missing/private-unverified output is never reported as successful, stale RUNNING claims are not automatically rerun, and owner/operator review is required before retry.
+22. **Simultaneous terminal-claim replacement:** After an earlier export is GENERATED or ERROR, submit overlapping replacement requests from two independent processes. Only one exact old-job/state compare-and-swap may queue a new job; the other must leave the winning claim untouched and clear its process-local active marker.
+23. **Stale worker completion fencing:** A stale worker with a mismatched job ID/owner or a claim no longer RUNNING attempts to mark success. It must not mutate the shared claim.
+24. **Malformed checkpoint metadata:** Use invalid JSON, top-level array, or invalid nested `pinned_master`. Status must fail closed to unconfirmed or unverified, not crash and not return a fabricated generated master.
+25. **In-process fallback regression:** With the dedicated worker disabled, verify the original web background task queues once and retains its local per-project duplicate marker until the task exits. No provider request or publishing may occur.
 
 
 ## Evidence required before release
@@ -63,7 +67,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all twenty-one staging scenarios pass with recorded evidence.
+- CI and all twenty-five staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
