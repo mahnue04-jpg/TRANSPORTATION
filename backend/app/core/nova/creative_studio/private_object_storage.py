@@ -78,25 +78,32 @@ def put_original(owner_id: str, project_id: str, filename: str, data: bytes, sha
     return _REMOTE_PREFIX + key
 
 
-def object_exists(ref: str, owner_id: str, project_id: str, sha256: str) -> bool:
-    """Check owner-scoped object HEAD metadata and reject empty objects.
+def owned_object_size(ref: str, owner_id: str, project_id: str,
+                      sha256: str) -> int | None:
+    """Verify private HEAD metadata and return the expected transfer size.
 
-    This is a cheap readiness check, not a full remote byte-by-byte digest.
-    Full MP4 integrity is verified when the source is downloaded for assembly.
+    HEAD checks existence, positive byte length and saved upload checksum
+    metadata. It does not rehash remote bytes; streaming limits and staging
+    checksum verification remain separate requirements.
     """
     key = parse_owned_ref(ref, owner_id, project_id)
-    if key is None:
-        return False
+    if key is None or not isinstance(sha256, str) or len(sha256) != 64:
+        return None
     info = _client().head_object(Bucket=_bucket(), Key=key)
     try:
         length = int(info.get("ContentLength", 0))
     except (TypeError, ValueError):
-        return False
-    return (
-        length > 0
-        and isinstance(sha256, str) and len(sha256) == 64
-        and info.get("Metadata", {}).get("sha256") == sha256
-    )
+        return None
+    if length <= 0 or length > 2 * 1024 * 1024 * 1024:
+        return None
+    if info.get("Metadata", {}).get("sha256") != sha256:
+        return None
+    return length
+
+
+def object_exists(ref: str, owner_id: str, project_id: str, sha256: str) -> bool:
+    """Legacy readiness predicate over the same owner-scoped HEAD checks."""
+    return owned_object_size(ref, owner_id, project_id, sha256) is not None
 
 
 def open_original(ref: str, owner_id: str, project_id: str):
