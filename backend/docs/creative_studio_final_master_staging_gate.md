@@ -47,6 +47,11 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 15. **Final-master corrections:** Mark a final-master checklist item as failed without notes. Expect HTTP 422. Add specific notes and verify the review saves for that exact master SHA; no automatic publishing.
 16. **Completed-output disappearance:** After a job is marked GENERATED in a staging database, make its private MP4 unavailable. Master job status must return `COMPLETED_ASSET_UNVERIFIED` rather than GENERATED, with a warning in the UI. Do not auto-queue a duplicate or claim the MP4 can be downloaded. Restore the exact object and SHA; verify the job reports GENERATED with the verified asset ID.
 17. **Completed-output version mismatch:** Keep the same saved job but change the master's pinned-version metadata in a test fixture. The completed status must be rejected, even if the object exists.
+18. **Dedicated worker queue:** With `NOVA_STUDIO_MASTER_WORKER_ENABLED=true`, enqueue a ready master through the web API. Check the persisted SQL claim is QUEUED and no web process background task or in-memory active marker is used. Verify the dedicated worker claims it exactly once.
+19. **Worker failure isolation:** Queue two independent project exports. Inject an exception in one worker invocation. The other project must still be attempted; the failed claim is preserved for explicit operator reconciliation, not silently retried as success.
+20. **Cross-process duplicate prevention:** Submit the same export from two web processes at nearly the same time. Confirm SQL compare-and-swap is the authoritative claim gate; never rely solely on a process-local lock.
+21. **Dedicated worker restart:** Kill the dedicated worker mid-export. Confirm a missing/private-unverified output is never reported as successful, stale RUNNING claims are not automatically rerun, and owner/operator review is required before retry.
+
 
 ## Evidence required before release
 
@@ -58,7 +63,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all seventeen staging scenarios pass with recorded evidence.
+- CI and all twenty-one staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
