@@ -1076,9 +1076,13 @@ def start_chapter_master_job(
         if key in _master_export_active:
             return {"status": "ALREADY_RUNNING",
                     "message": "This project's master export is already running."}
-        existing = _master_job_status(db, user.user_id, project_id, entry_id)
-        if existing["status"] in {"QUEUED", "RUNNING", "INTERRUPTED_UNCONFIRMED"}:
-            return {"status": existing["status"], "job": existing["job"],
+        latest = next(
+            (j for j in DbCreativeStudioStore(db).list_jobs(project_id, user.user_id)
+             if j.kind == "calendar_master:" + entry_id),
+            None,
+        )
+        if latest is not None and latest.status in {"QUEUED", "RUNNING"}:
+            return {"status": "ALREADY_RUNNING", "job": latest.as_dict(),
                     "message": "Check the saved master job before submitting again."}
         _master_export_active.add(key)
     try:
