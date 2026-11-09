@@ -45,6 +45,8 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 13. **Approval revoked after job queue:** Queue a job with two reviewed chapters, then change a selected chapter's saved review before the worker verifies it. Expect HTTP 409/failed job, unchanged originals and no final-master asset registered from the stale snapshot.
 14. **Legacy snapshot:** Attempt assembly from an older claim without per-chapter approved review digests. Reject it without opening source media or generating an output.
 15. **Final-master corrections:** Mark a final-master checklist item as failed without notes. Expect HTTP 422. Add specific notes and verify the review saves for that exact master SHA; no automatic publishing.
+16. **Completed-output disappearance:** After a job is marked GENERATED in a staging database, make its private MP4 unavailable. Master job status must return `COMPLETED_ASSET_UNVERIFIED` rather than GENERATED, with a warning in the UI. Do not auto-queue a duplicate or claim the MP4 can be downloaded. Restore the exact object and SHA; verify the job reports GENERATED with the verified asset ID.
+17. **Completed-output version mismatch:** Keep the same saved job but change the master's pinned-version metadata in a test fixture. The completed status must be rejected, even if the object exists.
 
 ## Evidence required before release
 
@@ -56,7 +58,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all fifteen staging scenarios pass with recorded evidence.
+- CI and all seventeen staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
