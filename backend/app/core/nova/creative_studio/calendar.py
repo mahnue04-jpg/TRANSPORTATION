@@ -1808,3 +1808,143 @@ def review_storyboard_preview(
         "asset_id": asset.id, "published": False, "publish_ready": False,
         "message": "Quality review saved for this MP4 only. Commercial and publishing approval remain separate.",
     }
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/storyboard-revisions")
+def list_storyboard_revisions(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """List immutable snapshots for comparison without reverting current work."""
+    _project(db, user.user_id, project_id)
+    _entry(db, user.user_id, project_id, entry_id)
+    records = (
+        db.query(NovaCreativeStoryboardRevision)
+        .filter_by(owner_id=user.user_id, project_id=project_id, entry_id=entry_id)
+        .order_by(NovaCreativeStoryboardRevision.created_at.desc())
+        .limit(40).all()
+    )
+    return {
+        "revisions": [{
+            "id": row.id,
+            "saved_at": row.created_at,
+            "sha256": row.source_sha256,
+            "narrator_voice": row.narrator_voice,
+            "narrator_speed": row.narrator_speed,
+            "scenes": json.loads(row.scenes_json),
+        } for row in records],
+        "restored": False, "published": False,
+    }
+
+
+def _render_single_storyboard_scene(db: Session, owner_id: str,
+                                    project_id: str, entry_id: str,
+                                    scene_index: int) -> dict:
+    """Render exactly one approved 2-12s scene as a protected QC-only MP4."""
+    from app.core.nova.creative_studio import private_object_storage as remote
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the current storyboard before rendering.")
+    if entry.content_mode not in {"faceless", "education"}:
+        raise HTTPException(status_code=422, detail="Local scene preview requires faceless or education mode.")
+    scenes = json.loads(entry.storyboard_json or "[]")
+    if not 0 <= scene_index < len(scenes):
+        raise HTTPException(status_code=404, detail="Storyboard scene not found.")
+    scene = scenes[scene_index]
+    seconds = int(scene.get("duration_seconds") or 0)
+    if not 2 <= seconds <= 12:
+        raise HTTPException(status_code=422, detail="This local scene preview supports 2-12 seconds.")
+    narration = str(scene.get("narration") or "").strip()
+    if not narration or len(narration) > 450:
+        raise HTTPException(status_code=422, detail="Scene narration must be 1-450 characters.")
+    store = DbCreativeStudioStore(db)
+    service = get_service(db)
+    key = hashlib.sha256(json.dumps({
+        "scene": scene, "voice": entry.narrator_voice, "speed": entry.narrator_speed,
+        "scene_index": scene_index,
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    for asset in reversed(store.list_assets(project_id, owner_id)):
+        meta = asset.metadata or {}
+        if (asset.kind == "video" and
+                meta.get("pipeline") == "calendar_scene_preview" and
+                meta.get("source_sha256") == key and
+                meta.get("calendar_entry_id") == entry_id):
+            digest = str(meta.get("sha256") or "")
+            try:
+                if asset.url and str(asset.url).startswith("private-studio-s3://"):
+                    valid = bool(digest) and remote.enabled() and remote.object_exists(
+                        asset.url, owner_id, project_id, digest)
+                else:
+                    stored, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                    valid = bool(digest) and stored.is_file() and hashlib.sha256(
+                        stored.read_bytes()).hexdigest() == digest
+                if valid:
+                    return {**_preview_result(project_id, asset, reused=True),
+                            "scene_index": scene_index}
+            except Exception:
+                pass
+    item = {
+        "heading": scene["heading"], "voiceover_text": narration,
+        "subtitle_text": narration, "duration_seconds": seconds,
+        "transition": scene.get("transition", "cut"), "caption_by_scene": True,
+        "caption_cues": scene.get("caption_cues") or [],
+    }
+    visual_id = scene.get("visual_asset_id")
+    if visual_id:
+        if not any(a.id == visual_id and a.kind == "image" for a in store.list_assets(project_id, owner_id)):
+            raise HTTPException(status_code=422, detail="Selected visual is missing from this project.")
+        try:
+            image_path, media_type, _ = service.open_asset_file(owner_id, project_id, visual_id)
+        except CreativeStudioError as exc:
+            raise HTTPException(status_code=422, detail="Scene visual is unavailable.") from exc
+        if media_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise HTTPException(status_code=422, detail="Scene visual is not a supported image.")
+        item["visual_image_path"] = str(image_path)
+    with tempfile.TemporaryDirectory(prefix="nova-scene-qc-") as scratch:
+        root = Path(scratch)
+        output = root / "scene-review.mp4"
+        try:
+            measured = render_offline_montage(
+                [item], output_mp4=output, audio_wav=root / "narration.wav",
+                vertical=True, voice=entry.narrator_voice, speed=entry.narrator_speed,
+            )
+        except OfflineCommercialError as exc:
+            raise HTTPException(status_code=422, detail=exc.message) from exc
+        if (not output.is_file() or not measured.get("audio_present")
+                or abs(float(measured.get("duration_seconds") or 0) - seconds) > 2):
+            raise HTTPException(status_code=422, detail="Verified single-scene MP4 was not produced.")
+        try:
+            imported = service.import_finished_video(
+                owner_id, project_id, output.read_bytes(), content_type="video/mp4"
+            )
+        except CreativeStudioError as exc:
+            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+    asset = next((a for a in store.list_assets(project_id, owner_id)
+                  if a.id == imported["asset"]["id"]), None)
+    if asset is None:
+        raise HTTPException(status_code=500, detail="Scene preview file was not saved.")
+    asset.metadata = {
+        **(asset.metadata or {}), "pipeline": "calendar_scene_preview",
+        "source_sha256": key, "calendar_entry_id": entry_id,
+        "scene_index": scene_index, "quality_state": "SCENE_PREVIEW_ONLY",
+        "commercial_complete": False, "publish_ready": False,
+        "captions_timing_verified": False, "external_publishing": False,
+        "paid_provider_charges": False,
+    }
+    asset = store.save_asset(asset)
+    return {**_preview_result(project_id, asset, reused=False),
+            "scene_index": scene_index}
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/scenes/{scene_index}/render-preview")
+async def render_single_storyboard_scene(
+    project_id: str, entry_id: str, scene_index: int,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return await run_in_threadpool(
+        _render_single_storyboard_scene, db, user.user_id,
+        project_id, entry_id, scene_index,
+    )
