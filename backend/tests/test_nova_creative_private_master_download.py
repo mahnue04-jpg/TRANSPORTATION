@@ -47,6 +47,7 @@ def test_private_download_requires_head_validation_before_open(monkeypatch):
     assert result[0] is stream
     assert result[1] == "video/mp4"
     assert result[3] == 512
+    assert result[4] == "a" * 64
     assert [event[0] for event in seen] == ["head", "open"]
 
 
