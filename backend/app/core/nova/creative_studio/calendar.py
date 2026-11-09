@@ -577,6 +577,19 @@ def replace_calendar_chapter_clip(
     }
 
 
+def _chapter_review_passed(review: dict | None, chapter_index: int, asset_sha256: str | None) -> bool:
+    """Only a passed review of this exact saved MP4 clears the master quality gate."""
+    return bool(
+        asset_sha256
+        and isinstance(review, dict)
+        and review.get("status") == "REVIEW_PASSED"
+        and review.get("file_sha256") == asset_sha256
+        and review.get("chapter_index") == chapter_index
+        and all(review.get(key) is True for key in
+                ("visuals_ok", "audio_ok", "captions_ok", "continuity_ok"))
+    )
+
+
 def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id: str) -> dict:
     """Describe current chapter outputs without rendering or billing.
 
@@ -636,6 +649,18 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
     missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
+    needs_review = [
+        row["chapter_index"] for row in states
+        if row["status"] == "REUSABLE" and not _chapter_review_passed(
+            row["quality_review"], row["chapter_index"], row["asset_sha256"]
+        )
+    ]
+    needs_correction = [
+        row["chapter_index"] for row in states
+        if row["status"] == "REUSABLE"
+        and isinstance(row["quality_review"], dict)
+        and row["quality_review"].get("status") == "CHANGES_REQUIRED"
+    ]
     # A version token binds customer confirmation to exact verified chapter
     # assets and current saved plan, not merely chapter counts.
     version = hashlib.sha256(json.dumps({
@@ -643,7 +668,8 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
         "duration_seconds": entry.duration_seconds,
         "chapters": chapters,
         "verified_assets": [
-            {"asset_id": row["asset_id"], "sha256": row["asset_sha256"]}
+            {"asset_id": row["asset_id"], "sha256": row["asset_sha256"],
+             "quality_review": row["quality_review"]}
             for row in states
         ],
     }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -653,12 +679,19 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
         "chapters": states,
         "reusable_chapters": len(states) - len(missing),
         "needs_rebuild_indices": missing,
-        "master_ready": entry.status == "approved" and len(states) >= 2 and not missing,
+        "needs_review_indices": needs_review,
+        "needs_correction_indices": needs_correction,
+        "master_ready": (entry.status == "approved" and len(states) >= 2
+                         and not missing and not needs_review),
         "published": False, "paid_provider_charges": False,
         "message": (
             "Review and approve the plan before rebuilding chapters."
             if entry.status != "approved"
-            else "Rebuild only missing or changed chapters; completed originals remain saved."
+            else "Rebuild missing chapters, then pass each verified MP4 quality review."
+            if missing
+            else "Complete quality reviews or correct affected chapters before final-master export."
+            if needs_review
+            else "All saved chapters are verified and quality-reviewed for private final-master export."
         ),
     }
 
