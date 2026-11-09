@@ -54,6 +54,29 @@ def draw_title_card(scene: dict[str, Any], dest: Path, *, width: int = 540, heig
     from PIL import Image, ImageDraw, ImageFont
     heading = str(scene.get("heading") or "Hook").strip()
     color = _COLORS.get(heading, (11, 42, 74))
+    selected_image = scene.get("visual_image_path")
+    if selected_image:
+        from PIL import ImageOps, UnidentifiedImageError
+        try:
+            with Image.open(selected_image) as source:
+                source.verify()
+            with Image.open(selected_image) as source:
+                if source.width < 256 or source.height < 256 or source.width * source.height > 20_000_000:
+                    raise ValueError("Scene visual dimensions are unsupported")
+                image = ImageOps.fit(source.convert("RGB"), (width, height), method=Image.Resampling.LANCZOS)
+        except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+            raise OfflineCommercialError("SCENE_VISUAL_INVALID", "The selected scene image cannot be decoded.") from exc
+        # Simple original-image preview, with restrained branding overlay.
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(image)
+        overlay_height = max(96, int(height * 0.13))
+        draw.rectangle((0, 0, width, overlay_height), fill=(12, 30, 54))
+        label = "Scene preview - owner-provided image"
+        font_path = str(_FONT) if _FONT.is_file() else None
+        font = ImageFont.truetype(font_path, max(16, width // 22)) if font_path else ImageFont.load_default()
+        draw.text((max(12, width // 25), max(12, height // 40)), label, fill=(255, 255, 255), font=font)
+        image.save(dest, format="PNG")
+        return
     image = Image.new("RGB", (width, height), color)
     draw = ImageDraw.Draw(image)
     font_path = str(_FONT) if _FONT.is_file() else None
