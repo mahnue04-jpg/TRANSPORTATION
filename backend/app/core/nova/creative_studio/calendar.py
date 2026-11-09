@@ -1295,9 +1295,10 @@ async def export_calendar_master(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
-    """Initial bounded master export, not a resumable 2h production worker."""
-    return await run_in_threadpool(
-        _assemble_chapter_master, db, user.user_id, project_id, entry_id,
+    """Legacy synchronous route intentionally closed: use pinned saved jobs."""
+    raise HTTPException(
+        status_code=409,
+        detail="Use the version-confirmed Update Final Master workflow. Unpinned synchronous exports are disabled.",
     )
 
 
