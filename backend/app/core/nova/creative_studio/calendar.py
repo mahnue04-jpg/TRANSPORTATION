@@ -1460,6 +1460,19 @@ async def export_calendar_master(
     )
 
 
+def _safe_master_checkpoint(raw: str | None) -> dict:
+    """Read checkpoint metadata without trusting corrupt or non-object JSON.
+
+    Malformed checkpoints have no trustworthy pinned master version, so
+    recovery and completion verification must fail closed.
+    """
+    try:
+        parsed = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _master_claim_key(owner_id: str, project_id: str, entry_id: str) -> str:
     return hashlib.sha256(
         (owner_id + ":" + project_id + ":" + entry_id).encode("utf-8")
@@ -1624,7 +1637,7 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
             # Another process already claimed this work, or it was canceled.
             return
         claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
-        saved = json.loads(claim.checkpoint_json or "{}") if claim and claim.job_id == job_id else {}
+        saved = _safe_master_checkpoint(claim.checkpoint_json) if claim and claim.job_id == job_id else {}
         pinned = saved.get("pinned_master")
         if not isinstance(pinned, dict):
             # Let the normal job failure handler mark this claim ERROR instead
@@ -1684,7 +1697,7 @@ def _master_job_status(db: Session, owner_id: str,
     with _master_export_lock:
         locally_running = key in _master_export_active
     claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
-    checkpoint = (json.loads(claim.checkpoint_json or "{}")
+    checkpoint = (_safe_master_checkpoint(claim.checkpoint_json)
                   if claim is not None and claim.job_id == latest.id else {})
     if latest.status == "GENERATED":
         # A database success flag alone is insufficient: the private MP4 may
