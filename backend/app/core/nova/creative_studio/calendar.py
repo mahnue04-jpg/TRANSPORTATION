@@ -829,7 +829,8 @@ def calendar_assembly_status(
     return {"status": latest.status, "job": latest.as_dict()}
 
 
-def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str):
+def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str,
+                             checkpoint=None):
     """Combine verified finished chapter assets into one private 10-30m master."""
     import os
     import shutil
@@ -851,6 +852,8 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
         raise HTTPException(status_code=422, detail="Create 2–12 completed chapters totaling the planned duration.")
     store = DbCreativeStudioStore(db)
     assets = store.list_assets(project_id, owner_id)
+    if checkpoint is not None:
+        checkpoint("VERIFYING_CHAPTERS", {"chapter_count": len(chapters)})
     selected = []
     for index, chapter in enumerate(chapters):
         matches = [
@@ -908,6 +911,8 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
             if not digest or hashlib.sha256(output.read_bytes()).hexdigest() != digest:
                 raise HTTPException(status_code=422, detail="Chapter checksum verification failed.")
             files.append(output)
+        if checkpoint is not None:
+            checkpoint("RENDERING_MASTER", {"verified_chapters": len(files)})
         output = root / "finished-master.mp4"
         try:
             measured = join_chapters(files, output, expected_seconds=entry.duration_seconds)
@@ -918,6 +923,8 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         sha = digest.hexdigest()
+        if checkpoint is not None:
+            checkpoint("UPLOADING_MASTER", {"master_sha256": sha, "bytes": output.stat().st_size})
         filename = new_id("imported_video") + ".mp4"
         try:
             ref = remote.put_original_file(owner_id, project_id, filename, output, sha)
@@ -942,6 +949,8 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
         except Exception:
             remote.delete_original(ref, owner_id, project_id)
             raise
+    if checkpoint is not None:
+        checkpoint("SAVED_MASTER", {"asset_id": asset.id, "master_sha256": sha})
     return _master_result(project_id, asset, reused=False)
 
 
@@ -993,6 +1002,36 @@ def _claim_queued_master(db: Session, owner_id: str, project_id: str,
     )
     db.commit()
     return updated.rowcount == 1
+
+
+def _write_master_checkpoint(owner_id: str, project_id: str,
+                             entry_id: str, job_id: str, stage: str,
+                             details: dict | None = None) -> None:
+    """Record verified processing stage for the exact active SQL claim."""
+    if stage not in {"VERIFYING_CHAPTERS", "RENDERING_MASTER",
+                     "UPLOADING_MASTER", "SAVED_MASTER"}:
+        raise ValueError("Invalid checkpoint stage")
+    db = SessionLocal()
+    try:
+        updated = db.execute(
+            update(NovaCreativeRenderClaim)
+            .where(
+                NovaCreativeRenderClaim.claim_key == _master_claim_key(owner_id, project_id, entry_id),
+                NovaCreativeRenderClaim.job_id == job_id,
+                NovaCreativeRenderClaim.state == "RUNNING",
+            )
+            .values(
+                checkpoint_json=json.dumps({
+                    "stage": stage, "details": details or {}, "updated_at": _now(),
+                }, sort_keys=True),
+                updated_at=_now(),
+            )
+        )
+        db.commit()
+        if updated.rowcount != 1:
+            raise RuntimeError("Render claim is no longer active")
+    finally:
+        db.close()
 
 
 def _heartbeat_master_claim(owner_id: str, project_id: str, entry_id: str,
@@ -1073,7 +1112,12 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         )
         heartbeat_thread.start()
         try:
-            result = _assemble_chapter_master(db, owner_id, project_id, entry_id)
+            result = _assemble_chapter_master(
+                db, owner_id, project_id, entry_id,
+                checkpoint=lambda stage, details: _write_master_checkpoint(
+                    owner_id, project_id, entry_id, job_id, stage, details
+                ),
+            )
             job.status = "GENERATED"
             job.result_asset_ids = [result["asset"]["id"]]
             job.message = "Finished chapter master saved. Owner review is required."
@@ -1112,6 +1156,7 @@ def _master_job_status(db: Session, owner_id: str,
     if latest.status not in {"QUEUED", "RUNNING"} or locally_running:
         return {"status": latest.status, "job": latest.as_dict()}
     claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
+    checkpoint = json.loads(claim.checkpoint_json or "{}") if claim is not None else {}
     # With an external worker the web process cannot observe its local lock.
     # Only declare interrupted after a conservative lease grace period, never
     # claim completion without a remotely verified master.
@@ -1127,7 +1172,8 @@ def _master_job_status(db: Session, owner_id: str,
             grace = timedelta(minutes=3 if claim.state == "RUNNING" else 5)
             if elapsed <= grace:
                 return {"status": claim.state, "job": latest.as_dict(),
-                        "message": "The export is queued or claimed by a render worker."}
+                        "message": "The export is queued or claimed by a render worker.",
+                        "checkpoint": checkpoint}
         except (ValueError, TypeError):
             pass
 
@@ -1159,6 +1205,7 @@ def _master_job_status(db: Session, owner_id: str,
                     "message": "A previously completed private master was verified and recovered."}
     return {
         "status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
+        "checkpoint": checkpoint,
         "message": "No active worker was found here; another worker may still be running. "
                    "No new render was submitted or charged.",
     }
