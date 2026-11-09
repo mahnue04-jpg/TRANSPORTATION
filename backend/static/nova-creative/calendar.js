@@ -455,6 +455,43 @@
           }
         }, master);
         panel.appendChild(correctionButton);
+        var assistantCorrection = button("Ask Nova to prepare chapter correction brief", async function () {
+          if (busy || active() !== project) return;
+          busy = true;
+          try {
+            var proposal = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(entry.id) + "/masters/" +
+              encodeURIComponent(master.asset_id) +
+              "/assistant/chapter-revision-proposal", {method: "POST"});
+            if (active() !== project || !host.contains(panel)) return;
+            if (!proposal || proposal.status !== "DRAFT_CHAPTER_REVISION" ||
+                !Number.isInteger(proposal.chapter_index) ||
+                proposal.chapter_index < 0 || proposal.chapter_index >= (entry.chapters || []).length) {
+              throw new Error("Nova did not return a valid chapter correction.");
+            }
+            var drafts = (entry.chapters || []).map(function (chapter) {
+              return {
+                title: chapter.title, duration_seconds: chapter.duration_seconds,
+                asset_ids: (chapter.asset_ids || []).slice(),
+                revision_note: chapter.revision_note || ""
+              };
+            });
+            drafts[proposal.chapter_index].revision_note = proposal.proposed_chapter.revision_note;
+            await editChapters(entry, drafts);
+            if (active() !== project) return;
+            var selectedPanel = $("calendar-chapters").querySelector(
+              '[data-chapter-index="' + proposal.chapter_index + '"]');
+            if (selectedPanel) {
+              selectedPanel.scrollIntoView({behavior: "smooth", block: "start"});
+              var field = selectedPanel.querySelector("textarea");
+              if (field) field.focus({preventScroll: true});
+            }
+            feedback("Nova opened an unsaved chapter revision brief. Review it and edit the actual clips before saving; no video was changed.");
+          } catch (err) {
+            feedback(err.message || "Nova could not prepare this chapter brief.", true);
+          } finally { busy = false; }
+        }, master);
+        panel.appendChild(assistantCorrection);
         host.appendChild(panel);
       });
       host.scrollIntoView({behavior: "smooth", block: "start"});
@@ -1186,6 +1223,7 @@
         return {
           title: chapter.title,
           duration_seconds: chapter.duration_seconds,
+          revision_note: chapter.revision_note || "",
           asset_ids: (chapter.asset_ids || []).slice()
         };
       });
@@ -1315,6 +1353,17 @@
           input.setAttribute("aria-label", "Chapter title");
           input.addEventListener("input", function () { row.title = input.value; });
           panel.appendChild(input);
+          var revisionLabel = document.createElement("label");
+          revisionLabel.textContent = "Chapter correction brief (edit before saving)";
+          var revisionInput = document.createElement("textarea");
+          revisionInput.rows = 3;
+          revisionInput.maxLength = 2000;
+          revisionInput.value = row.revision_note || "";
+          revisionInput.addEventListener("input", function () {
+            row.revision_note = revisionInput.value;
+          });
+          revisionLabel.appendChild(revisionInput);
+          panel.appendChild(revisionLabel);
           var mins = document.createElement("input");
           mins.type = "number";
           mins.min = "2";
