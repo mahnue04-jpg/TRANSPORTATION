@@ -202,3 +202,70 @@ def test_contended_terminal_claim_releases_in_process_marker(monkeypatch):
         assert key not in studio._master_export_active
     finally:
         studio._master_export_active.discard(key)
+
+
+def test_in_process_mode_still_enqueues_one_background_task(monkeypatch):
+    """Dedicated-mode fix must not disable the original in-process fallback."""
+    import json
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    monkeypatch.delenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", raising=False)
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: SimpleNamespace(
+        status="approved", duration_seconds=600,
+        chapters_json=json.dumps([{}, {}]),
+    ))
+    monkeypatch.setattr(studio, "_master_export_limit_seconds", lambda: 3600)
+    sha = "a" * 64
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "master_ready": True, "version_sha256": sha,
+        "chapters": [
+            {"chapter_index": i, "asset_id": f"asset-{i}",
+             "asset_sha256": sha,
+             "quality_review": {"status": "REVIEW_PASSED"}}
+            for i in range(2)
+        ],
+    })
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_jobs=lambda *args: [],
+        save_job=lambda job: job,
+    ))
+
+    class DB:
+        def __init__(self):
+            self.claims = []
+
+        def get(self, *args):
+            return None
+
+        def add(self, claim):
+            self.claims.append(claim)
+
+        def flush(self):
+            pass
+
+    class Tasks:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, *args):
+            self.calls.append(args)
+
+    db = DB()
+    tasks = Tasks()
+    key = ("owner", "project", "entry")
+    studio._master_export_active.discard(key)
+    try:
+        result = studio.start_chapter_master_job(
+            "project", "entry", tasks,
+            SimpleNamespace(user_id="owner"), db,
+        )
+        assert result["status"] == "QUEUED"
+        assert len(tasks.calls) == 1
+        assert tasks.calls[0][0] is studio._run_chapter_master_job
+        assert len(db.claims) == 1
+        assert key in studio._master_export_active
+    finally:
+        studio._master_export_active.discard(key)
