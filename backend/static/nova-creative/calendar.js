@@ -1240,6 +1240,10 @@
       var readinessTitle = document.createElement("legend");
       readinessTitle.textContent = "Rebuild affected chapters";
       readinessPanel.appendChild(readinessTitle);
+      var readinessLegendHelp = document.createElement("p");
+      readinessLegendHelp.className = "hint";
+      readinessLegendHelp.textContent = "Final-master export requires each saved chapter MP4 to be verified and its exact file to pass visuals, audio, captions and continuity review. This does not authorize publishing.";
+      readinessPanel.appendChild(readinessLegendHelp);
       var readinessList = document.createElement("div");
       readinessPanel.appendChild(readinessList);
       var readinessButton = button("Check chapter rebuild readiness", async function () {
@@ -1253,8 +1257,15 @@
           readinessList.replaceChildren();
           (plan.chapters || []).forEach(function (chapter) {
             var line = document.createElement("p");
+            var stateLabel = chapter.status !== "REUSABLE"
+              ? "rebuild needed"
+              : chapter.review_status === "REVIEW_PASSED"
+                ? "MP4 verified; quality review passed"
+                : chapter.review_status === "CHANGES_REQUIRED"
+                  ? "MP4 verified; corrections required"
+                  : "MP4 verified; quality review required";
             line.textContent = "Chapter " + (chapter.chapter_index + 1) + " — " + chapter.title +
-              ": " + (chapter.status === "REUSABLE" ? "verified saved chapter — reuse" : "rebuild needed");
+              ": " + stateLabel;
             if (chapter.status === "NEEDS_REBUILD" && plan.plan_status === "approved") {
               line.appendChild(button("Rebuild this chapter", async function () {
                 if (busy || active() !== project) return;
@@ -1288,9 +1299,11 @@
               qc.appendChild(qcTitle);
               var qcStatus = document.createElement("p");
               qcStatus.setAttribute("role", "status");
-              qcStatus.textContent = review.status
-                ? "Saved review: " + review.status.replace(/_/g, " ").toLowerCase()
-                : "No saved quality review for this chapter version.";
+              qcStatus.textContent = chapter.review_status === "REVIEW_PASSED"
+                ? "This exact chapter MP4 passed quality review."
+                : chapter.review_status === "CHANGES_REQUIRED"
+                  ? "Corrections required for this chapter MP4. Add replacement footage, rebuild, and review the new version."
+                  : "No valid passed quality review for this exact chapter MP4.";
               qc.appendChild(qcStatus);
               var chapterVideo = document.createElement("video");
               chapterVideo.controls = true;
@@ -1350,20 +1363,33 @@
               qc.appendChild(qcNotes);
               qc.appendChild(button("Save chapter quality review", async function () {
                 if (busy || active() !== project) return;
+                var body = {notes: qcNotes.value};
+                qcChecks.forEach(function (field) { body[field[0]] = qcInputs[field[0]].checked; });
+                var passedAll = qcChecks.every(function (field) { return body[field[0]] === true; });
+                if (!passedAll && !body.notes.trim()) {
+                  feedback("Enter specific correction notes when a chapter fails quality review.", true);
+                  qcNotes.focus();
+                  return;
+                }
                 busy = true;
+                var didSaveReview = false;
                 try {
-                  var body = {notes: qcNotes.value};
-                  qcChecks.forEach(function (field) { body[field[0]] = qcInputs[field[0]].checked; });
                   var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
                     "/chapters/" + chapter.chapter_index + "/review/" +
                     encodeURIComponent(chapter.asset_id), {method: "PUT", body: JSON.stringify(body)});
                   if (active() !== project || !readinessList.contains(qc)) return;
                   qcStatus.textContent = "Saved review: " + saved.status.replace(/_/g, " ").toLowerCase() +
                     ". Refresh readiness before final-master export. This does not approve publishing.";
-                  feedback(saved.message || "Chapter review saved. Recheck readiness.");
+                  didSaveReview = true;
+                  feedback(saved.message || "Chapter review saved. Updating master readiness.");
                 } catch (err) {
                   feedback(err.message || "Chapter review was not saved.", true);
-                } finally { busy = false; }
+                } finally {
+                  busy = false;
+                  if (didSaveReview && active() === project && host.contains(readinessPanel)) {
+                    readinessButton.click();
+                  }
+                }
               }, chapter));
               line.appendChild(qc);
             }
@@ -1392,7 +1418,8 @@
             var updateButton = button("Update Final Master (review-only)", async function () {
               if (busy || active() !== project) return;
               var matching = plan.chapters.every(function (ch, i) {
-                return ch.status === "REUSABLE" && ch.chapter_index === i && Boolean(ch.asset_id);
+                return ch.status === "REUSABLE" && ch.review_status === "REVIEW_PASSED" &&
+                  ch.chapter_index === i && Boolean(ch.asset_id);
               });
               if (!matching) {
                 feedback("Some chapters must be rebuilt before final master export.", true);
