@@ -193,3 +193,21 @@ class NovaCreativeCalendarEntry(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeRenderClaim(Base):
+    """Unique per-plan render claim, shared across all application workers.
+
+    Claims may be marked interrupted after a restart; they are never
+    automatically rerun without verified recovery and explicit resubmission.
+    """
+
+    __tablename__ = "nova_creative_render_claims"
+
+    claim_key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    job_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
