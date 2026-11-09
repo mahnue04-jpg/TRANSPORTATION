@@ -369,6 +369,13 @@
         <label>What would you like help creating?<textarea id="studio-guide-request" rows="3" maxlength="1000" placeholder="Help me plan a 10-minute educational video about..."></textarea></label>
         <button type="button" id="studio-guide-help" class="secondary">Help me plan my video</button>
         <div id="studio-guide-response" class="output" role="status" aria-live="polite"></div>
+        <h4>Ask Nova about your saved video plan</h4>
+        <p class="hint">Select a saved plan to ask Nova for script, chapter or production advice. AI conversation requires owner-enabled model access; otherwise Nova gives basic project guidance without charging a provider.</p>
+        <label>Saved plan<select id="studio-assistant-entry"><option value="">Select a saved plan</option></select></label>
+        <div id="studio-assistant-conversation" class="output" aria-live="polite"></div>
+        <label>Question to Nova<textarea id="studio-assistant-question" rows="2" maxlength="2000" placeholder="How can I improve my opening scene?"></textarea></label>
+        <button type="button" id="studio-assistant-send" class="secondary">Ask Nova Studio</button>
+        <p id="studio-assistant-feedback" class="hint" role="status"></p>
       </details>
       <p id="calendar-feedback" class="hint" role="status" aria-live="polite"></p>
       <h3>Saved video plans</h3>
