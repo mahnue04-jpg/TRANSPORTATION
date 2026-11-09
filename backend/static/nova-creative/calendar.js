@@ -114,7 +114,8 @@
           try {
             var info = await bridge.api(basePath(project) + "/" +
               encodeURIComponent(selected.id) + "/master-status", { method: "GET" });
-            feedback(info.message || ("Master export: " + info.status));
+            var step = info.checkpoint && info.checkpoint.stage;
+            feedback((info.message || ("Master export: " + info.status)) + (step ? " Last saved stage: " + step.replace(/_/g, " ").toLowerCase() + "." : ""));
             if (info.status === "GENERATED" && typeof bridge.refreshProductionAssets === "function") {
               await bridge.refreshProductionAssets();
             }
@@ -224,7 +225,8 @@
           feedback(status.message || "Master export needs attention. Saved chapters are preserved.", true);
           return;
         }
-        feedback("Master export: " + status.status + ". Completed chapter files remain saved.");
+        var stage = status.checkpoint && status.checkpoint.stage;
+        feedback("Master export: " + status.status + (stage ? " · " + stage.replace(/_/g, " ").toLowerCase() : "") + ". Completed chapters remain saved.");
       }
       feedback("Master export is still processing or its status is not confirmed. Reopen the project and check status.");
     } catch (err) {
