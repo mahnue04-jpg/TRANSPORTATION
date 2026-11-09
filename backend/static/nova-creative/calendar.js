@@ -386,6 +386,12 @@
           video.dataset.objectUrl = objectUrl;
           video.src = objectUrl;
           if (!videoPanel.contains(video)) videoPanel.appendChild(video);
+          video.addEventListener("emptied", function () {
+            if (!video.src && video.dataset.objectUrl) {
+              URL.revokeObjectURL(video.dataset.objectUrl);
+              delete video.dataset.objectUrl;
+            }
+          }, { once: true });
           feedback("Saved video loaded. Play or scrub to review the actual narration against caption timing.");
         } catch (err) {
           feedback(err.message || "Protected preview playback unavailable.", true);
