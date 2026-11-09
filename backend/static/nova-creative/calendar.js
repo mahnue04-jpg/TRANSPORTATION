@@ -281,7 +281,7 @@
     } finally { busy = false; }
   }
 
-  async function editChapters(entry) {
+  async function editChapters(entry, proposedChapters) {
     var project = requestProject();
     if (!project || busy) return;
     var host = $("calendar-chapters");
@@ -292,7 +292,7 @@
       var videos = (detail.assets || []).filter(function (a) {
         return a.kind === "video" && a.url && a.media_available !== false && a.id;
       });
-      var chapterRows = (entry.chapters || []).map(function (chapter) {
+      var chapterRows = (Array.isArray(proposedChapters) ? proposedChapters : (entry.chapters || [])).map(function (chapter) {
         return {
           title: chapter.title,
           duration_seconds: chapter.duration_seconds,
@@ -304,7 +304,9 @@
       host.appendChild(title);
       var note = document.createElement("p");
       note.className = "hint";
-      note.textContent = "Build the full video one chapter at a time. Each chapter is 2–10 minutes and uses previously saved clips. Chapter durations must add up to the entire planned length. Saving edits requires another approval.";
+      note.textContent = (Array.isArray(proposedChapters)
+        ? "Nova prepared an editable chapter suggestion. It has NOT been saved. Review every title and duration, then choose Save chapter plan to apply."
+        : "Build the full video one chapter at a time. Each chapter is 2–10 minutes and uses previously saved clips. Chapter durations must add up to the entire planned length. Saving edits requires another approval.");
       host.appendChild(note);
       var list = document.createElement("div");
       host.appendChild(list);
@@ -626,6 +628,53 @@
       await load();
     } catch (err) { feedback(err.message || "Unable to save plan.", true); }
     finally { busy = false; $("calendar-save").disabled = false; }
+  });
+  $("studio-assistant-propose-chapters").addEventListener("click", async function () {
+    var project = requestProject();
+    var entryId = $("studio-assistant-entry").value;
+    if (!project || busy) return;
+    var plan = entries.find(function (item) { return item.id === entryId; });
+    if (!plan) {
+      $("studio-assistant-feedback").textContent = "Select a saved video plan first.";
+      return;
+    }
+    if (plan.status === "canceled") {
+      $("studio-assistant-feedback").textContent = "Canceled plans cannot be edited.";
+      return;
+    }
+    if ((plan.chapters || []).length &&
+        !window.confirm("This will open a suggested chapter outline in the editor. Your existing chapters will not change unless you explicitly save the new outline. Continue?")) {
+      return;
+    }
+    busy = true;
+    $("studio-assistant-propose-chapters").disabled = true;
+    var selectedProject = project;
+    $("studio-assistant-feedback").textContent = "Nova is preparing an editable chapter structure...";
+    try {
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entryId) + "/assistant/chapter-proposal", { method: "POST" });
+      if (active() !== selectedProject || $("studio-assistant-entry").value !== entryId) return;
+      if (!result || result.status !== "DRAFT_SUGGESTION" ||
+          !Array.isArray(result.chapters) || !result.chapters.length) {
+        throw new Error("No supported chapter outline was returned.");
+      }
+      var proposedTotal = result.chapters.reduce(function (sum, ch) {
+        return sum + Number(ch.duration_seconds);
+      }, 0);
+      if (proposedTotal !== plan.duration_seconds) {
+        throw new Error("Suggested chapter durations do not match the saved plan.");
+      }
+      $("studio-assistant-feedback").textContent =
+        "Suggested " + result.chapters.length +
+        " editable chapters. Review and use Save chapter plan if you agree. Nothing has been saved yet.";
+      await editChapters(plan, result.chapters);
+    } catch (err) {
+      $("studio-assistant-feedback").textContent =
+        err.message || "Chapter proposal could not be prepared.";
+    } finally {
+      busy = false;
+      $("studio-assistant-propose-chapters").disabled = false;
+    }
   });
   $("studio-assistant-entry").addEventListener("change", function () {
     studioAssistantHistory = [];
