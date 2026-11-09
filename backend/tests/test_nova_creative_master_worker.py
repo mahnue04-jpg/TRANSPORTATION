@@ -143,3 +143,17 @@ def test_dedicated_mode_queues_sql_without_web_process_marker(monkeypatch):
         assert db.saved_claims[0].state == "QUEUED"
     finally:
         studio._master_export_active.discard(key)
+
+
+def test_dedicated_worker_backs_off_if_all_jobs_raise(monkeypatch):
+    jobs = [SimpleNamespace(owner_id="a", project_id="one",
+                            entry_id="entry", job_id="job-1")]
+    monkeypatch.setattr(master_worker, "_stop", False)
+    monkeypatch.setattr(master_worker, "SessionLocal", lambda: _Session(jobs))
+
+    def always_raise(*args):
+        raise RuntimeError("simulated unavailable database resource")
+
+    monkeypatch.setattr(master_worker, "_run_chapter_master_job", always_raise)
+    # False tells main() to take its configured poll delay.
+    assert master_worker.run_one_queued() is False
