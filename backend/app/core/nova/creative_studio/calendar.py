@@ -1437,7 +1437,9 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         saved = json.loads(claim.checkpoint_json or "{}") if claim and claim.job_id == job_id else {}
         pinned = saved.get("pinned_master")
         if not isinstance(pinned, dict):
-            raise RuntimeError("Master job has no pinned approved chapter selection")
+            # Let the normal job failure handler mark this claim ERROR instead
+            # of abandoning a RUNNING claim outside the guarded try/except.
+            pinned = {}
         job.status = "RUNNING"
         job.message = "Combining pinned approved chapters into a private MP4."
         job.updated_at = _now()
@@ -1520,13 +1522,20 @@ def _master_job_status(db: Session, owner_id: str,
         except (ValueError, TypeError):
             pass
 
-    # If the process died after saving the master but before updating its job,
-    # recover only a verifiably persisted file created after the job began.
+    # Recover only an asset produced for this exact pinned job version;
+    # older masters for the same entry must not be accepted as this result.
+    expected_version = (checkpoint.get("pinned_master") or {}).get("version_sha256")
+    # Legacy jobs without a pinned selection are unconfirmed, not recoverable.
+    if not isinstance(expected_version, str) or len(expected_version) != 64:
+        return {"status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
+                "checkpoint": checkpoint,
+                "message": "No approved chapter snapshot is attached to this job."}
     candidates = [
         asset for asset in store.list_assets(project_id, owner_id)
         if asset.kind == "video"
         and (asset.metadata or {}).get("pipeline") == "calendar_chapter_master"
         and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+        and (asset.metadata or {}).get("pinned_version_sha256") == expected_version
         and asset.created_at >= latest.created_at
         and str(asset.url or "").startswith("private-studio-s3://")
     ]
