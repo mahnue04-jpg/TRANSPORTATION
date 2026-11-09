@@ -83,6 +83,7 @@
             entry.duration_seconds >= 15 && entry.duration_seconds <= 120 &&
             Array.isArray(entry.storyboard) && entry.storyboard.length > 0) {
           actions.appendChild(button("Render storyboard preview", renderStoryboardPreview, entry));
+          actions.appendChild(button("Assemble saved scenes", assembleStoryboardScenes, entry));
         }
         if ((entry.content_mode === "faceless" || entry.content_mode === "education") && entry.duration_seconds === 30) {
           actions.appendChild(button("Render preview MP4", renderPreview, entry));
@@ -1223,6 +1224,26 @@
     }
   }
 
+  async function assembleStoryboardScenes(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    if (!window.confirm("Assemble only the currently approved, previously rendered scene segments? Missing scenes must be rendered individually first. Saved originals will remain unchanged.")) return;
+    busy = true;
+    feedback("Verifying saved scene segments and joining the review-only MP4...");
+    try {
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entry.id) + "/assemble-scene-previews", {method: "POST"});
+      if (active() !== project) return;
+      if (!result || result.status !== "PREVIEW_RENDERED") {
+        throw new Error("Studio did not confirm a verified assembled MP4.");
+      }
+      feedback("Assembled " + result.reused_scene_segments +
+        " verified saved scenes into a private review-only MP4. No paid generation or publishing.");
+      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+    } catch (err) {
+      feedback(err.message || "Assembly was not completed. Check each scene was separately rendered after your latest storyboard approval.", true);
+    } finally { busy = false; }
+  }
   async function renderStoryboardPreview(entry) {
     var project = requestProject();
     if (!project || busy) return;
