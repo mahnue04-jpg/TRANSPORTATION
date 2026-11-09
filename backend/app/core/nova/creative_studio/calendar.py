@@ -831,7 +831,7 @@ def calendar_assembly_status(
 
 def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str,
                              checkpoint=None):
-    """Combine verified finished chapter assets into one private 10-30m master."""
+    """Combine verified chapter assets into one private 10–60m master."""
     import os
     import shutil
     from app.core.nova.creative_studio import private_object_storage as remote
@@ -844,13 +844,13 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
     entry = _entry(db, owner_id, project_id, entry_id)
     if entry.status != "approved":
         raise HTTPException(status_code=409, detail="Approve the chapter plan before exporting.")
-    if not 600 <= entry.duration_seconds <= 1800:
-        raise HTTPException(status_code=422, detail="Master export currently supports 10–30 minutes.")
+    if not 600 <= entry.duration_seconds <= 3600:
+        raise HTTPException(status_code=422, detail="Master export currently supports 10–60 minutes.")
     if not remote.enabled():
         raise HTTPException(status_code=503, detail="Private durable object storage is required for long-form masters.")
     chapters = json.loads(entry.chapters_json or "[]")
-    if not 2 <= len(chapters) <= 12 or sum(int(ch["duration_seconds"]) for ch in chapters) != entry.duration_seconds:
-        raise HTTPException(status_code=422, detail="Create 2–12 completed chapters totaling the planned duration.")
+    if not 2 <= len(chapters) <= 24 or sum(int(ch["duration_seconds"]) for ch in chapters) != entry.duration_seconds:
+        raise HTTPException(status_code=422, detail="Create 2–24 completed chapters totaling the planned duration.")
     store = DbCreativeStudioStore(db)
     assets = store.list_assets(project_id, owner_id)
     if checkpoint is not None:
@@ -1324,13 +1324,13 @@ def start_chapter_master_job(
     entry = _entry(db, user.user_id, project_id, entry_id)
     if entry.status != "approved":
         raise HTTPException(status_code=409, detail="Approve all chapters first.")
-    if not 600 <= entry.duration_seconds <= 1800:
-        raise HTTPException(status_code=422, detail="Master export supports 10–30 minutes.")
+    if not 600 <= entry.duration_seconds <= 3600:
+        raise HTTPException(status_code=422, detail="Master export supports 10–60 minutes.")
     if not remote.enabled():
         raise HTTPException(status_code=503, detail="Private durable storage is required.")
     chapters = json.loads(entry.chapters_json or "[]")
-    if not 2 <= len(chapters) <= 12:
-        raise HTTPException(status_code=422, detail="Save 2–12 completed chapters first.")
+    if not 2 <= len(chapters) <= 24:
+        raise HTTPException(status_code=422, detail="Save 2–24 completed chapters first.")
     key = (user.user_id, project_id, entry_id)
     with _master_export_lock:
         if key in _master_export_active:
