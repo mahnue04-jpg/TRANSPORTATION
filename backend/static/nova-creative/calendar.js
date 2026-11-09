@@ -367,6 +367,28 @@
           label.appendChild(document.createTextNode(" " + field[1]));
           panel.appendChild(label);
         });
+        var correctionCategoryLabel = document.createElement("label");
+        correctionCategoryLabel.textContent = "Main issue";
+        var correctionCategory = document.createElement("select");
+        [["general", "General"], ["footage", "Footage"], ["audio", "Narration / audio"],
+         ["captions", "Captions"], ["continuity", "Chapter continuity"],
+         ["rights", "Rights and licensing"]].forEach(function (option) {
+          correctionCategory.add(new Option(option[1], option[0]));
+        });
+        correctionCategory.value = master.review && master.review.correction_category || "general";
+        correctionCategoryLabel.appendChild(correctionCategory);
+        panel.appendChild(correctionCategoryLabel);
+        var correctionChapterLabel = document.createElement("label");
+        correctionChapterLabel.textContent = "Affected chapter of this saved master (optional)";
+        var correctionChapter = document.createElement("select");
+        correctionChapter.add(new Option("General master issue", ""));
+        for (var chapterNumber = 0; chapterNumber < Number(master.chapter_count || 0); chapterNumber++) {
+          correctionChapter.add(new Option("Chapter " + (chapterNumber + 1), String(chapterNumber)));
+        }
+        correctionChapter.value = master.review && master.review.correction_chapter_index != null
+          ? String(master.review.correction_chapter_index) : "";
+        correctionChapterLabel.appendChild(correctionChapter);
+        panel.appendChild(correctionChapterLabel);
         var noteLabel = document.createElement("label");
         noteLabel.textContent = "Review or correction notes";
         var notes = document.createElement("textarea");
@@ -385,7 +407,10 @@
             state.textContent = "Review this saved master in the player or download and watch the full MP4 before submitting the checklist.";
             return;
           }
-          var body = {notes: notes.value};
+          var body = {
+            notes: notes.value, correction_category: correctionCategory.value,
+            correction_chapter_index: correctionChapter.value === "" ? null : Number(correctionChapter.value)
+          };
           checks.forEach(function (field) { body[field[0]] = controls[field[0]].checked; });
           try {
             var response = await bridge.api(basePath(project) + "/" +
@@ -401,6 +426,28 @@
             state.textContent = err.message || "Master review could not be saved.";
           }
         }, master));
+        var correctionButton = button("Open affected chapter correction", async function () {
+          if (active() !== project) return;
+          try {
+            var plan = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(entry.id) + "/masters/" +
+              encodeURIComponent(master.asset_id) + "/correction-plan", {method: "GET"});
+            if (active() !== project || !host.contains(panel)) return;
+            if (!plan.can_open_current_editor) {
+              feedback("The affected chapter is no longer in the current plan. Compare versions before making changes.", true);
+              return;
+            }
+            if (!plan.current_plan_matches_reviewed_chapter &&
+                !window.confirm("This chapter has changed since the reviewed master. Open the current chapter editor without changing it automatically?")) return;
+            await editChapters(entry);
+            if (active() !== project) return;
+            feedback(plan.message + " Chapter " + (plan.chapter_index + 1) +
+              " needs review: " + (plan.notes || "No correction notes provided."));
+          } catch (err) {
+            feedback(err.message || "Save a changes-required review and affected chapter first.", true);
+          }
+        }, master);
+        panel.appendChild(correctionButton);
         host.appendChild(panel);
       });
       host.scrollIntoView({behavior: "smooth", block: "start"});
