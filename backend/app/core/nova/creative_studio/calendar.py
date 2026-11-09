@@ -829,6 +829,14 @@ def calendar_assembly_status(
     return {"status": latest.status, "job": latest.as_dict()}
 
 
+
+def _master_export_limit_seconds() -> int:
+    """Extended long-form exports are opt-in; default remains one hour."""
+    import os
+    return (7200 if os.getenv("NOVA_STUDIO_EXTENDED_MASTER_EXPORTS", "").lower()
+            in {"1", "true", "yes"} else 3600)
+
+
 def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str,
                              checkpoint=None):
     """Combine verified chapter assets into one private 10–60m master."""
@@ -844,10 +852,16 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
     entry = _entry(db, owner_id, project_id, entry_id)
     if entry.status != "approved":
         raise HTTPException(status_code=409, detail="Approve the chapter plan before exporting.")
-    if not 600 <= entry.duration_seconds <= 3600:
-        raise HTTPException(status_code=422, detail="Master export currently supports 10–60 minutes.")
+    if not 600 <= entry.duration_seconds <= _master_export_limit_seconds():
+        raise HTTPException(status_code=422, detail="Master export duration exceeds the configured 10–60 or 10–120 minute limit.")
     if not remote.enabled():
         raise HTTPException(status_code=503, detail="Private durable object storage is required for long-form masters.")
+    # Extended export needs enough scratch space for all downloaded chapters
+    # plus the joined master; never start a large job without headroom.
+    if entry.duration_seconds > 3600:
+        import shutil
+        if shutil.disk_usage(tempfile.gettempdir()).free < 4 * 1024 * 1024 * 1024:
+            raise HTTPException(status_code=503, detail="Insufficient scratch disk for extended video export.")
     chapters = json.loads(entry.chapters_json or "[]")
     if not 2 <= len(chapters) <= 24 or sum(int(ch["duration_seconds"]) for ch in chapters) != entry.duration_seconds:
         raise HTTPException(status_code=422, detail="Create 2–24 completed chapters totaling the planned duration.")
@@ -1010,7 +1024,11 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
             checkpoint("UPLOADING_MASTER", {"master_sha256": sha, "bytes": output.stat().st_size})
         filename = new_id("imported_video") + ".mp4"
         try:
-            ref = remote.put_original_file(owner_id, project_id, filename, output, sha)
+            ref = remote.put_original_file(
+                owner_id, project_id, filename, output, sha,
+                max_bytes=(2 * 1024 * 1024 * 1024 if entry.duration_seconds > 3600
+                           else 512 * 1024 * 1024),
+            )
         except Exception as exc:
             raise HTTPException(status_code=503, detail="Long-form private storage unavailable; no video registered.") from exc
         try:
@@ -1324,8 +1342,8 @@ def start_chapter_master_job(
     entry = _entry(db, user.user_id, project_id, entry_id)
     if entry.status != "approved":
         raise HTTPException(status_code=409, detail="Approve all chapters first.")
-    if not 600 <= entry.duration_seconds <= 3600:
-        raise HTTPException(status_code=422, detail="Master export supports 10–60 minutes.")
+    if not 600 <= entry.duration_seconds <= _master_export_limit_seconds():
+        raise HTTPException(status_code=422, detail="Master export exceeds the configured 60 or 120 minute limit.")
     if not remote.enabled():
         raise HTTPException(status_code=503, detail="Private durable storage is required.")
     chapters = json.loads(entry.chapters_json or "[]")
