@@ -590,6 +590,24 @@ def _chapter_review_passed(review: dict | None, chapter_index: int, asset_sha256
     )
 
 
+def _final_master_readiness_status(
+    plan_status: str, chapter_count: int, missing: list[int],
+    needs_review: list[int], needs_correction: list[int],
+) -> str:
+    """Ordered fail-closed customer status; a green status means export may queue."""
+    if plan_status != "approved":
+        return "PLAN_APPROVAL_REQUIRED"
+    if chapter_count < 2:
+        return "MORE_CHAPTERS_REQUIRED"
+    if missing:
+        return "CHAPTER_REBUILD_REQUIRED"
+    if needs_correction:
+        return "CHAPTER_CORRECTIONS_REQUIRED"
+    if needs_review:
+        return "CHAPTER_REVIEW_REQUIRED"
+    return "READY_TO_UPDATE_FINAL_MASTER"
+
+
 def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id: str) -> dict:
     """Describe current chapter outputs without rendering or billing.
 
@@ -683,27 +701,44 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             for row in states
         ],
     }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    readiness_status = _final_master_readiness_status(
+        entry.status, len(states), missing, needs_review, needs_correction
+    )
+    blocking_chapters = [
+        {
+            "chapter_index": row["chapter_index"],
+            "title": row["title"],
+            "reason": row["review_status"],
+            "next_action": (
+                "REBUILD" if row["review_status"] == "NEEDS_REBUILD"
+                else "CORRECT_AND_REVIEW" if row["review_status"] == "CHANGES_REQUIRED"
+                else "REVIEW" if row["review_status"] == "REVIEW_REQUIRED"
+                else "NONE"
+            ),
+        }
+        for row in states if row["review_status"] != "REVIEW_PASSED"
+    ]
     return {
         "version_sha256": version,
         "plan_status": entry.status,
+        "readiness_status": readiness_status,
+        "blocking_chapters": blocking_chapters,
         "chapters": states,
         "reusable_chapters": len(states) - len(missing),
         "needs_rebuild_indices": missing,
         "needs_review_indices": needs_review,
         "needs_correction_indices": needs_correction,
         "reviewed_chapters": len(reviewed),
-        "master_ready": (entry.status == "approved" and len(states) >= 2
-                         and not missing and not needs_review),
+        "master_ready": readiness_status == "READY_TO_UPDATE_FINAL_MASTER",
         "published": False, "paid_provider_charges": False,
-        "message": (
-            "Review and approve the plan before rebuilding chapters."
-            if entry.status != "approved"
-            else "Rebuild missing chapters, then pass each verified MP4 quality review."
-            if missing
-            else "Complete quality reviews or correct affected chapters before final-master export."
-            if needs_review
-            else "All saved chapters are verified and quality-reviewed for private final-master export."
-        ),
+        "message": {
+            "PLAN_APPROVAL_REQUIRED": "Review and approve the chapter plan before final-master export.",
+            "MORE_CHAPTERS_REQUIRED": "Save at least two completed chapters before final-master export.",
+            "CHAPTER_REBUILD_REQUIRED": "Rebuild missing or changed chapters; saved originals remain preserved.",
+            "CHAPTER_CORRECTIONS_REQUIRED": "Correct affected chapters and pass new exact-MP4 reviews.",
+            "CHAPTER_REVIEW_REQUIRED": "Complete outstanding exact-MP4 chapter quality reviews.",
+            "READY_TO_UPDATE_FINAL_MASTER": "All saved chapters are verified and passed quality review. Private master export may be requested.",
+        }[readiness_status],
     }
 
 
