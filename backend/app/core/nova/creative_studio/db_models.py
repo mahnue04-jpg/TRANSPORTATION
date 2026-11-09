@@ -210,4 +210,5 @@ class NovaCreativeRenderClaim(Base):
     entry_id: Mapped[str] = mapped_column(String(48), nullable=False)
     job_id: Mapped[str] = mapped_column(String(48), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
+    checkpoint_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
