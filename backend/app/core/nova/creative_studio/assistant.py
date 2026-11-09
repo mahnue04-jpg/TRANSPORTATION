@@ -242,3 +242,58 @@ def propose_studio_storyboard(
         "saved": False, "media_generated": False, "published": False,
         "message": "Review narration, visual notes, pacing and scene titles before saving. No media was generated.",
     }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assistant/previews/{asset_id}/revision-proposal")
+def propose_review_revision(
+    project_id: str, entry_id: str, asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Prepare a review-note revision brief for an existing storyboard scene.
+
+    This deterministic proposal only copies the owner's stored correction
+    request into an editable scene note. It does not hallucinate a replacement
+    script, write to the database or call a paid model.
+    """
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be revised.")
+    assets = DbCreativeStudioStore(db).list_assets(project_id, user.user_id)
+    asset = next((a for a in assets if a.id == asset_id), None)
+    meta = (asset.metadata or {}) if asset is not None else {}
+    if (asset is None or asset.kind != "video"
+            or meta.get("pipeline") != "calendar_storyboard_preview"
+            or meta.get("calendar_entry_id") != entry_id):
+        raise HTTPException(status_code=404, detail="This preview does not belong to the selected plan.")
+    review = meta.get("storyboard_preview_review") or {}
+    if review.get("status") != "CHANGES_REQUIRED":
+        raise HTTPException(status_code=409, detail="Save a changes-required review before requesting corrections.")
+    notes = str(review.get("notes") or "").strip()
+    if not notes:
+        raise HTTPException(status_code=422, detail="Add specific correction notes to the quality review first.")
+    index = review.get("correction_scene_index")
+    plan = _as_dict(entry)
+    scenes = plan.get("storyboard") or []
+    if not isinstance(index, int) or index < 0 or index >= len(scenes):
+        raise HTTPException(status_code=422, detail="Choose an affected scene in the review first.")
+    category = str(review.get("correction_category") or "general")
+    if category not in {"general", "narration", "captions", "visuals", "playback"}:
+        category = "general"
+    original = scenes[index]
+    suggestion = {
+        **original,
+        "revision_note": (
+            f"Review correction ({category}) for scene {index + 1}: {notes}"
+        )[:2000],
+    }
+    return {
+        "status": "DRAFT_SUGGESTION",
+        "scene_index": index,
+        "suggested_scene": suggestion,
+        "source_review_asset_id": asset_id,
+        "model_called": False, "saved": False, "rendered": False, "published": False,
+        "message": "Original scene preserved. Review the correction note and explicitly save changes in the storyboard editor.",
+    }
