@@ -102,3 +102,42 @@ def test_failed_claim_can_be_explicitly_requeued(tmp_path):
             assert row.state == "QUEUED"
     finally:
         engine.dispose()
+
+
+def test_only_matching_running_claim_can_be_completed(tmp_path):
+    from app.core.nova.creative_studio.calendar import _finish_master_claim
+    engine = _claim_db(tmp_path, state="RUNNING")
+    try:
+        with Session(engine) as db:
+            assert _finish_master_claim(
+                db, "owner-a", "project-a", "entry-a", "wrong-job", "GENERATED"
+            ) is False
+            assert _finish_master_claim(
+                db, "other-owner", "project-a", "entry-a", "old-job", "GENERATED"
+            ) is False
+            assert _finish_master_claim(
+                db, "owner-a", "project-a", "entry-a", "old-job", "GENERATED"
+            ) is True
+            assert _finish_master_claim(
+                db, "owner-a", "project-a", "entry-a", "old-job", "ERROR"
+            ) is False
+        with Session(engine) as db:
+            row = db.get(NovaCreativeRenderClaim, "claim-1")
+            assert row.job_id == "old-job"
+            assert row.state == "GENERATED"
+    finally:
+        engine.dispose()
+
+
+def test_terminal_claim_status_rejects_unrecognized_state(tmp_path):
+    import pytest
+    from app.core.nova.creative_studio.calendar import _finish_master_claim
+    engine = _claim_db(tmp_path, state="RUNNING")
+    try:
+        with Session(engine) as db:
+            with pytest.raises(ValueError, match="Invalid terminal"):
+                _finish_master_claim(
+                    db, "owner-a", "project-a", "entry-a", "old-job", "QUEUED"
+                )
+    finally:
+        engine.dispose()
