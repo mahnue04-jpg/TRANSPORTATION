@@ -68,6 +68,12 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 33. **Digest/capability boundary:** A successful synthetic full-byte transfer proves only the private transfer path; it does not establish a production owner's end-to-end browser save or customer-facing video approval. Capture independent source SHA, downloaded SHA, ffprobe streams/duration and manual playback in actual staging.
 
 
+34. **Normal MP4 button safety:** With a private `video/mp4` response, reject missing/nonpositive Content-Length or more than 128 MiB before buffering. Reject a body smaller/larger than its reported length without triggering a browser save. Valid small MP4s may use the normal save button. Other asset formats must retain existing download behavior.
+35. **Streaming save interrupted:** On a compatible desktop browser, interrupt a master download mid-transfer, change the selected project, or send too many bytes. Expect the temporary file write to abort; the UI must not claim saved or show 100%. No second video generation is triggered.
+36. **Completion progress semantics:** Verify 100% is shown only after the browser's writable file handle closes successfully, not merely after the expected number of bytes has arrived. If the close fails, the user receives an error and no success message.
+37. **Mobile and browser compatibility:** Confirm the download UI explains when streaming saves require the File System Access API on a supported desktop browser. For browsers without it, never silently attempt to load a long-form master into a huge Blob; test the small-video-only fallback separately.
+38. **Browser-harness regression evidence:** Run `node --test backend/tests/js/test_creative_studio_master_download.mjs` in CI against the actual browser-function source. Confirm the regular and large-MP4 download paths reject bad sizes, malformed MIME, mid-stream cancellation and customer-project changes. These mocks do not substitute for actual browser/user staging testing.
+
 ## Evidence required before release
 
 Capture per-case result, exact Git commit SHA, staging environment identifier, timestamp, redacted project and chapter IDs, asset SHA256, browser/OS, CI run, FFprobe metadata and playback/download notes. Attach failures with reproduction steps and observed vs expected outcomes. Do not attach private customer video publicly.
@@ -78,7 +84,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all thirty-three staging scenarios pass with recorded evidence.
+- CI and all thirty-eight staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
