@@ -62,6 +62,11 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 
 28. **Protected master playback and review attestation:** In the authenticated Studio UI, load a saved private master, navigate away and back, switch projects, then reopen its chapter editor. Confirm in-memory blob URLs are revoked on view replacement and that saving a master-quality review requires explicit reviewer confirmation of full viewing. This confirmation is an attestation, not independently proven video watch-time tracking.
 29. **Remote master download fail-closed:** Attempt an owner-scoped private download with correct metadata, missing SHA, mismatched object-store HEAD, and another owner's credentials. Only the correctly scoped matching object may open a remote stream. Verify full streamed bytes, downloadable MP4 and content checksum separately in staging; HEAD metadata checks alone do not prove byte integrity.
+30. **Full streaming SHA-256 mismatch:** Keep remote HEAD size and SHA metadata consistent with the saved master but substitute changed content of the same length in a test-only remote object. Server must reject the stream at final SHA verification; browser must not report a successful complete download.
+31. **Truncated or oversized remote stream:** Make the storage GET return fewer or more bytes than its previously checked positive HEAD size; the protected HTTP download must signal failure. Verify the browser's streaming-save path aborts its partial file.
+32. **Authenticated streaming Content-Length:** Verify the owner-scoped route sends an exact positive `Content-Length`, private/no-store and nosniff headers, and rejects token query parameters. Test small protected playback and large streaming-save behavior without buffering a 2 GiB response in memory.
+33. **Digest/capability boundary:** A successful synthetic full-byte transfer proves only the private transfer path; it does not establish a production owner's end-to-end browser save or customer-facing video approval. Capture independent source SHA, downloaded SHA, ffprobe streams/duration and manual playback in actual staging.
+
 
 ## Evidence required before release
 
@@ -73,7 +78,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all twenty-nine staging scenarios pass with recorded evidence.
+- CI and all thirty-three staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
