@@ -835,8 +835,9 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
     import os
     import shutil
     from app.core.nova.creative_studio import private_object_storage as remote
-    from app.core.nova.creative_studio.chapter_master import (
-        ChapterMasterError, join_chapters,
+    from app.core.nova.creative_studio.chapter_master import ChapterMasterError
+    from app.core.nova.creative_studio.resumable_master import (
+        normalize_chapter, join_normalized_chapters,
     )
 
     _project(db, owner_id, project_id)
@@ -911,11 +912,93 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
             if not digest or hashlib.sha256(output.read_bytes()).hexdigest() != digest:
                 raise HTTPException(status_code=422, detail="Chapter checksum verification failed.")
             files.append(output)
-        if checkpoint is not None:
-            checkpoint("RENDERING_MASTER", {"verified_chapters": len(files)})
+        # Normalize chapters independently. Persist only verified canonical
+        # segments; after an interruption, already finished segments are reused.
+        normalized_files = []
+        for index, (source, chapter_asset) in enumerate(zip(files, selected)):
+            source_sha = str((chapter_asset.metadata or {}).get("sha256") or "")
+            segment_signature = hashlib.sha256(
+                (entry_id + "|normalized-v1|" + str(index) + "|" +
+                 chapter_asset.id + "|" + source_sha).encode("utf-8")
+            ).hexdigest()
+            normalized_path = root / f"normalized-{index:02d}.mp4"
+            reusable = next((
+                candidate for candidate in store.list_assets(project_id, owner_id)
+                if candidate.kind == "video"
+                and (candidate.metadata or {}).get("pipeline") == "chapter_normalized_checkpoint"
+                and (candidate.metadata or {}).get("segment_signature") == segment_signature
+                and str(candidate.url or "").startswith("private-studio-s3://")
+            ), None)
+            reused_segment = False
+            if reusable is not None:
+                reusable_sha = str((reusable.metadata or {}).get("sha256") or "")
+                try:
+                    if reusable_sha and remote.object_exists(
+                            reusable.url, owner_id, project_id, reusable_sha):
+                        stream, _, _ = service.open_private_remote_asset(
+                            owner_id, project_id, reusable.id
+                        )
+                        try:
+                            with normalized_path.open("wb") as handle:
+                                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                                    handle.write(chunk)
+                                    if handle.tell() > 128 * 1024 * 1024:
+                                        raise ValueError("Checkpoint is oversized")
+                        finally:
+                            stream.close()
+                        if hashlib.sha256(normalized_path.read_bytes()).hexdigest() == reusable_sha:
+                            reused_segment = True
+                except Exception:
+                    reused_segment = False
+                    normalized_path.unlink(missing_ok=True)
+            if not reused_segment:
+                try:
+                    normalize_chapter(source, normalized_path)
+                except ChapterMasterError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                normalized_sha = hashlib.sha256(normalized_path.read_bytes()).hexdigest()
+                normalized_filename = new_id("imported_video") + ".mp4"
+                try:
+                    segment_ref = remote.put_original_file(
+                        owner_id, project_id, normalized_filename, normalized_path,
+                        normalized_sha, max_bytes=128 * 1024 * 1024,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503, detail="Could not preserve chapter checkpoint."
+                    ) from exc
+                try:
+                    store.save_asset(CreativeAsset(
+                        id=new_id("casset"), owner_id=owner_id, project_id=project_id,
+                        kind="video", title=f"Master checkpoint chapter {index + 1}",
+                        content="Private normalized segment for recoverable assembly.",
+                        status="GENERATED", url=segment_ref,
+                        metadata={
+                            "pipeline": "chapter_normalized_checkpoint",
+                            "calendar_entry_id": entry_id,
+                            "chapter_index": index,
+                            "source_asset_id": chapter_asset.id,
+                            "source_sha256": source_sha,
+                            "segment_signature": segment_signature,
+                            "sha256": normalized_sha,
+                            "quality_state": "INTERNAL_CHECKPOINT",
+                            "publish_ready": False,
+                        },
+                    ))
+                except Exception:
+                    remote.delete_original(segment_ref, owner_id, project_id)
+                    raise
+            normalized_files.append(normalized_path)
+            if checkpoint is not None:
+                checkpoint("RENDERING_MASTER", {
+                    "completed_segments": len(normalized_files),
+                    "total_segments": len(files),
+                })
         output = root / "finished-master.mp4"
         try:
-            measured = join_chapters(files, output, expected_seconds=entry.duration_seconds)
+            measured = join_normalized_chapters(
+                normalized_files, output, expected_seconds=entry.duration_seconds
+            )
         except (ChapterMasterError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         digest = hashlib.sha256()
