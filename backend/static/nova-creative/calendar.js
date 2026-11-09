@@ -398,6 +398,78 @@
         } finally { audioButton.disabled = false; }
       }, entry);
       videoPanel.appendChild(audioButton);
+      var reviewPanel = document.createElement("fieldset");
+      var reviewTitle = document.createElement("legend");
+      reviewTitle.textContent = "Quality review of this saved MP4";
+      reviewPanel.appendChild(reviewTitle);
+      var reviewHint = document.createElement("p");
+      reviewHint.className = "hint";
+      reviewHint.textContent = "Review only after loading and watching this video. The checkboxes do not approve commercial rights or publishing.";
+      reviewPanel.appendChild(reviewHint);
+      var reviewChecks = [
+        ["narration_ok", "Narration sounds correct and complete"],
+        ["captions_ok", "Caption text and timing reviewed"],
+        ["visuals_ok", "Visuals and transitions reviewed"],
+        ["playback_ok", "Playback and audio continue to the end"]
+      ];
+      var controls = {};
+      var previousReview = (latestPreview.metadata || {}).storyboard_preview_review || {};
+      reviewChecks.forEach(function (field) {
+        var label = document.createElement("label");
+        var check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = Boolean(previousReview[field[0]]);
+        controls[field[0]] = check;
+        label.appendChild(check);
+        label.appendChild(document.createTextNode(" " + field[1]));
+        reviewPanel.appendChild(label);
+      });
+      var notesLabel = document.createElement("label");
+      notesLabel.textContent = "Correction notes (optional)";
+      var notes = document.createElement("textarea");
+      notes.rows = 3;
+      notes.maxLength = 2000;
+      notes.value = previousReview.notes || "";
+      notesLabel.appendChild(notes);
+      reviewPanel.appendChild(notesLabel);
+      var reviewStatus = document.createElement("p");
+      reviewStatus.setAttribute("role", "status");
+      reviewStatus.textContent = previousReview.status
+        ? "Previous review: " + previousReview.status.replace(/_/g, " ").toLowerCase()
+        : "Not yet reviewed.";
+      reviewPanel.appendChild(reviewStatus);
+      var submitReview = button("Save MP4 quality review", async function () {
+        if (active() !== project || !video.src) {
+          reviewStatus.textContent = "Load and review the saved video before submitting this checklist.";
+          return;
+        }
+        if (busy) return;
+        busy = true;
+        submitReview.disabled = true;
+        try {
+          var body = {notes: notes.value.trim()};
+          reviewChecks.forEach(function (field) {
+            body[field[0]] = controls[field[0]].checked;
+          });
+          var result = await bridge.api(basePath(project) + "/" +
+            encodeURIComponent(entry.id) + "/previews/" +
+            encodeURIComponent(latestPreview.id) + "/review", {
+              method: "PUT", body: JSON.stringify(body)
+            });
+          if (active() !== project || !host.contains(reviewPanel)) return;
+          reviewStatus.textContent = result.status === "REVIEW_PASSED"
+            ? "Preview QC passed. Publishing and commercial approval are still separate."
+            : "Changes required. Save edits, reapprove and render a new preview.";
+          feedback(result.message || "MP4 quality review saved.");
+        } catch (err) {
+          reviewStatus.textContent = err.message || "MP4 review could not be saved.";
+        } finally {
+          busy = false;
+          submitReview.disabled = false;
+        }
+      }, entry);
+      reviewPanel.appendChild(submitReview);
+      videoPanel.appendChild(reviewPanel);
     } else {
       var noPreview = document.createElement("p");
       noPreview.className = "hint";
