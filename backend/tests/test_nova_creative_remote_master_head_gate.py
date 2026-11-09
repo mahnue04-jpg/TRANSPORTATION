@@ -51,3 +51,21 @@ def test_head_gate_enforces_owner_and_project_scope(monkeypatch):
     with pytest.raises(storage.PrivateStorageError, match="access denied"):
         storage.object_exists(REF, "owner", "different", SHA)
     assert storage.object_exists("not-a-private-url", "owner", "project", SHA) is False
+
+
+def test_owned_object_size_returns_exact_length_and_rejects_large_remote_files(monkeypatch):
+    monkeypatch.setattr(storage, "_bucket", lambda: "test-bucket")
+
+    class FakeClient:
+        def __init__(self, length):
+            self.length = length
+
+        def head_object(self, **kwargs):
+            return {"ContentLength": self.length, "Metadata": {"sha256": SHA}}
+
+    monkeypatch.setattr(storage, "_client", lambda: FakeClient(4096))
+    assert storage.owned_object_size(REF, "owner", "project", SHA) == 4096
+    monkeypatch.setattr(storage, "_client", lambda: FakeClient(2 * 1024 * 1024 * 1024 + 1))
+    assert storage.owned_object_size(REF, "owner", "project", SHA) is None
+    assert storage.object_exists(REF, "owner", "project", SHA) is False
+    assert storage.owned_object_size(REF, "owner", "project", "bad") is None
