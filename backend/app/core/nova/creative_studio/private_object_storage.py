@@ -98,3 +98,45 @@ def delete_original(ref: str, owner_id: str, project_id: str) -> None:
     key = parse_owned_ref(ref, owner_id, project_id)
     if key is not None:
         _client().delete_object(Bucket=_bucket(), Key=key)
+
+
+def put_original_file(owner_id: str, project_id: str, filename: str, path, sha256: str,
+                      *, max_bytes: int = 512 * 1024 * 1024) -> str:
+    """Stream a validated long-form MP4 from disk into private durable storage.
+
+    Never loads the finished master into application memory. Restricted to
+    the existing owner/project key format and limited to 512 MiB.
+    """
+    from pathlib import Path
+
+    if not enabled():
+        raise PrivateStorageError("Private object storage is disabled")
+    source = Path(path)
+    if not source.is_file():
+        raise PrivateStorageError("Finished master is missing")
+    length = source.stat().st_size
+    if not 0 < length <= max_bytes <= 512 * 1024 * 1024:
+        raise PrivateStorageError("Finished master exceeds secure storage limit")
+    digest = hashlib.sha256()
+    with source.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sha256:
+        raise PrivateStorageError("Finished master checksum mismatch")
+    key = make_key(owner_id, project_id, filename)
+    client = _client()
+    bucket = _bucket()
+    with source.open("rb") as handle:
+        client.upload_fileobj(
+            handle, bucket, key,
+            ExtraArgs={"ContentType": "video/mp4", "Metadata": {"sha256": sha256}},
+        )
+    try:
+        remote = client.head_object(Bucket=bucket, Key=key)
+        if (int(remote.get("ContentLength", -1)) != length or
+                remote.get("Metadata", {}).get("sha256") != sha256):
+            raise PrivateStorageError("Finished master remote verification failed")
+    except Exception:
+        client.delete_object(Bucket=bucket, Key=key)
+        raise
+    return _REMOTE_PREFIX + key
