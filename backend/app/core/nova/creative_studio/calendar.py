@@ -1334,6 +1334,13 @@ def _write_master_checkpoint(owner_id: str, project_id: str,
         raise ValueError("Invalid checkpoint stage")
     db = SessionLocal()
     try:
+        current = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
+        if current is None or current.job_id != job_id or current.state != "RUNNING":
+            raise RuntimeError("Master claim is no longer active")
+        saved = json.loads(current.checkpoint_json or "{}")
+        pinned = saved.get("pinned_master")
+        if not isinstance(pinned, dict):
+            raise RuntimeError("Export has no pinned approved chapter snapshot")
         updated = db.execute(
             update(NovaCreativeRenderClaim)
             .where(
@@ -1343,6 +1350,7 @@ def _write_master_checkpoint(owner_id: str, project_id: str,
             )
             .values(
                 checkpoint_json=json.dumps({
+                    "pinned_master": pinned,
                     "stage": stage, "details": details or {}, "updated_at": _now(),
                 }, sort_keys=True),
                 updated_at=_now(),
@@ -1599,14 +1607,26 @@ def start_chapter_master_job(
                 _master_export_active.discard(key)
             return {"status": "ALREADY_RUNNING",
                     "message": "The database already has an active export claim."}
+        pinned = {
+            "version_sha256": readiness["version_sha256"],
+            "duration_seconds": entry.duration_seconds,
+            "chapters": [{
+                "chapter_index": row["chapter_index"],
+                "asset_id": row["asset_id"],
+                "sha256": row["asset_sha256"],
+            } for row in readiness["chapters"]],
+        }
+        snapshot = json.dumps({"pinned_master": pinned, "stage": "QUEUED"}, sort_keys=True)
         if claim is None:
             db.add(NovaCreativeRenderClaim(
                 claim_key=claim_key, owner_id=user.user_id, project_id=project_id,
                 entry_id=entry_id, job_id=fresh_id, state="QUEUED", updated_at=now,
+                checkpoint_json=snapshot,
             ))
         else:
             # Reclaim only a terminal state; never silently restart a stuck job.
             claim.job_id = fresh_id
+            claim.checkpoint_json = snapshot
             claim.state = "QUEUED"
             claim.updated_at = now
         try:
