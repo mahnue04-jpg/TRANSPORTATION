@@ -1847,6 +1847,8 @@ def start_chapter_master_job(
             old_job_id = claim.job_id
             old_state = claim.state
             if old_state not in {"ERROR", "GENERATED"}:
+                with _master_export_lock:
+                    _master_export_active.discard(key)
                 return {"status": "ALREADY_RUNNING",
                         "message": "The existing export claim needs reconciliation."}
             swapped = db.execute(
@@ -1866,6 +1868,8 @@ def start_chapter_master_job(
             )
             if swapped.rowcount != 1:
                 db.rollback()
+                with _master_export_lock:
+                    _master_export_active.discard(key)
                 return {"status": "ALREADY_RUNNING",
                         "message": "Another process updated this export claim. Check saved master status."}
         try:
