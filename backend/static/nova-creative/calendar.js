@@ -432,6 +432,51 @@
       notes.value = previousReview.notes || "";
       notesLabel.appendChild(notes);
       reviewPanel.appendChild(notesLabel);
+      var categoryLabel = document.createElement("label");
+      categoryLabel.textContent = "Main correction area";
+      var categorySelect = document.createElement("select");
+      [["general", "General"], ["narration", "Narration"], ["captions", "Captions"], ["visuals", "Visuals"], ["playback", "Playback"]].forEach(function (option) {
+        categorySelect.add(new Option(option[1], option[0]));
+      });
+      categorySelect.value = previousReview.correction_category || "general";
+      categoryLabel.appendChild(categorySelect);
+      reviewPanel.appendChild(categoryLabel);
+      var targetLabel = document.createElement("label");
+      targetLabel.textContent = "Scene needing correction (optional)";
+      var sceneSelect = document.createElement("select");
+      sceneSelect.add(new Option("General video issue", ""));
+      rows.forEach(function (scene, index) {
+        sceneSelect.add(new Option("Scene " + (index + 1) + " — " + scene.heading, String(index)));
+      });
+      sceneSelect.value = previousReview.correction_scene_index == null
+        ? "" : String(previousReview.correction_scene_index);
+      targetLabel.appendChild(sceneSelect);
+      reviewPanel.appendChild(targetLabel);
+      var jumpToCorrection = button("Go to correction scene", function () {
+        if (sceneSelect.value === "") {
+          feedback("Select a scene to jump to, or use the general video review.", true);
+          return;
+        }
+        var index = Number(sceneSelect.value);
+        var sceneFields = list.querySelectorAll("fieldset");
+        if (!Number.isInteger(index) || index < 0 || index >= rows.length || !sceneFields[index]) {
+          feedback("The selected scene is no longer available. Reload the storyboard.", true);
+          return;
+        }
+        var position = rows.slice(0, index).reduce(function (sum, item) {
+          return sum + Math.max(0, Number(item.duration_seconds) || 0);
+        }, 0);
+        playhead.value = String(position);
+        if (video.src && Number.isFinite(video.duration) && video.duration > 0) {
+          video.currentTime = Math.min(position, video.duration);
+          video.pause();
+        }
+        rehearse();
+        sceneFields[index].scrollIntoView({behavior: "smooth", block: "start"});
+        var firstInput = sceneFields[index].querySelector("input, textarea, select");
+        if (firstInput) firstInput.focus({preventScroll: true});
+      }, entry);
+      reviewPanel.appendChild(jumpToCorrection);
       var reviewStatus = document.createElement("p");
       reviewStatus.setAttribute("role", "status");
       reviewStatus.textContent = previousReview.status
@@ -447,7 +492,11 @@
         busy = true;
         submitReview.disabled = true;
         try {
-          var body = {notes: notes.value.trim()};
+          var body = {
+            notes: notes.value.trim(),
+            correction_category: categorySelect.value,
+            correction_scene_index: sceneSelect.value === "" ? null : Number(sceneSelect.value)
+          };
           reviewChecks.forEach(function (field) {
             body[field[0]] = controls[field[0]].checked;
           });
