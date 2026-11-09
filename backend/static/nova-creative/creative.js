@@ -2803,7 +2803,8 @@
     api: api,
     selectedProject: function () { return activeProjectId; },
     refreshProductionAssets: refreshAssets,
-    fetchProtectedVideo: fetchProtectedStudioVideo
+    fetchProtectedVideo: fetchProtectedStudioVideo,
+    downloadProtectedAsset: downloadProtectedAsset
   };
 
   boot();
