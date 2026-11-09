@@ -102,6 +102,9 @@
       if (entry.status !== "canceled" && entry.duration_seconds >= 120 && entry.duration_seconds <= 600) {
         if (entry.status !== "approved") actions.appendChild(button("Edit saved timeline", assembleSelect, entry));
       }
+      if (entry.status !== "canceled" && entry.duration_seconds >= 120) {
+        actions.appendChild(button("Edit chapters", editChapters, entry));
+      }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
       list.appendChild(article);
@@ -177,6 +180,136 @@
     }
     mutate(entry, { status: "approved" }, "approve");
   }
+  async function editChapters(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    var host = $("calendar-chapters");
+    host.replaceChildren();
+    try {
+      var detail = await bridge.api("/api/nova/creative/projects/" + encodeURIComponent(project), { method: "GET" });
+      if (active() !== project) return;
+      var videos = (detail.assets || []).filter(function (a) {
+        return a.kind === "video" && a.url && a.media_available !== false && a.id;
+      });
+      var chapterRows = (entry.chapters || []).map(function (chapter) {
+        return {
+          title: chapter.title,
+          duration_seconds: chapter.duration_seconds,
+          asset_ids: (chapter.asset_ids || []).slice()
+        };
+      });
+      var title = document.createElement("h3");
+      title.textContent = "Video chapters: " + entry.topic;
+      host.appendChild(title);
+      var note = document.createElement("p");
+      note.className = "hint";
+      note.textContent = "Build the full video one chapter at a time. Each chapter is 2–10 minutes and uses previously saved clips. Chapter durations must add up to the entire planned length. Saving edits requires another approval.";
+      host.appendChild(note);
+      var list = document.createElement("div");
+      host.appendChild(list);
+      function displayRows() {
+        list.replaceChildren();
+        chapterRows.forEach(function (row, index) {
+          var panel = document.createElement("fieldset");
+          var legend = document.createElement("legend");
+          legend.textContent = "Chapter " + (index + 1);
+          panel.appendChild(legend);
+          var input = document.createElement("input");
+          input.value = row.title;
+          input.maxLength = 200;
+          input.placeholder = "Chapter title";
+          input.setAttribute("aria-label", "Chapter title");
+          input.addEventListener("input", function () { row.title = input.value; });
+          panel.appendChild(input);
+          var mins = document.createElement("input");
+          mins.type = "number";
+          mins.min = "2";
+          mins.max = "10";
+          mins.step = "1";
+          mins.value = String(row.duration_seconds / 60);
+          mins.setAttribute("aria-label", "Chapter minutes");
+          mins.addEventListener("change", function () { row.duration_seconds = Math.round(Number(mins.value) * 60); });
+          panel.appendChild(mins);
+          var selector = document.createElement("div");
+          videos.forEach(function (asset) {
+            var label = document.createElement("label");
+            var check = document.createElement("input");
+            check.type = "checkbox";
+            check.checked = row.asset_ids.includes(asset.id);
+            check.addEventListener("change", function () {
+              if (check.checked && !row.asset_ids.includes(asset.id)) row.asset_ids.push(asset.id);
+              else if (!check.checked) row.asset_ids = row.asset_ids.filter(function (id) { return id !== asset.id; });
+            });
+            label.appendChild(check);
+            label.appendChild(document.createTextNode(" " + (asset.title || asset.id)));
+            selector.appendChild(label);
+          });
+          panel.appendChild(selector);
+          panel.appendChild(button("Remove chapter", function () {
+            chapterRows.splice(index, 1);
+            displayRows();
+          }, row));
+          if (entry.status === "approved" && row.asset_ids.length >= 2) {
+            panel.appendChild(button("Assemble this chapter", async function () {
+              if (busy || active() !== project) return;
+              busy = true;
+              feedback("Combining approved chapter " + (index + 1) + " into one MP4...");
+              try {
+                var out = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+                  "/chapters/" + index + "/assemble", { method: "POST" });
+                if (active() !== project) return;
+                if (out.status !== "ASSEMBLED_REVIEW_REQUIRED") throw new Error("Chapter render was not confirmed.");
+                feedback("Chapter MP4 saved. Review and download it from the Studio Asset list.");
+                if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+              } catch (err) {
+                feedback(err.message || "Chapter render failed; source clips are unchanged.", true);
+              } finally { busy = false; }
+            }, row));
+          }
+          list.appendChild(panel);
+        });
+      }
+      displayRows();
+      host.appendChild(button("Add chapter", function () {
+        if (chapterRows.length >= 24) { feedback("Maximum 24 chapters.", true); return; }
+        chapterRows.push({ title: "New chapter", duration_seconds: 300, asset_ids: [] });
+        displayRows();
+      }, entry));
+      host.appendChild(button("Save chapter plan", async function () {
+        if (busy || active() !== project) return;
+        if (!chapterRows.length || chapterRows.some(function (ch) {
+          return !ch.title.trim() || ch.duration_seconds < 120 || ch.duration_seconds > 600;
+        })) {
+          feedback("Each chapter needs a title and a length of 2–10 minutes.", true);
+          return;
+        }
+        var sum = chapterRows.reduce(function (total, ch) { return total + ch.duration_seconds; }, 0);
+        if (sum !== entry.duration_seconds) {
+          feedback("Chapter durations total " + Math.round(sum / 60) +
+            " minutes but the plan is " + Math.round(entry.duration_seconds / 60) + " minutes.", true);
+          return;
+        }
+        busy = true;
+        try {
+          var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) + "/chapters", {
+            method: "PUT", body: JSON.stringify({ chapters: chapterRows })
+          });
+          if (active() !== project) return;
+          feedback(saved.status === "ready_for_review"
+            ? "Chapters saved. Reapprove the plan before assembling."
+            : "Chapters saved. Continue working any time.");
+          host.replaceChildren();
+          await load();
+        } catch (err) {
+          feedback(err.message || "Could not save chapters.", true);
+        } finally { busy = false; }
+      }, entry));
+      host.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      feedback(err.message || "Unable to load chapter editor.", true);
+    }
+  }
+
   async function assembleSelect(entry) {
     var project = requestProject();
     if (!project || busy) return;
