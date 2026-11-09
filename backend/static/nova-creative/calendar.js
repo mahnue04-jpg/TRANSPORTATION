@@ -324,8 +324,22 @@
         } else {
           var largeNotice = document.createElement("p");
           largeNotice.className = "hint";
-          largeNotice.textContent = "This master is too large (or its size is unknown) for safe in-memory browser playback/download. The original remains in private Studio storage; large-file streaming and direct download still require implementation.";
+          largeNotice.textContent = "Large or unknown-size MP4: in-browser playback is disabled to protect memory. Download to review with your video player.";
           panel.appendChild(largeNotice);
+        }
+        if (typeof bridge.streamProtectedMaster === "function") {
+          panel.appendChild(button("Save full MP4 to computer (streaming)", async function () {
+            if (active() !== project) return;
+            try {
+              // Trigger the browser file picker directly from the click.
+              var saved = await bridge.streamProtectedMaster(project, master.asset_id);
+              if (active() !== project) return;
+              feedback("Saved " + Math.round(saved.bytes / (1024 * 1024)) +
+                " MiB to your computer. Review the exported video before approval.");
+            } catch (err) {
+              feedback(err.message || "Streaming MP4 save could not be completed.", true);
+            }
+          }, master));
         }
         var checks = [
           ["footage_ok", "Full footage reviewed"],
