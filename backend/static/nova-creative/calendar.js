@@ -1254,6 +1254,13 @@
           var plan = await bridge.api(basePath(project) + "/" +
             encodeURIComponent(entry.id) + "/chapter-rebuild-plan", {method: "GET"});
           if (active() !== project || !host.contains(readinessPanel)) return;
+          // Revoke protected in-memory video URLs before replacing the review panel.
+          // Authenticated chapter media must not remain pinned by an orphaned player.
+          readinessList.querySelectorAll("video[data-object-url]").forEach(function (player) {
+            if (player.dataset.objectUrl) URL.revokeObjectURL(player.dataset.objectUrl);
+            player.removeAttribute("src");
+            player.load();
+          });
           readinessList.replaceChildren();
           (plan.chapters || []).forEach(function (chapter) {
             var line = document.createElement("p");
