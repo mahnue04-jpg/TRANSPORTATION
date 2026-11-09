@@ -324,6 +324,78 @@
     note.className = "hint";
     note.textContent = "Edit each scene and review timing. Nothing is saved until you click Save storyboard. This is production planning, not generated footage.";
     host.appendChild(note);
+    // This rehearsal reads unsaved editor state, without simulating spoken audio.
+    var rehearsal = document.createElement("fieldset");
+    var rehearsalLegend = document.createElement("legend");
+    rehearsalLegend.textContent = "Review scene and caption timing";
+    rehearsal.appendChild(rehearsalLegend);
+    var rehearsalHelp = document.createElement("p");
+    rehearsalHelp.className = "hint";
+    rehearsalHelp.textContent = "Scrub the timeline to inspect which caption would appear. Speech-level synchronization still requires audio review.";
+    rehearsal.appendChild(rehearsalHelp);
+    var playheadLabel = document.createElement("label");
+    playheadLabel.textContent = "Storyboard position (seconds)";
+    var playhead = document.createElement("input");
+    playhead.type = "range";
+    playhead.min = "0";
+    playhead.max = String(entry.duration_seconds);
+    playhead.step = "0.1";
+    playhead.value = "0";
+    playheadLabel.appendChild(playhead);
+    rehearsal.appendChild(playheadLabel);
+    var rehearsalStatus = document.createElement("p");
+    rehearsalStatus.setAttribute("role", "status");
+    rehearsalStatus.setAttribute("aria-live", "polite");
+    rehearsal.appendChild(rehearsalStatus);
+    var rehearsalNarration = document.createElement("p");
+    rehearsal.appendChild(rehearsalNarration);
+    var rehearsalCaption = document.createElement("p");
+    rehearsal.appendChild(rehearsalCaption);
+    host.appendChild(rehearsal);
+    function editableCues(scene) {
+      if (scene.caption_cues_raw === undefined) return scene.caption_cues || [];
+      if (!scene.caption_cues_raw.trim()) return [];
+      return scene.caption_cues_raw.split(/\\r?\\n/).map(function (line) {
+        var parts = line.split("|");
+        return {
+          start_seconds: Number(parts[0]), end_seconds: Number(parts[1]),
+          text: parts.length === 3 ? parts[2].trim() : ""
+        };
+      }).filter(function (cue) {
+        return Number.isFinite(cue.start_seconds) &&
+          Number.isFinite(cue.end_seconds) &&
+          cue.start_seconds >= 0 && cue.end_seconds > cue.start_seconds && cue.text;
+      });
+    }
+    function rehearse() {
+      var total = rows.reduce(function (sum, item) {
+        return sum + Math.max(0, Number(item.duration_seconds) || 0);
+      }, 0);
+      playhead.max = String(total || 1);
+      var position = Math.min(Number(playhead.value) || 0, Math.max(0, total - 0.001));
+      var offset = 0, active = null, relative = 0, number = 0;
+      rows.some(function (scene, index) {
+        var length = Math.max(0, Number(scene.duration_seconds) || 0);
+        if (position < offset + length) {
+          active = scene; relative = position - offset; number = index + 1;
+          return true;
+        }
+        offset += length;
+        return false;
+      });
+      rehearsalStatus.textContent = active
+        ? position.toFixed(1) + "s / " + total.toFixed(1) + "s — Scene " + number +
+          ": " + active.heading + " (" + relative.toFixed(1) + "s in scene)"
+        : "Add scenes to inspect planned caption timing.";
+      rehearsalNarration.textContent = active ? "Narration script: " + (active.narration || "(none)") : "";
+      var cue = active && editableCues(active).find(function (item) {
+        return relative >= item.start_seconds && relative < item.end_seconds;
+      });
+      rehearsalCaption.textContent = !active ? "" : cue
+        ? "Planned caption: " + cue.text
+        : "No manual caption here; the renderer may use estimated timing.";
+    }
+    playhead.addEventListener("input", rehearse);
     var narrationLabel = document.createElement("label");
     narrationLabel.textContent = "Offline narrator voice (basic synthetic preview only)";
     var voicePicker = document.createElement("select");
@@ -404,6 +476,7 @@
         }).join("\n");
         captionText.addEventListener("input", function () {
           scene.caption_cues_raw = captionText.value;
+          rehearse();
         });
         captionLabel.appendChild(captionText);
         fieldset.appendChild(captionLabel);
@@ -412,7 +485,7 @@
         var seconds = document.createElement("input");
         seconds.type = "number"; seconds.min = "1"; seconds.max = "600"; seconds.step = "1";
         seconds.value = String(scene.duration_seconds);
-        seconds.addEventListener("change", function () { scene.duration_seconds = Number(seconds.value); });
+        seconds.addEventListener("change", function () { scene.duration_seconds = Number(seconds.value); rehearse(); });
         label.appendChild(seconds);
         fieldset.appendChild(label);
         fieldset.appendChild(button("Remove scene", function () {
@@ -421,6 +494,7 @@
         }, scene));
         list.appendChild(fieldset);
       });
+      rehearse();
     }
     renderRows();
     host.appendChild(button("Add scene", function () {
