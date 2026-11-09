@@ -1235,6 +1235,8 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
     if not 2 <= len(chapters) <= 24 or any(
             row.get("chapter_index") != i or not isinstance(row.get("asset_id"), str)
             or not isinstance(row.get("sha256"), str) or len(row["sha256"]) != 64
+            or not isinstance(row.get("review_sha256"), str)
+            or len(row["review_sha256"]) != 64
             for i, row in enumerate(chapters)):
         raise HTTPException(status_code=409, detail="Pinned chapter selection is invalid.")
     store = DbCreativeStudioStore(db)
@@ -1251,6 +1253,16 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
                    and (asset.metadata or {}).get("sha256") == chapter["sha256"]]
         if len(matches) != 1:
             raise HTTPException(status_code=409, detail=f"Pinned chapter {index + 1} changed or is missing.")
+        review = (matches[0].metadata or {}).get("chapter_quality_review")
+        expected_review_sha = hashlib.sha256(json.dumps(
+            review, sort_keys=True, ensure_ascii=False
+        ).encode("utf-8")).hexdigest()
+        if (not _chapter_review_passed(review, index, chapter["sha256"])
+                or expected_review_sha != chapter["review_sha256"]):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Pinned chapter {index + 1} quality review changed or failed. Refresh and approve the current chapter.",
+            )
         selected.append(matches[0])
     signature = hashlib.sha256(
         (entry_id + "|" + str(pinned_duration) + "|" +
@@ -1782,6 +1794,10 @@ def start_chapter_master_job(
                 "chapter_index": row["chapter_index"],
                 "asset_id": row["asset_id"],
                 "sha256": row["asset_sha256"],
+                "review_sha256": hashlib.sha256(json.dumps(
+                    row["quality_review"], sort_keys=True,
+                    ensure_ascii=False
+                ).encode("utf-8")).hexdigest(),
             } for row in readiness["chapters"]],
         }
         snapshot = json.dumps({"pinned_master": pinned, "stage": "QUEUED"}, sort_keys=True)
