@@ -1508,3 +1508,122 @@ def save_calendar_storyboard(
         db.commit()
         db.refresh(entry)
     return _as_dict(entry)
+
+
+def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
+                               entry_id: str) -> dict:
+    """Produce a short preview from owner-approved scene text, no paid calls.
+
+    The existing renderer clamps scenes to <=12s and synthesizes only the first
+    1800 narration characters; reject mismatched plans rather than silently
+    changing duration or truncating customer copy.
+    """
+    from app.core.nova.creative_studio import private_object_storage as remote
+    import os
+
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the current storyboard before rendering.")
+    if entry.content_mode not in {"faceless", "education"}:
+        raise HTTPException(status_code=422, detail="Offline storyboard preview is only for faceless and education; other styles require their dedicated renderer.")
+    scenes = json.loads(entry.storyboard_json or "[]")
+    if not scenes or len(scenes) > 60:
+        raise HTTPException(status_code=422, detail="Save a storyboard with up to 60 scenes first.")
+    planned = sum(int(scene.get("duration_seconds") or 0) for scene in scenes)
+    if planned != entry.duration_seconds or not 15 <= planned <= 120:
+        raise HTTPException(status_code=422, detail="This local storyboard preview supports 15–120 seconds. Use chapter production for longer videos.")
+    if any(not 2 <= int(scene.get("duration_seconds") or 0) <= 12 for scene in scenes):
+        raise HTTPException(status_code=422, detail="Each local preview scene must last 2–12 seconds. Edit scene timing or use chapter production.")
+    narration = " ".join(str(scene.get("narration") or "").strip() for scene in scenes).strip()
+    if not narration or len(narration) > 1800:
+        raise HTTPException(status_code=422, detail="The local narrator needs 1–1800 characters. Shorten narration or use chapter production.")
+    if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
+        raise HTTPException(status_code=503, detail="Durable private storage is required before preview rendering.")
+
+    signature = hashlib.sha256(
+        json.dumps(scenes, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    store = DbCreativeStudioStore(db)
+    service = get_service(db)
+    for asset in store.list_assets(project_id, owner_id):
+        meta = asset.metadata or {}
+        if (asset.kind != "video"
+                or meta.get("pipeline") != "calendar_storyboard_preview"
+                or meta.get("calendar_entry_id") != entry_id
+                or meta.get("storyboard_sha256") != signature):
+            continue
+        digest = str(meta.get("sha256") or "")
+        try:
+            if asset.url and asset.url.startswith("private-studio-s3://"):
+                exists = bool(digest) and remote.enabled() and remote.object_exists(
+                    asset.url, owner_id, project_id, digest
+                )
+            else:
+                file_path, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                exists = bool(digest) and file_path.is_file() and hashlib.sha256(file_path.read_bytes()).hexdigest() == digest
+            if exists:
+                return {
+                    **_preview_result(project_id, asset, reused=True),
+                    "preview_source": "approved_storyboard",
+                }
+        except Exception:
+            pass
+
+    render_scenes = [
+        {
+            "heading": scene["heading"],
+            "voiceover_text": scene["narration"],
+            "subtitle_text": scene["narration"],
+            "duration_seconds": scene["duration_seconds"],
+        }
+        for scene in scenes
+    ]
+    with tempfile.TemporaryDirectory(prefix="nova-storyboard-preview-") as scratch:
+        root = Path(scratch)
+        output = root / "storyboard-preview.mp4"
+        try:
+            measured = render_offline_montage(
+                render_scenes, output_mp4=output, audio_wav=root / "narration.wav",
+                vertical=True,
+            )
+        except OfflineCommercialError as exc:
+            raise HTTPException(status_code=422, detail=exc.message) from exc
+        if not measured.get("audio_present") or not output.is_file():
+            raise HTTPException(status_code=422, detail="Narrated storyboard preview was not produced.")
+        if abs(float(measured.get("duration_seconds") or 0) - planned) > 3:
+            raise HTTPException(status_code=422, detail="Rendered duration does not match the approved storyboard.")
+        try:
+            imported = service.import_finished_video(
+                owner_id, project_id, output.read_bytes(), content_type="video/mp4",
+            )
+        except CreativeStudioError as exc:
+            raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+        asset = next((item for item in store.list_assets(project_id, owner_id)
+                      if item.id == imported["asset"]["id"]), None)
+        if asset is None:
+            raise HTTPException(status_code=500, detail="Preview output was not saved.")
+        asset.metadata = {
+            **(asset.metadata or {}),
+            "pipeline": "calendar_storyboard_preview",
+            "calendar_entry_id": entry_id, "storyboard_sha256": signature,
+            "quality_state": "PREVIEW_ONLY", "publish_ready": False,
+            "preview_brand": "AMICOR Nova", "captions_timing_verified": False,
+            "narration_license_status": "AMBER", "commercial_complete": False,
+            "visual_notes_rendered": False, "presenter_lip_sync": False,
+            "paid_provider_charges": False, "external_publishing": False,
+        }
+        asset = store.save_asset(asset)
+    return {**_preview_result(project_id, asset, reused=False),
+            "preview_source": "approved_storyboard"}
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/render-storyboard-preview")
+async def render_storyboard_preview(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return await run_in_threadpool(
+        _render_storyboard_preview, db, user.user_id, project_id, entry_id,
+    )
