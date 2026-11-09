@@ -1460,6 +1460,7 @@ class StoryboardSceneIn(BaseModel):
     visual_note: str = Field(default="", max_length=1500)
     narration: str = Field(default="", max_length=6000)
     duration_seconds: int = Field(ge=1, le=600)
+    visual_asset_id: str | None = Field(default=None, max_length=48)
 
     @field_validator("heading")
     @classmethod
@@ -1491,11 +1492,19 @@ def save_calendar_storyboard(
             status_code=422,
             detail="Scene durations must add up to the planned video duration.",
         )
+    images = {
+        a.id: a for a in DbCreativeStudioStore(db).list_assets(project_id, user.user_id)
+        if a.kind == "image" and a.url
+    }
+    for scene in payload.scenes:
+        if scene.visual_asset_id and scene.visual_asset_id not in images:
+            raise HTTPException(status_code=422, detail="Scene images must belong to the selected Studio project.")
     scenes = [
         {
             "index": index, "heading": scene.heading,
             "visual_note": scene.visual_note, "narration": scene.narration,
             "duration_seconds": scene.duration_seconds,
+            "visual_asset_id": scene.visual_asset_id,
         }
         for index, scene in enumerate(payload.scenes)
     ]
@@ -1570,15 +1579,31 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
         except Exception:
             pass
 
-    render_scenes = [
-        {
+    saved_assets = {
+        a.id: a for a in store.list_assets(project_id, owner_id)
+        if a.kind == "image" and a.url
+    }
+    render_scenes = []
+    for scene in scenes:
+        item = {
             "heading": scene["heading"],
             "voiceover_text": scene["narration"],
             "subtitle_text": scene["narration"],
             "duration_seconds": scene["duration_seconds"],
         }
-        for scene in scenes
-    ]
+        visual_id = scene.get("visual_asset_id")
+        if visual_id:
+            visual = saved_assets.get(visual_id)
+            if visual is None:
+                raise HTTPException(status_code=422, detail="A selected storyboard image is unavailable.")
+            try:
+                image_path, media_type, _ = service.open_asset_file(owner_id, project_id, visual_id)
+            except CreativeStudioError as exc:
+                raise HTTPException(status_code=422, detail="A selected image could not be read.") from exc
+            if media_type not in {"image/png", "image/jpeg", "image/webp"}:
+                raise HTTPException(status_code=422, detail="Storyboard visuals must be image assets.")
+            item["visual_image_path"] = str(image_path)
+        render_scenes.append(item)
     with tempfile.TemporaryDirectory(prefix="nova-storyboard-preview-") as scratch:
         root = Path(scratch)
         output = root / "storyboard-preview.mp4"
@@ -1610,6 +1635,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
             "quality_state": "PREVIEW_ONLY", "publish_ready": False,
             "preview_brand": "AMICOR Nova", "captions_timing_verified": False,
             "narration_license_status": "AMBER", "commercial_complete": False,
+            "customer_images_used": any(scene.get("visual_asset_id") for scene in scenes),
             "visual_notes_rendered": False, "presenter_lip_sync": False,
             "paid_provider_charges": False, "external_publishing": False,
         }
