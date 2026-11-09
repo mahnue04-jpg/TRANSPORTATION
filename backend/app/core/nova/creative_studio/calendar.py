@@ -23,7 +23,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import UserContext, get_current_user_context
-from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject, NovaCreativeRenderClaim
+from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject, NovaCreativeRenderClaim, NovaCreativeStoryboardRevision
 from app.core.nova.creative_studio.models import CreativeAsset, GenerationJob, new_id
 from app.core.nova.creative_studio.store import DbCreativeStudioStore
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
@@ -1535,6 +1535,33 @@ def save_calendar_storyboard(
     if ((entry.storyboard_json or "[]") != canonical
             or entry.narrator_voice != payload.narrator_voice
             or entry.narrator_speed != payload.narrator_speed):
+        # Capture the previous saved version (including before the revision
+        # table existed), then the new version; both commit with the change.
+        from sqlalchemy import select
+        def snapshot(json_scenes: str, voice: str, speed: int) -> None:
+            digest = hashlib.sha256(
+                json.dumps({"scenes": json.loads(json_scenes or "[]"),
+                            "voice": voice, "speed": speed},
+                           sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+            exists = db.execute(
+                select(NovaCreativeStoryboardRevision.id).where(
+                    NovaCreativeStoryboardRevision.owner_id == user.user_id,
+                    NovaCreativeStoryboardRevision.project_id == project_id,
+                    NovaCreativeStoryboardRevision.entry_id == entry_id,
+                    NovaCreativeStoryboardRevision.source_sha256 == digest,
+                ).limit(1)
+            ).first()
+            if not exists:
+                db.add(NovaCreativeStoryboardRevision(
+                    id=new_id("crev"), owner_id=user.user_id, project_id=project_id,
+                    entry_id=entry_id, scenes_json=json_scenes,
+                    narrator_voice=voice, narrator_speed=speed,
+                    source_sha256=digest, created_at=_now(),
+                ))
+        if entry.storyboard_json and entry.storyboard_json != "[]":
+            snapshot(entry.storyboard_json, entry.narrator_voice, entry.narrator_speed)
+        snapshot(canonical, payload.narrator_voice, payload.narrator_speed)
         entry.storyboard_json = canonical
         entry.narrator_voice = payload.narrator_voice
         entry.narrator_speed = payload.narrator_speed
