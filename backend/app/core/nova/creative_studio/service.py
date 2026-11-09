@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -46,6 +47,21 @@ from app.core.nova.creative_studio.providers import (
 )
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
 from app.core.nova.creative_studio.store import CreativeStudioStore, DbCreativeStudioStore, get_db_store, get_store
+
+
+@dataclass(frozen=True)
+class PrivateRemoteVideo:
+    """Keep legacy three-field unpacking while attaching integrity metadata."""
+    stream: Any
+    media_type: str
+    filename: str
+    expected_bytes: int
+    expected_sha256: str
+
+    def __iter__(self):
+        yield self.stream
+        yield self.media_type
+        yield self.filename
 
 
 class CreativeStudioError(Exception):
@@ -3105,7 +3121,11 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError(
                 "MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503,
             ) from exc
-        return stream, "video/mp4", _download_filename(asset.title, ".mp4"), expected_bytes, digest
+        return PrivateRemoteVideo(
+            stream=stream, media_type="video/mp4",
+            filename=_download_filename(asset.title, ".mp4"),
+            expected_bytes=expected_bytes, expected_sha256=digest,
+        )
 
     def open_asset_file(
         self,
