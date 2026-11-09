@@ -629,7 +629,16 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
     missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
+    # A version token binds customer confirmation to exact verified chapter
+    # assets and current saved plan, not merely chapter counts.
+    version = hashlib.sha256(json.dumps({
+        "entry_id": entry_id,
+        "duration_seconds": entry.duration_seconds,
+        "chapters": chapters,
+        "verified_asset_ids": [row["asset_id"] for row in states],
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return {
+        "version_sha256": version,
         "plan_status": entry.status,
         "chapters": states,
         "reusable_chapters": len(states) - len(missing),
@@ -1621,6 +1630,49 @@ def start_chapter_master_job(
         with _master_export_lock:
             _master_export_active.discard(key)
         raise
+
+
+class ConfirmedMasterUpdateIn(BaseModel):
+    version_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    confirm_rebuild: bool = False
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/update-final-master")
+def update_final_master(
+    project_id: str, entry_id: str, payload: ConfirmedMasterUpdateIn,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Queue a new final master only for an explicitly confirmed ready version.
+
+    Produces a separate review-only master, preserving prior exports.
+    Existing active master SQL claims remain authoritative for deduplication.
+    """
+    if not payload.confirm_rebuild:
+        raise HTTPException(status_code=422, detail="Confirm the updated master export.")
+    plan = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+    if not plan["master_ready"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Update blocked. Reapprove and finish rebuilding changed chapters first.",
+                "needs_rebuild_indices": plan["needs_rebuild_indices"],
+            },
+        )
+    if payload.version_sha256 != plan["version_sha256"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Chapter plan changed since review. Refresh readiness and confirm again.",
+        )
+    result = start_chapter_master_job(project_id, entry_id, background_tasks, user, db)
+    return {
+        **result,
+        "confirmed_version_sha256": plan["version_sha256"],
+        "original_masters_preserved": True,
+        "publish_ready": False,
+        "published": False,
+    }
 
 
 @router.post("/projects/{project_id}/calendar/{entry_id}/resume-master-job")
