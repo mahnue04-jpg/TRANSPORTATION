@@ -314,6 +314,7 @@
       return {
         heading: scene.heading || "",
         visual_note: scene.visual_note || "",
+        revision_note: scene.revision_note || "",
         narration: scene.narration || "",
         duration_seconds: Number(scene.duration_seconds) || 1,
         visual_asset_id: scene.visual_asset_id || null,
@@ -477,6 +478,31 @@
         if (firstInput) firstInput.focus({preventScroll: true});
       }, entry);
       reviewPanel.appendChild(jumpToCorrection);
+      var proposalButton = button("Ask Nova to prepare correction brief", async function () {
+        if (active() !== project || busy) return;
+        busy = true;
+        proposalButton.disabled = true;
+        try {
+          var result = await bridge.api(basePath(project) + "/" +
+            encodeURIComponent(entry.id) + "/assistant/previews/" +
+            encodeURIComponent(latestPreview.id) + "/revision-proposal", {method: "POST"});
+          if (active() !== project || !host.contains(reviewPanel)) return;
+          if (!result || result.status !== "DRAFT_SUGGESTION" ||
+              !Number.isInteger(result.scene_index) ||
+              !rows[result.scene_index]) throw new Error("No supported scene correction returned.");
+          rows[result.scene_index].revision_note = result.suggested_scene.revision_note;
+          renderRows();
+          sceneSelect.value = String(result.scene_index);
+          jumpToCorrection.click();
+          feedback("Correction brief copied to the editable scene. Review it, make changes, and save the storyboard. No media was modified.");
+        } catch (err) {
+          feedback(err.message || "Save a changes-required review with a specific scene and correction notes first.", true);
+        } finally {
+          busy = false;
+          proposalButton.disabled = false;
+        }
+      }, entry);
+      reviewPanel.appendChild(proposalButton);
       var reviewStatus = document.createElement("p");
       reviewStatus.setAttribute("role", "status");
       reviewStatus.textContent = previousReview.status
@@ -624,6 +650,7 @@
         }
         editable("Scene heading", scene.heading, 120, function (value) { scene.heading = value; }, false);
         editable("Visual direction", scene.visual_note, 1500, function (value) { scene.visual_note = value; }, true);
+        editable("Revision brief from quality review (planning only)", scene.revision_note || "", 2000, function (value) { scene.revision_note = value; }, true);
         var visualLabel = document.createElement("label");
         visualLabel.textContent = "Scene image from this project (optional)";
         var visualPicker = document.createElement("select");
