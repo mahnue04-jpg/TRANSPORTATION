@@ -1791,9 +1791,13 @@ def start_chapter_master_job(
             "needs_review_indices": readiness["needs_review_indices"],
             "needs_correction_indices": readiness["needs_correction_indices"],
         })
+    import os
+    dedicated = os.getenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", "").lower() in {"1", "true", "yes"}
     key = (user.user_id, project_id, entry_id)
     with _master_export_lock:
-        if key in _master_export_active:
+        # Local markers are valid only for work this web process will execute.
+        # Dedicated workers run in other processes; SQL claims are authoritative.
+        if not dedicated and key in _master_export_active:
             return {"status": "ALREADY_RUNNING",
                     "message": "This project's master export is already running."}
         latest = next(
@@ -1804,7 +1808,8 @@ def start_chapter_master_job(
         if latest is not None and latest.status in {"QUEUED", "RUNNING"}:
             return {"status": "ALREADY_RUNNING", "job": latest.as_dict(),
                     "message": "Check the saved master job before submitting again."}
-        _master_export_active.add(key)
+        if not dedicated:
+            _master_export_active.add(key)
     try:
         now = _now()
         fresh_id = new_id("cjob")
@@ -1857,8 +1862,6 @@ def start_chapter_master_job(
                     "message": "Another worker claimed this export."}
         # When a dedicated worker is enabled, the committed SQL claim is its
         # queue; the web process must not execute a second in-process task.
-        import os
-        dedicated = os.getenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", "").lower() in {"1", "true", "yes"}
         if not dedicated:
             background_tasks.add_task(
                 _run_chapter_master_job, user.user_id, project_id, entry_id, job.id
