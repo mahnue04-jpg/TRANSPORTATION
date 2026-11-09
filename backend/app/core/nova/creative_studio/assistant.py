@@ -317,8 +317,8 @@ def _literal_narration_rewrite(original: str, feedback: str) -> dict:
     """Only perform exact quoted owner-requested replacements, never invent copy."""
     import re
     pattern = (
-        r'^\\s*replace\\s+["\\u201c]([^"\\u201d]{1,160})["\\u201d]'
-        r'\\s+with\\s+["\\u201c]([^"\\u201d]{1,160})["\\u201d]\\s*[.!]?\\s*$'
+        r'^\s*replace\s+["“]([^"”]{1,160})["”]'
+        r'\s+with\s+["“]([^"”]{1,160})["”]\s*[.!]?\s*$'
     )
     match = re.fullmatch(pattern, feedback, flags=re.IGNORECASE | re.DOTALL)
     if match is None:
