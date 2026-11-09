@@ -154,6 +154,10 @@
   }
   async function load() {
     var project = active();
+    if (project !== loadedProject) {
+      releaseProtectedVideoUrls($("calendar-chapters"));
+      $("calendar-chapters").replaceChildren();
+    }
     loadedProject = project;
     var current = ++revision;
     $("calendar-project-status").textContent = project ?
@@ -1237,6 +1241,7 @@
     var project = requestProject();
     if (!project || (busy && !Array.isArray(proposedChapters))) return;
     var host = $("calendar-chapters");
+    releaseProtectedVideoUrls(host);
     host.replaceChildren();
     try {
       var detail = await bridge.api("/api/nova/creative/projects/" + encodeURIComponent(project), { method: "GET" });
