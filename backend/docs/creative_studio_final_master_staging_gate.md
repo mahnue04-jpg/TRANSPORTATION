@@ -60,6 +60,9 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 
 
 
+28. **Protected master playback and review attestation:** In the authenticated Studio UI, load a saved private master, navigate away and back, switch projects, then reopen its chapter editor. Confirm in-memory blob URLs are revoked on view replacement and that saving a master-quality review requires explicit reviewer confirmation of full viewing. This confirmation is an attestation, not independently proven video watch-time tracking.
+29. **Remote master download fail-closed:** Attempt an owner-scoped private download with correct metadata, missing SHA, mismatched object-store HEAD, and another owner's credentials. Only the correctly scoped matching object may open a remote stream. Verify full streamed bytes, downloadable MP4 and content checksum separately in staging; HEAD metadata checks alone do not prove byte integrity.
+
 ## Evidence required before release
 
 Capture per-case result, exact Git commit SHA, staging environment identifier, timestamp, redacted project and chapter IDs, asset SHA256, browser/OS, CI run, FFprobe metadata and playback/download notes. Attach failures with reproduction steps and observed vs expected outcomes. Do not attach private customer video publicly.
@@ -70,7 +73,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all twenty-seven staging scenarios pass with recorded evidence.
+- CI and all twenty-nine staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
