@@ -1062,6 +1062,23 @@ def _master_job_status(db: Session, owner_id: str,
         locally_running = key in _master_export_active
     if latest.status not in {"QUEUED", "RUNNING"} or locally_running:
         return {"status": latest.status, "job": latest.as_dict()}
+    claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
+    # With an external worker the web process cannot observe its local lock.
+    # Only declare interrupted after a conservative lease grace period, never
+    # claim completion without a remotely verified master.
+    if claim is not None and claim.job_id == latest.id and claim.state in {"QUEUED", "RUNNING"}:
+        from datetime import timedelta
+        try:
+            since = datetime.fromisoformat(claim.updated_at)
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            elapsed = datetime.now(timezone.utc) - since
+            grace = timedelta(minutes=75 if claim.state == "RUNNING" else 5)
+            if elapsed <= grace:
+                return {"status": claim.state, "job": latest.as_dict(),
+                        "message": "The export is queued or claimed by a render worker."}
+        except (ValueError, TypeError):
+            pass
 
     # If the process died after saving the master but before updating its job,
     # recover only a verifiably persisted file created after the job began.
