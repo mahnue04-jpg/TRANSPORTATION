@@ -8,6 +8,7 @@ No generation providers or social publishing are invoked.
 from __future__ import annotations
 
 import math
+import os
 from pathlib import Path
 import subprocess
 
@@ -45,8 +46,10 @@ def normalize_chapter(source: Path, output: Path) -> dict:
 
 def join_normalized_chapters(paths: list[Path], output: Path, *, expected_seconds: int) -> dict:
     """Stream-copy normalized segments into one MP4; avoid reencoding them."""
-    if not 600 <= expected_seconds <= 3600 or not 2 <= len(paths) <= 24:
-        raise ChapterMasterError("Final export supports 10–60 minutes and 2–24 segments.")
+    extended = os.getenv("NOVA_STUDIO_EXTENDED_MASTER_EXPORTS", "").lower() in {"1", "true", "yes"}
+    limit = 7200 if extended else 3600
+    if not 600 <= expected_seconds <= limit or not 2 <= len(paths) <= 24:
+        raise ChapterMasterError("The configured final export limit is 10–" + str(limit // 60) + " minutes, using 2–24 segments.")
     specs = [inspect_chapter(path) for path in paths]
     if abs(sum(x["duration_seconds"] for x in specs) - expected_seconds) > max(8, expected_seconds * .02):
         raise ChapterMasterError("Completed segments do not match the planned duration.")
@@ -70,11 +73,12 @@ def join_normalized_chapters(paths: list[Path], output: Path, *, expected_second
             "-f", "concat", "-safe", "0", "-i", str(manifest),
             "-map", "0:v:0", "-map", "0:a:0",
             "-c", "copy", "-movflags", "+faststart", str(output),
-        ], capture_output=True, timeout=1200)
+        ], capture_output=True, timeout=2400 if extended else 1200)
         if result.returncode != 0 or not output.is_file():
             raise ChapterMasterError("Joining saved chapter checkpoints failed.")
-        if not 0 < output.stat().st_size <= 512 * 1024 * 1024:
-            raise ChapterMasterError("Joined master exceeds 512 MiB.")
+        max_bytes = (2 * 1024 * 1024 * 1024) if extended else (512 * 1024 * 1024)
+        if not 0 < output.stat().st_size <= max_bytes:
+            raise ChapterMasterError("Joined master exceeds the configured secure size limit.")
         measured = inspect_chapter_master(output)
         if abs(measured["duration_seconds"] - expected_seconds) > max(8, expected_seconds * .02):
             raise ChapterMasterError("Joined master duration mismatch.")
