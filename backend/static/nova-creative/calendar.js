@@ -20,6 +20,18 @@
     el.textContent = message;
     el.style.color = error ? "#9b1c1c" : "";
   }
+  function releaseProtectedVideoUrls(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return;
+    root.querySelectorAll("video[data-object-url]").forEach(function (video) {
+      var url = video.dataset.objectUrl;
+      if (!url) return;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(url);
+      delete video.dataset.objectUrl;
+    });
+  }
   function basePath(projectId) {
     return "/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/calendar";
   }
@@ -263,6 +275,7 @@
     var project = requestProject();
     if (!project || busy) return;
     var host = $("calendar-chapters");
+    releaseProtectedVideoUrls(host);
     host.replaceChildren();
     var heading = document.createElement("h3");
     heading.textContent = "Finished master review — " + entry.topic;
@@ -315,7 +328,7 @@
               video.src = url;
               if (!panel.contains(video)) panel.appendChild(video);
               loaded = true;
-              feedback("Verified master loaded. Review the actual footage, narration and captions before marking quality checks.");
+              feedback("Master loaded for playback. Watch through the ending and explicitly confirm your full review before saving the checklist.");
             } catch (err) { feedback(err.message || "Protected master playback failed.", true); }
           }, master));
           panel.appendChild(button("Download reviewed MP4", async function () {
@@ -351,7 +364,7 @@
         localReviewCheckbox.type = "checkbox";
         localReviewLabel.appendChild(localReviewCheckbox);
         localReviewLabel.appendChild(document.createTextNode(
-          " I opened and watched this complete saved MP4 in a local player (or loaded it above)."
+          " I have reviewed this complete saved MP4 in a player (including audio, captions and ending)."
         ));
         panel.appendChild(localReviewLabel);
         var checks = [
@@ -408,8 +421,8 @@
           "Not reviewed.";
         panel.appendChild(state);
         panel.appendChild(button("Save master quality review", async function () {
-          if (!loaded && !localReviewCheckbox.checked) {
-            state.textContent = "Review this saved master in the player or download and watch the full MP4 before submitting the checklist.";
+          if (!localReviewCheckbox.checked) {
+            state.textContent = "Confirm that you watched the complete saved MP4, including its audio and ending, before submitting this checklist.";
             return;
           }
           var body = {
