@@ -337,3 +337,51 @@ def test_master_job_requires_pinned_review_digest(monkeypatch):
         studio._assemble_chapter_master(object(), "owner", "project", "entry", pinned=pinned)
     assert error.value.status_code == 409
     assert "Pinned chapter selection" in error.value.detail
+
+
+def test_completed_master_status_requires_verified_private_file(monkeypatch):
+    from types import SimpleNamespace
+    import json
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    version = "a" * 64
+    claim = SimpleNamespace(
+        job_id="job-1", checkpoint_json=json.dumps({
+            "pinned_master": {"version_sha256": version},
+        })
+    )
+    job = SimpleNamespace(
+        id="job-1", kind="calendar_master:entry", status="GENERATED",
+        result_asset_ids=["finished-1"],
+        as_dict=lambda: {"id": "job-1", "status": "GENERATED"},
+    )
+    asset = SimpleNamespace(
+        id="finished-1", kind="video",
+        url="private-studio-s3://test-master",
+        metadata={
+            "pipeline": "calendar_chapter_master",
+            "calendar_entry_id": "entry",
+            "pinned_version_sha256": version,
+            "sha256": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_jobs=lambda *args: [job], list_assets=lambda *args: [asset],
+    ))
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    db = SimpleNamespace(get=lambda *args: claim)
+
+    monkeypatch.setattr(remote, "object_exists", lambda *args: False)
+    missing = studio._master_job_status(db, "owner", "project", "entry")
+    assert missing["status"] == "COMPLETED_ASSET_UNVERIFIED"
+    assert missing["job"]["status"] == "GENERATED"  # historical DB value is not falsified
+
+    monkeypatch.setattr(remote, "object_exists", lambda *args: True)
+    verified = studio._master_job_status(db, "owner", "project", "entry")
+    assert verified["status"] == "GENERATED"
+    assert verified["verified_asset_id"] == "finished-1"
+
+    asset.metadata["pinned_version_sha256"] = "c" * 64
+    stale = studio._master_job_status(db, "owner", "project", "entry")
+    assert stale["status"] == "COMPLETED_ASSET_UNVERIFIED"
