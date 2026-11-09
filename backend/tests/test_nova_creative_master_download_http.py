@@ -1,6 +1,7 @@
 """Owner-scoped private master download HTTP headers without networking."""
 import hashlib
 import io
+import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
-from app.core.nova.creative_studio import router as studio_router
+studio_router = importlib.import_module("app.core.nova.creative_studio.router")
 
 
 def _request(query=b""):
