@@ -1695,6 +1695,8 @@ class StoryboardPreviewReviewIn(BaseModel):
     visuals_ok: bool
     playback_ok: bool
     notes: str = Field(default="", max_length=2000)
+    correction_scene_index: int | None = Field(default=None, ge=0, le=59)
+    correction_category: Literal["narration", "captions", "visuals", "playback", "general"] = "general"
 
 
 @router.put("/projects/{project_id}/calendar/{entry_id}/previews/{asset_id}/review")
@@ -1747,7 +1749,12 @@ def review_storyboard_preview(
     if not verified:
         raise HTTPException(status_code=409, detail="Preview file could not be verified. Review was not saved.")
 
+    saved_scenes = json.loads(entry.storyboard_json or "[]")
+    if (payload.correction_scene_index is not None and payload.correction_scene_index >= len(saved_scenes)):
+        raise HTTPException(status_code=422, detail="The correction scene does not exist in this storyboard.")
     review = {
+        "correction_scene_index": payload.correction_scene_index,
+        "correction_category": payload.correction_category,
         "narration_ok": payload.narration_ok,
         "captions_ok": payload.captions_ok,
         "visuals_ok": payload.visuals_ok,
