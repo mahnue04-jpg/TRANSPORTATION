@@ -1403,23 +1403,19 @@
             readinessList.appendChild(line);
           });
           var summary = document.createElement("p");
+          summary.setAttribute("role", "status");
           var rebuildCount = (plan.needs_rebuild_indices || []).length;
           var reviewCount = (plan.needs_review_indices || []).length;
           var correctionCount = (plan.needs_correction_indices || []).length;
-          summary.textContent = plan.master_ready
-            ? "Ready to update final master for private review: all " +
-              plan.reusable_chapters + " chapter MP4s are verified and their exact versions passed quality review."
-            : plan.plan_status !== "approved"
-              ? "Save and approve the chapter plan before rebuilding or exporting."
-              : rebuildCount
-                ? rebuildCount + " chapter(s) need rebuilding. " +
-                  reviewCount + " additional chapter(s) need quality review; " +
-                  correctionCount + " have corrections requested."
-                : reviewCount
-                  ? reviewCount + " chapter(s) need quality review before final-master export (" +
-                    correctionCount + " with corrections requested). Review each chapter MP4 below, " +
-                    "correct failures, and check readiness again."
-                  : "Final master is not ready. Check chapter approvals and saved media.";
+          var readyLabel = plan.readiness_status === "READY_TO_UPDATE_FINAL_MASTER"
+            ? "READY TO UPDATE FINAL MASTER"
+            : String(plan.readiness_status || "REVIEW REQUIRED").replace(/_/g, " ");
+          summary.textContent = readyLabel + ". " +
+            (plan.message || "Check the saved chapter plan and quality reviews.") +
+            " Verified and passed: " + (plan.reviewed_chapters || 0) +
+            "; rebuild: " + rebuildCount +
+            "; review outstanding: " + reviewCount +
+            "; corrections requested: " + correctionCount + ".";
           readinessList.appendChild(summary);
           if (plan.master_ready && plan.version_sha256 && plan.plan_status === "approved") {
             var updateButton = button("Update Final Master (review-only)", async function () {
