@@ -1021,10 +1021,12 @@
                   feedback("Chapter " + (chapter.chapter_index + 1) +
                     " saved for review. Recheck readiness before exporting the full master.");
                   if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
-                  readinessButton.click();
                 } catch (err) {
                   feedback(err.message || "Chapter rebuild failed; existing videos remain saved.", true);
-                } finally { busy = false; }
+                } finally {
+                  busy = false;
+                  if (active() === project && host.contains(readinessPanel)) readinessButton.click();
+                }
               }, chapter));
             }
             readinessList.appendChild(line);
