@@ -88,6 +88,26 @@ def ensure_nova_creative_schema(engine: Engine | None = None) -> None:
                     "ALTER TABLE nova_creative_render_claims "
                     "ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT '{}'"
                 ))
+    # Additive budget-ledger fields for already-created Studio AI request slots.
+    inspector = inspect(eng)
+    if "nova_creative_ai_request_slots" in inspector.get_table_names():
+        existing_slots = {
+            column["name"] for column in inspector.get_columns("nova_creative_ai_request_slots")
+        }
+        additions = (
+            ("reserved_micro_usd", "INTEGER NOT NULL DEFAULT 0"),
+            ("estimated_micro_usd", "INTEGER"),
+            ("input_tokens", "INTEGER"),
+            ("output_tokens", "INTEGER"),
+            ("charge_status", "VARCHAR(36) NOT NULL DEFAULT 'reserved_unverified'"),
+            ("updated_at", "VARCHAR(40) NOT NULL DEFAULT ''"),
+        )
+        with eng.begin() as conn:
+            for column, sql_type in additions:
+                if column not in existing_slots:
+                    conn.execute(text(
+                        f"ALTER TABLE nova_creative_ai_request_slots ADD COLUMN {column} {sql_type}"
+                    ))
     inspector = inspect(eng)
     names = set(inspector.get_table_names())
     missing = [table.name for table in CREATIVE_TABLES if table.name not in names]
