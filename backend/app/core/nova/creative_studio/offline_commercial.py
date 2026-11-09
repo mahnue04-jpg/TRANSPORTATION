@@ -296,6 +296,7 @@ def render_offline_montage(
     vertical: bool = True,
     voice: str = "en-us",
     speed: int = 148,
+    include_cta: bool = True,
 ) -> dict[str, Any]:
     """Build one MP4 from storyboard beats. Duration follows the storyboard, not a 5s loop."""
     if not scenes:
@@ -413,6 +414,7 @@ def render_offline_montage(
             height=height,
             cta_text="getamicor.com/nova-today",
             fade_seconds=min(2.5, max(1.0, planned / 8)),
+            include_cta=include_cta,
         )
         output_mp4.parent.mkdir(parents=True, exist_ok=True)
         output_mp4.write_bytes(polished.read_bytes())
