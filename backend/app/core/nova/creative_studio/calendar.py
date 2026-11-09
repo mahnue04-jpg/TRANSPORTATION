@@ -119,6 +119,7 @@ def _as_dict(row: NovaCreativeCalendarEntry) -> dict:
         "duration_seconds": row.duration_seconds,
         "timeline_asset_ids": json.loads(row.timeline_json or "[]"),
         "chapters": json.loads(row.chapters_json or "[]"),
+        "storyboard": json.loads(row.storyboard_json or "[]"),
         "status": row.status, "created_at": row.created_at,
         "updated_at": row.updated_at, "publishing_enabled": False,
         "message": "Planning only. Approval does not schedule or publish a post.",
@@ -1452,3 +1453,58 @@ def chapter_master_job_status(
     _project(db, user.user_id, project_id)
     _entry(db, user.user_id, project_id, entry_id)
     return _master_job_status(db, user.user_id, project_id, entry_id)
+
+
+class StoryboardSceneIn(BaseModel):
+    heading: str = Field(min_length=1, max_length=120)
+    visual_note: str = Field(default="", max_length=1500)
+    narration: str = Field(default="", max_length=6000)
+    duration_seconds: int = Field(ge=1, le=600)
+
+    @field_validator("heading")
+    @classmethod
+    def strip_heading(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Scene heading cannot be blank")
+        return value
+
+
+class StoryboardIn(BaseModel):
+    scenes: list[StoryboardSceneIn] = Field(min_length=1, max_length=60)
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/storyboard")
+def save_calendar_storyboard(
+    project_id: str, entry_id: str, payload: StoryboardIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Save reviewed planning-only scenes without touching generated media."""
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be edited.")
+    total = sum(scene.duration_seconds for scene in payload.scenes)
+    if total != entry.duration_seconds:
+        raise HTTPException(
+            status_code=422,
+            detail="Scene durations must add up to the planned video duration.",
+        )
+    scenes = [
+        {
+            "index": index, "heading": scene.heading,
+            "visual_note": scene.visual_note, "narration": scene.narration,
+            "duration_seconds": scene.duration_seconds,
+        }
+        for index, scene in enumerate(payload.scenes)
+    ]
+    canonical = json.dumps(scenes, ensure_ascii=False)
+    if (entry.storyboard_json or "[]") != canonical:
+        entry.storyboard_json = canonical
+        if entry.status == "approved":
+            entry.status = "ready_for_review"
+        entry.updated_at = _now()
+        db.commit()
+        db.refresh(entry)
+    return _as_dict(entry)
