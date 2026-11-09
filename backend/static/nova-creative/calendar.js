@@ -321,6 +321,26 @@
     note.className = "hint";
     note.textContent = "Edit each scene and review timing. Nothing is saved until you click Save storyboard. This is production planning, not generated footage.";
     host.appendChild(note);
+    var narrationLabel = document.createElement("label");
+    narrationLabel.textContent = "Offline narrator voice (basic synthetic preview only)";
+    var voicePicker = document.createElement("select");
+    voicePicker.add(new Option("English — US", "en-us"));
+    voicePicker.add(new Option("English — UK", "en-gb"));
+    voicePicker.value = entry.narrator_voice || "en-us";
+    narrationLabel.appendChild(voicePicker);
+    host.appendChild(narrationLabel);
+    var speedLabel = document.createElement("label");
+    speedLabel.textContent = "Speaking speed (words per minute)";
+    var speedPicker = document.createElement("select");
+    [115, 130, 148, 165, 180].forEach(function (wpm) {
+      speedPicker.add(new Option(wpm + " WPM", String(wpm)));
+    });
+    if (![115,130,148,165,180].includes(Number(entry.narrator_speed))) {
+      speedPicker.add(new Option(String(entry.narrator_speed || 148) + " WPM", String(entry.narrator_speed || 148)));
+    }
+    speedPicker.value = String(entry.narrator_speed || 148);
+    speedLabel.appendChild(speedPicker);
+    host.appendChild(speedLabel);
     var list = document.createElement("div");
     host.appendChild(list);
     function renderRows() {
@@ -407,7 +427,7 @@
       busy = true;
       try {
         var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
-          "/storyboard", { method: "PUT", body: JSON.stringify({ scenes: rows }) });
+          "/storyboard", { method: "PUT", body: JSON.stringify({ scenes: rows, narrator_voice: voicePicker.value, narrator_speed: Number(speedPicker.value) }) });
         if (active() !== project) return;
         feedback(saved.status === "ready_for_review"
           ? "Storyboard saved. Review and reapprove the edited plan before production."
