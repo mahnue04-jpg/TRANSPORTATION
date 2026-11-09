@@ -291,6 +291,7 @@
     var project = requestProject();
     if (!project) return;
     var visualAssets = [];
+    var renderedPreviews = [];
     try {
       var projectDetail = await bridge.api("/api/nova/creative/projects/" + encodeURIComponent(project), {
         method: "GET"
@@ -298,6 +299,12 @@
       if (active() !== project) return;
       visualAssets = (projectDetail.assets || []).filter(function (asset) {
         return asset.kind === "image" && Boolean(asset.url) && asset.status === "GENERATED";
+      });
+      renderedPreviews = (projectDetail.assets || []).filter(function (asset) {
+        var meta = asset.metadata || {};
+        return asset.kind === "video" && asset.status === "GENERATED" &&
+          meta.pipeline === "calendar_storyboard_preview" &&
+          meta.calendar_entry_id === entry.id && Boolean(asset.url);
       });
     } catch (err) {
       feedback("Image choices unavailable; scene text can still be edited.", true);
@@ -352,6 +359,53 @@
     var rehearsalCaption = document.createElement("p");
     rehearsal.appendChild(rehearsalCaption);
     host.appendChild(rehearsal);
+    var videoPanel = document.createElement("div");
+    var video = document.createElement("video");
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.setAttribute("aria-label", "Previously rendered storyboard preview with narration");
+    video.style.maxWidth = "100%";
+    video.style.maxHeight = "360px";
+    var previewHelp = document.createElement("p");
+    previewHelp.className = "hint";
+    previewHelp.textContent = "Playback is from the most recently saved storyboard preview. Unsaved script, voice or caption edits are NOT in that MP4 until you save, reapprove and render again.";
+    videoPanel.appendChild(previewHelp);
+    if (renderedPreviews.length && typeof bridge.fetchProtectedVideo === "function") {
+      var latestPreview = renderedPreviews.slice().sort(function (a, b) {
+        return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      })[0];
+      var audioButton = button("Load saved video with narration", async function () {
+        if (active() !== project) return;
+        audioButton.disabled = true;
+        try {
+          var blob = await bridge.fetchProtectedVideo(project, latestPreview.id);
+          if (active() !== project || !host.contains(audioButton)) return;
+          if (video.dataset.objectUrl) URL.revokeObjectURL(video.dataset.objectUrl);
+          var objectUrl = URL.createObjectURL(blob);
+          video.dataset.objectUrl = objectUrl;
+          video.src = objectUrl;
+          if (!videoPanel.contains(video)) videoPanel.appendChild(video);
+          feedback("Saved video loaded. Play or scrub to review the actual narration against caption timing.");
+        } catch (err) {
+          feedback(err.message || "Protected preview playback unavailable.", true);
+        } finally { audioButton.disabled = false; }
+      }, entry);
+      videoPanel.appendChild(audioButton);
+    } else {
+      var noPreview = document.createElement("p");
+      noPreview.className = "hint";
+      noPreview.textContent = "No saved storyboard MP4 preview is available yet. Save and approve this plan, then render a preview to review real narration.";
+      videoPanel.appendChild(noPreview);
+    }
+    rehearsal.appendChild(videoPanel);
+    video.addEventListener("timeupdate", function () {
+      if (Number.isFinite(video.currentTime)) {
+        playhead.value = String(Math.min(Number(playhead.max), video.currentTime));
+        rehearse();
+      }
+    });
+    video.addEventListener("ended", function () { rehearse(); });
     function editableCues(scene) {
       if (scene.caption_cues_raw === undefined) return scene.caption_cues || [];
       if (!scene.caption_cues_raw.trim()) return [];
@@ -395,7 +449,12 @@
         ? "Planned caption: " + cue.text
         : "No manual caption here; the renderer may use estimated timing.";
     }
-    playhead.addEventListener("input", rehearse);
+    playhead.addEventListener("input", function () {
+      if (video.src && Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.min(video.duration, Number(playhead.value));
+      }
+      rehearse();
+    });
     var narrationLabel = document.createElement("label");
     narrationLabel.textContent = "Offline narrator voice (basic synthetic preview only)";
     var voicePicker = document.createElement("select");
