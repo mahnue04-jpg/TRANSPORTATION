@@ -385,3 +385,35 @@ def test_completed_master_status_requires_verified_private_file(monkeypatch):
     asset.metadata["pinned_version_sha256"] = "c" * 64
     stale = studio._master_job_status(db, "owner", "project", "entry")
     assert stale["status"] == "COMPLETED_ASSET_UNVERIFIED"
+
+
+def test_master_checkpoint_parser_fails_closed_for_corrupt_metadata():
+    from app.core.nova.creative_studio.calendar import _safe_master_checkpoint
+    assert _safe_master_checkpoint(None) == {}
+    assert _safe_master_checkpoint("") == {}
+    assert _safe_master_checkpoint("{invalid") == {}
+    assert _safe_master_checkpoint("[]") == {}
+    assert _safe_master_checkpoint('"not a dict"') == {}
+    assert _safe_master_checkpoint('{"pinned_master":{"version_sha256":"abc"}}') == {
+        "pinned_master": {"version_sha256": "abc"}
+    }
+
+
+def test_master_job_status_handles_corrupt_claim_without_reporting_completion(monkeypatch):
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import calendar as studio
+
+    claim = SimpleNamespace(job_id="job-1", checkpoint_json="{broken", state="ERROR")
+    job = SimpleNamespace(
+        id="job-1", kind="calendar_master:entry", status="GENERATED",
+        result_asset_ids=["master-1"],
+        as_dict=lambda: {"id": "job-1", "status": "GENERATED"},
+    )
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_jobs=lambda *args: [job], list_assets=lambda *args: [],
+    ))
+    result = studio._master_job_status(
+        SimpleNamespace(get=lambda *args: claim), "owner", "project", "entry"
+    )
+    assert result["status"] == "COMPLETED_ASSET_UNVERIFIED"
+    assert result["checkpoint"] == {}
