@@ -74,6 +74,9 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 37. **Mobile and browser compatibility:** Confirm the download UI explains when streaming saves require the File System Access API on a supported desktop browser. For browsers without it, never silently attempt to load a long-form master into a huge Blob; test the small-video-only fallback separately.
 38. **Browser-harness regression evidence:** Run `node --test backend/tests/js/test_creative_studio_master_download.mjs` in CI against the actual browser-function source. Confirm the regular and large-MP4 download paths reject bad sizes, malformed MIME, mid-stream cancellation and customer-project changes. These mocks do not substitute for actual browser/user staging testing.
 
+39. **Verified staging MP4 download:** Once a nonproduction PR #470 service actually exists, use `backend/scripts/verify_studio_master_download.py` with an owner-approved private project, asset ID, and independently captured source SHA-256. Provide the bearer as `NOVA_STUDIO_STAGING_BEARER` in the executing environment (never a URL or issue comment). The read-only script must confirm HTTPS, private authenticated MP4, positive exact Content-Length, streamed SHA-256, nonzero video and audio via ffprobe, and print only sanitized metadata. Fail closed on mismatches. Manually watch the complete finished MP4 separately.
+40. **Staging environment isolation:** The current Render workspace inspection on 2026-11-09 did not show a service for PR #470. A suitable isolated service must be provisioned/identified with the correct branch, storage, database and owner-only credentials *before* live customer testing. Do not trigger production deployment or paid infrastructure without explicit owner authorization.
+
 ## Evidence required before release
 
 Capture per-case result, exact Git commit SHA, staging environment identifier, timestamp, redacted project and chapter IDs, asset SHA256, browser/OS, CI run, FFprobe metadata and playback/download notes. Attach failures with reproduction steps and observed vs expected outcomes. Do not attach private customer video publicly.
@@ -84,7 +87,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all thirty-eight staging scenarios pass with recorded evidence.
+- CI and all forty staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
