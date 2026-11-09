@@ -412,6 +412,12 @@
             correction_chapter_index: correctionChapter.value === "" ? null : Number(correctionChapter.value)
           };
           checks.forEach(function (field) { body[field[0]] = controls[field[0]].checked; });
+          var passedMaster = checks.every(function (field) { return body[field[0]] === true; });
+          if (!passedMaster && !body.notes.trim()) {
+            state.textContent = "Add specific correction notes before saving a failed master review.";
+            notes.focus();
+            return;
+          }
           try {
             var response = await bridge.api(basePath(project) + "/" +
               encodeURIComponent(entry.id) + "/masters/" +
