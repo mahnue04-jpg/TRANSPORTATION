@@ -1933,6 +1933,11 @@ def review_master_version(
         payload.continuity_ok, payload.rights_reviewed,
     ]
     status = "REVIEW_PASSED" if all(checks) else "CHANGES_REQUIRED"
+    if status == "CHANGES_REQUIRED" and not payload.notes.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Describe what needs correction before saving a failed final-master review.",
+        )
     review = {
         "status": status,
         "correction_chapter_index": payload.correction_chapter_index,
