@@ -1694,6 +1694,8 @@ class MasterReviewIn(BaseModel):
     continuity_ok: bool
     rights_reviewed: bool
     notes: str = Field(default="", max_length=2000)
+    correction_chapter_index: int | None = Field(default=None, ge=0, le=23)
+    correction_category: Literal["footage", "audio", "captions", "continuity", "rights", "general"] = "general"
 
 
 def _verified_master_assets(db: Session, owner_id: str, project_id: str,
@@ -1736,6 +1738,7 @@ def get_master_versions(
             "pinned_version_sha256": (asset.metadata or {}).get("pinned_version_sha256"),
             "duration_seconds": (asset.metadata or {}).get("duration_seconds"),
             "review": (asset.metadata or {}).get("master_quality_review"),
+            "chapter_count": len((asset.metadata or {}).get("source_asset_ids") or []),
             "download_url": f"/api/nova/creative/projects/{project_id}/assets/{asset.id}/file",
             "commercial_complete": False, "publish_ready": False,
         } for asset in masters[:30]],
@@ -1757,6 +1760,10 @@ def review_master_version(
         db, user.user_id, project_id, entry_id) if item.id == asset_id), None)
     if master is None:
         raise HTTPException(status_code=404, detail="The private master is missing or unverified.")
+    source_ids = (master.metadata or {}).get("source_asset_ids") or []
+    if payload.correction_chapter_index is not None and not (
+            0 <= payload.correction_chapter_index < len(source_ids)):
+        raise HTTPException(status_code=422, detail="The affected chapter does not exist in this saved master.")
     checks = [
         payload.footage_ok, payload.audio_ok, payload.captions_ok,
         payload.continuity_ok, payload.rights_reviewed,
@@ -1764,6 +1771,10 @@ def review_master_version(
     status = "REVIEW_PASSED" if all(checks) else "CHANGES_REQUIRED"
     review = {
         "status": status,
+        "correction_chapter_index": payload.correction_chapter_index,
+        "correction_category": payload.correction_category,
+        "source_chapter_asset_id": (source_ids[payload.correction_chapter_index]
+            if payload.correction_chapter_index is not None else None),
         "footage_ok": payload.footage_ok,
         "audio_ok": payload.audio_ok,
         "captions_ok": payload.captions_ok,
@@ -1790,6 +1801,55 @@ def review_master_version(
         "message": "Quality review saved for this exact MP4. Publishing and commercial clearance remain separate.",
     }
 
+
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/masters/{asset_id}/correction-plan")
+def master_chapter_correction_plan(
+    project_id: str, entry_id: str, asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Match saved master feedback to its historical chapter, not a guessed current one."""
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    master = next((a for a in _verified_master_assets(
+        db, user.user_id, project_id, entry_id) if a.id == asset_id), None)
+    if master is None:
+        raise HTTPException(status_code=404, detail="Verified saved master not found.")
+    review = (master.metadata or {}).get("master_quality_review") or {}
+    if review.get("status") != "CHANGES_REQUIRED":
+        raise HTTPException(status_code=409, detail="Save a changes-required review of this master first.")
+    index = review.get("correction_chapter_index")
+    source_ids = (master.metadata or {}).get("source_asset_ids") or []
+    if type(index) is not int or index < 0 or index >= len(source_ids):
+        raise HTTPException(status_code=422, detail="Choose an affected chapter in this master's quality review.")
+    chapters = json.loads(entry.chapters_json or "[]")
+    current_chapter = chapters[index] if index < len(chapters) else None
+    original_id = source_ids[index]
+    # Current plan's chapter asset must still resolve to the exact MP4 from
+    # the reviewed master before we claim the historical chapter matches.
+    readiness = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+    now = next((row for row in readiness["chapters"]
+                if row["chapter_index"] == index), None)
+    same_output = bool(now and now["asset_id"] == original_id)
+    return {
+        "status": "CORRECTION_BRIEF",
+        "source_master_asset_id": asset_id,
+        "source_master_sha256": (master.metadata or {}).get("sha256"),
+        "historical_chapter_asset_id": original_id,
+        "chapter_index": index,
+        "correction_category": review.get("correction_category", "general"),
+        "notes": review.get("notes") or "",
+        "current_chapter": current_chapter,
+        "current_plan_matches_reviewed_chapter": same_output,
+        "current_plan_status": entry.status,
+        "can_open_current_editor": current_chapter is not None,
+        "saved": False, "rendered": False, "published": False,
+        "message": ("The current chapter matches this master. Review edits in the chapter editor."
+                    if same_output else
+                    "The current chapter is different from the reviewed master. Compare before editing; no changes were applied."),
+    }
 
 @router.post("/projects/{project_id}/calendar/{entry_id}/update-final-master")
 def update_final_master(
