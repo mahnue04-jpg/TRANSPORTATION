@@ -1969,3 +1969,164 @@ async def render_single_storyboard_scene(
         _render_single_storyboard_scene, db, user.user_id,
         project_id, entry_id, scene_index,
     )
+
+
+def _assemble_saved_storyboard_segments(db: Session, owner_id: str,
+                                        project_id: str, entry_id: str) -> dict:
+    """Build a short private MP4 from existing, *verified* CTA-free scene segments.
+
+    Missing or changed scenes must be rendered independently first. There are
+    no paid calls, no implicit generation, and no changes to original videos.
+    """
+    import subprocess
+    from app.core.nova.creative_studio import private_object_storage as remote
+    from app.core.nova.creative_studio.video_import import validate_video
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved" or entry.content_mode not in {"faceless", "education"}:
+        raise HTTPException(status_code=409, detail="Approve a faceless/education storyboard before assembly.")
+    scenes = json.loads(entry.storyboard_json or "[]")
+    duration = sum(int(s.get("duration_seconds") or 0) for s in scenes)
+    if (not 1 <= len(scenes) <= 60 or duration != entry.duration_seconds
+            or not 15 <= duration <= 120
+            or any(not 2 <= int(s.get("duration_seconds") or 0) <= 12 for s in scenes)):
+        raise HTTPException(status_code=422, detail="Saved-scene assembly supports approved 15-120s plans with 2-12s scenes.")
+    store = DbCreativeStudioStore(db)
+    service = get_service(db)
+    assets = store.list_assets(project_id, owner_id)
+    candidates = []
+    missing = []
+    for index, scene in enumerate(scenes):
+        key = _storyboard_segment_hash(scene, entry, index)
+        matches = [a for a in assets if a.kind == "video" and a.url
+                   and (a.metadata or {}).get("pipeline") == "calendar_scene_segment"
+                   and (a.metadata or {}).get("calendar_entry_id") == entry_id
+                   and (a.metadata or {}).get("source_sha256") == key
+                   and (a.metadata or {}).get("concat_ready") is True]
+        if not matches:
+            missing.append(index + 1)
+        candidates.append(matches[-1] if matches else None)
+    if missing:
+        raise HTTPException(status_code=409, detail={
+            "message": "Render these approved scenes before assembling; no existing files were changed.",
+            "missing_scene_numbers": missing,
+        })
+    overall = hashlib.sha256(json.dumps({
+        "scene_hashes": [_storyboard_segment_hash(s, entry, i) for i,s in enumerate(scenes)],
+        "profile": "concat-scene-v1",
+    }, sort_keys=True).encode("utf-8")).hexdigest()
+    for asset in reversed(assets):
+        meta = asset.metadata or {}
+        if (meta.get("pipeline") == "calendar_assembled_scene_preview"
+                and meta.get("calendar_entry_id") == entry_id
+                and meta.get("assembly_signature") == overall):
+            digest = str(meta.get("sha256") or "")
+            try:
+                if str(asset.url).startswith("private-studio-s3://"):
+                    valid = bool(digest) and remote.enabled() and remote.object_exists(
+                        asset.url, owner_id, project_id, digest)
+                else:
+                    local, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                    valid = bool(digest) and local.is_file() and hashlib.sha256(local.read_bytes()).hexdigest() == digest
+                if valid:
+                    return {**_preview_result(project_id, asset, reused=True),
+                            "reused_scene_segments": len(scenes)}
+            except Exception:
+                pass
+    with tempfile.TemporaryDirectory(prefix="nova-scene-join-") as scratch:
+        root = Path(scratch)
+        sources = []
+        for index, asset in enumerate(candidates):
+            assert asset is not None
+            target = root / f"scene-{index:02d}.mp4"
+            digest = str((asset.metadata or {}).get("sha256") or "")
+            if not digest:
+                raise HTTPException(status_code=409, detail="A segment has no stored checksum.")
+            try:
+                if str(asset.url).startswith("private-studio-s3://"):
+                    if not remote.enabled() or not remote.object_exists(
+                            asset.url, owner_id, project_id, digest):
+                        raise ValueError("Remote segment is not verified")
+                    stream_info = service.open_private_remote_asset(owner_id, project_id, asset.id)
+                    if stream_info is None:
+                        raise ValueError("Remote segment not found")
+                    stream = stream_info[0]
+                    try:
+                        with target.open("wb") as handle:
+                            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                                handle.write(chunk)
+                                if handle.tell() > 128 * 1024 * 1024:
+                                    raise ValueError("Segment exceeds secure size limit")
+                    finally:
+                        stream.close()
+                else:
+                    local, media_type, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                    if media_type != "video/mp4" or local.stat().st_size > 128 * 1024 * 1024:
+                        raise ValueError("Invalid local segment")
+                    import shutil
+                    shutil.copyfile(local, target)
+                if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                    raise ValueError("Segment checksum mismatch")
+                measured = validate_video(target)
+                if abs(measured["duration_seconds"] - scenes[index]["duration_seconds"]) > 1.5:
+                    raise ValueError("Segment duration mismatch")
+            except (CreativeStudioError, OSError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=f"Scene {index + 1} failed media verification; source videos remain saved.") from exc
+            sources.append(target)
+        manifest = root / "input.txt"
+        manifest.write_text("".join(f"file '{path.as_posix()}'\\n" for path in sources), encoding="utf-8")
+        output = root / "joined.mp4"
+        try:
+            process = subprocess.run([
+                "ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(manifest),
+                "-map", "0:v:0", "-map", "0:a:0", "-c", "copy",
+                "-movflags", "+faststart", str(output),
+            ], capture_output=True, timeout=240)
+            if process.returncode != 0 or not output.is_file():
+                raise ValueError("Scene assembly failed")
+            final = validate_video(output)
+            if abs(final["duration_seconds"] - duration) > 2:
+                raise ValueError("Joined scene timing differs from the approved plan")
+            imported = service.import_finished_video(
+                owner_id, project_id, output.read_bytes(), content_type="video/mp4"
+            )
+        except (subprocess.TimeoutExpired, OSError, ValueError, CreativeStudioError) as exc:
+            raise HTTPException(status_code=422, detail="Could not verify the assembled MP4. Saved scenes are unchanged.") from exc
+    asset = next((a for a in store.list_assets(project_id, owner_id)
+                  if a.id == imported["asset"]["id"]), None)
+    if asset is None:
+        raise HTTPException(status_code=500, detail="Finished assembled MP4 was not saved.")
+    if imported.get("reused"):
+        meta = asset.metadata or {}
+        if (meta.get("pipeline") != "calendar_assembled_scene_preview"
+                or meta.get("assembly_signature") != overall
+                or meta.get("calendar_entry_id") != entry_id):
+            raise HTTPException(status_code=409, detail="Identical MP4 belongs to an existing original. No asset was relabeled.")
+        return {**_preview_result(project_id, asset, reused=True),
+                "reused_scene_segments": len(scenes)}
+    asset.metadata = {
+        **(asset.metadata or {}),
+        "pipeline": "calendar_assembled_scene_preview",
+        "calendar_entry_id": entry_id,
+        "assembly_signature": overall,
+        "quality_state": "PREVIEW_ONLY", "publish_ready": False,
+        "commercial_complete": False, "external_publishing": False,
+        "scene_segments_reused": len(scenes),
+        "final_cta_added": False, "captions_timing_verified": False,
+        "paid_provider_charges": False,
+    }
+    asset = store.save_asset(asset)
+    return {**_preview_result(project_id, asset, reused=False),
+            "reused_scene_segments": len(scenes)}
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assemble-scene-previews")
+async def assemble_saved_storyboard_segments(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return await run_in_threadpool(
+        _assemble_saved_storyboard_segments, db, user.user_id, project_id, entry_id,
+    )
