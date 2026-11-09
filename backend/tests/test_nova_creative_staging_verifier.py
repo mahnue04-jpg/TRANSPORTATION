@@ -92,3 +92,53 @@ def test_video_only_file_fails_audio_requirement(tmp_path):
     ], capture_output=True, check=True, timeout=40)
     with pytest.raises(verifier.VerificationError, match="video and audio"):
         verifier.inspect_mp4(target)
+
+
+def test_staging_download_streams_and_renames_only_verified_file(monkeypatch, tmp_path):
+    payload = b"synthetic-mp4-byte-content"
+    class FakeResponse(BytesIO):
+        status = 200
+        headers = {"Content-Length": str(len(payload)), "Content-Type": "video/mp4"}
+    class FakeOpener:
+        def open(self, request, timeout):
+            assert request.get_header("Authorization") == "Bearer mock-owner-token"
+            assert request.full_url.endswith("/projects/project/assets/asset/file")
+            return FakeResponse(payload)
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    destination = tmp_path / "verified.mp4"
+    assert verifier.download_staging_master(
+        "https://studio.example.test", "project", "asset",
+        digest(payload), destination, "mock-owner-token",
+    ) == len(payload)
+    assert destination.read_bytes() == payload
+    assert not (tmp_path / "verified.mp4.partial").exists()
+
+
+def test_staging_download_does_not_preserve_corrupt_partial(monkeypatch, tmp_path):
+    payload = b"changed-mp4-data"
+    class FakeResponse(BytesIO):
+        status = 200
+        headers = {"Content-Length": str(len(payload)), "Content-Type": "video/mp4"}
+    class FakeOpener:
+        def open(self, request, timeout):
+            return FakeResponse(payload)
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    destination = tmp_path / "untrusted.mp4"
+    with pytest.raises(verifier.VerificationError, match="SHA-256"):
+        verifier.download_staging_master(
+            "https://studio.example.test", "project", "asset",
+            digest(b"original-data!!"), destination, "mock-owner-token",
+        )
+    assert not destination.exists()
+    assert not (tmp_path / "untrusted.mp4.partial").exists()
+
+
+def test_staging_download_refuses_overwriting_existing_evidence(monkeypatch, tmp_path):
+    destination = tmp_path / "original-evidence.mp4"
+    destination.write_bytes(b"existing")
+    with pytest.raises(verifier.VerificationError, match="overwrite"):
+        verifier.download_staging_master(
+            "https://studio.example.test", "project", "asset",
+            digest(b"other"), destination, "mock-owner-token",
+        )
+    assert destination.read_bytes() == b"existing"
