@@ -825,3 +825,140 @@ def calendar_assembly_status(
             ),
         }
     return {"status": latest.status, "job": latest.as_dict()}
+
+
+def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str):
+    """Combine verified finished chapter assets into one private 10-30m master."""
+    import os
+    import shutil
+    from app.core.nova.creative_studio import private_object_storage as remote
+    from app.core.nova.creative_studio.chapter_master import (
+        ChapterMasterError, join_chapters,
+    )
+
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the chapter plan before exporting.")
+    if not 600 <= entry.duration_seconds <= 1800:
+        raise HTTPException(status_code=422, detail="Master export currently supports 10–30 minutes.")
+    if not remote.enabled():
+        raise HTTPException(status_code=503, detail="Private durable object storage is required for long-form masters.")
+    chapters = json.loads(entry.chapters_json or "[]")
+    if not 2 <= len(chapters) <= 12 or sum(int(ch["duration_seconds"]) for ch in chapters) != entry.duration_seconds:
+        raise HTTPException(status_code=422, detail="Create 2–12 completed chapters totaling the planned duration.")
+    store = DbCreativeStudioStore(db)
+    assets = store.list_assets(project_id, owner_id)
+    selected = []
+    for index, chapter in enumerate(chapters):
+        matches = [
+            asset for asset in assets if asset.kind == "video"
+            and (asset.metadata or {}).get("pipeline") == "calendar_saved_clip_assembly"
+            and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+            and (asset.metadata or {}).get("chapter_index") == index
+            and (asset.metadata or {}).get("source_asset_ids") == chapter["asset_ids"]
+            and abs(float((asset.metadata or {}).get("duration_seconds") or 0) -
+                    float(chapter["duration_seconds"])) <= 5
+        ]
+        if not matches:
+            raise HTTPException(status_code=422, detail=f"Chapter {index + 1} needs a completed MP4 before export.")
+        selected.append(matches[-1])
+    signature = hashlib.sha256(
+        (entry_id + "|" + str(entry.duration_seconds) + "|" +
+         "|".join(f"{a.id}:{(a.metadata or {}).get('sha256','')}" for a in selected)).encode("utf-8")
+    ).hexdigest()
+    for asset in assets:
+        meta = asset.metadata or {}
+        if (meta.get("pipeline") == "calendar_chapter_master" and
+                meta.get("master_signature") == signature and
+                str(asset.url or "").startswith("private-studio-s3://")):
+            try:
+                if remote.object_exists(asset.url, owner_id, project_id, str(meta.get("sha256") or "")):
+                    return _master_result(project_id, asset, reused=True)
+            except Exception:
+                pass
+    service = get_service(db)
+    with tempfile.TemporaryDirectory(prefix="nova-master-") as scratch:
+        root = Path(scratch)
+        files = []
+        for index, asset in enumerate(selected):
+            output = root / f"chapter-{index:02d}.mp4"
+            ref = str(asset.url or "")
+            if ref.startswith("private-studio-s3://"):
+                stream, _, _ = service.open_private_remote_asset(owner_id, project_id, asset.id)
+                try:
+                    with output.open("wb") as handle:
+                        while True:
+                            chunk = stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            if handle.tell() > 128 * 1024 * 1024:
+                                raise HTTPException(status_code=422, detail="Chapter exceeds 128 MiB.")
+                finally:
+                    stream.close()
+            else:
+                source, _, _ = service.open_asset_file(owner_id, project_id, asset.id)
+                if source.stat().st_size > 128 * 1024 * 1024:
+                    raise HTTPException(status_code=422, detail="Chapter exceeds 128 MiB.")
+                shutil.copyfile(source, output)
+            digest = str((asset.metadata or {}).get("sha256") or "")
+            if not digest or hashlib.sha256(output.read_bytes()).hexdigest() != digest:
+                raise HTTPException(status_code=422, detail="Chapter checksum verification failed.")
+            files.append(output)
+        output = root / "finished-master.mp4"
+        try:
+            measured = join_chapters(files, output, expected_seconds=entry.duration_seconds)
+        except (ChapterMasterError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        digest = hashlib.sha256()
+        with output.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        sha = digest.hexdigest()
+        filename = new_id("imported_video") + ".mp4"
+        try:
+            ref = remote.put_original_file(owner_id, project_id, filename, output, sha)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Long-form private storage unavailable; no video registered.") from exc
+        try:
+            asset = store.save_asset(CreativeAsset(
+                id=new_id("casset"), owner_id=owner_id, project_id=project_id,
+                kind="video", title="Completed chapter master — owner review",
+                content="Assembled from existing saved chapters; no paid media generation.",
+                status="GENERATED", url=ref,
+                metadata={
+                    "source": "chapter_master", "pipeline": "calendar_chapter_master",
+                    "calendar_entry_id": entry_id, "master_signature": signature,
+                    "source_asset_ids": [a.id for a in selected], "sha256": sha,
+                    **measured, "quality_state": "OWNER_REVIEW_REQUIRED",
+                    "commercial_complete": False, "publish_ready": False,
+                    "captions_verified": False, "rights_review_required": True,
+                    "paid_provider_charges": False,
+                },
+            ))
+        except Exception:
+            remote.delete_original(ref, owner_id, project_id)
+            raise
+    return _master_result(project_id, asset, reused=False)
+
+
+def _master_result(project_id: str, asset: CreativeAsset, *, reused: bool):
+    return {
+        "status": "MASTER_SAVED_REVIEW_REQUIRED", "asset": asset.as_dict(),
+        "download_url": f"/api/nova/creative/projects/{project_id}/assets/{asset.id}/file",
+        "reused": reused, "published": False, "publish_ready": False,
+        "message": "Combined chapter master saved privately. Review footage, captions, audio continuity, rights and completeness.",
+    }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/export-master")
+async def export_calendar_master(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Initial bounded master export, not a resumable 2h production worker."""
+    return await run_in_threadpool(
+        _assemble_chapter_master, db, user.user_id, project_id, entry_id,
+    )
