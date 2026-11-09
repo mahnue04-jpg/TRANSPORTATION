@@ -236,3 +236,20 @@ class NovaCreativeAiRequestSlot(Base):
     charge_status: Mapped[str] = mapped_column(String(36), nullable=False, default="reserved_unverified")
     updated_at: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class NovaCreativeStoryboardRevision(Base):
+    """Immutable owner-scoped snapshot of a saved storyboard revision."""
+    __tablename__ = "nova_creative_storyboard_revisions"
+    __table_args__ = (
+        Index("ix_nova_storyboard_revision_entry", "owner_id", "project_id", "entry_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    scenes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    narrator_voice: Mapped[str] = mapped_column(String(16), nullable=False)
+    narrator_speed: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
