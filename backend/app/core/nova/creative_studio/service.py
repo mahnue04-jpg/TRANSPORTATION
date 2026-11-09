@@ -3077,6 +3077,11 @@ class CreativeStudioService(ShortDramaMixin):
         asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
         if asset is None or not str(asset.url or "").startswith("private-studio-s3://"):
             return None
+        if asset.kind != "video":
+            raise CreativeStudioError(
+                "MEDIA_UNAVAILABLE", "This private asset is not a downloadable video.",
+                http_status=404,
+            )
         if not private_store.enabled():
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private media storage is disabled.", http_status=503)
         # Owner authorization alone does not prove the requested object still
