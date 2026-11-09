@@ -309,7 +309,8 @@
         visual_note: scene.visual_note || "",
         narration: scene.narration || "",
         duration_seconds: Number(scene.duration_seconds) || 1,
-        visual_asset_id: scene.visual_asset_id || null
+        visual_asset_id: scene.visual_asset_id || null,
+        transition: scene.transition === "fade" ? "fade" : "cut"
       };
     });
     host.replaceChildren();
@@ -358,6 +359,17 @@
         });
         visualLabel.appendChild(visualPicker);
         fieldset.appendChild(visualLabel);
+        var transitionLabel = document.createElement("label");
+        transitionLabel.textContent = "Visual transition into scene";
+        var transitionPicker = document.createElement("select");
+        transitionPicker.add(new Option("Direct cut", "cut"));
+        transitionPicker.add(new Option("Fade in from black (0.5s max)", "fade"));
+        transitionPicker.value = scene.transition;
+        transitionPicker.addEventListener("change", function () {
+          scene.transition = transitionPicker.value;
+        });
+        transitionLabel.appendChild(transitionPicker);
+        fieldset.appendChild(transitionLabel);
         editable("Narration / dialogue", scene.narration, 6000, function (value) { scene.narration = value; }, true);
         var label = document.createElement("label");
         label.textContent = "Duration in seconds";
@@ -377,7 +389,7 @@
     renderRows();
     host.appendChild(button("Add scene", function () {
       if (rows.length >= 60) { feedback("Storyboard supports up to 60 scenes.", true); return; }
-      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null });
+      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null, transition: "cut" });
       renderRows();
     }, entry));
     host.appendChild(button("Save storyboard", async function () {
