@@ -290,13 +290,26 @@
   async function editStoryboard(entry, suggestedScenes) {
     var project = requestProject();
     if (!project) return;
+    var visualAssets = [];
+    try {
+      var projectDetail = await bridge.api("/api/nova/creative/projects/" + encodeURIComponent(project), {
+        method: "GET"
+      });
+      if (active() !== project) return;
+      visualAssets = (projectDetail.assets || []).filter(function (asset) {
+        return asset.kind === "image" && Boolean(asset.url) && asset.status === "GENERATED";
+      });
+    } catch (err) {
+      feedback("Image choices unavailable; scene text can still be edited.", true);
+    }
     var host = $("calendar-storyboard");
     var rows = (Array.isArray(suggestedScenes) ? suggestedScenes : (entry.storyboard || [])).map(function (scene) {
       return {
         heading: scene.heading || "",
         visual_note: scene.visual_note || "",
         narration: scene.narration || "",
-        duration_seconds: Number(scene.duration_seconds) || 1
+        duration_seconds: Number(scene.duration_seconds) || 1,
+        visual_asset_id: scene.visual_asset_id || null
       };
     });
     host.replaceChildren();
@@ -329,6 +342,23 @@
         }
         editable("Scene heading", scene.heading, 120, function (value) { scene.heading = value; }, false);
         editable("Visual direction", scene.visual_note, 1500, function (value) { scene.visual_note = value; }, true);
+        var visualLabel = document.createElement("label");
+        visualLabel.textContent = "Scene image from this project (optional)";
+        var visualPicker = document.createElement("select");
+        visualPicker.add(new Option("Use Studio title-card preview", ""));
+        visualAssets.forEach(function (asset) {
+          visualPicker.add(new Option(asset.title || asset.id, asset.id));
+        });
+        if (scene.visual_asset_id && !visualAssets.some(function (item) { return item.id === scene.visual_asset_id; })) {
+          visualPicker.add(new Option("Previously selected image unavailable", scene.visual_asset_id));
+          visualPicker.disabled = true;
+        }
+        visualPicker.value = scene.visual_asset_id || "";
+        visualPicker.addEventListener("change", function () {
+          scene.visual_asset_id = visualPicker.value || null;
+        });
+        visualLabel.appendChild(visualPicker);
+        fieldset.appendChild(visualLabel);
         editable("Narration / dialogue", scene.narration, 6000, function (value) { scene.narration = value; }, true);
         var label = document.createElement("label");
         label.textContent = "Duration in seconds";
@@ -348,7 +378,7 @@
     renderRows();
     host.appendChild(button("Add scene", function () {
       if (rows.length >= 60) { feedback("Storyboard supports up to 60 scenes.", true); return; }
-      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60 });
+      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null });
       renderRows();
     }, entry));
     host.appendChild(button("Save storyboard", async function () {
