@@ -164,7 +164,7 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
-def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
+def synthesize_narration(script: str, dest: Path, *, voice: str = "en-us", speed: int = 148) -> dict[str, Any]:
     """Speak the reviewed script with a local engine. No network and no provider charge."""
     binary = shutil.which("espeak-ng") or shutil.which("espeak")
     if not binary:
@@ -175,13 +175,14 @@ def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
     text = " ".join(str(script or "").split())
     if not text:
         raise OfflineCommercialError("SCRIPT_REQUIRED", "Offline narration needs the storyboard script.")
-    voice = "en-us"
+    if voice not in {"en-us", "en-gb"} or not 110 <= speed <= 185:
+        raise OfflineCommercialError("VOICE_SETTINGS_INVALID", "Choose an approved English voice and speaking speed.")
     probe = subprocess.run([binary, "--voices"], check=False, capture_output=True, text=True, timeout=20)
-    if voice not in (probe.stdout or "") and "en-us" not in (probe.stdout or ""):
-        voice = "en"
+    if probe.returncode != 0 or voice not in (probe.stdout or "").lower():
+        raise OfflineCommercialError("VOICE_UNAVAILABLE", "Selected local English voice is not installed; choose another voice.")
     dest.parent.mkdir(parents=True, exist_ok=True)
     run = subprocess.run(
-        [binary, "-w", str(dest), "-s", "148", "-v", voice, text[:1800]],
+        [binary, "-w", str(dest), "-s", str(speed), "-v", voice, text[:1800]],
         check=False,
         capture_output=True,
         text=True,
@@ -194,6 +195,7 @@ def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
     return {
         "engine": engine,
         "voice": voice,
+        "speed_wpm": speed,
         "license": "GPL-3.0-or-later",
         "license_status": "AMBER",
         "commercial_use": (
@@ -228,6 +230,8 @@ def render_offline_montage(
     output_mp4: Path,
     audio_wav: Path,
     vertical: bool = True,
+    voice: str = "en-us",
+    speed: int = 148,
 ) -> dict[str, Any]:
     """Build one MP4 from storyboard beats. Duration follows the storyboard, not a 5s loop."""
     if not scenes:
@@ -239,7 +243,7 @@ def render_offline_montage(
         for scene in scenes
         if str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
     )
-    narration = synthesize_narration(script, audio_wav)
+    narration = synthesize_narration(script, audio_wav, voice=voice, speed=speed)
     planned = 0.0
     with tempfile.TemporaryDirectory(prefix="nova-offline-") as temp_name:
         temp = Path(temp_name)
