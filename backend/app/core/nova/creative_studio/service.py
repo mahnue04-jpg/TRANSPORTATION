@@ -3079,10 +3079,25 @@ class CreativeStudioService(ShortDramaMixin):
             return None
         if not private_store.enabled():
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private media storage is disabled.", http_status=503)
+        # Owner authorization alone does not prove the requested object still
+        # matches its saved metadata. Reject missing/empty or wrong-SHA objects
+        # before opening a streaming download.
+        digest = str((asset.metadata or {}).get("sha256") or "")
         try:
+            if (len(digest) != 64 or not private_store.object_exists(
+                    asset.url, owner_id, project_id, digest)):
+                raise CreativeStudioError(
+                    "MEDIA_UNAVAILABLE",
+                    "This private video file is missing or failed saved checksum metadata validation.",
+                    http_status=503,
+                )
             stream = private_store.open_original(asset.url, owner_id, project_id)
+        except CreativeStudioError:
+            raise
         except Exception as exc:
-            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503) from exc
+            raise CreativeStudioError(
+                "MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503,
+            ) from exc
         return stream, "video/mp4", _download_filename(asset.title, ".mp4")
 
     def open_asset_file(
