@@ -36,3 +36,93 @@ def test_master_quality_gate_fails_closed_on_review_defects():
     assert not _chapter_review_passed(changes, 1, "a" * 64)
     pending = {**good, "status": "PENDING"}
     assert not _chapter_review_passed(pending, 1, "a" * 64)
+
+
+def _build_plan(monkeypatch, tmp_path, *, first_review=True, second_review=True):
+    """Exercise the actual readiness planner without paid media or network."""
+    import json
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    def make_asset(index, passed):
+        sha = chr(ord("a") + index) * 64
+        review = {
+            "status": "REVIEW_PASSED" if passed else "CHANGES_REQUIRED",
+            "chapter_index": index, "file_sha256": sha,
+            "visuals_ok": passed, "audio_ok": True,
+            "captions_ok": True, "continuity_ok": True,
+            "notes": "" if passed else "Scene transition needs correction.",
+        }
+        return SimpleNamespace(
+            id=f"asset-{index}", kind="video", url=f"private-studio-s3://test-{index}",
+            metadata={
+                "pipeline": "calendar_saved_clip_assembly",
+                "calendar_entry_id": "entry",
+                "chapter_index": index,
+                "source_asset_ids": [f"source-{index}"],
+                "duration_seconds": 180,
+                "sha256": sha,
+                "chapter_quality_review": review,
+                "file_size_bytes": 50000,
+            },
+        )
+
+    assets = [make_asset(0, first_review), make_asset(1, second_review)]
+    chapters = [
+        {"title": f"Chapter {i + 1}", "duration_seconds": 180,
+         "asset_ids": [f"source-{i}"]}
+        for i in range(2)
+    ]
+    entry = SimpleNamespace(chapters_json=json.dumps(chapters),
+                            duration_seconds=360, status="approved")
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: entry)
+    monkeypatch.setattr(studio, "DbCreativeStudioStore",
+                        lambda db: SimpleNamespace(list_assets=lambda *args: assets))
+    monkeypatch.setattr(studio, "get_service", lambda db: object())
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    monkeypatch.setattr(remote, "object_exists", lambda *args: True)
+    return studio, assets
+
+
+def test_chapter_plan_blocks_changes_required_and_reports_indices(monkeypatch, tmp_path):
+    studio, assets = _build_plan(monkeypatch, tmp_path, second_review=False)
+    plan = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert plan["master_ready"] is False
+    assert plan["needs_rebuild_indices"] == []
+    assert plan["needs_review_indices"] == [1]
+    assert plan["needs_correction_indices"] == [1]
+    assert plan["reviewed_chapters"] == 1
+    assert [row["review_status"] for row in plan["chapters"]] == [
+        "REVIEW_PASSED", "CHANGES_REQUIRED"
+    ]
+    # A saved correction review must not create a publish-ready master.
+    assert plan["published"] is False
+
+
+def test_chapter_plan_accepts_only_both_exact_passed_reviews(monkeypatch, tmp_path):
+    studio, assets = _build_plan(monkeypatch, tmp_path)
+    passed = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert passed["master_ready"] is True
+    assert passed["reviewed_chapters"] == 2
+    assert not passed["needs_review_indices"]
+    assets[1].metadata["chapter_quality_review"]["file_sha256"] = "f" * 64
+    stale = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert stale["master_ready"] is False
+    assert stale["needs_review_indices"] == [1]
+    assert stale["needs_correction_indices"] == []
+    assert stale["chapters"][1]["review_status"] == "REVIEW_REQUIRED"
+    assert stale["version_sha256"] != passed["version_sha256"]
+
+
+def test_chapter_plan_missing_file_blocks_without_review(monkeypatch, tmp_path):
+    studio, assets = _build_plan(monkeypatch, tmp_path)
+    from app.core.nova.creative_studio import private_object_storage as remote
+    monkeypatch.setattr(remote, "object_exists",
+                        lambda url, *args: not url.endswith("test-1"))
+    plan = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert plan["master_ready"] is False
+    assert plan["needs_rebuild_indices"] == [1]
+    assert plan["needs_review_indices"] == []
+    assert plan["chapters"][1]["review_status"] == "NEEDS_REBUILD"
