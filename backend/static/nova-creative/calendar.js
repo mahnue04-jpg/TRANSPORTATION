@@ -1280,6 +1280,61 @@
                 }
               }, chapter));
             }
+            if (chapter.status === "REUSABLE" && chapter.asset_id) {
+              var review = chapter.quality_review || {};
+              var qc = document.createElement("fieldset");
+              var qcTitle = document.createElement("legend");
+              qcTitle.textContent = "Review Chapter " + (chapter.chapter_index + 1) + " MP4";
+              qc.appendChild(qcTitle);
+              var qcStatus = document.createElement("p");
+              qcStatus.setAttribute("role", "status");
+              qcStatus.textContent = review.status
+                ? "Saved review: " + review.status.replace(/_/g, " ").toLowerCase()
+                : "No saved quality review for this chapter version.";
+              qc.appendChild(qcStatus);
+              var qcChecks = [
+                ["visuals_ok", "Visuals and scene transitions reviewed"],
+                ["audio_ok", "Narration and audio reviewed"],
+                ["captions_ok", "Captions reviewed"],
+                ["continuity_ok", "Chapter starts and ends correctly"]
+              ];
+              var qcInputs = {};
+              qcChecks.forEach(function (field) {
+                var label = document.createElement("label");
+                var cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = Boolean(review[field[0]]);
+                qcInputs[field[0]] = cb;
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(" " + field[1]));
+                qc.appendChild(label);
+              });
+              var qcNotes = document.createElement("textarea");
+              qcNotes.rows = 2;
+              qcNotes.maxLength = 2000;
+              qcNotes.placeholder = "Chapter correction notes";
+              qcNotes.value = review.notes || "";
+              qcNotes.setAttribute("aria-label", "Chapter quality review notes");
+              qc.appendChild(qcNotes);
+              qc.appendChild(button("Save chapter quality review", async function () {
+                if (busy || active() !== project) return;
+                busy = true;
+                try {
+                  var body = {notes: qcNotes.value};
+                  qcChecks.forEach(function (field) { body[field[0]] = qcInputs[field[0]].checked; });
+                  var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+                    "/chapters/" + chapter.chapter_index + "/review/" +
+                    encodeURIComponent(chapter.asset_id), {method: "PUT", body: JSON.stringify(body)});
+                  if (active() !== project || !readinessList.contains(qc)) return;
+                  qcStatus.textContent = "Saved review: " + saved.status.replace(/_/g, " ").toLowerCase() +
+                    ". This does not approve publishing.";
+                  feedback(saved.message || "Chapter review saved.");
+                } catch (err) {
+                  feedback(err.message || "Chapter review was not saved.", true);
+                } finally { busy = false; }
+              }, chapter));
+              line.appendChild(qc);
+            }
             readinessList.appendChild(line);
           });
           var summary = document.createElement("p");
