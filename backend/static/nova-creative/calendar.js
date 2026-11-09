@@ -310,7 +310,10 @@
         narration: scene.narration || "",
         duration_seconds: Number(scene.duration_seconds) || 1,
         visual_asset_id: scene.visual_asset_id || null,
-        transition: scene.transition === "fade" ? "fade" : "cut"
+        transition: scene.transition === "fade" ? "fade" : "cut",
+        caption_cues: (scene.caption_cues || []).map(function (cue) {
+          return { start_seconds: Number(cue.start_seconds), end_seconds: Number(cue.end_seconds), text: String(cue.text || "") };
+        })
       };
     });
     host.replaceChildren();
@@ -391,6 +394,19 @@
         transitionLabel.appendChild(transitionPicker);
         fieldset.appendChild(transitionLabel);
         editable("Narration / dialogue", scene.narration, 6000, function (value) { scene.narration = value; }, true);
+        var captionLabel = document.createElement("label");
+        captionLabel.textContent = "Optional corrected captions: one per line as START | END | TEXT (seconds within this scene)";
+        var captionText = document.createElement("textarea");
+        captionText.rows = 3;
+        captionText.placeholder = "0.0 | 2.5 | Welcome to my video";
+        captionText.value = (scene.caption_cues || []).map(function (cue) {
+          return cue.start_seconds + " | " + cue.end_seconds + " | " + cue.text;
+        }).join("\n");
+        captionText.addEventListener("input", function () {
+          scene.caption_cues_raw = captionText.value;
+        });
+        captionLabel.appendChild(captionText);
+        fieldset.appendChild(captionLabel);
         var label = document.createElement("label");
         label.textContent = "Duration in seconds";
         var seconds = document.createElement("input");
@@ -409,7 +425,7 @@
     renderRows();
     host.appendChild(button("Add scene", function () {
       if (rows.length >= 60) { feedback("Storyboard supports up to 60 scenes.", true); return; }
-      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null, transition: "cut" });
+      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null, transition: "cut", caption_cues: [] });
       renderRows();
     }, entry));
     host.appendChild(button("Save storyboard", async function () {
@@ -422,6 +438,31 @@
       if (!valid || seconds !== entry.duration_seconds) {
         feedback("Each scene needs a heading and valid duration; scene durations must total " +
           entry.duration_seconds + " seconds. Current total: " + seconds + ".", true);
+        return;
+      }
+      try {
+        rows.forEach(function (scene, i) {
+          if (scene.caption_cues_raw === undefined) return;
+          var raw = scene.caption_cues_raw.trim();
+          var previous = 0;
+          var cues = raw ? raw.split(/\r?\n/).map(function (line) {
+            var parts = line.split("|");
+            if (parts.length !== 3) throw new Error("Scene " + (i + 1) + ": caption format must be START | END | TEXT.");
+            var start = Number(parts[0].trim());
+            var end = Number(parts[1].trim());
+            var text = parts[2].trim();
+            if (!Number.isFinite(start) || !Number.isFinite(end) || !text ||
+                start < previous || end <= start || end > scene.duration_seconds) {
+              throw new Error("Scene " + (i + 1) + ": captions must be ordered, nonoverlapping, and fit within scene time.");
+            }
+            previous = end;
+            return { start_seconds: start, end_seconds: end, text: text };
+          }) : [];
+          if (cues.length > 30) throw new Error("Scene " + (i + 1) + ": maximum 30 captions.");
+          scene.caption_cues = cues;
+        });
+      } catch (err) {
+        feedback(err.message || "Fix the caption timing before saving.", true);
         return;
       }
       busy = true;
