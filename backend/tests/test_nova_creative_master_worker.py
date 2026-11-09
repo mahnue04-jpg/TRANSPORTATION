@@ -72,3 +72,74 @@ def test_dedicated_worker_does_not_claim_when_no_jobs(monkeypatch):
     monkeypatch.setattr(master_worker, "_stop", False)
     monkeypatch.setattr(master_worker, "SessionLocal", lambda: _Session([]))
     assert master_worker.run_one_queued() is False
+
+
+def test_dedicated_mode_queues_sql_without_web_process_marker(monkeypatch):
+    """Queued dedicated work is tracked in SQL, not a permanent web-process set."""
+    import json
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    monkeypatch.setenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", "true")
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: SimpleNamespace(
+        status="approved", duration_seconds=600,
+        chapters_json=json.dumps([{}, {}]),
+    ))
+    monkeypatch.setattr(studio, "_master_export_limit_seconds", lambda: 3600)
+    sha = "a" * 64
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "master_ready": True, "version_sha256": sha,
+        "chapters": [
+            {"chapter_index": n, "asset_id": "asset-" + str(n),
+             "asset_sha256": sha, "quality_review": {"status": "REVIEW_PASSED"}}
+            for n in range(2)
+        ],
+    })
+
+    class Store:
+        def list_jobs(self, *_args):
+            return []
+
+        def save_job(self, job):
+            return job
+
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: Store())
+
+    class DB:
+        def __init__(self):
+            self.saved_claims = []
+
+        def get(self, *_args):
+            return None
+
+        def add(self, claim):
+            self.saved_claims.append(claim)
+
+        def flush(self):
+            pass
+
+    class Background:
+        def __init__(self):
+            self.tasks = []
+
+        def add_task(self, *args):
+            self.tasks.append(args)
+
+    db = DB()
+    background = Background()
+    key = ("owner", "project", "entry")
+    studio._master_export_active.discard(key)
+    try:
+        result = studio.start_chapter_master_job(
+            "project", "entry", background,
+            SimpleNamespace(user_id="owner"), db
+        )
+        assert result["status"] == "QUEUED"
+        assert background.tasks == []
+        assert key not in studio._master_export_active
+        assert len(db.saved_claims) == 1
+        assert db.saved_claims[0].state == "QUEUED"
+    finally:
+        studio._master_export_active.discard(key)
