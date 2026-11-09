@@ -1841,11 +1841,33 @@ def start_chapter_master_job(
                 checkpoint_json=snapshot,
             ))
         else:
-            # Reclaim only a terminal state; never silently restart a stuck job.
-            claim.job_id = fresh_id
-            claim.checkpoint_json = snapshot
-            claim.state = "QUEUED"
-            claim.updated_at = now
+            # Multiple web processes can observe the same terminal claim.
+            # Replace it only if the exact previous job and state still match.
+            # Never overwrite an active or concurrently replaced export claim.
+            old_job_id = claim.job_id
+            old_state = claim.state
+            if old_state not in {"ERROR", "GENERATED"}:
+                return {"status": "ALREADY_RUNNING",
+                        "message": "The existing export claim needs reconciliation."}
+            swapped = db.execute(
+                update(NovaCreativeRenderClaim)
+                .where(
+                    NovaCreativeRenderClaim.claim_key == claim_key,
+                    NovaCreativeRenderClaim.owner_id == user.user_id,
+                    NovaCreativeRenderClaim.project_id == project_id,
+                    NovaCreativeRenderClaim.entry_id == entry_id,
+                    NovaCreativeRenderClaim.job_id == old_job_id,
+                    NovaCreativeRenderClaim.state == old_state,
+                )
+                .values(
+                    job_id=fresh_id, state="QUEUED",
+                    checkpoint_json=snapshot, updated_at=now,
+                )
+            )
+            if swapped.rowcount != 1:
+                db.rollback()
+                return {"status": "ALREADY_RUNNING",
+                        "message": "Another process updated this export claim. Check saved master status."}
         try:
             db.flush()
             job = DbCreativeStudioStore(db).save_job(GenerationJob(
