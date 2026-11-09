@@ -3100,7 +3100,7 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError(
                 "MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503,
             ) from exc
-        return stream, "video/mp4", _download_filename(asset.title, ".mp4"), expected_bytes
+        return stream, "video/mp4", _download_filename(asset.title, ".mp4"), expected_bytes, digest
 
     def open_asset_file(
         self,
