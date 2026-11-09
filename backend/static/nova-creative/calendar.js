@@ -355,7 +355,7 @@
     function editableCues(scene) {
       if (scene.caption_cues_raw === undefined) return scene.caption_cues || [];
       if (!scene.caption_cues_raw.trim()) return [];
-      return scene.caption_cues_raw.split(/\\r?\\n/).map(function (line) {
+      return scene.caption_cues_raw.split(/\r?\n/).map(function (line) {
         var parts = line.split("|");
         return {
           start_seconds: Number(parts[0]), end_seconds: Number(parts[1]),
