@@ -3084,8 +3084,10 @@ class CreativeStudioService(ShortDramaMixin):
         # before opening a streaming download.
         digest = str((asset.metadata or {}).get("sha256") or "")
         try:
-            if (len(digest) != 64 or not private_store.object_exists(
-                    asset.url, owner_id, project_id, digest)):
+            expected_bytes = private_store.owned_object_size(
+                asset.url, owner_id, project_id, digest
+            )
+            if expected_bytes is None:
                 raise CreativeStudioError(
                     "MEDIA_UNAVAILABLE",
                     "This private video file is missing or failed saved checksum metadata validation.",
@@ -3098,7 +3100,7 @@ class CreativeStudioService(ShortDramaMixin):
             raise CreativeStudioError(
                 "MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503,
             ) from exc
-        return stream, "video/mp4", _download_filename(asset.title, ".mp4")
+        return stream, "video/mp4", _download_filename(asset.title, ".mp4"), expected_bytes
 
     def open_asset_file(
         self,
