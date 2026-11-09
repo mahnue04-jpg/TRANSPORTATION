@@ -341,6 +341,14 @@
             }
           }, master));
         }
+        var localReviewLabel = document.createElement("label");
+        var localReviewCheckbox = document.createElement("input");
+        localReviewCheckbox.type = "checkbox";
+        localReviewLabel.appendChild(localReviewCheckbox);
+        localReviewLabel.appendChild(document.createTextNode(
+          " I opened and watched this complete saved MP4 in a local player (or loaded it above)."
+        ));
+        panel.appendChild(localReviewLabel);
         var checks = [
           ["footage_ok", "Full footage reviewed"],
           ["audio_ok", "Narration and audio continuity reviewed"],
@@ -373,8 +381,8 @@
           "Not reviewed.";
         panel.appendChild(state);
         panel.appendChild(button("Save master quality review", async function () {
-          if (!loaded) {
-            state.textContent = "Load and watch this exact master before reviewing. For larger files, complete the secure streaming review workflow first.";
+          if (!loaded && !localReviewCheckbox.checked) {
+            state.textContent = "Review this saved master in the player or download and watch the full MP4 before submitting the checklist.";
             return;
           }
           var body = {notes: notes.value};
