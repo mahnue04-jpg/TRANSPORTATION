@@ -5,7 +5,12 @@ No provider requests, video generation, external services, or production writes.
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.core.nova.creative_studio.calendar import _swap_terminal_master_claim
+from app.core.nova.creative_studio.calendar import (
+    _master_claim_key,
+    _swap_terminal_master_claim,
+)
+
+CLAIM_KEY = _master_claim_key("owner-a", "project-a", "entry-a")
 from app.core.nova.creative_studio.db_models import NovaCreativeRenderClaim
 
 
@@ -14,7 +19,7 @@ def _claim_db(tmp_path, *, state="GENERATED"):
     NovaCreativeRenderClaim.__table__.create(engine, checkfirst=True)
     with Session(engine) as db:
         db.add(NovaCreativeRenderClaim(
-            claim_key="claim-1", owner_id="owner-a", project_id="project-a",
+            claim_key=CLAIM_KEY, owner_id="owner-a", project_id="project-a",
             entry_id="entry-a", job_id="old-job", state=state,
             checkpoint_json='{"stage":"SAVED_MASTER"}',
             updated_at="2026-11-09T00:00:00+00:00",
@@ -25,7 +30,7 @@ def _claim_db(tmp_path, *, state="GENERATED"):
 
 def _swap(db, **kwargs):
     return _swap_terminal_master_claim(
-        db, claim_key="claim-1",
+        db, claim_key=CLAIM_KEY,
         owner_id=kwargs.get("owner_id", "owner-a"),
         project_id=kwargs.get("project_id", "project-a"),
         entry_id=kwargs.get("entry_id", "entry-a"),
@@ -49,7 +54,7 @@ def test_terminal_claim_is_atomically_queued_once(tmp_path):
             assert _swap(competing, next_job_id="competing-job") is False
             competing.rollback()
         with Session(engine) as check:
-            row = check.get(NovaCreativeRenderClaim, "claim-1")
+            row = check.get(NovaCreativeRenderClaim, CLAIM_KEY)
             assert row.job_id == "new-job"
             assert row.state == "QUEUED"
             assert row.checkpoint_json == '{"stage":"QUEUED"}'
@@ -67,7 +72,7 @@ def test_terminal_claim_swap_requires_correct_tenant_and_job(tmp_path):
             assert not _swap(db, expected_job_id="old-job-from-another-process")
             db.rollback()
         with Session(engine) as check:
-            row = check.get(NovaCreativeRenderClaim, "claim-1")
+            row = check.get(NovaCreativeRenderClaim, CLAIM_KEY)
             assert row.job_id == "old-job"
             assert row.state == "GENERATED"
     finally:
@@ -83,7 +88,7 @@ def test_terminal_claim_swap_refuses_running_or_wrong_state(tmp_path):
             assert not _swap(db, expected_state="ERROR")
             db.rollback()
         with Session(engine) as check:
-            row = check.get(NovaCreativeRenderClaim, "claim-1")
+            row = check.get(NovaCreativeRenderClaim, CLAIM_KEY)
             assert row.job_id == "old-job"
             assert row.state == "RUNNING"
     finally:
@@ -97,7 +102,7 @@ def test_failed_claim_can_be_explicitly_requeued(tmp_path):
             assert _swap(db, expected_state="ERROR") is True
             db.commit()
         with Session(engine) as check:
-            row = check.get(NovaCreativeRenderClaim, "claim-1")
+            row = check.get(NovaCreativeRenderClaim, CLAIM_KEY)
             assert row.job_id == "new-job"
             assert row.state == "QUEUED"
     finally:
@@ -122,7 +127,7 @@ def test_only_matching_running_claim_can_be_completed(tmp_path):
                 db, "owner-a", "project-a", "entry-a", "old-job", "ERROR"
             ) is False
         with Session(engine) as db:
-            row = db.get(NovaCreativeRenderClaim, "claim-1")
+            row = db.get(NovaCreativeRenderClaim, CLAIM_KEY)
             assert row.job_id == "old-job"
             assert row.state == "GENERATED"
     finally:
