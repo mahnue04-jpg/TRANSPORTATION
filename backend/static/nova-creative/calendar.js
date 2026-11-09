@@ -985,6 +985,65 @@
         ? "Nova prepared an editable chapter suggestion. It has NOT been saved. Review every title and duration, then choose Save chapter plan to apply."
         : "Build the full video one chapter at a time. Each chapter is 2–10 minutes and uses previously saved clips. Chapter durations must add up to the entire planned length. Saving edits requires another approval.");
       host.appendChild(note);
+      var readinessPanel = document.createElement("fieldset");
+      var readinessTitle = document.createElement("legend");
+      readinessTitle.textContent = "Rebuild affected chapters";
+      readinessPanel.appendChild(readinessTitle);
+      var readinessList = document.createElement("div");
+      readinessPanel.appendChild(readinessList);
+      var readinessButton = button("Check chapter rebuild readiness", async function () {
+        if (active() !== project || busy) return;
+        readinessButton.disabled = true;
+        readinessList.textContent = "Checking saved chapter media and current clip order...";
+        try {
+          var plan = await bridge.api(basePath(project) + "/" +
+            encodeURIComponent(entry.id) + "/chapter-rebuild-plan", {method: "GET"});
+          if (active() !== project || !host.contains(readinessPanel)) return;
+          readinessList.replaceChildren();
+          (plan.chapters || []).forEach(function (chapter) {
+            var line = document.createElement("p");
+            line.textContent = "Chapter " + (chapter.chapter_index + 1) + " — " + chapter.title +
+              ": " + (chapter.status === "REUSABLE" ? "verified saved chapter — reuse" : "rebuild needed");
+            if (chapter.status === "NEEDS_REBUILD" && plan.plan_status === "approved") {
+              line.appendChild(button("Rebuild this chapter", async function () {
+                if (busy || active() !== project) return;
+                if (!window.confirm("Rebuild only chapter " + (chapter.chapter_index + 1) +
+                    " from approved saved clips? Earlier videos remain saved.")) return;
+                busy = true;
+                try {
+                  var result = await bridge.api(basePath(project) + "/" +
+                    encodeURIComponent(entry.id) + "/chapters/" + chapter.chapter_index +
+                    "/rebuild", {method: "POST"});
+                  if (active() !== project) return;
+                  if (result.status !== "ASSEMBLED_REVIEW_REQUIRED") {
+                    throw new Error("Chapter rebuild was not verified.");
+                  }
+                  feedback("Chapter " + (chapter.chapter_index + 1) +
+                    " saved for review. Recheck readiness before exporting the full master.");
+                  if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+                  readinessButton.click();
+                } catch (err) {
+                  feedback(err.message || "Chapter rebuild failed; existing videos remain saved.", true);
+                } finally { busy = false; }
+              }, chapter));
+            }
+            readinessList.appendChild(line);
+          });
+          var summary = document.createElement("p");
+          summary.textContent = plan.master_ready
+            ? "All " + plan.reusable_chapters + " chapters have matching verified MP4s. The approved master export can reuse them."
+            : plan.plan_status !== "approved"
+              ? "Save and approve the chapter plan before rebuilding or exporting."
+              : (plan.needs_rebuild_indices.length + " chapter(s) need rebuilding. Existing matching chapters will be reused.");
+          readinessList.appendChild(summary);
+        } catch (err) {
+          readinessList.textContent = "Could not check chapter readiness: " + (err.message || "unknown error");
+        } finally {
+          readinessButton.disabled = false;
+        }
+      }, entry);
+      readinessPanel.appendChild(readinessButton);
+      host.appendChild(readinessPanel);
       var list = document.createElement("div");
       host.appendChild(list);
       function displayRows() {
