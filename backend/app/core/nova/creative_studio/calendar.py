@@ -1163,9 +1163,14 @@ def start_chapter_master_job(
                 _master_export_active.discard(key)
             return {"status": "ALREADY_RUNNING",
                     "message": "Another worker claimed this export."}
-        background_tasks.add_task(
-            _run_chapter_master_job, user.user_id, project_id, entry_id, job.id
-        )
+        # When a dedicated worker is enabled, the committed SQL claim is its
+        # queue; the web process must not execute a second in-process task.
+        import os
+        dedicated = os.getenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", "").lower() in {"1", "true", "yes"}
+        if not dedicated:
+            background_tasks.add_task(
+                _run_chapter_master_job, user.user_id, project_id, entry_id, job.id
+            )
         return {
             "status": "QUEUED", "job": job.as_dict(),
             "status_url": f"/api/nova/creative/projects/{project_id}/calendar/{entry_id}/master-status",
