@@ -434,6 +434,7 @@ def save_calendar_timeline(
 class ChapterIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     duration_seconds: int = Field(ge=120, le=600)
+    revision_note: str = Field(default="", max_length=2000)
     asset_ids: list[str] = Field(default_factory=list, max_length=16)
 
     @field_validator("title")
@@ -472,6 +473,7 @@ def save_calendar_chapters(
             raise HTTPException(status_code=422, detail="Each chapter must reference clips in this project.")
         chapters.append({
             "index": index, "title": ch.title, "duration_seconds": ch.duration_seconds,
+            "revision_note": ch.revision_note,
             "asset_ids": list(ch.asset_ids),
         })
     canonical = json.dumps(chapters)
