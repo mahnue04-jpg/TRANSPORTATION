@@ -1470,7 +1470,11 @@ def _safe_master_checkpoint(raw: str | None) -> dict:
         parsed = json.loads(raw or "{}")
     except (TypeError, ValueError):
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    if not isinstance(parsed, dict):
+        return {}
+    if "pinned_master" in parsed and not isinstance(parsed["pinned_master"], dict):
+        return {}
+    return parsed
 
 
 def _master_claim_key(owner_id: str, project_id: str, entry_id: str) -> str:
