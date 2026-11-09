@@ -204,3 +204,29 @@ def test_failed_chapter_review_requires_actionable_notes(monkeypatch):
             SimpleNamespace(user_id="owner"), object(),
         )
     assert error.value.status_code == 422
+
+
+def test_final_master_readiness_status_matrix():
+    from app.core.nova.creative_studio.calendar import _final_master_readiness_status as status
+    assert status("draft", 2, [], [], []) == "PLAN_APPROVAL_REQUIRED"
+    assert status("approved", 1, [], [], []) == "MORE_CHAPTERS_REQUIRED"
+    assert status("approved", 2, [0], [1], [1]) == "CHAPTER_REBUILD_REQUIRED"
+    assert status("approved", 2, [], [1], [1]) == "CHAPTER_CORRECTIONS_REQUIRED"
+    assert status("approved", 2, [], [1], []) == "CHAPTER_REVIEW_REQUIRED"
+    assert status("approved", 2, [], [], []) == "READY_TO_UPDATE_FINAL_MASTER"
+
+
+def test_readiness_plan_exposes_per_chapter_actions(monkeypatch, tmp_path):
+    studio, assets = _build_plan(monkeypatch, tmp_path, second_review=False)
+    plan = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert plan["readiness_status"] == "CHAPTER_CORRECTIONS_REQUIRED"
+    assert plan["blocking_chapters"] == [{
+        "chapter_index": 1,
+        "title": "Chapter 2",
+        "reason": "CHANGES_REQUIRED",
+        "next_action": "CORRECT_AND_REVIEW",
+    }]
+    assets[1].metadata["chapter_quality_review"] = {}
+    needs_review = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
+    assert needs_review["readiness_status"] == "CHAPTER_REVIEW_REQUIRED"
+    assert needs_review["blocking_chapters"][0]["next_action"] == "REVIEW"
