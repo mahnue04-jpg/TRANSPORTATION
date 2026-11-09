@@ -639,28 +639,38 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
                     break
             except (CreativeStudioError, OSError, ValueError):
                 continue
+        verified_review = ((verified.metadata or {}).get("chapter_quality_review")
+                           if verified is not None else None)
+        verified_sha = (str((verified.metadata or {}).get("sha256") or "")
+                        if verified is not None else None)
+        if verified is None:
+            review_status = "NEEDS_REBUILD"
+        elif _chapter_review_passed(verified_review, index, verified_sha):
+            review_status = "REVIEW_PASSED"
+        elif (isinstance(verified_review, dict)
+              and verified_review.get("status") == "CHANGES_REQUIRED"
+              and verified_review.get("file_sha256") == verified_sha
+              and verified_review.get("chapter_index") == index):
+            review_status = "CHANGES_REQUIRED"
+        else:
+            review_status = "REVIEW_REQUIRED"
         states.append({
             "chapter_index": index, "title": chapter.get("title", f"Chapter {index+1}"),
             "status": "REUSABLE" if verified is not None else "NEEDS_REBUILD",
+            "review_status": review_status,
             "asset_id": verified.id if verified is not None else None,
             "asset_sha256": str((verified.metadata or {}).get("sha256") or "") if verified is not None else None,
             "file_size_bytes": (verified.metadata or {}).get("file_size_bytes") if verified is not None else None,
-            "quality_review": (verified.metadata or {}).get("chapter_quality_review") if verified is not None else None,
+            "quality_review": verified_review,
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
     missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
-    needs_review = [
-        row["chapter_index"] for row in states
-        if row["status"] == "REUSABLE" and not _chapter_review_passed(
-            row["quality_review"], row["chapter_index"], row["asset_sha256"]
-        )
-    ]
-    needs_correction = [
-        row["chapter_index"] for row in states
-        if row["status"] == "REUSABLE"
-        and isinstance(row["quality_review"], dict)
-        and row["quality_review"].get("status") == "CHANGES_REQUIRED"
-    ]
+    needs_review = [row["chapter_index"] for row in states
+                    if row["review_status"] in {"REVIEW_REQUIRED", "CHANGES_REQUIRED"}]
+    needs_correction = [row["chapter_index"] for row in states
+                        if row["review_status"] == "CHANGES_REQUIRED"]
+    reviewed = [row["chapter_index"] for row in states
+                if row["review_status"] == "REVIEW_PASSED"]
     # A version token binds customer confirmation to exact verified chapter
     # assets and current saved plan, not merely chapter counts.
     version = hashlib.sha256(json.dumps({
@@ -681,6 +691,7 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
         "needs_rebuild_indices": missing,
         "needs_review_indices": needs_review,
         "needs_correction_indices": needs_correction,
+        "reviewed_chapters": len(reviewed),
         "master_ready": (entry.status == "approved" and len(states) >= 2
                          and not missing and not needs_review),
         "published": False, "paid_provider_charges": False,
@@ -726,6 +737,11 @@ def review_saved_chapter(
         raise HTTPException(status_code=409, detail="Chapter MP4 changed or could not be verified.")
     passed = all((payload.visuals_ok, payload.audio_ok,
                   payload.captions_ok, payload.continuity_ok))
+    if not passed and not payload.notes.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Add specific correction notes when a chapter fails quality review.",
+        )
     review = {
         "status": "REVIEW_PASSED" if passed else "CHANGES_REQUIRED",
         "visuals_ok": payload.visuals_ok,
@@ -1695,8 +1711,10 @@ def start_chapter_master_job(
     readiness = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
     if not readiness["master_ready"]:
         raise HTTPException(status_code=409, detail={
-            "message": "Master export blocked: rebuild or verify the current chapter MP4s first.",
+            "message": "Master export blocked: rebuild missing chapters and complete each exact-MP4 quality review.",
             "needs_rebuild_indices": readiness["needs_rebuild_indices"],
+            "needs_review_indices": readiness["needs_review_indices"],
+            "needs_correction_indices": readiness["needs_correction_indices"],
         })
     key = (user.user_id, project_id, entry_id)
     with _master_export_lock:
@@ -2050,8 +2068,10 @@ def update_final_master(
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Update blocked. Reapprove and finish rebuilding changed chapters first.",
+                "message": "Update blocked. Reapprove, rebuild changed chapters, and complete exact-MP4 quality reviews.",
                 "needs_rebuild_indices": plan["needs_rebuild_indices"],
+                "needs_review_indices": plan["needs_review_indices"],
+                "needs_correction_indices": plan["needs_correction_indices"],
             },
         )
     if payload.version_sha256 != plan["version_sha256"]:
