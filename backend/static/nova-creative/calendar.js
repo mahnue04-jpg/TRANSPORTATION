@@ -283,7 +283,7 @@
 
   async function editChapters(entry, proposedChapters) {
     var project = requestProject();
-    if (!project || busy) return;
+    if (!project || (busy && !Array.isArray(proposedChapters))) return;
     var host = $("calendar-chapters");
     host.replaceChildren();
     try {
