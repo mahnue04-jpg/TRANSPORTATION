@@ -11,6 +11,7 @@ on:
       - "backend/static/nova-creative/calendar.js"
       - "backend/static/nova-creative/creative.js"
       - "backend/tests/test_nova_creative_remote_master_stream.py"
+      - "backend/tests/test_nova_creative_master_download_http.py"
       - "backend/tests/test_nova_creative_private_master_download.py"
       - "backend/app/core/nova/creative_studio/resumable_master.py"
       - "backend/app/core/nova/creative_studio/chapter_master.py"
@@ -66,4 +67,5 @@ jobs:
             tests/test_nova_creative_remote_master_head_gate.py \
             tests/test_nova_creative_private_master_download.py \
             tests/test_nova_creative_remote_master_stream.py \
+            tests/test_nova_creative_master_download_http.py \
             tests/test_nova_creative_master_media_smoke.py
