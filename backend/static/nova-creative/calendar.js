@@ -108,6 +108,18 @@
       if (entry.status === "approved" && entry.duration_seconds >= 600 &&
           entry.duration_seconds <= 1800 && (entry.chapters || []).length >= 2) {
         actions.appendChild(button("Export chapter master", exportMaster, entry));
+        actions.appendChild(button("Master job status", async function (selected) {
+          var project = requestProject();
+          if (!project) return;
+          try {
+            var info = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(selected.id) + "/master-status", { method: "GET" });
+            feedback(info.message || ("Master export: " + info.status));
+            if (info.status === "GENERATED" && typeof bridge.refreshProductionAssets === "function") {
+              await bridge.refreshProductionAssets();
+            }
+          } catch (err) { feedback(err.message || "Could not retrieve master export status.", true); }
+        }, entry));
       }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
@@ -187,20 +199,36 @@
   async function exportMaster(entry) {
     var project = requestProject();
     if (!project || busy) return;
-    if (!window.confirm("Combine your completed chapters into a review-only MP4? This uses local processing, requires private storage, and does not publish anything.")) return;
+    if (!window.confirm("Start a review-only chapter master export? Existing chapter videos remain saved. No paid provider or publishing will be activated.")) return;
     busy = true;
-    feedback("Assembling completed chapters into one MP4. Keep your original chapters saved.");
+    feedback("Submitting master export as a saved job...");
     try {
       var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
-        "/export-master", { method: "POST" });
+        "/export-master-job", { method: "POST" });
       if (active() !== project) return;
-      if (!result || result.status !== "MASTER_SAVED_REVIEW_REQUIRED") {
-        throw new Error("No verified chapter master was returned.");
+      if (result.status !== "QUEUED" && result.status !== "ALREADY_RUNNING") {
+        throw new Error(result.message || "No saved export job was confirmed.");
       }
-      feedback("Finished master saved privately. Review and download it from the Studio Asset list.");
-      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+      feedback("Master export queued. You may return to this project and check its status.");
+      // The job is persisted server-side; this short poll is only for convenience.
+      for (var attempt = 0; attempt < 90 && active() === project; attempt++) {
+        await new Promise(function (resolve) { setTimeout(resolve, 3000); });
+        var status = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+          "/master-status", { method: "GET" });
+        if (status.status === "GENERATED") {
+          feedback("Master MP4 saved. Review and download from the Studio Asset list.");
+          if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+          return;
+        }
+        if (status.status === "ERROR" || status.status === "INTERRUPTED_UNCONFIRMED") {
+          feedback(status.message || "Master export needs attention. Saved chapters are preserved.", true);
+          return;
+        }
+        feedback("Master export: " + status.status + ". Completed chapter files remain saved.");
+      }
+      feedback("Master export is still processing or its status is not confirmed. Reopen the project and check status.");
     } catch (err) {
-      feedback(err.message || "Master export failed; your chapter files remain saved.", true);
+      feedback(err.message || "Master export could not be confirmed; original chapters remain saved.", true);
     } finally { busy = false; }
   }
 
