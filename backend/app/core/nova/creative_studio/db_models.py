@@ -215,3 +215,18 @@ class NovaCreativeRenderClaim(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     checkpoint_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeAiRequestSlot(Base):
+    """Atomic daily allocation for optional model-backed Studio revisions.
+
+    A slot is never refunded automatically after an uncertain provider result.
+    This bounds request count across application workers; it is not a dollar
+    accounting ledger or proof of final provider charges.
+    """
+    __tablename__ = "nova_creative_ai_request_slots"
+    slot_key: Mapped[str] = mapped_column(String(150), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    day_utc: Mapped[str] = mapped_column(String(10), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
