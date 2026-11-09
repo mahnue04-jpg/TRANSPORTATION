@@ -116,6 +116,7 @@ def _as_dict(row: NovaCreativeCalendarEntry) -> dict:
         "channels": json.loads(row.channels_json), "scheduled_at": row.scheduled_at,
         "duration_seconds": row.duration_seconds,
         "timeline_asset_ids": json.loads(row.timeline_json or "[]"),
+        "chapters": json.loads(row.chapters_json or "[]"),
         "status": row.status, "created_at": row.created_at,
         "updated_at": row.updated_at, "publishing_enabled": False,
         "message": "Planning only. Approval does not schedule or publish a post.",
@@ -417,6 +418,60 @@ def save_calendar_timeline(
     previous = json.loads(entry.timeline_json or "[]")
     if previous != payload.asset_ids:
         entry.timeline_json = json.dumps(payload.asset_ids)
+        if entry.status == "approved":
+            entry.status = "ready_for_review"
+        entry.updated_at = _now()
+        db.commit()
+        db.refresh(entry)
+    return _as_dict(entry)
+
+
+class ChapterIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    duration_seconds: int = Field(ge=120, le=600)
+    asset_ids: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("title")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Chapter title cannot be blank.")
+        return value
+
+
+class ChaptersIn(BaseModel):
+    chapters: list[ChapterIn] = Field(min_length=1, max_length=24)
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/chapters")
+def save_calendar_chapters(
+    project_id: str, entry_id: str, payload: ChaptersIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Persist reusable long-form chapters with their own ordered source clips."""
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be changed.")
+    if sum(ch.duration_seconds for ch in payload.chapters) != entry.duration_seconds:
+        raise HTTPException(status_code=422, detail="Chapter lengths must add up to the planned video duration.")
+    store = DbCreativeStudioStore(db)
+    assets = {a.id: a for a in store.list_assets(project_id, user.user_id)}
+    chapters = []
+    for index, ch in enumerate(payload.chapters):
+        if len(ch.asset_ids) != len(set(ch.asset_ids)):
+            raise HTTPException(status_code=422, detail="Duplicate clip in a chapter.")
+        if any(aid not in assets or assets[aid].kind != "video" or not assets[aid].url for aid in ch.asset_ids):
+            raise HTTPException(status_code=422, detail="Each chapter must reference clips in this project.")
+        chapters.append({
+            "index": index, "title": ch.title, "duration_seconds": ch.duration_seconds,
+            "asset_ids": list(ch.asset_ids),
+        })
+    canonical = json.dumps(chapters)
+    if (entry.chapters_json or "[]") != canonical:
+        entry.chapters_json = canonical
         if entry.status == "approved":
             entry.status = "ready_for_review"
         entry.updated_at = _now()
