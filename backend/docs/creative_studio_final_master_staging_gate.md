@@ -26,6 +26,8 @@ The private final-master readiness endpoint reports:
 
 Review requests that fail a visual/audio/captions/continuity check must include actionable notes. The saved quality review is tied to its SHA and chapter index. Any change to a reviewed chapter changes the readiness version and requires another review. All exports remain `publish_ready=false`; quality approval is **not** commercial publishing permission.
 
+A queued master job pins both each chapter media SHA and a digest of that chapter's exact approved quality review. The worker must revalidate both before downloading/normalizing clips; changing a quality review after queueing blocks the old job rather than silently exporting a chapter with revoked approval. Legacy pinned snapshots without review digests fail closed. Failed **final-master** quality reviews require specific correction notes too, including when the issue is a general full-video issue rather than one targeted chapter.
+
 ## Staging validation matrix (run with OWNER-controlled, cleared footage)
 
 1. **Happy path:** Create a project and approved 2-chapter plan, import two sets of lawful H.264/AAC clips, build each 2–10-minute chapter; verify private MP4 playback and audio in the chapter-review pane. Review both with four checks passed, re-fetch readiness, confirm `master_ready=true`, export private master and play/download it fully.
@@ -40,6 +42,9 @@ Review requests that fail a visual/audio/captions/continuity check must include 
 10. **Compatibility:** Verify original vertical 720x1280 workflow, storyboard/narration previews and caption behavior remain functional. Issue #472 widescreen assembly must be added later using the common review/storage/export model, without silently altering vertical files.
 11. **Download/playback:** Inspect file size/MP4 metadata with ffprobe, run full playback, verify A/V sync, captions, object URL cleanup on player refresh, and protected download. Large videos use existing protected download without loading entire file into browser memory.
 12. **No-cost guard:** No generation provider requests, billing, automatic social publication or production deployment during this QA run.
+13. **Approval revoked after job queue:** Queue a job with two reviewed chapters, then change a selected chapter's saved review before the worker verifies it. Expect HTTP 409/failed job, unchanged originals and no final-master asset registered from the stale snapshot.
+14. **Legacy snapshot:** Attempt assembly from an older claim without per-chapter approved review digests. Reject it without opening source media or generating an output.
+15. **Final-master corrections:** Mark a final-master checklist item as failed without notes. Expect HTTP 422. Add specific notes and verify the review saves for that exact master SHA; no automatic publishing.
 
 ## Evidence required before release
 
@@ -51,7 +56,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all twelve staging scenarios pass with recorded evidence.
+- CI and all fifteen staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
