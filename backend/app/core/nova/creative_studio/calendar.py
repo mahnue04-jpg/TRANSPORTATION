@@ -1853,6 +1853,48 @@ def master_chapter_correction_plan(
                     "The current chapter is different from the reviewed master. Compare before editing; no changes were applied."),
     }
 
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/masters/{asset_id}/assistant/chapter-revision-proposal")
+def propose_master_chapter_revision(
+    project_id: str, entry_id: str, asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """No-cost correction brief, preserving every saved chapter and source clip."""
+    plan = master_chapter_correction_plan(
+        project_id, entry_id, asset_id, user=user, db=db
+    )
+    if not plan["current_plan_matches_reviewed_chapter"]:
+        raise HTTPException(
+            status_code=409,
+            detail="The current chapter differs from the reviewed master. Compare versions before suggesting edits.",
+        )
+    notes = str(plan["notes"] or "").strip()
+    if not notes:
+        raise HTTPException(
+            status_code=422,
+            detail="Add specific correction notes in the saved master review first.",
+        )
+    category = plan["correction_category"]
+    if category not in {"footage", "audio", "captions", "continuity", "rights", "general"}:
+        category = "general"
+    chapter = dict(plan["current_chapter"])
+    index = plan["chapter_index"]
+    summary = (f"Review of master {asset_id}, chapter {index + 1} "
+               f"({category}): {notes}")[:2000]
+    chapter["revision_note"] = summary
+    return {
+        "status": "DRAFT_CHAPTER_REVISION",
+        "chapter_index": index,
+        "source_master_asset_id": asset_id,
+        "historical_chapter_asset_id": plan["historical_chapter_asset_id"],
+        "proposed_chapter": chapter,
+        "original_chapter": plan["current_chapter"],
+        "message": "A revision brief was prepared. Make the real changes in the editor before saving.",
+        "model_called": False, "saved": False, "rendered": False, "published": False,
+    }
+
+
 @router.post("/projects/{project_id}/calendar/{entry_id}/update-final-master")
 def update_final_master(
     project_id: str, entry_id: str, payload: ConfirmedMasterUpdateIn,
