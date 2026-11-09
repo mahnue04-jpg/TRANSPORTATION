@@ -8,6 +8,7 @@
   var entries = [];
   var revision = 0;
   var busy = false;
+  var studioAssistantHistory = [];
   var localTime = function (iso) {
     var date = new Date(iso);
     if (!Number.isFinite(date.getTime())) return "";
@@ -145,6 +146,17 @@
       var result = await bridge.api(basePath(project), { method: "GET" });
       if (current !== revision || active() !== project) return;
       entries = result.entries || [];
+      var selector = $("studio-assistant-entry");
+      var previous = selector.value;
+      selector.replaceChildren(new Option("Select a saved plan", ""));
+      entries.forEach(function (item) {
+        selector.add(new Option(item.topic + " (" + Math.round(item.duration_seconds / 60 * 10) / 10 + " min)", item.id));
+      });
+      if (entries.some(function (item) { return item.id === previous; })) selector.value = previous;
+      else {
+        studioAssistantHistory = [];
+        $("studio-assistant-conversation").textContent = "";
+      }
       render();
       feedback("Calendar loaded. No posts have been published.");
     } catch (err) {
@@ -614,6 +626,55 @@
       await load();
     } catch (err) { feedback(err.message || "Unable to save plan.", true); }
     finally { busy = false; $("calendar-save").disabled = false; }
+  });
+  $("studio-assistant-entry").addEventListener("change", function () {
+    studioAssistantHistory = [];
+    $("studio-assistant-conversation").textContent = "";
+    $("studio-assistant-feedback").textContent = "";
+  });
+  $("studio-assistant-send").addEventListener("click", async function () {
+    var project = requestProject();
+    var entryId = $("studio-assistant-entry").value;
+    var question = $("studio-assistant-question").value.trim();
+    if (!project || busy) return;
+    if (!entryId || !entries.some(function (item) { return item.id === entryId; })) {
+      $("studio-assistant-feedback").textContent = "Select a saved video plan first.";
+      return;
+    }
+    if (!question) {
+      $("studio-assistant-feedback").textContent = "Write a question for Nova Studio.";
+      return;
+    }
+    busy = true;
+    $("studio-assistant-send").disabled = true;
+    var selectedProject = project;
+    var selectedEntry = entryId;
+    $("studio-assistant-feedback").textContent = "Nova is reviewing your saved plan...";
+    try {
+      var response = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entryId) + "/assistant", {
+          method: "POST", body: JSON.stringify({
+            message: question, history: studioAssistantHistory.slice(-8)
+          })
+        });
+      if (active() !== selectedProject || $("studio-assistant-entry").value !== selectedEntry) return;
+      if (!response || !response.reply) throw new Error("No assistant response returned.");
+      studioAssistantHistory.push({ role: "user", content: question });
+      studioAssistantHistory.push({ role: "assistant", content: response.reply });
+      studioAssistantHistory = studioAssistantHistory.slice(-8);
+      var conversation = $("studio-assistant-conversation");
+      conversation.textContent += (conversation.textContent ? "\\n\\n" : "") +
+        "You: " + question + "\\nNova: " + response.reply;
+      $("studio-assistant-question").value = "";
+      $("studio-assistant-feedback").textContent = response.mode === "conversational"
+        ? "AI guidance only. No changes saved or published."
+        : "Basic guided mode; AI model is disabled. No provider was charged.";
+    } catch (err) {
+      $("studio-assistant-feedback").textContent = err.message || "Nova could not answer.";
+    } finally {
+      busy = false;
+      $("studio-assistant-send").disabled = false;
+    }
   });
   $("studio-guide-help").addEventListener("click", function () {
     var request = $("studio-guide-request").value.trim();
