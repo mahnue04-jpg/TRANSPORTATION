@@ -1292,6 +1292,38 @@
                 ? "Saved review: " + review.status.replace(/_/g, " ").toLowerCase()
                 : "No saved quality review for this chapter version.";
               qc.appendChild(qcStatus);
+              var chapterVideo = document.createElement("video");
+              chapterVideo.controls = true;
+              chapterVideo.preload = "metadata";
+              chapterVideo.playsInline = true;
+              chapterVideo.style.maxWidth = "100%";
+              chapterVideo.style.maxHeight = "340px";
+              chapterVideo.setAttribute("aria-label", "Saved verified chapter video");
+              var safeForPlayback = Number.isFinite(Number(chapter.file_size_bytes)) &&
+                Number(chapter.file_size_bytes) > 0 &&
+                Number(chapter.file_size_bytes) <= 128 * 1024 * 1024;
+              if (safeForPlayback && typeof bridge.fetchProtectedVideo === "function") {
+                qc.appendChild(button("Load this chapter MP4", async function () {
+                  if (active() !== project) return;
+                  try {
+                    var blob = await bridge.fetchProtectedVideo(project, chapter.asset_id);
+                    if (active() !== project || !readinessList.contains(qc)) return;
+                    if (chapterVideo.dataset.objectUrl) URL.revokeObjectURL(chapterVideo.dataset.objectUrl);
+                    var objectUrl = URL.createObjectURL(blob);
+                    chapterVideo.dataset.objectUrl = objectUrl;
+                    chapterVideo.src = objectUrl;
+                    if (!qc.contains(chapterVideo)) qc.appendChild(chapterVideo);
+                    feedback("Chapter MP4 loaded. Review narration, captions, visuals and chapter ending.");
+                  } catch (err) {
+                    feedback(err.message || "Protected chapter playback unavailable.", true);
+                  }
+                }, chapter));
+              } else {
+                var playbackHint = document.createElement("p");
+                playbackHint.className = "hint";
+                playbackHint.textContent = "This chapter is too large (or size is unknown) for safe in-memory playback. Review it through the protected Studio asset download before saving quality notes.";
+                qc.appendChild(playbackHint);
+              }
               var qcChecks = [
                 ["visuals_ok", "Visuals and scene transitions reviewed"],
                 ["audio_ok", "Narration and audio reviewed"],
