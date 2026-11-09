@@ -1122,7 +1122,9 @@ def _master_job_status(db: Session, owner_id: str,
             if since.tzinfo is None:
                 since = since.replace(tzinfo=timezone.utc)
             elapsed = datetime.now(timezone.utc) - since
-            grace = timedelta(minutes=75 if claim.state == "RUNNING" else 5)
+            # Worker refreshes RUNNING claims every 20 seconds. Allow an
+            # outage buffer but avoid labeling a dead worker as active for 75m.
+            grace = timedelta(minutes=3 if claim.state == "RUNNING" else 5)
             if elapsed <= grace:
                 return {"status": claim.state, "job": latest.as_dict(),
                         "message": "The export is queued or claimed by a render worker."}
