@@ -16,6 +16,8 @@ A chapter has independent media and review states:
 | Verified | REVIEW_PASSED, four explicit true checks for matching SHA/index | REVIEW_PASSED | Only if ALL chapters pass |
 
 The private final-master readiness endpoint reports:
+- `readiness_status`: one of `PLAN_APPROVAL_REQUIRED`, `MORE_CHAPTERS_REQUIRED`, `CHAPTER_REBUILD_REQUIRED`, `CHAPTER_CORRECTIONS_REQUIRED`, `CHAPTER_REVIEW_REQUIRED`, or `READY_TO_UPDATE_FINAL_MASTER`.
+- `blocking_chapters`: exact chapter indices/titles with a `REBUILD`, `CORRECT_AND_REVIEW` or `REVIEW` next action.
 - `needs_rebuild_indices`: missing/changed/unverified chapter MP4s.
 - `needs_review_indices`: verified chapters with no valid passed exact-file review (includes corrections).
 - `needs_correction_indices`: verified chapters with saved corrections-required review of this exact MP4.
