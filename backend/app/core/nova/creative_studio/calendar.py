@@ -2074,7 +2074,7 @@ def _assemble_saved_storyboard_segments(db: Session, owner_id: str,
                 raise HTTPException(status_code=409, detail=f"Scene {index + 1} failed media verification; source videos remain saved.") from exc
             sources.append(target)
         manifest = root / "input.txt"
-        manifest.write_text("".join(f"file '{path.as_posix()}'\\n" for path in sources), encoding="utf-8")
+        manifest.write_text("".join(f"file '{path.as_posix()}'\n" for path in sources), encoding="utf-8")
         output = root / "joined.mp4"
         try:
             process = subprocess.run([
