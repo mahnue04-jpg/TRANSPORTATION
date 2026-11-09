@@ -1547,6 +1547,8 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
     if any(not 2 <= int(scene.get("duration_seconds") or 0) <= 12 for scene in scenes):
         raise HTTPException(status_code=422, detail="Each local preview scene must last 2–12 seconds. Edit scene timing or use chapter production.")
     narration = " ".join(str(scene.get("narration") or "").strip() for scene in scenes).strip()
+    if any(not str(scene.get("narration") or "").strip() for scene in scenes):
+        raise HTTPException(status_code=422, detail="Every preview scene needs narration so captions can stay within its planned time.")
     if not narration or len(narration) > 1800:
         raise HTTPException(status_code=422, detail="The local narrator needs 1–1800 characters. Shorten narration or use chapter production.")
     if os.getenv("NOVA_STUDIO_REQUIRE_DURABLE_IMPORTS", "").lower() in {"1", "true", "yes"} and not remote.enabled():
@@ -1593,6 +1595,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
             "subtitle_text": scene["narration"],
             "duration_seconds": scene["duration_seconds"],
             "transition": scene.get("transition", "cut"),
+            "caption_by_scene": True,
         }
         visual_id = scene.get("visual_asset_id")
         if visual_id:
@@ -1638,6 +1641,8 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
             "quality_state": "PREVIEW_ONLY", "publish_ready": False,
             "preview_brand": "AMICOR Nova", "captions_timing_verified": False,
             "narration_license_status": "AMBER", "commercial_complete": False,
+            "caption_timing_mode": "scene_bounded_approximate",
+            "transition_mode": "cut_or_fade_in_from_black",
             "customer_images_used": any(scene.get("visual_asset_id") for scene in scenes),
             "visual_notes_rendered": False, "presenter_lip_sync": False,
             "paid_provider_charges": False, "external_publishing": False,
