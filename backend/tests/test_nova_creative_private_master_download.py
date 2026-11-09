@@ -44,10 +44,12 @@ def test_private_download_requires_head_validation_before_open(monkeypatch):
     monkeypatch.setattr(storage, "owned_object_size", check)
     monkeypatch.setattr(storage, "open_original", open_file)
     result = studio.open_private_remote_asset("owner", "project", "master-1")
-    assert result[0] is stream
-    assert result[1] == "video/mp4"
-    assert result[3] == 512
-    assert result[4] == "a" * 64
+    received_stream, media_type, filename = result
+    assert received_stream is stream
+    assert media_type == "video/mp4"
+    assert filename.endswith(".mp4")
+    assert result.expected_bytes == 512
+    assert result.expected_sha256 == "a" * 64
     assert [event[0] for event in seen] == ["head", "open"]
 
 
