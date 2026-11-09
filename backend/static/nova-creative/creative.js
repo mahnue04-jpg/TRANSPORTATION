@@ -2771,12 +2771,39 @@
     });
   });
 
+  async function fetchProtectedStudioVideo(projectId, assetId) {
+    // Authenticated blob fetch only; never place bearer tokens in a video URL.
+    if (!projectId || !assetId || projectId !== activeProjectId) {
+      throw new Error("Select the matching Studio project.");
+    }
+    var url = "/api/nova/creative/projects/" + encodeURIComponent(projectId) +
+      "/assets/" + encodeURIComponent(assetId) + "/file";
+    assertDownloadUrlHasNoToken(url);
+    var shared = session();
+    if (shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+    var headers = {};
+    if (token()) headers.Authorization = "Bearer " + token();
+    var response = shared && typeof shared.authFetch === "function"
+      ? await shared.authFetch(url, {method: "GET", headers: headers})
+      : await fetch(url, {method: "GET", headers: headers});
+    if (!response.ok) throw new Error("Preview media unavailable (" + response.status + ").");
+    var mime = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (mime !== "video/mp4") throw new Error("The selected preview is not an MP4 video.");
+    var blob = await response.blob();
+    if (!blob.size || blob.size > 128 * 1024 * 1024) {
+      throw new Error("Preview exceeds the protected playback limit.");
+    }
+    if (projectId !== activeProjectId) throw new Error("The active project changed.");
+    return blob;
+  }
+
   // The calendar shares the same session-aware API and selected project.
   // It cannot bypass Creative Studio authentication or trigger publishing.
   window.NovaCreativeCalendarBridge = {
     api: api,
     selectedProject: function () { return activeProjectId; },
-    refreshProductionAssets: refreshAssets
+    refreshProductionAssets: refreshAssets,
+    fetchProtectedVideo: fetchProtectedStudioVideo
   };
 
   boot();
