@@ -1038,6 +1038,45 @@
               ? "Save and approve the chapter plan before rebuilding or exporting."
               : (plan.needs_rebuild_indices.length + " chapter(s) need rebuilding. Existing matching chapters will be reused.");
           readinessList.appendChild(summary);
+          if (plan.master_ready && plan.version_sha256 && plan.plan_status === "approved") {
+            var updateButton = button("Update Final Master (review-only)", async function () {
+              if (busy || active() !== project) return;
+              var matching = plan.chapters.every(function (ch, i) {
+                return ch.status === "REUSABLE" && ch.chapter_index === i && Boolean(ch.asset_id);
+              });
+              if (!matching) {
+                feedback("Some chapters must be rebuilt before final master export.", true);
+                return;
+              }
+              if (!window.confirm("Create a NEW review-only final master from all " +
+                  plan.reusable_chapters + " verified saved chapters? Older masters will remain available. No paid AI generation or publishing.")) return;
+              busy = true;
+              updateButton.disabled = true;
+              try {
+                var result = await bridge.api(basePath(project) + "/" +
+                  encodeURIComponent(entry.id) + "/update-final-master", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      version_sha256: plan.version_sha256,
+                      confirm_rebuild: true
+                    })
+                  });
+                if (active() !== project) return;
+                if (!result || (result.status !== "QUEUED" && result.status !== "ALREADY_RUNNING")) {
+                  throw new Error(result && result.message || "No master export job was confirmed.");
+                }
+                feedback(result.status === "QUEUED"
+                  ? "Updated master queued. Use Master job status to follow progress. Older masters remain saved."
+                  : "A master export is already running. Check its saved status before starting another.");
+              } catch (err) {
+                feedback(err.message || "Updated master export was not started. Previous videos are preserved.", true);
+              } finally {
+                busy = false;
+                updateButton.disabled = false;
+              }
+            }, entry);
+            readinessList.appendChild(updateButton);
+          }
         } catch (err) {
           readinessList.textContent = "Could not check chapter readiness: " + (err.message || "unknown error");
         } finally {
