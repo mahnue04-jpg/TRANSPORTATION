@@ -19,6 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import UserContext, get_current_user_context
@@ -971,6 +972,29 @@ def _master_claim_key(owner_id: str, project_id: str, entry_id: str) -> str:
     ).hexdigest()
 
 
+def _claim_queued_master(db: Session, owner_id: str, project_id: str,
+                         entry_id: str, job_id: str) -> bool:
+    """Atomic SQL compare-and-swap: exactly one process can run a queued export.
+
+    An interrupted RUNNING export is intentionally not retried automatically.
+    """
+    key = _master_claim_key(owner_id, project_id, entry_id)
+    updated = db.execute(
+        update(NovaCreativeRenderClaim)
+        .where(
+            NovaCreativeRenderClaim.claim_key == key,
+            NovaCreativeRenderClaim.owner_id == owner_id,
+            NovaCreativeRenderClaim.project_id == project_id,
+            NovaCreativeRenderClaim.entry_id == entry_id,
+            NovaCreativeRenderClaim.job_id == job_id,
+            NovaCreativeRenderClaim.state == "QUEUED",
+        )
+        .values(state="RUNNING", updated_at=_now())
+    )
+    db.commit()
+    return updated.rowcount == 1
+
+
 def _finish_master_claim(db: Session, owner_id: str, project_id: str,
                          entry_id: str, job_id: str, state: str) -> None:
     claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
@@ -994,10 +1018,12 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         store = DbCreativeStudioStore(db)
         job = next((row for row in store.list_jobs(project_id, owner_id)
                     if row.id == job_id), None)
-        if job is None:
+        if job is None or job.status != "QUEUED":
+            return
+        if not _claim_queued_master(db, owner_id, project_id, entry_id, job_id):
+            # Another process already claimed this work, or it was canceled.
             return
         job.status = "RUNNING"
-        _finish_master_claim(db, owner_id, project_id, entry_id, job_id, "RUNNING")
         job.message = "Combining previously saved chapters into a private MP4."
         job.updated_at = _now()
         store.save_job(job)
