@@ -375,7 +375,26 @@ def render_offline_montage(
                 seconds = max(2.0, min(float(scene.get("duration_seconds") or 5), 12.0))
                 speech_window = min(seconds, spoken_windows[index]) if scene_audio_mode else seconds
                 text = str(scene.get("subtitle_text") or scene.get("voiceover_text") or "").strip()
-                if text:
+                manual = scene.get("caption_cues") or []
+                if manual:
+                    prev_end = 0.0
+                    for cue in manual:
+                        start = float(cue["start_seconds"])
+                        end = float(cue["end_seconds"])
+                        caption_text = str(cue["text"]).strip()
+                        if (not caption_text or start < prev_end or end <= start
+                                or end > speech_window + 0.01):
+                            raise OfflineCommercialError(
+                                "CAPTION_TIMING_INVALID",
+                                "Manual captions must fit inside measured scene speech; review their timing."
+                            )
+                        cues.append({
+                            "start": round(offset + start, 3),
+                            "end": round(offset + end, 3),
+                            "text": caption_text,
+                        })
+                        prev_end = end
+                elif text:
                     for cue in even_spaced_cues(text, speech_window):
                         cues.append({
                             "start": round(offset + cue["start"], 3),
@@ -414,6 +433,7 @@ def render_offline_montage(
         "captions_burned_in": True,
         "captions_scene_bounded": bool(all(scene.get("caption_by_scene") for scene in scenes)),
         "captions_speech_aligned": False,
+        "manual_caption_cues_used": any(bool(scene.get("caption_cues")) for scene in scenes),
         "narration_scene_audio_aligned": scene_audio_mode,
         "caption_alignment_mode": "scene_speech_window_estimate" if scene_audio_mode else "global_even_spacing",
         "subtitle_path": str(output_mp4.with_suffix(".srt")),
