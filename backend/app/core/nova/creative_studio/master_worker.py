@@ -48,16 +48,20 @@ def run_one_queued() -> bool:
         return False
     # The runner atomically compares state=QUEUED before processing.
     # A competing web worker or another queue worker may claim first.
+    processed_without_error = False
     for owner_id, project_id, entry_id, job_id in candidates:
         if _stop:
             return False
         try:
             _run_chapter_master_job(owner_id, project_id, entry_id, job_id)
+            processed_without_error = True
         except Exception:
             # Preserve fail-closed claim state for operator reconciliation.
             # One corrupt job must not starve other independent projects.
             _logger.exception("Creative Studio master job failed unexpectedly during worker poll.")
-    return True
+    # If all candidates unexpectedly failed before being claimable, back off
+    # rather than hammering the shared SQL database in a tight loop.
+    return processed_without_error
 
 
 def main() -> None:
