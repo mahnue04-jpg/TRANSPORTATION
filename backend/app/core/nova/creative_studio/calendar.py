@@ -1925,6 +1925,19 @@ def _render_single_storyboard_scene(db: Session, owner_id: str,
                   if a.id == imported["asset"]["id"]), None)
     if asset is None:
         raise HTTPException(status_code=500, detail="Scene preview file was not saved.")
+    # The existing protected importer can deduplicate byte-identical media
+    # from a different workflow. Never relabel someone else's saved original.
+    if imported.get("reused"):
+        old_meta = asset.metadata or {}
+        if (old_meta.get("pipeline") != "calendar_scene_preview"
+                or old_meta.get("source_sha256") != key
+                or old_meta.get("calendar_entry_id") != entry_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Identical video belongs to another saved asset. Original preserved; scene preview not relabeled.",
+            )
+        return {**_preview_result(project_id, asset, reused=True),
+                "scene_index": scene_index}
     asset.metadata = {
         **(asset.metadata or {}), "pipeline": "calendar_scene_preview",
         "source_sha256": key, "calendar_entry_id": entry_id,
