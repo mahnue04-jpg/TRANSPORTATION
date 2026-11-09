@@ -1838,6 +1838,15 @@ def list_storyboard_revisions(
     }
 
 
+def _storyboard_segment_hash(scene: dict, entry: NovaCreativeCalendarEntry, index: int) -> str:
+    # v2 marks CTA-free reusable segments; never mix with older QC previews.
+    return hashlib.sha256(json.dumps({
+        "scene": scene, "voice": entry.narrator_voice,
+        "speed": entry.narrator_speed, "scene_index": index,
+        "render_profile": "offline-captioned-no-cta-v2",
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
 def _render_single_storyboard_scene(db: Session, owner_id: str,
                                     project_id: str, entry_id: str,
                                     scene_index: int) -> dict:
@@ -1861,14 +1870,11 @@ def _render_single_storyboard_scene(db: Session, owner_id: str,
         raise HTTPException(status_code=422, detail="Scene narration must be 1-450 characters.")
     store = DbCreativeStudioStore(db)
     service = get_service(db)
-    key = hashlib.sha256(json.dumps({
-        "scene": scene, "voice": entry.narrator_voice, "speed": entry.narrator_speed,
-        "scene_index": scene_index,
-    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    key = _storyboard_segment_hash(scene, entry, scene_index)
     for asset in reversed(store.list_assets(project_id, owner_id)):
         meta = asset.metadata or {}
         if (asset.kind == "video" and
-                meta.get("pipeline") == "calendar_scene_preview" and
+                meta.get("pipeline") == "calendar_scene_segment" and
                 meta.get("source_sha256") == key and
                 meta.get("calendar_entry_id") == entry_id):
             digest = str(meta.get("sha256") or "")
@@ -1909,6 +1915,7 @@ def _render_single_storyboard_scene(db: Session, owner_id: str,
             measured = render_offline_montage(
                 [item], output_mp4=output, audio_wav=root / "narration.wav",
                 vertical=True, voice=entry.narrator_voice, speed=entry.narrator_speed,
+                include_cta=False,
             )
         except OfflineCommercialError as exc:
             raise HTTPException(status_code=422, detail=exc.message) from exc
@@ -1929,7 +1936,7 @@ def _render_single_storyboard_scene(db: Session, owner_id: str,
     # from a different workflow. Never relabel someone else's saved original.
     if imported.get("reused"):
         old_meta = asset.metadata or {}
-        if (old_meta.get("pipeline") != "calendar_scene_preview"
+        if (old_meta.get("pipeline") != "calendar_scene_segment"
                 or old_meta.get("source_sha256") != key
                 or old_meta.get("calendar_entry_id") != entry_id):
             raise HTTPException(
@@ -1939,9 +1946,10 @@ def _render_single_storyboard_scene(db: Session, owner_id: str,
         return {**_preview_result(project_id, asset, reused=True),
                 "scene_index": scene_index}
     asset.metadata = {
-        **(asset.metadata or {}), "pipeline": "calendar_scene_preview",
+        **(asset.metadata or {}), "pipeline": "calendar_scene_segment",
         "source_sha256": key, "calendar_entry_id": entry_id,
-        "scene_index": scene_index, "quality_state": "SCENE_PREVIEW_ONLY",
+        "scene_index": scene_index, "quality_state": "SCENE_SEGMENT_REVIEW_ONLY",
+        "concat_ready": True, "render_profile": "offline-captioned-no-cta-v2",
         "commercial_complete": False, "publish_ready": False,
         "captions_timing_verified": False, "external_publishing": False,
         "paid_provider_charges": False,
