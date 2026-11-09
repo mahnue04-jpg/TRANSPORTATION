@@ -2771,6 +2771,63 @@
     });
   });
 
+  async function streamProtectedStudioMaster(projectId, assetId) {
+    // File System Access API prompt must occur in the originating click gesture.
+    // This avoids buffering 2 GiB in a Blob; browser support is intentionally gated.
+    if (!projectId || !assetId || projectId !== activeProjectId) {
+      throw new Error("Select the matching Studio project.");
+    }
+    if (typeof window.showSaveFilePicker !== "function") {
+      throw new Error("Large-file streaming save requires a compatible desktop browser.");
+    }
+    var fileHandle = await window.showSaveFilePicker({
+      suggestedName: "creative-studio-master-" + assetId + ".mp4",
+      types: [{description: "MP4 video", accept: {"video/mp4": [".mp4"]}}]
+    });
+    var url = "/api/nova/creative/projects/" + encodeURIComponent(projectId) +
+      "/assets/" + encodeURIComponent(assetId) + "/file";
+    assertDownloadUrlHasNoToken(url);
+    var shared = session();
+    if (shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+    var headers = {};
+    if (token()) headers.Authorization = "Bearer " + token();
+    var response = shared && typeof shared.authFetch === "function"
+      ? await shared.authFetch(url, {method: "GET", headers: headers})
+      : await fetch(url, {method: "GET", headers: headers});
+    if (!response.ok || !response.body ||
+        !String(response.headers.get("content-type") || "").toLowerCase().startsWith("video/mp4")) {
+      throw new Error("Protected master download is unavailable.");
+    }
+    var reported = Number(response.headers.get("content-length"));
+    if (reported > 2 * 1024 * 1024 * 1024) throw new Error("Master exceeds the 2 GiB streaming limit.");
+    if (projectId !== activeProjectId) throw new Error("Project selection changed.");
+    var writable = await fileHandle.createWritable();
+    var reader = response.body.getReader();
+    var total = 0;
+    try {
+      while (true) {
+        if (projectId !== activeProjectId) throw new Error("Project selection changed during download.");
+        var part = await reader.read();
+        if (part.done) break;
+        total += part.value.byteLength;
+        if (total > 2 * 1024 * 1024 * 1024) {
+          throw new Error("Master exceeded the maximum safe download size.");
+        }
+        await writable.write(part.value);
+      }
+      if (!total || (reported > 0 && reported !== total)) {
+        throw new Error("Downloaded master is empty or incomplete.");
+      }
+      await writable.close();
+      return {bytes: total, saved: true};
+    } catch (err) {
+      try { await writable.abort(); } catch (ignore) {}
+      throw err;
+    } finally {
+      try { await reader.cancel(); } catch (ignore) {}
+    }
+  }
+
   async function fetchProtectedStudioVideo(projectId, assetId) {
     // Authenticated blob fetch only; never place bearer tokens in a video URL.
     if (!projectId || !assetId || projectId !== activeProjectId) {
@@ -2804,7 +2861,8 @@
     selectedProject: function () { return activeProjectId; },
     refreshProductionAssets: refreshAssets,
     fetchProtectedVideo: fetchProtectedStudioVideo,
-    downloadProtectedAsset: downloadProtectedAsset
+    downloadProtectedAsset: downloadProtectedAsset,
+    streamProtectedMaster: streamProtectedStudioMaster
   };
 
   boot();
