@@ -230,3 +230,55 @@ def test_readiness_plan_exposes_per_chapter_actions(monkeypatch, tmp_path):
     needs_review = studio._chapter_rebuild_plan(object(), "owner", "project", "entry")
     assert needs_review["readiness_status"] == "CHAPTER_REVIEW_REQUIRED"
     assert needs_review["blocking_chapters"][0]["next_action"] == "REVIEW"
+
+
+def test_master_assembler_rejects_replaced_chapter_review_before_ffmpeg(monkeypatch):
+    """A queued job cannot silently reuse footage after its quality approval changes."""
+    from types import SimpleNamespace
+    import hashlib
+    import json
+    import pytest
+    from fastapi import HTTPException
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    review = _approved_review()
+    review["chapter_index"] = 0
+    asset = SimpleNamespace(
+        id="chapter-a", kind="video", url="private-studio-s3://chapter-a",
+        metadata={
+            "pipeline": "calendar_saved_clip_assembly",
+            "calendar_entry_id": "entry", "chapter_index": 0,
+            "sha256": "a" * 64,
+            "chapter_quality_review": review,
+        },
+    )
+    pinned_review_sha = hashlib.sha256(json.dumps(
+        review, sort_keys=True, ensure_ascii=False
+    ).encode("utf-8")).hexdigest()
+    pinned = {
+        "duration_seconds": 600,
+        "version_sha256": "b" * 64,
+        "chapters": [
+            {"chapter_index": 0, "asset_id": "chapter-a",
+             "sha256": "a" * 64, "review_sha256": pinned_review_sha},
+            {"chapter_index": 1, "asset_id": "chapter-b",
+             "sha256": "c" * 64, "review_sha256": "d" * 64},
+        ],
+    }
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: None)
+    monkeypatch.setattr(studio, "_master_export_limit_seconds", lambda: 3600)
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_assets=lambda *args: [asset],
+    ))
+    # Alter the metadata after job confirmation: the old approval no longer applies.
+    asset.metadata["chapter_quality_review"] = {
+        **review, "status": "CHANGES_REQUIRED", "visuals_ok": False,
+    }
+    with pytest.raises(HTTPException) as error:
+        studio._assemble_chapter_master(object(), "owner", "project", "entry",
+                                        pinned=pinned)
+    assert error.value.status_code == 409
+    assert "quality review changed" in error.value.detail
