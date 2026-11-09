@@ -106,7 +106,7 @@
         actions.appendChild(button("Edit chapters", editChapters, entry));
       }
       if (entry.status === "approved" && entry.duration_seconds >= 600 &&
-          entry.duration_seconds <= 3600 && (entry.chapters || []).length >= 2) {
+          entry.duration_seconds <= 7200 && (entry.chapters || []).length >= 2) {
         actions.appendChild(button("Export chapter master", exportMaster, entry));
         actions.appendChild(button("Resume failed export", resumeMaster, entry));
         actions.appendChild(button("Master job status", async function (selected) {
@@ -235,7 +235,7 @@
   async function exportMaster(entry) {
     var project = requestProject();
     if (!project || busy) return;
-    if (!window.confirm("Start a review-only chapter master export? Existing chapter videos remain saved. No paid provider or publishing will be activated.")) return;
+    if (!window.confirm("Start a review-only chapter master export? Videos over 60 minutes require the owner's extended-export configuration, private storage, and ample disk space. All existing chapters remain saved. No paid provider or publishing will be activated.")) return;
     busy = true;
     feedback("Submitting master export as a saved job...");
     try {
