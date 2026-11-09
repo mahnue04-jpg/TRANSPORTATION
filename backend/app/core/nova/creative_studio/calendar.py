@@ -485,6 +485,94 @@ def save_calendar_chapters(
     return _as_dict(entry)
 
 
+class ChapterClipReplacementIn(BaseModel):
+    old_asset_id: str = Field(min_length=1, max_length=48)
+    new_asset_id: str = Field(min_length=1, max_length=48)
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/chapters/{chapter_index}/replace-clip")
+def replace_calendar_chapter_clip(
+    project_id: str, entry_id: str, chapter_index: int,
+    payload: ChapterClipReplacementIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Explicitly replace ONE clip in a chapter; never alter finished MP4s.
+
+    Replacement must be a completed, verified, review-only assembled scene
+    video from the same owner/project. All other chapter clips retain order.
+    The entire plan returns for approval before any further assembly.
+    """
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be modified.")
+    chapters = json.loads(entry.chapters_json or "[]")
+    if not 0 <= chapter_index < len(chapters):
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    old_id, new_id_value = payload.old_asset_id, payload.new_asset_id
+    if old_id == new_id_value:
+        raise HTTPException(status_code=422, detail="Choose a different replacement clip.")
+    selected = chapters[chapter_index]
+    existing = list(selected.get("asset_ids") or [])
+    if existing.count(old_id) != 1:
+        raise HTTPException(status_code=409, detail="The source clip is no longer present exactly once in this chapter.")
+    if new_id_value in existing:
+        raise HTTPException(status_code=422, detail="The replacement is already in this chapter.")
+    store = DbCreativeStudioStore(db)
+    assets = {a.id: a for a in store.list_assets(project_id, user.user_id)}
+    replacement = assets.get(new_id_value)
+    if (replacement is None or replacement.kind != "video" or not replacement.url
+            or (replacement.metadata or {}).get("pipeline") != "calendar_assembled_scene_preview"
+            or (replacement.metadata or {}).get("publish_ready") is not False):
+        raise HTTPException(
+            status_code=422,
+            detail="Choose a saved review-only assembled storyboard MP4 from this Studio project.",
+        )
+    # Check current stored file before committing a reference to it.
+    from app.core.nova.creative_studio import private_object_storage as remote
+    media_sha = str((replacement.metadata or {}).get("sha256") or "")
+    if not media_sha:
+        raise HTTPException(status_code=409, detail="Replacement MP4 has no verified checksum.")
+    service = get_service(db)
+    try:
+        if str(replacement.url).startswith("private-studio-s3://"):
+            valid = remote.enabled() and remote.object_exists(
+                replacement.url, user.user_id, project_id, media_sha
+            )
+        else:
+            local_path, media_type, _ = service.open_asset_file(
+                user.user_id, project_id, new_id_value
+            )
+            valid = (media_type == "video/mp4" and local_path.is_file()
+                     and hashlib.sha256(local_path.read_bytes()).hexdigest() == media_sha)
+    except Exception:
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=409, detail="Replacement MP4 could not be verified.")
+    updated = existing.copy()
+    updated[updated.index(old_id)] = new_id_value
+    selected["asset_ids"] = updated
+    entry.chapters_json = json.dumps(chapters)
+    if entry.status == "approved":
+        entry.status = "ready_for_review"
+    entry.updated_at = _now()
+    db.commit()
+    db.refresh(entry)
+    return {
+        "status": "REPLACEMENT_SAVED_REVIEW_REQUIRED",
+        "chapter_index": chapter_index,
+        "replaced_asset_id": old_id,
+        "replacement_asset_id": new_id_value,
+        "new_chapter_asset_ids": updated,
+        "calendar": _as_dict(entry),
+        "assembled_chapter_changed": False,
+        "originals_preserved": True,
+        "published": False,
+        "message": "Chapter clip reference updated; approve the chapter plan and rebuild the affected chapter before master export.",
+    }
+
+
 class LongFormAssemblyIn(BaseModel):
     """Ordered video asset IDs already saved in this same owner's Studio project."""
     asset_ids: list[str] = Field(default_factory=list, max_length=16)
