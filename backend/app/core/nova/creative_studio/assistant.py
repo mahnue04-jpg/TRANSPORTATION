@@ -125,3 +125,70 @@ def ask_studio_assistant(
         raise HTTPException(
             status_code=503, detail="The Studio assistant could not complete this request."
         ) from exc
+
+
+def _chapter_proposal(plan: dict) -> list[dict]:
+    """Cost-free editable chapter scaffold fitted exactly to the target duration."""
+    seconds = int(plan.get("duration_seconds") or 0)
+    if seconds < 120:
+        raise HTTPException(
+            status_code=422,
+            detail="Chapter planning starts at 2 minutes. Use the short-video editor for shorter productions.",
+        )
+    if seconds > 7200:
+        raise HTTPException(status_code=422, detail="Video exceeds the two-hour planning limit.")
+    # Aim for ~5m sections, bounded by existing 2-10m chapter editor.
+    count = min(24, max(1, (seconds + 299) // 300))
+    while count > 1 and seconds // count < 120:
+        count -= 1
+    while count < 24 and seconds // count > 600:
+        count += 1
+    if not 120 <= seconds // count <= 600:
+        raise HTTPException(status_code=422, detail="No supported chapter split for this duration.")
+    base, extra = divmod(seconds, count)
+    topic = " ".join(str(plan.get("topic") or "Video").split())[:100]
+    mode = str(plan.get("content_mode") or "faceless")
+    openings = {
+        "drama": ("Opening / central conflict", "Story development", "Turning point", "Resolution"),
+        "education": ("Learning objectives", "Core concepts", "Examples and application", "Review"),
+        "presenter": ("Introduction and promise", "Key points", "Demonstration", "Wrap-up"),
+        "faceless": ("Opening hook", "Main ideas", "Supporting visuals", "Closing takeaway"),
+    }
+    labels = openings.get(mode, openings["faceless"])
+    proposed = []
+    for index in range(count):
+        if count == 1:
+            label = "Complete video"
+        elif index == 0:
+            label = labels[0]
+        elif index == count - 1:
+            label = labels[-1]
+        else:
+            label = labels[1 + min(1, (index - 1) * 2 // max(1, count - 2))]
+        proposed.append({
+            "title": f"{index + 1}. {label} — {topic}"[:200],
+            "duration_seconds": base + (1 if index < extra else 0),
+            "asset_ids": [],
+        })
+    return proposed
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assistant/chapter-proposal")
+def propose_studio_chapters(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Return a structured proposal; saving requires separate owner action."""
+    _project(db, user.user_id, project_id)
+    plan = _as_dict(_entry(db, user.user_id, project_id, entry_id))
+    if plan["status"] == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled video plans cannot be revised.")
+    chapters = _chapter_proposal(plan)
+    return {
+        "status": "DRAFT_SUGGESTION", "chapters": chapters,
+        "duration_seconds": plan["duration_seconds"],
+        "existing_chapters": len(plan.get("chapters") or []),
+        "model_called": False, "saved": False, "published": False,
+        "message": "Editable outline only. Review the proposed chapter titles and lengths, then save in the existing chapter editor. No video or AI model was run.",
+    }
