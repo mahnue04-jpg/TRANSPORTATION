@@ -1685,6 +1685,109 @@ class ConfirmedMasterUpdateIn(BaseModel):
     confirm_rebuild: bool = False
 
 
+class MasterReviewIn(BaseModel):
+    footage_ok: bool
+    audio_ok: bool
+    captions_ok: bool
+    continuity_ok: bool
+    rights_reviewed: bool
+    notes: str = Field(default="", max_length=2000)
+
+
+def _verified_master_assets(db: Session, owner_id: str, project_id: str,
+                            entry_id: str) -> list[CreativeAsset]:
+    """Find only fully persisted private masters owned by this account."""
+    from app.core.nova.creative_studio import private_object_storage as remote
+    store = DbCreativeStudioStore(db)
+    verified = []
+    for asset in reversed(store.list_assets(project_id, owner_id)):
+        meta = asset.metadata or {}
+        digest = str(meta.get("sha256") or "")
+        if (asset.kind != "video" or meta.get("pipeline") != "calendar_chapter_master"
+                or meta.get("calendar_entry_id") != entry_id
+                or not str(asset.url or "").startswith("private-studio-s3://")
+                or len(digest) != 64):
+            continue
+        try:
+            if remote.enabled() and remote.object_exists(asset.url, owner_id, project_id, digest):
+                verified.append(asset)
+        except Exception:
+            continue
+    return verified
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/master-versions")
+def get_master_versions(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    _project(db, user.user_id, project_id)
+    _entry(db, user.user_id, project_id, entry_id)
+    masters = _verified_master_assets(db, user.user_id, project_id, entry_id)
+    return {
+        "masters": [{
+            "asset_id": asset.id,
+            "created_at": asset.created_at,
+            "file_sha256": (asset.metadata or {}).get("sha256"),
+            "pinned_version_sha256": (asset.metadata or {}).get("pinned_version_sha256"),
+            "duration_seconds": (asset.metadata or {}).get("duration_seconds"),
+            "review": (asset.metadata or {}).get("master_quality_review"),
+            "download_url": f"/api/nova/creative/projects/{project_id}/assets/{asset.id}/file",
+            "commercial_complete": False, "publish_ready": False,
+        } for asset in masters[:30]],
+        "published": False,
+        "message": "Verified saved master versions. Quality review does not grant commercial rights or publishing permission.",
+    }
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/masters/{asset_id}/review")
+def review_master_version(
+    project_id: str, entry_id: str, asset_id: str, payload: MasterReviewIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Save an owner quality review for the exact verified master MP4."""
+    _project(db, user.user_id, project_id)
+    _entry(db, user.user_id, project_id, entry_id)
+    master = next((item for item in _verified_master_assets(
+        db, user.user_id, project_id, entry_id) if item.id == asset_id), None)
+    if master is None:
+        raise HTTPException(status_code=404, detail="The private master is missing or unverified.")
+    checks = [
+        payload.footage_ok, payload.audio_ok, payload.captions_ok,
+        payload.continuity_ok, payload.rights_reviewed,
+    ]
+    status = "REVIEW_PASSED" if all(checks) else "CHANGES_REQUIRED"
+    review = {
+        "status": status,
+        "footage_ok": payload.footage_ok,
+        "audio_ok": payload.audio_ok,
+        "captions_ok": payload.captions_ok,
+        "continuity_ok": payload.continuity_ok,
+        "rights_reviewed": payload.rights_reviewed,
+        "notes": payload.notes.strip(),
+        "reviewed_by": user.user_id,
+        "reviewed_at": _now(),
+        "file_sha256": (master.metadata or {}).get("sha256"),
+    }
+    master.metadata = {
+        **(master.metadata or {}),
+        "master_quality_review": review,
+        "quality_state": "MASTER_REVIEW_PASSED" if all(checks)
+                         else "MASTER_CHANGES_REQUIRED",
+        "commercial_complete": False,
+        "publish_ready": False,
+        "external_publishing": False,
+    }
+    DbCreativeStudioStore(db).save_asset(master)
+    return {
+        "status": status, "asset_id": asset_id, "review": review,
+        "published": False, "publish_ready": False,
+        "message": "Quality review saved for this exact MP4. Publishing and commercial clearance remain separate.",
+    }
+
+
 @router.post("/projects/{project_id}/calendar/{entry_id}/update-final-master")
 def update_final_master(
     project_id: str, entry_id: str, payload: ConfirmedMasterUpdateIn,
