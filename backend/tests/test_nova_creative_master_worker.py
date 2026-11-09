@@ -157,3 +157,48 @@ def test_dedicated_worker_backs_off_if_all_jobs_raise(monkeypatch):
     monkeypatch.setattr(master_worker, "_run_chapter_master_job", always_raise)
     # False tells main() to take its configured poll delay.
     assert master_worker.run_one_queued() is False
+
+
+def test_contended_terminal_claim_releases_in_process_marker(monkeypatch):
+    """A losing web process must not permanently block a later valid retry."""
+    import json
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    monkeypatch.delenv("NOVA_STUDIO_MASTER_WORKER_ENABLED", raising=False)
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: SimpleNamespace(
+        status="approved", duration_seconds=600,
+        chapters_json=json.dumps([{}, {}]),
+    ))
+    monkeypatch.setattr(studio, "_master_export_limit_seconds", lambda: 3600)
+    sha = "a" * 64
+    monkeypatch.setattr(studio, "_chapter_rebuild_plan", lambda *args: {
+        "master_ready": True, "version_sha256": sha,
+        "chapters": [
+            {"chapter_index": n, "asset_id": f"asset-{n}",
+             "asset_sha256": sha, "quality_review": {"status": "REVIEW_PASSED"}}
+            for n in range(2)
+        ],
+    })
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        list_jobs=lambda *_args: [],
+    ))
+    previous = SimpleNamespace(job_id="previous-job", state="GENERATED")
+    db = SimpleNamespace(
+        get=lambda *args: previous,
+        execute=lambda *args: SimpleNamespace(rowcount=0),
+        rollback=lambda: None,
+    )
+    key = ("owner", "project", "entry")
+    studio._master_export_active.discard(key)
+    try:
+        response = studio.start_chapter_master_job(
+            "project", "entry", SimpleNamespace(add_task=lambda *a: None),
+            SimpleNamespace(user_id="owner"), db,
+        )
+        assert response["status"] == "ALREADY_RUNNING"
+        assert key not in studio._master_export_active
+    finally:
+        studio._master_export_active.discard(key)
