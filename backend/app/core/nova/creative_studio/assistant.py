@@ -311,3 +311,64 @@ def propose_review_revision(
         "model_called": False, "saved": False, "rendered": False, "published": False,
         "message": "Original scene preserved. Review the correction note and explicitly save changes in the storyboard editor.",
     }
+
+
+def _literal_narration_rewrite(original: str, feedback: str) -> dict:
+    """Only perform exact quoted owner-requested replacements, never invent copy."""
+    import re
+    pattern = (
+        r'^\\s*replace\\s+["\\u201c]([^"\\u201d]{1,160})["\\u201d]'
+        r'\\s+with\\s+["\\u201c]([^"\\u201d]{1,160})["\\u201d]\\s*[.!]?\\s*$'
+    )
+    match = re.fullmatch(pattern, feedback, flags=re.IGNORECASE | re.DOTALL)
+    if match is None:
+        return {
+            "supported": False, "proposed_narration": original,
+            "reason": 'Use an explicit instruction: replace "old phrase" with "new phrase". Open-ended rewriting needs an approved AI model.',
+        }
+    old, new = match.group(1), match.group(2)
+    if old == new or not old.strip() or not new.strip():
+        raise HTTPException(status_code=422, detail="The replacement must contain two different, nonempty phrases.")
+    count = original.count(old)
+    if count != 1:
+        raise HTTPException(status_code=422, detail="The original phrase must appear exactly once in the selected scene narration.")
+    revised = original.replace(old, new, 1)
+    if len(revised) > 6000:
+        raise HTTPException(status_code=422, detail="Suggested narration exceeds the 6,000-character scene limit.")
+    return {
+        "supported": True, "proposed_narration": revised,
+        "reason": "One exact owner-requested wording replacement; review pronunciation and timing before saving.",
+    }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assistant/previews/{asset_id}/script-revision")
+def propose_review_script_revision(
+    project_id: str, entry_id: str, asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Read-only, no-cost script proposal from a reviewed, current MP4."""
+    context = propose_review_revision(
+        project_id, entry_id, asset_id, user=user, db=db
+    )
+    index = context["scene_index"]
+    current = context["suggested_scene"]
+    original = str(current.get("narration") or "")
+    from app.core.nova.creative_studio.store import DbCreativeStudioStore
+    asset = next(
+        (a for a in DbCreativeStudioStore(db).list_assets(project_id, user.user_id)
+         if a.id == asset_id), None
+    )
+    review = ((asset.metadata or {}).get("storyboard_preview_review") or {}) if asset else {}
+    if review.get("correction_category") != "narration":
+        raise HTTPException(status_code=422, detail="Select Narration as the review correction category.")
+    proposal = _literal_narration_rewrite(original, str(review.get("notes") or ""))
+    return {
+        "status": "DRAFT_SCRIPT_REVISION" if proposal["supported"] else "NEEDS_AI_OR_EXPLICIT_EDIT",
+        "scene_index": index, "original_narration": original,
+        "proposed_narration": proposal["proposed_narration"],
+        "revision_note": current.get("revision_note", ""),
+        "explanation": proposal["reason"],
+        "source_review_asset_id": asset_id,
+        "model_called": False, "saved": False, "rendered": False, "published": False,
+    }
