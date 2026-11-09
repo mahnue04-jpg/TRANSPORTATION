@@ -962,3 +962,153 @@ async def export_calendar_master(
     return await run_in_threadpool(
         _assemble_chapter_master, db, user.user_id, project_id, entry_id,
     )
+
+
+# The master-export worker runs only within this application process. Records
+# remain in SQL; actual restart-resumable queues are a later production gate.
+_master_export_lock = threading.Lock()
+_master_export_active: set[tuple[str, str, str]] = set()
+
+
+def _run_chapter_master_job(owner_id: str, project_id: str,
+                            entry_id: str, job_id: str) -> None:
+    key = (owner_id, project_id, entry_id)
+    db = SessionLocal()
+    try:
+        store = DbCreativeStudioStore(db)
+        job = next((row for row in store.list_jobs(project_id, owner_id)
+                    if row.id == job_id), None)
+        if job is None:
+            return
+        job.status = "RUNNING"
+        job.message = "Combining previously saved chapters into a private MP4."
+        job.updated_at = _now()
+        store.save_job(job)
+        try:
+            result = _assemble_chapter_master(db, owner_id, project_id, entry_id)
+            job.status = "GENERATED"
+            job.result_asset_ids = [result["asset"]["id"]]
+            job.message = "Finished chapter master saved. Owner review is required."
+        except Exception as exc:
+            db.rollback()
+            _calendar_assembly_logger.warning(
+                "Studio chapter master failed job=%s error_class=%s",
+                job_id, type(exc).__name__,
+            )
+            job.status = "ERROR"
+            job.message = "Master export could not finish. Existing chapters remain saved."
+        job.updated_at = _now()
+        store.save_job(job)
+    finally:
+        db.close()
+        with _master_export_lock:
+            _master_export_active.discard(key)
+
+
+def _master_job_status(db: Session, owner_id: str,
+                       project_id: str, entry_id: str) -> dict:
+    from app.core.nova.creative_studio import private_object_storage as remote
+    store = DbCreativeStudioStore(db)
+    latest = next((job for job in store.list_jobs(project_id, owner_id)
+                   if job.kind == "calendar_master:" + entry_id), None)
+    if latest is None:
+        return {"status": "NOT_STARTED", "job": None}
+    key = (owner_id, project_id, entry_id)
+    with _master_export_lock:
+        locally_running = key in _master_export_active
+    if latest.status not in {"QUEUED", "RUNNING"} or locally_running:
+        return {"status": latest.status, "job": latest.as_dict()}
+
+    # If the process died after saving the master but before updating its job,
+    # recover only a verifiably persisted file created after the job began.
+    candidates = [
+        asset for asset in store.list_assets(project_id, owner_id)
+        if asset.kind == "video"
+        and (asset.metadata or {}).get("pipeline") == "calendar_chapter_master"
+        and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+        and asset.created_at >= latest.created_at
+        and str(asset.url or "").startswith("private-studio-s3://")
+    ]
+    for asset in reversed(candidates):
+        digest = (asset.metadata or {}).get("sha256") or ""
+        try:
+            verified = bool(digest) and remote.enabled() and remote.object_exists(
+                asset.url, owner_id, project_id, digest
+            )
+        except Exception:
+            verified = False
+        if verified:
+            latest.status = "GENERATED"
+            latest.result_asset_ids = [asset.id]
+            latest.message = "Verified saved master recovered after interrupted job update."
+            latest.updated_at = _now()
+            store.save_job(latest)
+            return {"status": "GENERATED", "job": latest.as_dict(),
+                    "message": "A previously completed private master was verified and recovered."}
+    return {
+        "status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
+        "message": "No active worker was found here; another worker may still be running. "
+                   "No new render was submitted or charged.",
+    }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/export-master-job")
+def start_chapter_master_job(
+    project_id: str, entry_id: str, background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Queue owner-controlled local master export without holding the browser open."""
+    from app.core.nova.creative_studio import private_object_storage as remote
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve all chapters first.")
+    if not 600 <= entry.duration_seconds <= 1800:
+        raise HTTPException(status_code=422, detail="Master export supports 10–30 minutes.")
+    if not remote.enabled():
+        raise HTTPException(status_code=503, detail="Private durable storage is required.")
+    chapters = json.loads(entry.chapters_json or "[]")
+    if not 2 <= len(chapters) <= 12:
+        raise HTTPException(status_code=422, detail="Save 2–12 completed chapters first.")
+    key = (user.user_id, project_id, entry_id)
+    with _master_export_lock:
+        if key in _master_export_active:
+            return {"status": "ALREADY_RUNNING",
+                    "message": "This project's master export is already running."}
+        existing = _master_job_status(db, user.user_id, project_id, entry_id)
+        if existing["status"] in {"QUEUED", "RUNNING", "INTERRUPTED_UNCONFIRMED"}:
+            return {"status": existing["status"], "job": existing["job"],
+                    "message": "Check the saved master job before submitting again."}
+        _master_export_active.add(key)
+    try:
+        now = _now()
+        job = DbCreativeStudioStore(db).save_job(GenerationJob(
+            id=new_id("cjob"), owner_id=user.user_id, project_id=project_id,
+            kind="calendar_master:" + entry_id, status="QUEUED",
+            message="Queued local master export with no paid-provider calls.",
+            created_at=now, updated_at=now,
+        ))
+        background_tasks.add_task(
+            _run_chapter_master_job, user.user_id, project_id, entry_id, job.id
+        )
+        return {
+            "status": "QUEUED", "job": job.as_dict(),
+            "status_url": f"/api/nova/creative/projects/{project_id}/calendar/{entry_id}/master-status",
+            "paid_provider_charges": False, "publishing_enabled": False,
+        }
+    except Exception:
+        with _master_export_lock:
+            _master_export_active.discard(key)
+        raise
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/master-status")
+def chapter_master_job_status(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    _project(db, user.user_id, project_id)
+    _entry(db, user.user_id, project_id, entry_id)
+    return _master_job_status(db, user.user_id, project_id, entry_id)
