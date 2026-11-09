@@ -1457,6 +1457,12 @@ def chapter_master_job_status(
     return _master_job_status(db, user.user_id, project_id, entry_id)
 
 
+class CaptionCueIn(BaseModel):
+    start_seconds: float = Field(ge=0, le=600)
+    end_seconds: float = Field(gt=0, le=600)
+    text: str = Field(min_length=1, max_length=240)
+
+
 class StoryboardSceneIn(BaseModel):
     heading: str = Field(min_length=1, max_length=120)
     visual_note: str = Field(default="", max_length=1500)
@@ -1464,6 +1470,7 @@ class StoryboardSceneIn(BaseModel):
     duration_seconds: int = Field(ge=1, le=600)
     visual_asset_id: str | None = Field(default=None, max_length=48)
     transition: Literal["cut", "fade"] = "cut"
+    caption_cues: list[CaptionCueIn] = Field(default_factory=list, max_length=30)
 
     @field_validator("heading")
     @classmethod
@@ -1504,6 +1511,13 @@ def save_calendar_storyboard(
     for scene in payload.scenes:
         if scene.visual_asset_id and scene.visual_asset_id not in images:
             raise HTTPException(status_code=422, detail="Scene images must belong to the selected Studio project.")
+        previous_end = 0.0
+        for cue in scene.caption_cues:
+            if cue.end_seconds > scene.duration_seconds or cue.start_seconds >= cue.end_seconds:
+                raise HTTPException(status_code=422, detail="Caption intervals must fit within their scene.")
+            if cue.start_seconds < previous_end:
+                raise HTTPException(status_code=422, detail="Caption intervals cannot overlap or be out of order.")
+            previous_end = cue.end_seconds
     scenes = [
         {
             "index": index, "heading": scene.heading,
@@ -1511,6 +1525,7 @@ def save_calendar_storyboard(
             "duration_seconds": scene.duration_seconds,
             "visual_asset_id": scene.visual_asset_id,
             "transition": scene.transition,
+            "caption_cues": [cue.model_dump() for cue in scene.caption_cues],
         }
         for index, scene in enumerate(payload.scenes)
     ]
@@ -1604,6 +1619,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
             "duration_seconds": scene["duration_seconds"],
             "transition": scene.get("transition", "cut"),
             "caption_by_scene": True,
+            "caption_cues": scene.get("caption_cues") or [],
         }
         visual_id = scene.get("visual_asset_id")
         if visual_id:
