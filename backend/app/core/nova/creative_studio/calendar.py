@@ -573,6 +573,122 @@ def replace_calendar_chapter_clip(
     }
 
 
+def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id: str) -> dict:
+    """Describe current chapter outputs without rendering or billing.
+
+    A matching source list is necessary but not sufficient: the saved MP4
+    must also be accessible and checksum-verified before it is reusable.
+    """
+    from app.core.nova.creative_studio import private_object_storage as remote
+    _project(db, owner_id, project_id)
+    entry = _entry(db, owner_id, project_id, entry_id)
+    chapters = json.loads(entry.chapters_json or "[]")
+    store = DbCreativeStudioStore(db)
+    service = get_service(db)
+    assets = store.list_assets(project_id, owner_id)
+    states = []
+    for index, chapter in enumerate(chapters):
+        matches = [
+            asset for asset in assets
+            if asset.kind == "video" and bool(asset.url)
+            and (asset.metadata or {}).get("pipeline") == "calendar_saved_clip_assembly"
+            and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+            and (asset.metadata or {}).get("chapter_index") == index
+            and (asset.metadata or {}).get("source_asset_ids") == chapter.get("asset_ids", [])
+            and abs(float((asset.metadata or {}).get("duration_seconds") or 0)
+                    - int(chapter["duration_seconds"])) <= 5
+        ]
+        verified = None
+        for asset in reversed(matches):
+            meta = asset.metadata or {}
+            digest = str(meta.get("sha256") or "")
+            if not digest:
+                continue
+            try:
+                if str(asset.url).startswith("private-studio-s3://"):
+                    valid = remote.enabled() and remote.object_exists(
+                        asset.url, owner_id, project_id, digest
+                    )
+                else:
+                    local, media_type, _ = service.open_asset_file(
+                        owner_id, project_id, asset.id
+                    )
+                    valid = (
+                        media_type == "video/mp4" and local.is_file()
+                        and hashlib.sha256(local.read_bytes()).hexdigest() == digest
+                    )
+                if valid:
+                    verified = asset
+                    break
+            except (CreativeStudioError, OSError, ValueError):
+                continue
+        states.append({
+            "chapter_index": index, "title": chapter.get("title", f"Chapter {index+1}"),
+            "status": "REUSABLE" if verified is not None else "NEEDS_REBUILD",
+            "asset_id": verified.id if verified is not None else None,
+            "source_clip_count": len(chapter.get("asset_ids") or []),
+        })
+    missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
+    return {
+        "plan_status": entry.status,
+        "chapters": states,
+        "reusable_chapters": len(states) - len(missing),
+        "needs_rebuild_indices": missing,
+        "master_ready": entry.status == "approved" and len(states) >= 2 and not missing,
+        "published": False, "paid_provider_charges": False,
+        "message": (
+            "Review and approve the plan before rebuilding chapters."
+            if entry.status != "approved"
+            else "Rebuild only missing or changed chapters; completed originals remain saved."
+        ),
+    }
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/chapter-rebuild-plan")
+def chapter_rebuild_plan(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    return _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/chapters/{chapter_index}/rebuild")
+async def rebuild_affected_chapter(
+    project_id: str, entry_id: str, chapter_index: int,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Rebuild one changed chapter from its approved, saved clip list.
+
+    This is intentionally a separate explicit user action. Reusing a verified
+    existing chapter returns its asset without running FFmpeg.
+    """
+    plan = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+    if plan["plan_status"] != "approved":
+        raise HTTPException(status_code=409, detail="Reapprove the revised chapter plan before rebuilding.")
+    chapter = next(
+        (row for row in plan["chapters"] if row["chapter_index"] == chapter_index), None
+    )
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    if chapter["status"] == "REUSABLE":
+        saved = next(
+            (a for a in DbCreativeStudioStore(db).list_assets(project_id, user.user_id)
+             if a.id == chapter["asset_id"]), None
+        )
+        if saved is None:
+            raise HTTPException(status_code=409, detail="Verified chapter disappeared; check readiness again.")
+        return {**_assembly_result(project_id, saved, reused=True),
+                "chapter_index": chapter_index, "remaining": plan["needs_rebuild_indices"]}
+    result = await run_in_threadpool(
+        _assemble_calendar_video, db, user.user_id, project_id, entry_id,
+        [], chapter_index,
+    )
+    return {**result, "chapter_index": chapter_index,
+            "message": "Affected chapter saved for review. Recheck readiness before exporting the master."}
+
+
 class LongFormAssemblyIn(BaseModel):
     """Ordered video asset IDs already saved in this same owner's Studio project."""
     asset_ids: list[str] = Field(default_factory=list, max_length=16)
