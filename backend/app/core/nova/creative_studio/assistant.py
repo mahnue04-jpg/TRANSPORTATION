@@ -378,31 +378,122 @@ class PaidRevisionRequest(BaseModel):
     confirm_billable_model_request: bool = False
 
 
-def _reserve_rewrite_request(db: Session, owner_id: str) -> None:
-    """Reserve one of two daily slots with a unique SQL insert, before model use."""
+def _configured_rewrite_reservation_micro_usd() -> tuple[int, int, int]:
+    """Fail closed until owner configures a verified model price and daily budget.
+
+    Pricing is expressed in integer MICRO-USD per million tokens. At most
+    8192 input and 600 output tokens are reserved per attempt; two such
+    reservations must fit entirely inside the configured daily budget.
+    This is a conservative cost estimate, not provider-billed actuals.
+    """
+    try:
+        input_rate = int(os.environ["NOVA_STUDIO_REWRITE_INPUT_MICRO_USD_PER_M"])
+        output_rate = int(os.environ["NOVA_STUDIO_REWRITE_OUTPUT_MICRO_USD_PER_M"])
+        budget = int(os.environ["NOVA_STUDIO_REWRITE_DAILY_BUDGET_MICRO_USD"])
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Studio AI rewrite budget/pricing is unconfigured. No model call was made.",
+        ) from exc
+    if not (1 <= input_rate <= 100_000_000 and 1 <= output_rate <= 100_000_000
+            and 1 <= budget <= 1_000_000):
+        raise HTTPException(status_code=503, detail="Studio AI rewrite budget/pricing is invalid.")
+    reservation = ((8192 * input_rate + 600 * output_rate + 999_999) // 1_000_000)
+    if not 0 < reservation * 2 <= budget:
+        raise HTTPException(
+            status_code=503,
+            detail="Configured daily budget cannot cover both conservative rewrite reservations.",
+        )
+    return reservation, input_rate, output_rate
+
+
+def _reserve_rewrite_request(db: Session, owner_id: str, reserve_micro: int) -> str:
+    """Atomically reserve one of two daily slots before any provider request."""
     import hashlib
     from datetime import datetime, timezone
     from sqlalchemy.exc import IntegrityError
     from app.core.nova.creative_studio.db_models import NovaCreativeAiRequestSlot
-    day = datetime.now(timezone.utc).date().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    day = now[:10]
     for slot in range(2):
         key = hashlib.sha256(f"{owner_id}:{day}:script-rewrite:{slot}".encode()).hexdigest()
         try:
             with db.begin_nested():
                 db.add(NovaCreativeAiRequestSlot(
                     slot_key=key, owner_id=owner_id, day_utc=day,
-                    category="script-rewrite",
-                    created_at=datetime.now(timezone.utc).isoformat(),
+                    category="script-rewrite", reserved_micro_usd=reserve_micro,
+                    charge_status="reserved_unverified", created_at=now,
+                    updated_at=now,
                 ))
                 db.flush()
             db.commit()
-            return
+            return key
         except IntegrityError:
             db.rollback()
     raise HTTPException(
         status_code=429,
-        detail="Daily Studio AI rewrite request limit reached (2 requests). No new model call was made.",
+        detail="Daily Studio AI rewrite limit reached (2 attempts). No new model call was made.",
     )
+
+
+def _mark_rewrite_usage(db: Session, owner_id: str, slot_key: str,
+                        usage, input_rate: int, output_rate: int) -> None:
+    """Record usage-based estimate; never label it an actual settled charge."""
+    from datetime import datetime, timezone
+    from app.core.nova.creative_studio.db_models import NovaCreativeAiRequestSlot
+    row = db.get(NovaCreativeAiRequestSlot, slot_key)
+    if row is None or row.owner_id != owner_id:
+        return
+    in_tokens = getattr(usage, "prompt_tokens", None) if usage else None
+    out_tokens = getattr(usage, "completion_tokens", None) if usage else None
+    if isinstance(in_tokens, int) and isinstance(out_tokens, int):
+        row.input_tokens = in_tokens
+        row.output_tokens = out_tokens
+        row.estimated_micro_usd = (
+            in_tokens * input_rate + out_tokens * output_rate + 999_999
+        ) // 1_000_000
+        row.charge_status = "usage_estimated_unverified"
+    else:
+        row.charge_status = "potential_charge_unverified"
+    row.updated_at = datetime.now(timezone.utc).isoformat()
+    db.commit()
+
+
+@router.get("/studio-ai-rewrite-budget")
+def studio_ai_rewrite_budget(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Owner-scoped budget overview. Provider settlements are never inferred."""
+    from datetime import datetime, timezone
+    from app.core.nova.creative_studio.db_models import NovaCreativeAiRequestSlot
+    day = datetime.now(timezone.utc).date().isoformat()
+    records = (
+        db.query(NovaCreativeAiRequestSlot)
+        .filter(NovaCreativeAiRequestSlot.owner_id == user.user_id,
+                NovaCreativeAiRequestSlot.day_utc == day,
+                NovaCreativeAiRequestSlot.category == "script-rewrite")
+        .all()
+    )
+    enabled = os.getenv("NOVA_STUDIO_AI_REWRITE_ENABLED", "").lower() in {"1", "true", "yes"}
+    try:
+        reserve, _, _ = _configured_rewrite_reservation_micro_usd()
+        budget = int(os.environ["NOVA_STUDIO_REWRITE_DAILY_BUDGET_MICRO_USD"])
+        configured = True
+    except HTTPException:
+        reserve, budget, configured = 0, 0, False
+    return {
+        "enabled": enabled and configured, "pricing_configured": configured,
+        "day_utc": day, "daily_attempt_limit": 2,
+        "used_attempts": len(records), "remaining_attempts": max(0, 2 - len(records)),
+        "daily_budget_micro_usd": budget,
+        "reserved_per_attempt_micro_usd": reserve,
+        "total_reserved_micro_usd": sum(row.reserved_micro_usd for row in records),
+        "total_usage_estimated_micro_usd": sum(row.estimated_micro_usd or 0 for row in records),
+        "unsettled_requests": sum(row.charge_status != "provider_settled" for row in records),
+        "settled_provider_charges_available": False,
+        "message": "Usage estimates and reservations are not actual billed charges. No automatic refunds or retries.",
+    }
 
 
 @router.post("/projects/{project_id}/calendar/{entry_id}/assistant/previews/{asset_id}/ai-script-revision")
@@ -440,7 +531,8 @@ def propose_model_script_revision(
     notes = str(review.get("notes") or "")
     if not old.strip() or len(old) > 3000 or not notes.strip():
         raise HTTPException(status_code=422, detail="Provide narration (up to 3000 characters) and specific correction notes.")
-    _reserve_rewrite_request(db, user.user_id)
+    reserve, input_rate, output_rate = _configured_rewrite_reservation_micro_usd()
+    slot_key = _reserve_rewrite_request(db, user.user_id, reserve)
     from openai import OpenAI, OpenAIError
     try:
         result = OpenAI(
@@ -469,6 +561,7 @@ def propose_model_script_revision(
             status_code=503,
             detail="The optional AI rewrite failed or timed out. A request slot was used because provider charges are uncertain.",
         ) from exc
+    _mark_rewrite_usage(db, user.user_id, slot_key, getattr(result, "usage", None), input_rate, output_rate)
     rewritten = str(result.choices[0].message.content or "").strip()
     if not rewritten or len(rewritten) > 6000:
         raise HTTPException(status_code=502, detail="AI rewrite was empty or too long; original narration was preserved.")
@@ -482,4 +575,6 @@ def propose_model_script_revision(
         "model_called": True, "saved": False, "rendered": False, "published": False,
         "billing_status": "potential_charge_unverified",
         "daily_request_limit": 2,
+        "reserved_micro_usd": reserve,
+        "cost_is_estimate_not_settled": True,
     }
