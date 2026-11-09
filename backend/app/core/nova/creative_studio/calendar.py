@@ -120,6 +120,8 @@ def _as_dict(row: NovaCreativeCalendarEntry) -> dict:
         "timeline_asset_ids": json.loads(row.timeline_json or "[]"),
         "chapters": json.loads(row.chapters_json or "[]"),
         "storyboard": json.loads(row.storyboard_json or "[]"),
+        "narrator_voice": row.narrator_voice,
+        "narrator_speed": row.narrator_speed,
         "status": row.status, "created_at": row.created_at,
         "updated_at": row.updated_at, "publishing_enabled": False,
         "message": "Planning only. Approval does not schedule or publish a post.",
@@ -1474,6 +1476,8 @@ class StoryboardSceneIn(BaseModel):
 
 class StoryboardIn(BaseModel):
     scenes: list[StoryboardSceneIn] = Field(min_length=1, max_length=60)
+    narrator_voice: Literal["en-us", "en-gb"] = "en-us"
+    narrator_speed: int = Field(default=148, ge=110, le=185)
 
 
 @router.put("/projects/{project_id}/calendar/{entry_id}/storyboard")
@@ -1511,8 +1515,12 @@ def save_calendar_storyboard(
         for index, scene in enumerate(payload.scenes)
     ]
     canonical = json.dumps(scenes, ensure_ascii=False)
-    if (entry.storyboard_json or "[]") != canonical:
+    if ((entry.storyboard_json or "[]") != canonical
+            or entry.narrator_voice != payload.narrator_voice
+            or entry.narrator_speed != payload.narrator_speed):
         entry.storyboard_json = canonical
+        entry.narrator_voice = payload.narrator_voice
+        entry.narrator_speed = payload.narrator_speed
         if entry.status == "approved":
             entry.status = "ready_for_review"
         entry.updated_at = _now()
@@ -1555,7 +1563,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
         raise HTTPException(status_code=503, detail="Durable private storage is required before preview rendering.")
 
     signature = hashlib.sha256(
-        json.dumps(scenes, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        json.dumps({"scenes": scenes, "voice": entry.narrator_voice, "speed": entry.narrator_speed}, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     store = DbCreativeStudioStore(db)
     service = get_service(db)
@@ -1616,7 +1624,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
         try:
             measured = render_offline_montage(
                 render_scenes, output_mp4=output, audio_wav=root / "narration.wav",
-                vertical=True,
+                vertical=True, voice=entry.narrator_voice, speed=entry.narrator_speed,
             )
         except OfflineCommercialError as exc:
             raise HTTPException(status_code=422, detail=exc.message) from exc
