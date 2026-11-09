@@ -71,5 +71,37 @@ def test_join_two_real_normalized_chapters_into_private_review_only_mp4(tmp_path
         join_normalized_chapters([first, second], tmp_path / "wrong.mp4",
                                  expected_seconds=600)
     assert not (tmp_path / "wrong.mp4").exists()
-    # No real 10-minute video is generated here; the test intentionally
-    # verifies the duration gate and absence of false-success artifacts.
+    # Exercise actual FFmpeg concatenation against short synthetic clips.
+    # Only planned-duration metadata is faked; no 10-minute render is claimed.
+    from app.core.nova.creative_studio import resumable_master as assembly
+
+    original_chapter_probe = assembly.inspect_chapter
+    original_master_probe = assembly.inspect_chapter_master
+
+    def planned_chapter(path):
+        details = original_chapter_probe(path)
+        return {**details, "duration_seconds": 300.0}
+
+    def planned_master(path):
+        actual = original_master_probe(path)
+        assert 5.0 <= actual["duration_seconds"] <= 8.0
+        assert actual["audio_present"] is True
+        return {**actual, "duration_seconds": 600.0}
+
+    original_a = source_a.read_bytes()
+    original_b = source_b.read_bytes()
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(assembly, "inspect_chapter", planned_chapter)
+        monkeypatch.setattr(assembly, "inspect_chapter_master", planned_master)
+        output = tmp_path / "assembled-master.mp4"
+        plan = join_normalized_chapters([first, second], output, expected_seconds=600)
+        assert plan["width"] == 720 and plan["height"] == 1280
+        assert output.stat().st_size > 0
+        actual = original_master_probe(output)
+        assert 5.0 <= actual["duration_seconds"] <= 8.0
+        assert actual["audio_present"] is True
+        assert source_a.read_bytes() == original_a
+        assert source_b.read_bytes() == original_b
+    finally:
+        monkeypatch.undo()
