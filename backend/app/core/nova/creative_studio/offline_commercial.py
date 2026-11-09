@@ -258,6 +258,13 @@ def render_offline_montage(
                 f"crop={width}:{height}:x='(in_w-out_w)*t/{seconds:.3f}':y='(in_h-out_h)/2',"
                 f"fps=12,format=yuv420p"
             )
+            # A fade is a short fade-in from black, NOT an overlapping
+            # cross-dissolve. The original sequence and runtime are preserved.
+            transition = str(scene.get("transition") or "cut")
+            if transition not in {"cut", "fade"}:
+                raise OfflineCommercialError("INVALID_TRANSITION", "Only cut and fade-in transitions are supported.")
+            if index > 1 and transition == "fade":
+                pan += f",fade=t=in:st=0:d={min(0.5, seconds / 4):.3f}"
             _run(
                 [
                     ffmpeg, "-y", "-threads", "1", "-loop", "1", "-i", str(card),
@@ -284,7 +291,26 @@ def render_offline_montage(
                 "-t", f"{planned:.3f}", "-movflags", "+faststart", str(muxed),
             ]
         )
-        cues = even_spaced_cues(script or "Visit getamicor.com", planned)
+        if all(scene.get("caption_by_scene") for scene in scenes):
+            # Approximate, scene-bounded caption timing. This is not
+            # word-aligned transcription or verified speech synchronization.
+            cues = []
+            offset = 0.0
+            for scene in scenes:
+                seconds = max(2.0, min(float(scene.get("duration_seconds") or 5), 12.0))
+                text = str(scene.get("subtitle_text") or scene.get("voiceover_text") or "").strip()
+                if text:
+                    for cue in even_spaced_cues(text, seconds):
+                        cues.append({
+                            "start": round(offset + cue["start"], 3),
+                            "end": round(offset + cue["end"], 3),
+                            "text": cue["text"],
+                        })
+                offset += seconds
+            if not cues:
+                raise OfflineCommercialError("SCRIPT_REQUIRED", "Storyboard narration is required for captions.")
+        else:
+            cues = even_spaced_cues(script or "Visit getamicor.com", planned)
         polished, srt = burn_captions_and_cta_fade(
             muxed,
             cues,
@@ -310,6 +336,8 @@ def render_offline_montage(
         "width": width,
         "height": height,
         "captions_burned_in": True,
+        "captions_scene_bounded": bool(all(scene.get("caption_by_scene") for scene in scenes)),
+        "captions_speech_aligned": False,
         "subtitle_path": str(output_mp4.with_suffix(".srt")),
         "audio_present": has_audio,
         "lip_sync": False,
