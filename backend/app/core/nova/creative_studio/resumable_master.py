@@ -18,6 +18,10 @@ from app.core.nova.creative_studio.chapter_master import (
 
 
 def normalize_chapter(source: Path, output: Path) -> dict:
+    source = Path(source).resolve(strict=True)
+    output = Path(output).resolve()
+    if source == output or output.suffix.lower() != ".mp4":
+        raise ChapterMasterError("Normalization output must be a separate MP4; source is preserved.")
     measured = inspect_chapter(source)
     output.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -50,7 +54,12 @@ def join_normalized_chapters(paths: list[Path], output: Path, *, expected_second
     limit = 7200 if extended else 3600
     if not 600 <= expected_seconds <= limit or not 2 <= len(paths) <= 24:
         raise ChapterMasterError("The configured final export limit is 10–" + str(limit // 60) + " minutes, using 2–24 segments.")
-    specs = [inspect_chapter(path) for path in paths]
+    sources = [Path(path).resolve(strict=True) for path in paths]
+    output = Path(output).resolve()
+    if (len(set(sources)) != len(sources) or output in sources
+            or output.suffix.lower() != ".mp4"):
+        raise ChapterMasterError("Normalized sources must be distinct from each other and the output.")
+    specs = [inspect_chapter(path) for path in sources]
     if abs(sum(x["duration_seconds"] for x in specs) - expected_seconds) > max(8, expected_seconds * .02):
         raise ChapterMasterError("Completed segments do not match the planned duration.")
     # All checkpoint segments are produced by normalize_chapter using one
@@ -65,7 +74,7 @@ def join_normalized_chapters(paths: list[Path], output: Path, *, expected_second
     # use ffmpeg's concat demuxer with only locally generated names.
     manifest.write_text("".join(
         "file '" + str(Path(path).resolve()).replace("'", "'\\''") + "'\n"
-        for path in paths
+        for path in sources
     ), encoding="utf-8")
     try:
         result = subprocess.run([
