@@ -56,6 +56,8 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 24. **Malformed checkpoint metadata:** Use invalid JSON, top-level array, or invalid nested `pinned_master`. Status must fail closed to unconfirmed or unverified, not crash and not return a fabricated generated master.
 25. **In-process fallback regression:** With the dedicated worker disabled, verify the original web background task queues once and retains its local per-project duplicate marker until the task exits. No provider request or publishing may occur.
 26. **Empty/corrupt remote HEAD:** For an owner-scoped master or chapter, simulate a remote object whose HEAD advertises zero/missing ContentLength or a mismatched SHA metadata value. The readiness and completion checks must reject it. A passing HEAD is *metadata-only* evidence; do not call it full file-content validation without an actual stream read and digest check.
+27. **Synthetic actual-media CI:** Run `test_nova_creative_master_media_smoke.py` on a runner with ffmpeg/ffprobe. Verify real 720x1280 H.264/AAC chapter normalization, source preservation, duplicate/in-place output rejection, and assembly of two synthetic ~5-minute chapters into a real ~10-minute master with both streams and measured duration. This demonstrates a local media path, not owner-scoped staging storage, download, or actor movement.
+
 
 
 ## Evidence required before release
@@ -68,7 +70,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all twenty-six staging scenarios pass with recorded evidence.
+- CI and all twenty-seven staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
