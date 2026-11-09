@@ -51,7 +51,12 @@ def run_one_queued() -> bool:
     for owner_id, project_id, entry_id, job_id in candidates:
         if _stop:
             return False
-        _run_chapter_master_job(owner_id, project_id, entry_id, job_id)
+        try:
+            _run_chapter_master_job(owner_id, project_id, entry_id, job_id)
+        except Exception:
+            # Preserve fail-closed claim state for operator reconciliation.
+            # One corrupt job must not starve other independent projects.
+            _logger.exception("Creative Studio master job failed unexpectedly during worker poll.")
     return True
 
 
