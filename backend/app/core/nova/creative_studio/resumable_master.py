@@ -45,8 +45,8 @@ def normalize_chapter(source: Path, output: Path) -> dict:
 
 def join_normalized_chapters(paths: list[Path], output: Path, *, expected_seconds: int) -> dict:
     """Stream-copy normalized segments into one MP4; avoid reencoding them."""
-    if not 600 <= expected_seconds <= 1800 or not 2 <= len(paths) <= 12:
-        raise ChapterMasterError("Final export supports 10–30 minutes and 2–12 segments.")
+    if not 600 <= expected_seconds <= 3600 or not 2 <= len(paths) <= 24:
+        raise ChapterMasterError("Final export supports 10–60 minutes and 2–24 segments.")
     specs = [inspect_chapter(path) for path in paths]
     if abs(sum(x["duration_seconds"] for x in specs) - expected_seconds) > max(8, expected_seconds * .02):
         raise ChapterMasterError("Completed segments do not match the planned duration.")
@@ -70,7 +70,7 @@ def join_normalized_chapters(paths: list[Path], output: Path, *, expected_second
             "-f", "concat", "-safe", "0", "-i", str(manifest),
             "-map", "0:v:0", "-map", "0:a:0",
             "-c", "copy", "-movflags", "+faststart", str(output),
-        ], capture_output=True, timeout=600)
+        ], capture_output=True, timeout=1200)
         if result.returncode != 0 or not output.is_file():
             raise ChapterMasterError("Joining saved chapter checkpoints failed.")
         if not 0 < output.stat().st_size <= 512 * 1024 * 1024:
