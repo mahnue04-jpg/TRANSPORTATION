@@ -1607,12 +1607,25 @@ def _heartbeat_master_claim(owner_id: str, project_id: str, entry_id: str,
 
 
 def _finish_master_claim(db: Session, owner_id: str, project_id: str,
-                         entry_id: str, job_id: str, state: str) -> None:
-    claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
-    if claim is not None and claim.job_id == job_id:
-        claim.state = state
-        claim.updated_at = _now()
-        db.commit()
+                         entry_id: str, job_id: str, state: str) -> bool:
+    """Only the currently RUNNING owner-scoped claim may finish this job."""
+    if state not in {"GENERATED", "ERROR"}:
+        raise ValueError("Invalid terminal master job status")
+    updated = db.execute(
+        update(NovaCreativeRenderClaim)
+        .where(
+            NovaCreativeRenderClaim.claim_key ==
+                _master_claim_key(owner_id, project_id, entry_id),
+            NovaCreativeRenderClaim.owner_id == owner_id,
+            NovaCreativeRenderClaim.project_id == project_id,
+            NovaCreativeRenderClaim.entry_id == entry_id,
+            NovaCreativeRenderClaim.job_id == job_id,
+            NovaCreativeRenderClaim.state == "RUNNING",
+        )
+        .values(state=state, updated_at=_now())
+    )
+    db.commit()
+    return updated.rowcount == 1
 
 
 # The master-export worker runs only within this application process. Records
