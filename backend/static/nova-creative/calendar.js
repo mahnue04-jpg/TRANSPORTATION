@@ -123,7 +123,8 @@
             var info = await bridge.api(basePath(project) + "/" +
               encodeURIComponent(selected.id) + "/master-status", { method: "GET" });
             var step = info.checkpoint && info.checkpoint.stage;
-            feedback((info.message || ("Master export: " + info.status)) + (step ? " Last saved stage: " + step.replace(/_/g, " ").toLowerCase() + "." : ""));
+            feedback((info.message || ("Master export: " + info.status)) + (step ? " Last saved stage: " + step.replace(/_/g, " ").toLowerCase() + "." : ""),
+              info.status === "COMPLETED_ASSET_UNVERIFIED");
             if (info.status === "GENERATED" && typeof bridge.refreshProductionAssets === "function") {
               await bridge.refreshProductionAssets();
             }
@@ -228,6 +229,10 @@
       var status = await bridge.api(basePath(project) + "/" +
         encodeURIComponent(entry.id) + "/master-status", { method: "GET" });
       if (active() !== project) return;
+      if (status.status === "COMPLETED_ASSET_UNVERIFIED") {
+        feedback("The export record says completed, but the saved MP4 could not be verified. Do not publish or download this version. Request storage recovery.", true);
+        return;
+      }
       if (status.status === "GENERATED") {
         feedback("The master was already saved. Open the Studio Asset list to review it.");
         if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
@@ -531,7 +536,8 @@
           if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
           return;
         }
-        if (status.status === "ERROR" || status.status === "INTERRUPTED_UNCONFIRMED") {
+        if (status.status === "ERROR" || status.status === "INTERRUPTED_UNCONFIRMED" ||
+            status.status === "COMPLETED_ASSET_UNVERIFIED") {
           feedback(status.message || "Master export needs attention. Saved chapters are preserved.", true);
           return;
         }
