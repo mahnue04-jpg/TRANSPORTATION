@@ -108,6 +108,7 @@
       if (entry.status === "approved" && entry.duration_seconds >= 600 &&
           entry.duration_seconds <= 1800 && (entry.chapters || []).length >= 2) {
         actions.appendChild(button("Export chapter master", exportMaster, entry));
+        actions.appendChild(button("Resume failed export", resumeMaster, entry));
         actions.appendChild(button("Master job status", async function (selected) {
           var project = requestProject();
           if (!project) return;
@@ -197,6 +198,40 @@
     }
     mutate(entry, { status: "approved" }, "approve");
   }
+  async function resumeMaster(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    busy = true;
+    try {
+      var status = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entry.id) + "/master-status", { method: "GET" });
+      if (active() !== project) return;
+      if (status.status === "GENERATED") {
+        feedback("The master was already saved. Open the Studio Asset list to review it.");
+        if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+        return;
+      }
+      if (status.status !== "ERROR" || !status.resumable) {
+        feedback(status.message || "Only a confirmed failed export is eligible for resume; interrupted work must be reviewed.", true);
+        return;
+      }
+      if (!window.confirm("Resume this confirmed failed export? Verified chapters and saved segments will be reused. No paid provider is used.")) return;
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entry.id) + "/resume-master-job", { method: "POST" });
+      if (active() !== project) return;
+      if (result.status === "ALREADY_COMPLETED") {
+        feedback("A verified completed master was recovered; nothing was rerendered.");
+        if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+      } else if (result.status === "QUEUED") {
+        feedback("Export resumed from saved verified segments. Use Master job status to track progress.");
+      } else {
+        feedback(result.message || "Resume was not started. Check the saved job status.", true);
+      }
+    } catch (err) {
+      feedback(err.message || "Resume was not started; saved chapters were preserved.", true);
+    } finally { busy = false; }
+  }
+
   async function exportMaster(entry) {
     var project = requestProject();
     if (!project || busy) return;
