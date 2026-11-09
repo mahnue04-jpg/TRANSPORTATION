@@ -1236,10 +1236,15 @@ def _master_job_status(db: Session, owner_id: str,
     key = (owner_id, project_id, entry_id)
     with _master_export_lock:
         locally_running = key in _master_export_active
-    if latest.status not in {"QUEUED", "RUNNING"} or locally_running:
-        return {"status": latest.status, "job": latest.as_dict()}
     claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
-    checkpoint = json.loads(claim.checkpoint_json or "{}") if claim is not None else {}
+    checkpoint = (json.loads(claim.checkpoint_json or "{}")
+                  if claim is not None and claim.job_id == latest.id else {})
+    if latest.status == "GENERATED":
+        return {"status": latest.status, "job": latest.as_dict(), "checkpoint": checkpoint}
+    if latest.status not in {"QUEUED", "RUNNING", "ERROR"}:
+        return {"status": latest.status, "job": latest.as_dict(), "checkpoint": checkpoint}
+    if locally_running and latest.status in {"QUEUED", "RUNNING"}:
+        return {"status": latest.status, "job": latest.as_dict(), "checkpoint": checkpoint}
     # With an external worker the web process cannot observe its local lock.
     # Only declare interrupted after a conservative lease grace period, never
     # claim completion without a remotely verified master.
@@ -1284,8 +1289,21 @@ def _master_job_status(db: Session, owner_id: str,
             latest.message = "Verified saved master recovered after interrupted job update."
             latest.updated_at = _now()
             store.save_job(latest)
+            if claim is not None and claim.job_id == latest.id:
+                claim.state = "GENERATED"
+                claim.updated_at = _now()
+                db.commit()
             return {"status": "GENERATED", "job": latest.as_dict(),
+                    "checkpoint": checkpoint,
                     "message": "A previously completed private master was verified and recovered."}
+    if latest.status == "ERROR":
+        return {
+            "status": "ERROR", "job": latest.as_dict(),
+            "checkpoint": checkpoint, "resumable": bool(
+                claim is not None and claim.job_id == latest.id and claim.state == "ERROR"
+            ),
+            "message": "The export failed. Verified saved chapters and normalized checkpoints can be reused with an explicit resume.",
+        }
     return {
         "status": "INTERRUPTED_UNCONFIRMED", "job": latest.as_dict(),
         "checkpoint": checkpoint,
@@ -1378,6 +1396,33 @@ def start_chapter_master_job(
         with _master_export_lock:
             _master_export_active.discard(key)
         raise
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/resume-master-job")
+def resume_failed_master_job(
+    project_id: str, entry_id: str, background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Explicitly resume a confirmed failed master, reusing verified segments.
+
+    Unknown/interrupted running jobs are NOT resumed because a remote worker
+    might still be active. This action cannot enable providers or posting.
+    """
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    if entry.status != "approved":
+        raise HTTPException(status_code=409, detail="Approve the plan before resuming.")
+    status = _master_job_status(db, user.user_id, project_id, entry_id)
+    if status["status"] == "GENERATED":
+        return {"status": "ALREADY_COMPLETED", "job": status["job"],
+                "message": "The completed master was recovered; no new render started."}
+    if status["status"] != "ERROR" or not status.get("resumable"):
+        raise HTTPException(
+            status_code=409,
+            detail="Only a confirmed failed job can be resumed. Unconfirmed interrupted workers require operator recovery.",
+        )
+    return start_chapter_master_job(project_id, entry_id, background_tasks, user, db)
 
 
 @router.get("/projects/{project_id}/calendar/{entry_id}/master-status")
