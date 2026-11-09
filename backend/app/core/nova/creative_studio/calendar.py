@@ -995,6 +995,42 @@ def _claim_queued_master(db: Session, owner_id: str, project_id: str,
     return updated.rowcount == 1
 
 
+def _heartbeat_master_claim(owner_id: str, project_id: str, entry_id: str,
+                            job_id: str, stop: threading.Event) -> None:
+    """Refresh this specific RUNNING SQL claim while FFmpeg is processing.
+
+    A separate SQL session avoids sharing a session across threads. The
+    heartbeat never renews a different job or a terminal claim.
+    """
+    claim_key = _master_claim_key(owner_id, project_id, entry_id)
+    while not stop.wait(20):
+        db = SessionLocal()
+        try:
+            result = db.execute(
+                update(NovaCreativeRenderClaim)
+                .where(
+                    NovaCreativeRenderClaim.claim_key == claim_key,
+                    NovaCreativeRenderClaim.owner_id == owner_id,
+                    NovaCreativeRenderClaim.project_id == project_id,
+                    NovaCreativeRenderClaim.entry_id == entry_id,
+                    NovaCreativeRenderClaim.job_id == job_id,
+                    NovaCreativeRenderClaim.state == "RUNNING",
+                )
+                .values(updated_at=_now())
+            )
+            db.commit()
+            if result.rowcount != 1:
+                return
+        except Exception:
+            db.rollback()
+            _calendar_assembly_logger.warning(
+                "Creative Studio master heartbeat could not be persisted job=%s",
+                job_id,
+            )
+        finally:
+            db.close()
+
+
 def _finish_master_claim(db: Session, owner_id: str, project_id: str,
                          entry_id: str, job_id: str, state: str) -> None:
     claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
@@ -1014,6 +1050,8 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
                             entry_id: str, job_id: str) -> None:
     key = (owner_id, project_id, entry_id)
     db = SessionLocal()
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
     try:
         store = DbCreativeStudioStore(db)
         job = next((row for row in store.list_jobs(project_id, owner_id)
@@ -1027,6 +1065,13 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         job.message = "Combining previously saved chapters into a private MP4."
         job.updated_at = _now()
         store.save_job(job)
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_master_claim,
+            args=(owner_id, project_id, entry_id, job_id, heartbeat_stop),
+            name="nova-master-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             result = _assemble_chapter_master(db, owner_id, project_id, entry_id)
             job.status = "GENERATED"
@@ -1040,10 +1085,14 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
             )
             job.status = "ERROR"
             job.message = "Master export could not finish. Existing chapters remain saved."
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=5)
         job.updated_at = _now()
         store.save_job(job)
         _finish_master_claim(db, owner_id, project_id, entry_id, job_id, job.status)
     finally:
+        heartbeat_stop.set()
         db.close()
         with _master_export_lock:
             _master_export_active.discard(key)
