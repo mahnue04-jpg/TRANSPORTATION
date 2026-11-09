@@ -2799,7 +2799,10 @@
       throw new Error("Protected master download is unavailable.");
     }
     var reported = Number(response.headers.get("content-length"));
-    if (reported > 2 * 1024 * 1024 * 1024) throw new Error("Master exceeds the 2 GiB streaming limit.");
+    if (!Number.isSafeInteger(reported) || reported <= 0 ||
+        reported > 2 * 1024 * 1024 * 1024) {
+      throw new Error("Protected master download has an invalid verified file size.");
+    }
     if (projectId !== activeProjectId) throw new Error("Project selection changed.");
     var writable = await fileHandle.createWritable();
     var reader = response.body.getReader();
@@ -2815,7 +2818,7 @@
         }
         await writable.write(part.value);
       }
-      if (!total || (reported > 0 && reported !== total)) {
+      if (reported !== total) {
         throw new Error("Downloaded master is empty or incomplete.");
       }
       await writable.close();
@@ -2846,9 +2849,14 @@
     if (!response.ok) throw new Error("Preview media unavailable (" + response.status + ").");
     var mime = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     if (mime !== "video/mp4") throw new Error("The selected preview is not an MP4 video.");
+    var expectedSize = Number(response.headers.get("content-length"));
+    if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0 ||
+        expectedSize > 128 * 1024 * 1024) {
+      throw new Error("Preview size cannot be safely verified for playback.");
+    }
     var blob = await response.blob();
-    if (!blob.size || blob.size > 128 * 1024 * 1024) {
-      throw new Error("Preview exceeds the protected playback limit.");
+    if (!blob.size || blob.size !== expectedSize) {
+      throw new Error("Preview download is incomplete or mismatched.");
     }
     if (projectId !== activeProjectId) throw new Error("The active project changed.");
     return blob;
