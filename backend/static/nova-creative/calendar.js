@@ -124,6 +124,7 @@
           } catch (err) { feedback(err.message || "Could not retrieve master export status.", true); }
         }, entry));
       }
+      if (entry.status !== "canceled") actions.appendChild(button("Edit storyboard", editStoryboard, entry));
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
       list.appendChild(article);
@@ -279,6 +280,99 @@
     } catch (err) {
       feedback(err.message || "Master export could not be confirmed; original chapters remain saved.", true);
     } finally { busy = false; }
+  }
+
+  async function editStoryboard(entry, suggestedScenes) {
+    var project = requestProject();
+    if (!project) return;
+    var host = $("calendar-storyboard");
+    var rows = (Array.isArray(suggestedScenes) ? suggestedScenes : (entry.storyboard || [])).map(function (scene) {
+      return {
+        heading: scene.heading || "",
+        visual_note: scene.visual_note || "",
+        narration: scene.narration || "",
+        duration_seconds: Number(scene.duration_seconds) || 1
+      };
+    });
+    host.replaceChildren();
+    var title = document.createElement("h3");
+    title.textContent = "Storyboard — " + entry.topic;
+    host.appendChild(title);
+    var note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = "Edit each scene and review timing. Nothing is saved until you click Save storyboard. This is production planning, not generated footage.";
+    host.appendChild(note);
+    var list = document.createElement("div");
+    host.appendChild(list);
+    function renderRows() {
+      list.replaceChildren();
+      rows.forEach(function (scene, index) {
+        var fieldset = document.createElement("fieldset");
+        var legend = document.createElement("legend");
+        legend.textContent = "Scene " + (index + 1);
+        fieldset.appendChild(legend);
+        function editable(labelText, value, maxLength, onChange, multiline) {
+          var label = document.createElement("label");
+          label.textContent = labelText;
+          var field = document.createElement(multiline ? "textarea" : "input");
+          field.value = value;
+          field.maxLength = maxLength;
+          if (multiline) field.rows = 3;
+          field.addEventListener("input", function () { onChange(field.value); });
+          label.appendChild(field);
+          fieldset.appendChild(label);
+        }
+        editable("Scene heading", scene.heading, 120, function (value) { scene.heading = value; }, false);
+        editable("Visual direction", scene.visual_note, 1500, function (value) { scene.visual_note = value; }, true);
+        editable("Narration / dialogue", scene.narration, 6000, function (value) { scene.narration = value; }, true);
+        var label = document.createElement("label");
+        label.textContent = "Duration in seconds";
+        var seconds = document.createElement("input");
+        seconds.type = "number"; seconds.min = "1"; seconds.max = "600"; seconds.step = "1";
+        seconds.value = String(scene.duration_seconds);
+        seconds.addEventListener("change", function () { scene.duration_seconds = Number(seconds.value); });
+        label.appendChild(seconds);
+        fieldset.appendChild(label);
+        fieldset.appendChild(button("Remove scene", function () {
+          rows.splice(index, 1);
+          renderRows();
+        }, scene));
+        list.appendChild(fieldset);
+      });
+    }
+    renderRows();
+    host.appendChild(button("Add scene", function () {
+      if (rows.length >= 60) { feedback("Storyboard supports up to 60 scenes.", true); return; }
+      rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60 });
+      renderRows();
+    }, entry));
+    host.appendChild(button("Save storyboard", async function () {
+      if (busy || active() !== project) return;
+      var valid = rows.length > 0 && rows.length <= 60 && rows.every(function (scene) {
+        return scene.heading.trim() && Number.isInteger(scene.duration_seconds) &&
+          scene.duration_seconds >= 1 && scene.duration_seconds <= 600;
+      });
+      var seconds = rows.reduce(function (sum, scene) { return sum + scene.duration_seconds; }, 0);
+      if (!valid || seconds !== entry.duration_seconds) {
+        feedback("Each scene needs a heading and valid duration; scene durations must total " +
+          entry.duration_seconds + " seconds. Current total: " + seconds + ".", true);
+        return;
+      }
+      busy = true;
+      try {
+        var saved = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+          "/storyboard", { method: "PUT", body: JSON.stringify({ scenes: rows }) });
+        if (active() !== project) return;
+        feedback(saved.status === "ready_for_review"
+          ? "Storyboard saved. Review and reapprove the edited plan before production."
+          : "Storyboard saved in this video plan; no media has been generated.");
+        host.replaceChildren();
+        await load();
+      } catch (err) {
+        feedback(err.message || "Storyboard could not be saved.", true);
+      } finally { busy = false; }
+    }, entry));
+    host.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function editChapters(entry, proposedChapters) {
@@ -674,6 +768,36 @@
     } finally {
       busy = false;
       $("studio-assistant-propose-chapters").disabled = false;
+    }
+  });
+  $("studio-assistant-propose-storyboard").addEventListener("click", async function () {
+    var project = requestProject();
+    var entryId = $("studio-assistant-entry").value;
+    var plan = entries.find(function (item) { return item.id === entryId; });
+    if (!project || busy) return;
+    if (!plan) {
+      $("studio-assistant-feedback").textContent = "Select a saved video plan first.";
+      return;
+    }
+    if ((plan.storyboard || []).length &&
+        !window.confirm("Open a new storyboard suggestion? Existing scenes will remain saved unless you explicitly save the replacement.")) return;
+    busy = true;
+    $("studio-assistant-propose-storyboard").disabled = true;
+    try {
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entryId) + "/assistant/storyboard-proposal", { method: "POST" });
+      if (active() !== project || $("studio-assistant-entry").value !== entryId) return;
+      if (!result || result.status !== "DRAFT_SUGGESTION" || !Array.isArray(result.scenes)) {
+        throw new Error("No editable storyboard was returned.");
+      }
+      $("studio-assistant-feedback").textContent =
+        "Storyboard suggestion ready. Review scenes and click Save storyboard to keep your changes.";
+      await editStoryboard(plan, result.scenes);
+    } catch (err) {
+      $("studio-assistant-feedback").textContent = err.message || "Storyboard suggestion failed.";
+    } finally {
+      busy = false;
+      $("studio-assistant-propose-storyboard").disabled = false;
     }
   });
   $("studio-assistant-entry").addEventListener("change", function () {
