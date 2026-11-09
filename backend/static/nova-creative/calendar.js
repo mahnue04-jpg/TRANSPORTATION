@@ -503,6 +503,76 @@
         }
       }, entry);
       reviewPanel.appendChild(proposalButton);
+      var scriptProposal = document.createElement("fieldset");
+      var scriptLegend = document.createElement("legend");
+      scriptLegend.textContent = "Proposed narration correction (not saved)";
+      scriptProposal.appendChild(scriptLegend);
+      var originalScript = document.createElement("p");
+      var proposedScript = document.createElement("textarea");
+      proposedScript.rows = 4;
+      proposedScript.maxLength = 6000;
+      proposedScript.setAttribute("aria-label", "Editable proposed narration");
+      var scriptMessage = document.createElement("p");
+      scriptMessage.className = "hint";
+      scriptProposal.appendChild(originalScript);
+      scriptProposal.appendChild(proposedScript);
+      scriptProposal.appendChild(scriptMessage);
+      var preparedSceneIndex = null;
+      var scriptSuggestionButton = button("Suggest exact wording correction", async function () {
+        if (active() !== project || busy) return;
+        busy = true;
+        scriptSuggestionButton.disabled = true;
+        try {
+          var result = await bridge.api(basePath(project) + "/" +
+            encodeURIComponent(entry.id) + "/assistant/previews/" +
+            encodeURIComponent(latestPreview.id) + "/script-revision", {method: "POST"});
+          if (active() !== project || !host.contains(reviewPanel)) return;
+          if (!result || !Number.isInteger(result.scene_index) ||
+              !rows[result.scene_index]) throw new Error("No valid scene revision returned.");
+          preparedSceneIndex = result.status === "DRAFT_SCRIPT_REVISION"
+            ? result.scene_index : null;
+          originalScript.textContent = "Original narration: " + result.original_narration;
+          proposedScript.value = result.proposed_narration;
+          scriptMessage.textContent = result.explanation ||
+            "Review this suggestion and confirm before changing the scene.";
+          if (preparedSceneIndex === null) {
+            feedback("No automatic rewrite was performed. Use an explicit replace instruction in the saved review notes.", true);
+          }
+        } catch (err) {
+          feedback(err.message || "A saved narration correction review is needed.", true);
+        } finally {
+          busy = false;
+          scriptSuggestionButton.disabled = false;
+        }
+      }, entry);
+      reviewPanel.appendChild(scriptSuggestionButton);
+      var applyScriptButton = button("Use proposed text in unsaved scene", function () {
+        if (preparedSceneIndex === null || !rows[preparedSceneIndex]) {
+          feedback("Create a supported narration suggestion first.", true);
+          return;
+        }
+        var scene = rows[preparedSceneIndex];
+        var existing = originalScript.textContent.slice("Original narration: ".length);
+        if (scene.narration !== existing) {
+          feedback("The scene has changed since the suggestion. Reopen its review before applying.", true);
+          return;
+        }
+        if (!proposedScript.value.trim() || proposedScript.value.length > 6000) {
+          feedback("Proposed narration must be between 1 and 6000 characters.", true);
+          return;
+        }
+        scene.narration = proposedScript.value;
+        // Previously timed captions describe the old words. Reset them for
+        // a fresh caption review instead of silently keeping stale cues.
+        scene.caption_cues = [];
+        scene.caption_cues_raw = "";
+        scene.revision_note = "Narration correction applied as draft; review captions and timing before saving.";
+        renderRows();
+        feedback("Narration changed only in the unsaved editor. Review captions and scene duration, then save and reapprove.");
+        preparedSceneIndex = null;
+      }, entry);
+      reviewPanel.appendChild(applyScriptButton);
+      reviewPanel.appendChild(scriptProposal);
       var reviewStatus = document.createElement("p");
       reviewStatus.setAttribute("role", "status");
       reviewStatus.textContent = previousReview.status
