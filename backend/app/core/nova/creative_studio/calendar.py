@@ -1466,6 +1466,7 @@ class CaptionCueIn(BaseModel):
 class StoryboardSceneIn(BaseModel):
     heading: str = Field(min_length=1, max_length=120)
     visual_note: str = Field(default="", max_length=1500)
+    revision_note: str = Field(default="", max_length=2000)
     narration: str = Field(default="", max_length=6000)
     duration_seconds: int = Field(ge=1, le=600)
     visual_asset_id: str | None = Field(default=None, max_length=48)
@@ -1521,7 +1522,8 @@ def save_calendar_storyboard(
     scenes = [
         {
             "index": index, "heading": scene.heading,
-            "visual_note": scene.visual_note, "narration": scene.narration,
+            "visual_note": scene.visual_note, "revision_note": scene.revision_note,
+            "narration": scene.narration,
             "duration_seconds": scene.duration_seconds,
             "visual_asset_id": scene.visual_asset_id,
             "transition": scene.transition,
