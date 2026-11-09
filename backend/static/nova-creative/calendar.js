@@ -663,8 +663,8 @@
       studioAssistantHistory.push({ role: "assistant", content: response.reply });
       studioAssistantHistory = studioAssistantHistory.slice(-8);
       var conversation = $("studio-assistant-conversation");
-      conversation.textContent += (conversation.textContent ? "\\n\\n" : "") +
-        "You: " + question + "\\nNova: " + response.reply;
+      conversation.textContent += (conversation.textContent ? "\n\n" : "") +
+        "You: " + question + "\nNova: " + response.reply;
       $("studio-assistant-question").value = "";
       $("studio-assistant-feedback").textContent = response.mode === "conversational"
         ? "AI guidance only. No changes saved or published."
