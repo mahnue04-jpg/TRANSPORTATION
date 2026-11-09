@@ -1359,8 +1359,8 @@
                     encodeURIComponent(chapter.asset_id), {method: "PUT", body: JSON.stringify(body)});
                   if (active() !== project || !readinessList.contains(qc)) return;
                   qcStatus.textContent = "Saved review: " + saved.status.replace(/_/g, " ").toLowerCase() +
-                    ". This does not approve publishing.";
-                  feedback(saved.message || "Chapter review saved.");
+                    ". Refresh readiness before final-master export. This does not approve publishing.";
+                  feedback(saved.message || "Chapter review saved. Recheck readiness.");
                 } catch (err) {
                   feedback(err.message || "Chapter review was not saved.", true);
                 } finally { busy = false; }
@@ -1370,11 +1370,23 @@
             readinessList.appendChild(line);
           });
           var summary = document.createElement("p");
+          var rebuildCount = (plan.needs_rebuild_indices || []).length;
+          var reviewCount = (plan.needs_review_indices || []).length;
+          var correctionCount = (plan.needs_correction_indices || []).length;
           summary.textContent = plan.master_ready
-            ? "All " + plan.reusable_chapters + " chapters have matching verified MP4s. The approved master export can reuse them."
+            ? "Ready to update final master for private review: all " +
+              plan.reusable_chapters + " chapter MP4s are verified and their exact versions passed quality review."
             : plan.plan_status !== "approved"
               ? "Save and approve the chapter plan before rebuilding or exporting."
-              : (plan.needs_rebuild_indices.length + " chapter(s) need rebuilding. Existing matching chapters will be reused.");
+              : rebuildCount
+                ? rebuildCount + " chapter(s) need rebuilding. " +
+                  reviewCount + " additional chapter(s) need quality review; " +
+                  correctionCount + " have corrections requested."
+                : reviewCount
+                  ? reviewCount + " chapter(s) need quality review before final-master export (" +
+                    correctionCount + " with corrections requested). Review each chapter MP4 below, " +
+                    "correct failures, and check readiness again."
+                  : "Final master is not ready. Check chapter approvals and saved media.";
           readinessList.appendChild(summary);
           if (plan.master_ready && plan.version_sha256 && plan.plan_status === "approved") {
             var updateButton = button("Update Final Master (review-only)", async function () {
