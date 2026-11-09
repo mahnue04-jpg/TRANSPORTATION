@@ -824,6 +824,24 @@
         seconds.addEventListener("change", function () { scene.duration_seconds = Number(seconds.value); rehearse(); });
         label.appendChild(seconds);
         fieldset.appendChild(label);
+        if (entry.status === "approved" && (entry.content_mode === "faceless" || entry.content_mode === "education") &&
+            scene.duration_seconds >= 2 && scene.duration_seconds <= 12) {
+          fieldset.appendChild(button("Render this saved scene (free preview)", async function () {
+            if (busy || active() !== project) return;
+            if (!window.confirm("Render the APPROVED saved version of this scene as a review-only MP4? Unsaved edits are not included.")) return;
+            busy = true;
+            try {
+              var result = await bridge.api(basePath(project) + "/" +
+                encodeURIComponent(entry.id) + "/scenes/" + index + "/render-preview", {method: "POST"});
+              if (active() !== project) return;
+              if (!result || result.status !== "PREVIEW_RENDERED") throw new Error("No scene MP4 was confirmed.");
+              feedback("Scene " + (index + 1) + " preview saved privately. Full video and original are unchanged.");
+              if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+            } catch (err) {
+              feedback(err.message || "This scene could not be rendered. Existing videos are preserved.", true);
+            } finally { busy = false; }
+          }, scene));
+        }
         fieldset.appendChild(button("Remove scene", function () {
           rows.splice(index, 1);
           renderRows();
@@ -833,6 +851,53 @@
       rehearse();
     }
     renderRows();
+    var historyPanel = document.createElement("fieldset");
+    var historyTitle = document.createElement("legend");
+    historyTitle.textContent = "Previously saved storyboard versions";
+    historyPanel.appendChild(historyTitle);
+    var historyNote = document.createElement("p");
+    historyNote.className = "hint";
+    historyNote.textContent = "Review and compare past saved versions. Loading a previous version only opens it as a draft; it does not overwrite the saved plan.";
+    historyPanel.appendChild(historyNote);
+    var historyItems = document.createElement("div");
+    historyPanel.appendChild(historyItems);
+    host.appendChild(historyPanel);
+    (async function loadHistory() {
+      try {
+        var history = await bridge.api(basePath(project) + "/" +
+          encodeURIComponent(entry.id) + "/storyboard-revisions", {method: "GET"});
+        if (active() !== project || !host.contains(historyPanel)) return;
+        historyItems.replaceChildren();
+        (history.revisions || []).forEach(function (version) {
+          var item = document.createElement("p");
+          var label = document.createElement("span");
+          label.textContent = (version.saved_at || "Saved version") + " — " +
+            ((version.scenes || []).length) + " scenes ";
+          item.appendChild(label);
+          item.appendChild(button("Open as unsaved draft", function () {
+            if (!window.confirm("Open this earlier storyboard in the editor? Unsaved edits in the current editor will be replaced; the saved video plan is not changed until Save storyboard.")) return;
+            rows = (version.scenes || []).map(function (scene) {
+              return {
+                heading: scene.heading || "", visual_note: scene.visual_note || "",
+                revision_note: scene.revision_note || "", narration: scene.narration || "",
+                duration_seconds: Number(scene.duration_seconds) || 1,
+                visual_asset_id: scene.visual_asset_id || null,
+                transition: scene.transition === "fade" ? "fade" : "cut",
+                caption_cues: (scene.caption_cues || []).slice()
+              };
+            });
+            voicePicker.value = version.narrator_voice || "en-us";
+            speedPicker.value = String(version.narrator_speed || 148);
+            renderRows();
+            feedback("Previous version opened as unsaved draft. Review before saving.");
+          }, version));
+          historyItems.appendChild(item);
+        });
+        if (!historyItems.children.length) historyItems.textContent = "No previous saved versions.";
+      } catch (err) {
+        historyItems.textContent = "Storyboard history is unavailable.";
+      }
+    })();
     host.appendChild(button("Add scene", function () {
       if (rows.length >= 60) { feedback("Storyboard supports up to 60 scenes.", true); return; }
       rows.push({ heading: "New scene", visual_note: "", narration: "", duration_seconds: 60, visual_asset_id: null, transition: "cut", caption_cues: [] });
