@@ -474,8 +474,22 @@
       if (!detail && errBody && errBody.detail && errBody.detail.message) detail = String(errBody.detail.message);
       throw new Error(detail || ("Download failed. (" + res.status + ")"));
     }
+    var requestedMime = (contentType.split(";")[0] || "").trim().toLowerCase();
+    var expectedVideoBytes = 0;
+    if (requestedMime === "video/mp4") {
+      // The regular blob download buffers the entire response. Long-form
+      // exports must use the disk-streaming save path, not this button.
+      expectedVideoBytes = Number(res.headers.get("content-length"));
+      if (!Number.isSafeInteger(expectedVideoBytes) || expectedVideoBytes <= 0 ||
+          expectedVideoBytes > 128 * 1024 * 1024) {
+        throw new Error("This MP4 is too large or its size is unknown. Use Save full MP4 to computer (streaming).");
+      }
+    }
     var blob = await res.blob();
     if (!blob || !blob.size) throw new Error("Download was empty.");
+    if (requestedMime === "video/mp4" && blob.size !== expectedVideoBytes) {
+      throw new Error("The MP4 download was incomplete; the file was not saved.");
+    }
     var mime = (contentType.split(";")[0] || blob.type || "application/octet-stream").trim();
     if (mime && blob.type !== mime) blob = new Blob([blob], { type: mime });
     var disposition = res.headers && typeof res.headers.get === "function" ? res.headers.get("content-disposition") : "";
