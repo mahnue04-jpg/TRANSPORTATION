@@ -268,6 +268,20 @@ def propose_review_revision(
             or meta.get("pipeline") != "calendar_storyboard_preview"
             or meta.get("calendar_entry_id") != entry_id):
         raise HTTPException(status_code=404, detail="This preview does not belong to the selected plan.")
+    import hashlib
+    import json
+    signature = hashlib.sha256(
+        json.dumps({
+            "scenes": json.loads(entry.storyboard_json or "[]"),
+            "voice": entry.narrator_voice,
+            "speed": entry.narrator_speed,
+        }, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    if meta.get("storyboard_sha256") != signature:
+        raise HTTPException(
+            status_code=409,
+            detail="The saved storyboard has changed since this review. Review the new preview before preparing corrections.",
+        )
     review = meta.get("storyboard_preview_review") or {}
     if review.get("status") != "CHANGES_REQUIRED":
         raise HTTPException(status_code=409, detail="Save a changes-required review before requesting corrections.")
