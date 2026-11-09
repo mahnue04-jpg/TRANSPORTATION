@@ -106,7 +106,7 @@
         actions.appendChild(button("Edit chapters", editChapters, entry));
       }
       if (entry.status === "approved" && entry.duration_seconds >= 600 &&
-          entry.duration_seconds <= 1800 && (entry.chapters || []).length >= 2) {
+          entry.duration_seconds <= 3600 && (entry.chapters || []).length >= 2) {
         actions.appendChild(button("Export chapter master", exportMaster, entry));
         actions.appendChild(button("Resume failed export", resumeMaster, entry));
         actions.appendChild(button("Master job status", async function (selected) {
