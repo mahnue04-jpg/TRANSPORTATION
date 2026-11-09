@@ -130,6 +130,9 @@
           } catch (err) { feedback(err.message || "Could not retrieve master export status.", true); }
         }, entry));
       }
+      if (entry.duration_seconds >= 600) {
+        actions.appendChild(button("Review saved master versions", reviewMasterVersions, entry));
+      }
       if (entry.status !== "canceled") actions.appendChild(button("Edit storyboard", editStoryboard, entry));
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
@@ -249,6 +252,140 @@
     } catch (err) {
       feedback(err.message || "Resume was not started; saved chapters were preserved.", true);
     } finally { busy = false; }
+  }
+
+  async function reviewMasterVersions(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    var host = $("calendar-chapters");
+    host.replaceChildren();
+    var heading = document.createElement("h3");
+    heading.textContent = "Finished master review — " + entry.topic;
+    host.appendChild(heading);
+    var message = document.createElement("p");
+    message.className = "hint";
+    message.textContent = "Verified saved masters are listed separately. Reviewing an MP4 does not authorize publishing or commercial use.";
+    host.appendChild(message);
+    try {
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entry.id) + "/master-versions", {method: "GET"});
+      if (active() !== project || !host.contains(heading)) return;
+      var masters = result.masters || [];
+      if (!masters.length) {
+        var none = document.createElement("p");
+        none.textContent = "No verified saved final masters yet. Complete the chapter exports first.";
+        host.appendChild(none);
+        return;
+      }
+      masters.forEach(function (master, index) {
+        var panel = document.createElement("fieldset");
+        var legend = document.createElement("legend");
+        legend.textContent = "Saved master " + (index + 1);
+        panel.appendChild(legend);
+        var info = document.createElement("p");
+        info.textContent = "Saved " + (master.created_at || "unknown date") +
+          " · " + Math.round((Number(master.duration_seconds) || 0) / 60) +
+          " minutes · version " + String(master.pinned_version_sha256 || "legacy").slice(0, 12);
+        panel.appendChild(info);
+        var video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.playsInline = true;
+        video.style.maxWidth = "100%";
+        video.style.maxHeight = "360px";
+        video.setAttribute("aria-label", "Saved verified master video");
+        var loaded = false;
+        var safeForMemory = Number.isFinite(Number(master.file_size_bytes)) &&
+          Number(master.file_size_bytes) > 0 &&
+          Number(master.file_size_bytes) <= 128 * 1024 * 1024;
+        if (safeForMemory && typeof bridge.fetchProtectedVideo === "function") {
+          panel.appendChild(button("Load verified master for playback", async function () {
+            if (active() !== project) return;
+            try {
+              var blob = await bridge.fetchProtectedVideo(project, master.asset_id);
+              if (active() !== project || !host.contains(panel)) return;
+              if (video.dataset.objectUrl) URL.revokeObjectURL(video.dataset.objectUrl);
+              var url = URL.createObjectURL(blob);
+              video.dataset.objectUrl = url;
+              video.src = url;
+              if (!panel.contains(video)) panel.appendChild(video);
+              loaded = true;
+              feedback("Verified master loaded. Review the actual footage, narration and captions before marking quality checks.");
+            } catch (err) { feedback(err.message || "Protected master playback failed.", true); }
+          }, master));
+          panel.appendChild(button("Download reviewed MP4", async function () {
+            if (active() !== project || typeof bridge.downloadProtectedAsset !== "function") return;
+            try {
+              await bridge.downloadProtectedAsset(master.download_url,
+                "creative-studio-master-" + master.asset_id + ".mp4");
+              feedback("Protected master download requested.");
+            } catch (err) { feedback(err.message || "Master download could not be completed.", true); }
+          }, master));
+        } else {
+          var largeNotice = document.createElement("p");
+          largeNotice.className = "hint";
+          largeNotice.textContent = "This master is too large (or its size is unknown) for safe in-memory browser playback/download. The original remains in private Studio storage; large-file streaming and direct download still require implementation.";
+          panel.appendChild(largeNotice);
+        }
+        var checks = [
+          ["footage_ok", "Full footage reviewed"],
+          ["audio_ok", "Narration and audio continuity reviewed"],
+          ["captions_ok", "Captions reviewed"],
+          ["continuity_ok", "Chapter transitions and ending reviewed"],
+          ["rights_reviewed", "Licensing and asset permissions reviewed"]
+        ];
+        var controls = {};
+        checks.forEach(function (field) {
+          var label = document.createElement("label");
+          var box = document.createElement("input");
+          box.type = "checkbox";
+          box.checked = Boolean(master.review && master.review[field[0]]);
+          controls[field[0]] = box;
+          label.appendChild(box);
+          label.appendChild(document.createTextNode(" " + field[1]));
+          panel.appendChild(label);
+        });
+        var noteLabel = document.createElement("label");
+        noteLabel.textContent = "Review or correction notes";
+        var notes = document.createElement("textarea");
+        notes.rows = 3;
+        notes.maxLength = 2000;
+        notes.value = master.review && master.review.notes || "";
+        noteLabel.appendChild(notes);
+        panel.appendChild(noteLabel);
+        var state = document.createElement("p");
+        state.setAttribute("role", "status");
+        state.textContent = master.review ? "Saved review: " + master.review.status :
+          "Not reviewed.";
+        panel.appendChild(state);
+        panel.appendChild(button("Save master quality review", async function () {
+          if (!loaded) {
+            state.textContent = "Load and watch this exact master before reviewing. For larger files, complete the secure streaming review workflow first.";
+            return;
+          }
+          var body = {notes: notes.value};
+          checks.forEach(function (field) { body[field[0]] = controls[field[0]].checked; });
+          try {
+            var response = await bridge.api(basePath(project) + "/" +
+              encodeURIComponent(entry.id) + "/masters/" +
+              encodeURIComponent(master.asset_id) + "/review", {
+                method: "PUT", body: JSON.stringify(body)
+              });
+            if (active() !== project || !host.contains(panel)) return;
+            state.textContent = "Saved: " + response.status +
+              ". Commercial and publishing approvals remain separate.";
+            feedback(response.message || "Master review saved.");
+          } catch (err) {
+            state.textContent = err.message || "Master review could not be saved.";
+          }
+        }, master));
+        host.appendChild(panel);
+      });
+      host.scrollIntoView({behavior: "smooth", block: "start"});
+    } catch (err) {
+      message.textContent = err.message || "Unable to load verified master versions.";
+      feedback(message.textContent, true);
+    }
   }
 
   async function exportMaster(entry) {
