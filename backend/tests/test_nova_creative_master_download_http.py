@@ -24,10 +24,12 @@ def test_private_download_response_advertises_exact_verified_size(monkeypatch):
     sha = hashlib.sha256(data).hexdigest()
     opened = []
 
+    from app.core.nova.creative_studio.service import PrivateRemoteVideo
+
     class FakeService:
         def open_private_remote_asset(self, owner, project, asset, *, part):
             opened.append((owner, project, asset, part))
-            return (io.BytesIO(data), "video/mp4", "master.mp4", len(data), sha)
+            return PrivateRemoteVideo(io.BytesIO(data), "video/mp4", "master.mp4", len(data), sha)
 
     monkeypatch.setattr(studio_router, "get_service", lambda db: FakeService())
     response = studio_router.download_asset_file(
