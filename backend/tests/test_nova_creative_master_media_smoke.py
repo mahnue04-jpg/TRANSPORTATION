@@ -62,7 +62,7 @@ def _repeat_normalized_clip(source: Path, output: Path, count: int = 100) -> Pat
     manifest = output.with_suffix(".concat.txt")
     # Paths are inside pytest's isolated scratch directory.
     manifest.write_text("".join(
-        f"file '{source.resolve()}'\\n" for _ in range(count)
+        f"file '{source.resolve()}'\n" for _ in range(count)
     ), encoding="utf-8")
     try:
         subprocess.run([
