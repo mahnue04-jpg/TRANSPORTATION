@@ -486,7 +486,8 @@ class LongFormAssemblyIn(BaseModel):
 
 
 def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
-                             entry_id: str, asset_ids: list[str]):
+                             entry_id: str, asset_ids: list[str],
+                             chapter_index: int | None = None):
     import os
     from app.core.nova.creative_studio import private_object_storage as remote
     from app.core.nova.creative_studio.long_form_assembly import (
@@ -496,11 +497,18 @@ def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
     entry = _entry(db, owner_id, project_id, entry_id)
     if entry.status != "approved":
         raise HTTPException(status_code=409, detail="Approve the plan before assembling its video.")
-    if not 120 <= entry.duration_seconds <= 600:
-        raise HTTPException(status_code=422, detail="This first long-form assembler supports 2–10 minutes. Longer productions need the queued storage workflow.")
-    # The stored timeline is authoritative once configured. The client can
-    # send an empty list to request the saved order on later sessions.
-    stored_timeline = json.loads(entry.timeline_json or "[]")
+    target_duration = entry.duration_seconds
+    if chapter_index is not None:
+        chapters = json.loads(entry.chapters_json or "[]")
+        if not 0 <= chapter_index < len(chapters):
+            raise HTTPException(status_code=404, detail="Chapter not found.")
+        chapter = chapters[chapter_index]
+        target_duration = int(chapter["duration_seconds"])
+        stored_timeline = chapter["asset_ids"]
+    else:
+        stored_timeline = json.loads(entry.timeline_json or "[]")
+    if not 120 <= target_duration <= 600:
+        raise HTTPException(status_code=422, detail="The current assembler supports 2–10 minutes per chapter.")
     if not asset_ids:
         asset_ids = stored_timeline
     elif stored_timeline and asset_ids != stored_timeline:
@@ -519,7 +527,7 @@ def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
             raise HTTPException(status_code=422, detail="Every segment must be a saved video in your selected Studio project.")
         sources.append(asset)
     signature = hashlib.sha256(
-        (entry_id + "|" + str(entry.duration_seconds) + "|" + "|".join(
+        (entry_id + "|chapter:" + str(chapter_index) + "|" + str(target_duration) + "|" + "|".join(
             f"{a.id}:{(a.metadata or {}).get('sha256', '')}" for a in sources
         )).encode("utf-8")
     ).hexdigest()
@@ -565,7 +573,7 @@ def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
             clip_paths.append(target)
         output = directory / "long-form.mp4"
         try:
-            measured = assemble_clips(clip_paths, output, target_seconds=entry.duration_seconds)
+            measured = assemble_clips(clip_paths, output, target_seconds=target_duration)
         except LongFormAssemblyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
@@ -584,6 +592,7 @@ def _assemble_calendar_video(db: Session, owner_id: str, project_id: str,
         assembled.metadata = {
             **(assembled.metadata or {}),
             "assembly_signature": signature, "calendar_entry_id": entry_id,
+            "chapter_index": chapter_index,
             "source_asset_ids": asset_ids, "segment_count": measured["segment_count"],
             "pipeline": "calendar_saved_clip_assembly", "duration_seconds": measured["duration_seconds"],
             "quality_state": "OWNER_REVIEW_REQUIRED", "publish_ready": False,
@@ -603,6 +612,23 @@ def _assembly_result(project_id: str, asset: CreativeAsset, *, reused: bool):
         "published": False, "publish_ready": False,
         "message": "Combined saved clips into one MP4. Review audio, captions, visual continuity, rights, and completeness before publishing.",
     }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/chapters/{chapter_index}/assemble")
+async def assemble_calendar_chapter(
+    project_id: str, entry_id: str, chapter_index: int,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Build one already-approved chapter from its saved ordered clips.
+
+    The output remains a review-only MP4. Individual chapters can be finished
+    separately; this is not a claim that a 2-hour final master can yet be exported.
+    """
+    return await run_in_threadpool(
+        _assemble_calendar_video, db, user.user_id, project_id, entry_id,
+        [], chapter_index,
+    )
 
 
 @router.post("/projects/{project_id}/calendar/{entry_id}/assemble")
