@@ -546,9 +546,13 @@
         }
       }, entry);
       reviewPanel.appendChild(scriptSuggestionButton);
+      var budgetNotice = document.createElement("p");
+      budgetNotice.className = "hint";
+      budgetNotice.textContent = "Checking optional AI rewrite availability. Paid model requests are disabled unless the owner configures verified pricing and a daily budget.";
+      reviewPanel.appendChild(budgetNotice);
       var aiRewriteButton = button("Request optional AI rewrite (may incur charges)", async function () {
         if (active() !== project || busy) return;
-        if (!window.confirm("This is an optional model request that may incur charges and uses one of two daily slots. The resulting text is a draft only. Continue?")) return;
+        if (!window.confirm("This model request may incur charges and uses one of two daily reservations. Provider charges are not yet settled or reconciled. The result is a draft only. Continue?")) return;
         busy = true;
         aiRewriteButton.disabled = true;
         try {
@@ -577,6 +581,24 @@
         }
       }, entry);
       reviewPanel.appendChild(aiRewriteButton);
+      aiRewriteButton.disabled = true;
+      (async function loadAiBudget() {
+        try {
+          var budget = await bridge.api("/api/nova/creative/studio-ai-rewrite-budget", {method: "GET"});
+          if (active() !== project || !host.contains(reviewPanel)) return;
+          aiRewriteButton.disabled = !budget.enabled || budget.remaining_attempts <= 0;
+          budgetNotice.textContent = !budget.enabled
+            ? "Optional AI rewrites are disabled or pricing/budget is unconfigured. No paid model will be called."
+            : "AI rewrite daily quota: " + budget.remaining_attempts + " of " +
+              budget.daily_attempt_limit + " requests remaining. Budget $" +
+              (budget.daily_budget_micro_usd / 1000000).toFixed(4) +
+              "; reserved $" + (budget.total_reserved_micro_usd / 1000000).toFixed(4) +
+              ". Charges are estimates, not settled provider billing.";
+        } catch (err) {
+          aiRewriteButton.disabled = true;
+          budgetNotice.textContent = "AI budget status unavailable; model rewrite is blocked here.";
+        }
+      })();
       var applyScriptButton = button("Use proposed text in unsaved scene", function () {
         if (preparedSceneIndex === null || !rows[preparedSceneIndex]) {
           feedback("Create a supported narration suggestion first.", true);
