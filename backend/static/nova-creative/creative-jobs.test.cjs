@@ -282,6 +282,7 @@ function response({status, contentType, disposition, bytes, jsonBody}) {
       const key = String(name || "").toLowerCase();
       if (key === "content-type") return contentType || "";
       if (key === "content-disposition") return disposition || "";
+      if (key === "content-length") return String((bytes || new Uint8Array()).byteLength);
       return "";
     }},
     blob: async () => new Blob([bytes || new Uint8Array()], {type: (contentType || "application/octet-stream").split(";")[0]}),
