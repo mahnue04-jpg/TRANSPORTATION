@@ -10,6 +10,7 @@ on:
       - "backend/app/core/nova/creative_studio/router.py"
       - "backend/static/nova-creative/calendar.js"
       - "backend/static/nova-creative/creative.js"
+      - "backend/tests/js/test_creative_studio_master_download.mjs"
       - "backend/tests/test_nova_creative_remote_master_stream.py"
       - "backend/tests/test_nova_creative_master_download_http.py"
       - "backend/tests/test_nova_creative_private_master_download.py"
@@ -49,6 +50,8 @@ jobs:
         run: |
           node --check backend/static/nova-creative/calendar.js
           node --check backend/static/nova-creative/creative.js
+      - name: Exercise customer browser MP4 stream failure recovery
+        run: node --test backend/tests/js/test_creative_studio_master_download.mjs
       - name: Install FFmpeg media tools
         run: |
           sudo apt-get update -qq
