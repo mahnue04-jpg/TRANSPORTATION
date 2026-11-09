@@ -105,6 +105,10 @@
       if (entry.status !== "canceled" && entry.duration_seconds >= 120) {
         actions.appendChild(button("Edit chapters", editChapters, entry));
       }
+      if (entry.status === "approved" && entry.duration_seconds >= 600 &&
+          entry.duration_seconds <= 1800 && (entry.chapters || []).length >= 2) {
+        actions.appendChild(button("Export chapter master", exportMaster, entry));
+      }
       if (entry.status !== "canceled") actions.appendChild(button("Cancel plan", cancel, entry));
       article.appendChild(actions);
       list.appendChild(article);
@@ -180,6 +184,26 @@
     }
     mutate(entry, { status: "approved" }, "approve");
   }
+  async function exportMaster(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    if (!window.confirm("Combine your completed chapters into a review-only MP4? This uses local processing, requires private storage, and does not publish anything.")) return;
+    busy = true;
+    feedback("Assembling completed chapters into one MP4. Keep your original chapters saved.");
+    try {
+      var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+        "/export-master", { method: "POST" });
+      if (active() !== project) return;
+      if (!result || result.status !== "MASTER_SAVED_REVIEW_REQUIRED") {
+        throw new Error("No verified chapter master was returned.");
+      }
+      feedback("Finished master saved privately. Review and download it from the Studio Asset list.");
+      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+    } catch (err) {
+      feedback(err.message || "Master export failed; your chapter files remain saved.", true);
+    } finally { busy = false; }
+  }
+
   async function editChapters(entry) {
     var project = requestProject();
     if (!project || busy) return;
