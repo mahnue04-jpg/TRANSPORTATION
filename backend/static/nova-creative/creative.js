@@ -2771,7 +2771,7 @@
     });
   });
 
-  async function streamProtectedStudioMaster(projectId, assetId) {
+  async function streamProtectedStudioMaster(projectId, assetId, onProgress) {
     // File System Access API prompt must occur in the originating click gesture.
     // This avoids buffering 2 GiB in a Blob; browser support is intentionally gated.
     if (!projectId || !assetId || projectId !== activeProjectId) {
@@ -2807,6 +2807,7 @@
     var writable = await fileHandle.createWritable();
     var reader = response.body.getReader();
     var total = 0;
+    var lastReportedPercent = -1;
     try {
       while (true) {
         if (projectId !== activeProjectId) throw new Error("Project selection changed during download.");
@@ -2817,6 +2818,13 @@
           throw new Error("Master exceeded the maximum safe download size.");
         }
         await writable.write(part.value);
+        if (typeof onProgress === "function") {
+          var percent = Math.min(100, Math.floor(100 * total / reported));
+          if (percent !== lastReportedPercent) {
+            lastReportedPercent = percent;
+            onProgress({bytes: total, totalBytes: reported, percent: percent});
+          }
+        }
       }
       if (reported !== total) {
         throw new Error("Downloaded master is empty or incomplete.");
