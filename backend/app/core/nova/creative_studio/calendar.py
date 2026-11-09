@@ -626,6 +626,7 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             "chapter_index": index, "title": chapter.get("title", f"Chapter {index+1}"),
             "status": "REUSABLE" if verified is not None else "NEEDS_REBUILD",
             "asset_id": verified.id if verified is not None else None,
+            "asset_sha256": str((verified.metadata or {}).get("sha256") or "") if verified is not None else None,
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
     missing = [row["chapter_index"] for row in states if row["status"] == "NEEDS_REBUILD"]
@@ -635,7 +636,10 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
         "entry_id": entry_id,
         "duration_seconds": entry.duration_seconds,
         "chapters": chapters,
-        "verified_asset_ids": [row["asset_id"] for row in states],
+        "verified_assets": [
+            {"asset_id": row["asset_id"], "sha256": row["asset_sha256"]}
+            for row in states
+        ],
     }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return {
         "version_sha256": version,
@@ -1565,6 +1569,12 @@ def start_chapter_master_job(
     chapters = json.loads(entry.chapters_json or "[]")
     if not 2 <= len(chapters) <= 24:
         raise HTTPException(status_code=422, detail="Save 2–24 completed chapters first.")
+    readiness = _chapter_rebuild_plan(db, user.user_id, project_id, entry_id)
+    if not readiness["master_ready"]:
+        raise HTTPException(status_code=409, detail={
+            "message": "Master export blocked: rebuild or verify the current chapter MP4s first.",
+            "needs_rebuild_indices": readiness["needs_rebuild_indices"],
+        })
     key = (user.user_id, project_id, entry_id)
     with _master_export_lock:
         if key in _master_export_active:
