@@ -1457,7 +1457,9 @@ def download_asset_file(
     try:
         remote = studio.open_private_remote_asset(user.user_id, project_id, asset_id, part=part)
         if remote is not None:
-            stream, media_type, filename, expected_bytes, expected_sha256 = remote
+            stream, media_type, filename = remote
+            expected_bytes = remote.expected_bytes
+            expected_sha256 = remote.expected_sha256
             from urllib.parse import quote
             return StreamingResponse(
                 _verified_remote_video_chunks(stream, expected_bytes, expected_sha256),
