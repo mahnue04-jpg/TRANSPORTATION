@@ -1687,3 +1687,88 @@ async def render_storyboard_preview(
     return await run_in_threadpool(
         _render_storyboard_preview, db, user.user_id, project_id, entry_id,
     )
+
+
+class StoryboardPreviewReviewIn(BaseModel):
+    narration_ok: bool
+    captions_ok: bool
+    visuals_ok: bool
+    playback_ok: bool
+    notes: str = Field(default="", max_length=2000)
+
+
+@router.put("/projects/{project_id}/calendar/{entry_id}/previews/{asset_id}/review")
+def review_storyboard_preview(
+    project_id: str, entry_id: str, asset_id: str,
+    payload: StoryboardPreviewReviewIn,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Record manual QA on this exact saved MP4; never authorize publishing."""
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    store = DbCreativeStudioStore(db)
+    asset = next((
+        row for row in store.list_assets(project_id, user.user_id)
+        if row.id == asset_id
+    ), None)
+    meta = asset.metadata or {} if asset is not None else {}
+    if (asset is None or asset.kind != "video" or not asset.url
+            or meta.get("pipeline") != "calendar_storyboard_preview"
+            or meta.get("calendar_entry_id") != entry_id):
+        raise HTTPException(status_code=404, detail="Saved storyboard preview not found in this project.")
+    current_signature = hashlib.sha256(
+        json.dumps({
+            "scenes": json.loads(entry.storyboard_json or "[]"),
+            "voice": entry.narrator_voice,
+            "speed": entry.narrator_speed,
+        }, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    if meta.get("storyboard_sha256") != current_signature:
+        raise HTTPException(
+            status_code=409,
+            detail="The storyboard has changed since this MP4 was rendered. Render a current preview before reviewing.",
+        )
+    from app.core.nova.creative_studio import private_object_storage as remote
+    digest = str(meta.get("sha256") or "")
+    if not digest:
+        raise HTTPException(status_code=409, detail="Preview has no verifiable stored checksum.")
+    service = get_service(db)
+    try:
+        if str(asset.url).startswith("private-studio-s3://"):
+            verified = remote.enabled() and remote.object_exists(
+                asset.url, user.user_id, project_id, digest
+            )
+        else:
+            media_path, _, _ = service.open_asset_file(user.user_id, project_id, asset.id)
+            verified = media_path.is_file() and hashlib.sha256(media_path.read_bytes()).hexdigest() == digest
+    except Exception:
+        verified = False
+    if not verified:
+        raise HTTPException(status_code=409, detail="Preview file could not be verified. Review was not saved.")
+
+    review = {
+        "narration_ok": payload.narration_ok,
+        "captions_ok": payload.captions_ok,
+        "visuals_ok": payload.visuals_ok,
+        "playback_ok": payload.playback_ok,
+        "notes": payload.notes.strip(),
+        "reviewed_at": _now(),
+        "reviewed_by": user.user_id,
+        "status": "REVIEW_PASSED" if all([
+            payload.narration_ok, payload.captions_ok,
+            payload.visuals_ok, payload.playback_ok,
+        ]) else "CHANGES_REQUIRED",
+    }
+    asset.metadata = {
+        **meta, "storyboard_preview_review": review,
+        "quality_state": "PREVIEW_REVIEWED" if review["status"] == "REVIEW_PASSED" else "PREVIEW_CHANGES_REQUIRED",
+        "publish_ready": False, "commercial_complete": False,
+        "external_publishing": False,
+    }
+    store.save_asset(asset)
+    return {
+        "status": review["status"], "review": review,
+        "asset_id": asset.id, "published": False, "publish_ready": False,
+        "message": "Quality review saved for this MP4 only. Commercial and publishing approval remain separate.",
+    }
