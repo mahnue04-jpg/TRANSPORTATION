@@ -354,7 +354,14 @@
             if (active() !== project) return;
             try {
               // Trigger the browser file picker directly from the click.
-              var saved = await bridge.streamProtectedMaster(project, master.asset_id);
+              var saved = await bridge.streamProtectedMaster(
+                project, master.asset_id, function (progress) {
+                  if (active() !== project || !host.contains(panel)) return;
+                  feedback("Saving private master: " + progress.percent + "% (" +
+                    Math.round(progress.bytes / (1024 * 1024)) + " of " +
+                    Math.round(progress.totalBytes / (1024 * 1024)) + " MiB).");
+                }
+              );
               if (active() !== project) return;
               feedback("Saved " + Math.round(saved.bytes / (1024 * 1024)) +
                 " MiB to your computer. Review the exported video before approval.");
