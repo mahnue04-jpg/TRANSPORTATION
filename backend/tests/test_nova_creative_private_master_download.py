@@ -79,3 +79,17 @@ def test_cross_owner_download_is_denied_before_remote_access(monkeypatch):
     with pytest.raises(CreativeStudioError) as err:
         studio.open_private_remote_asset("other-owner", "project", "master-1")
     assert err.value.http_status == 404
+
+
+def test_remote_master_rejects_non_video_asset_before_storage(monkeypatch):
+    asset = _asset()
+    asset.kind = "image"
+    studio = _studio(asset)
+    monkeypatch.setattr(storage, "enabled", lambda: True)
+    monkeypatch.setattr(
+        storage, "owned_object_size",
+        lambda *args: pytest.fail("Non-video download must not reach storage"),
+    )
+    with pytest.raises(CreativeStudioError) as err:
+        studio.open_private_remote_asset("owner", "project", "master-1")
+    assert err.value.http_status == 404
