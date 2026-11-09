@@ -350,8 +350,7 @@
           visualPicker.add(new Option(asset.title || asset.id, asset.id));
         });
         if (scene.visual_asset_id && !visualAssets.some(function (item) { return item.id === scene.visual_asset_id; })) {
-          visualPicker.add(new Option("Previously selected image unavailable", scene.visual_asset_id));
-          visualPicker.disabled = true;
+          visualPicker.add(new Option("Previously selected image unavailable — choose another", scene.visual_asset_id));
         }
         visualPicker.value = scene.visual_asset_id || "";
         visualPicker.addEventListener("change", function () {
