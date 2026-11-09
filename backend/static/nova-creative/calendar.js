@@ -79,6 +79,11 @@
       }
       if (entry.status === "approved") {
         actions.appendChild(button("Prepare in Studio", prepare, entry));
+        if ((entry.content_mode === "faceless" || entry.content_mode === "education") &&
+            entry.duration_seconds >= 15 && entry.duration_seconds <= 120 &&
+            Array.isArray(entry.storyboard) && entry.storyboard.length > 0) {
+          actions.appendChild(button("Render storyboard preview", renderStoryboardPreview, entry));
+        }
         if ((entry.content_mode === "faceless" || entry.content_mode === "education") && entry.duration_seconds === 30) {
           actions.appendChild(button("Render preview MP4", renderPreview, entry));
         }
@@ -641,6 +646,29 @@
     }
   }
 
+  async function renderStoryboardPreview(entry) {
+    var project = requestProject();
+    if (!project || busy) return;
+    var selectedRevision = revision;
+    busy = true;
+    feedback("Rendering your approved storyboard as a local narrated preview. No paid providers or publishing.");
+    try {
+      var result = await bridge.api(basePath(project) + "/" +
+        encodeURIComponent(entry.id) + "/render-storyboard-preview", {
+          method: "POST"
+        });
+      if (active() !== project || selectedRevision !== revision) return;
+      if (!result || result.status !== "PREVIEW_RENDERED" || !result.download_url) {
+        throw new Error("Studio did not confirm a saved storyboard preview MP4.");
+      }
+      feedback("Storyboard preview saved in the Studio Asset list. This is an AMICOR title-card preview, not finished AI-generated footage.");
+      if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+    } catch (err) {
+      feedback(err.message || "Storyboard preview could not be rendered; your saved scenes remain unchanged.", true);
+    } finally {
+      busy = false;
+    }
+  }
   async function renderPreview(entry) {
     var project = requestProject();
     if (!project || busy) return;
