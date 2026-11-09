@@ -60,6 +60,12 @@ def ensure_nova_creative_schema(engine: Engine | None = None) -> None:
                     "ALTER TABLE nova_creative_calendar_entries "
                     "ADD COLUMN chapters_json TEXT NOT NULL DEFAULT '[]'"
                 ))
+        if "storyboard_json" not in existing:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE nova_creative_calendar_entries "
+                    "ADD COLUMN storyboard_json TEXT NOT NULL DEFAULT '[]'"
+                ))
     if "nova_creative_render_claims" in inspector.get_table_names():
         claim_columns = {col["name"] for col in inspector.get_columns("nova_creative_render_claims")}
         if "checkpoint_json" not in claim_columns:
