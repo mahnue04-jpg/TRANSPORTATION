@@ -1025,6 +1025,55 @@
             selector.appendChild(label);
           });
           panel.appendChild(selector);
+          var revisedClips = videos.filter(function (asset) {
+            return (asset.metadata || {}).pipeline === "calendar_assembled_scene_preview" &&
+              asset.media_available !== false && Boolean(asset.url);
+          });
+          if (row.asset_ids.length && revisedClips.length) {
+            var replacePanel = document.createElement("fieldset");
+            var replaceLegend = document.createElement("legend");
+            replaceLegend.textContent = "Replace a chapter clip with revised storyboard video";
+            replacePanel.appendChild(replaceLegend);
+            var oldPicker = document.createElement("select");
+            row.asset_ids.forEach(function (id) {
+              var asset = videos.find(function (item) { return item.id === id; });
+              oldPicker.add(new Option(asset ? (asset.title || asset.id) : id, id));
+            });
+            oldPicker.setAttribute("aria-label", "Current clip to replace");
+            replacePanel.appendChild(oldPicker);
+            var newPicker = document.createElement("select");
+            revisedClips.forEach(function (asset) {
+              newPicker.add(new Option(asset.title || asset.id, asset.id));
+            });
+            newPicker.setAttribute("aria-label", "Revised completed storyboard MP4");
+            replacePanel.appendChild(newPicker);
+            replacePanel.appendChild(button("Replace clip and require review", async function () {
+              if (busy || active() !== project) return;
+              if (!window.confirm("Replace only the selected saved chapter clip? The chapter plan will require reapproval and the earlier chapter MP4 will be preserved.")) return;
+              busy = true;
+              try {
+                var result = await bridge.api(basePath(project) + "/" + encodeURIComponent(entry.id) +
+                  "/chapters/" + index + "/replace-clip", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      old_asset_id: oldPicker.value,
+                      new_asset_id: newPicker.value
+                    })
+                  });
+                if (active() !== project) return;
+                if (!result || result.status !== "REPLACEMENT_SAVED_REVIEW_REQUIRED") {
+                  throw new Error("The clip replacement was not confirmed.");
+                }
+                feedback("Chapter " + (index + 1) +
+                  " replacement saved. Reapprove the plan before rebuilding this chapter and master video. The old MP4 is preserved.");
+                host.replaceChildren();
+                await load();
+              } catch (err) {
+                feedback(err.message || "The chapter clip was not replaced.", true);
+              } finally { busy = false; }
+            }, row));
+            panel.appendChild(replacePanel);
+          }
           panel.appendChild(button("Remove chapter", function () {
             chapterRows.splice(index, 1);
             displayRows();
