@@ -1657,7 +1657,35 @@ def _master_job_status(db: Session, owner_id: str,
     checkpoint = (json.loads(claim.checkpoint_json or "{}")
                   if claim is not None and claim.job_id == latest.id else {})
     if latest.status == "GENERATED":
-        return {"status": latest.status, "job": latest.as_dict(), "checkpoint": checkpoint}
+        # A database success flag alone is insufficient: the private MP4 may
+        # have been deleted, corrupted or replaced since the job was saved.
+        pinned_version = (checkpoint.get("pinned_master") or {}).get("version_sha256")
+        result_ids = latest.result_asset_ids or []
+        completed = [
+            asset for asset in store.list_assets(project_id, owner_id)
+            if asset.id in result_ids and asset.kind == "video"
+            and (asset.metadata or {}).get("pipeline") == "calendar_chapter_master"
+            and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+            and (asset.metadata or {}).get("pinned_version_sha256") == pinned_version
+            and str(asset.url or "").startswith("private-studio-s3://")
+        ]
+        for asset in completed:
+            digest = str((asset.metadata or {}).get("sha256") or "")
+            try:
+                if (len(digest) == 64 and remote.enabled()
+                        and remote.object_exists(asset.url, owner_id, project_id, digest)):
+                    return {"status": "GENERATED", "job": latest.as_dict(),
+                            "checkpoint": checkpoint,
+                            "verified_asset_id": asset.id}
+            except Exception:
+                pass
+        return {
+            "status": "COMPLETED_ASSET_UNVERIFIED",
+            "job": latest.as_dict(),
+            "checkpoint": checkpoint,
+            "message": "The saved master file is missing or could not be verified. "
+                       "Do not present this job as a playable/downloadable completed export.",
+        }
     if latest.status not in {"QUEUED", "RUNNING", "ERROR"}:
         return {"status": latest.status, "job": latest.as_dict(), "checkpoint": checkpoint}
     if locally_running and latest.status in {"QUEUED", "RUNNING"}:
