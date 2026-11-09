@@ -57,51 +57,49 @@ def test_join_rejects_duplicate_sources_and_in_place_output(tmp_path):
                                  expected_seconds=600)
 
 
-def test_join_two_real_normalized_chapters_into_private_review_only_mp4(tmp_path):
-    # Repeated sample audio/video makes a full 10-minute output without
-    # paid providers; use ultrafast synthetic sources to keep CI bounded.
+def _repeat_normalized_clip(source: Path, output: Path, count: int = 100) -> Path:
+    """Use lossless stream copying to create real 5-minute chapter fixtures."""
+    manifest = output.with_suffix(".concat.txt")
+    # Paths are inside pytest's isolated scratch directory.
+    manifest.write_text("".join(
+        f"file '{source.resolve()}'\\n" for _ in range(count)
+    ), encoding="utf-8")
+    try:
+        subprocess.run([
+            "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(manifest),
+            "-map", "0:v:0", "-map", "0:a:0",
+            "-c", "copy", "-movflags", "+faststart", str(output),
+        ], check=True, capture_output=True, timeout=120)
+    finally:
+        manifest.unlink(missing_ok=True)
+    assert output.stat().st_size > 0
+    return output
+
+
+def test_join_two_real_five_minute_chapters_into_ten_minute_master(tmp_path):
+    """Actual 10m H.264/AAC MP4, without provider billing or customer media."""
     source_a = _sample(tmp_path / "source-a.mp4", 3, "blue")
     source_b = _sample(tmp_path / "source-b.mp4", 3, "yellow")
-    first = tmp_path / "chapter-a.mp4"
-    second = tmp_path / "chapter-b.mp4"
-    normalize_chapter(source_a, first)
-    normalize_chapter(source_b, second)
-    # Join validation must reject a wildly incorrect requested duration.
-    with pytest.raises(ChapterMasterError, match="planned duration"):
-        join_normalized_chapters([first, second], tmp_path / "wrong.mp4",
-                                 expected_seconds=600)
-    assert not (tmp_path / "wrong.mp4").exists()
-    # Exercise actual FFmpeg concatenation against short synthetic clips.
-    # Only planned-duration metadata is faked; no 10-minute render is claimed.
-    from app.core.nova.creative_studio import resumable_master as assembly
-
-    original_chapter_probe = assembly.inspect_chapter
-    original_master_probe = assembly.inspect_chapter_master
-
-    def planned_chapter(path):
-        details = original_chapter_probe(path)
-        return {**details, "duration_seconds": 300.0}
-
-    def planned_master(path):
-        actual = original_master_probe(path)
-        assert 5.0 <= actual["duration_seconds"] <= 8.0
-        assert actual["audio_present"] is True
-        return {**actual, "duration_seconds": 600.0}
-
-    original_a = source_a.read_bytes()
-    original_b = source_b.read_bytes()
-    monkeypatch = pytest.MonkeyPatch()
-    try:
-        monkeypatch.setattr(assembly, "inspect_chapter", planned_chapter)
-        monkeypatch.setattr(assembly, "inspect_chapter_master", planned_master)
-        output = tmp_path / "assembled-master.mp4"
-        plan = join_normalized_chapters([first, second], output, expected_seconds=600)
-        assert plan["width"] == 720 and plan["height"] == 1280
-        assert output.stat().st_size > 0
-        actual = original_master_probe(output)
-        assert 5.0 <= actual["duration_seconds"] <= 8.0
-        assert actual["audio_present"] is True
-        assert source_a.read_bytes() == original_a
-        assert source_b.read_bytes() == original_b
-    finally:
-        monkeypatch.undo()
+    normalized_a = tmp_path / "normalized-a.mp4"
+    normalized_b = tmp_path / "normalized-b.mp4"
+    normalize_chapter(source_a, normalized_a)
+    normalize_chapter(source_b, normalized_b)
+    chapter_a = _repeat_normalized_clip(normalized_a, tmp_path / "chapter-a.mp4")
+    chapter_b = _repeat_normalized_clip(normalized_b, tmp_path / "chapter-b.mp4")
+    before_a = chapter_a.stat().st_size
+    before_b = chapter_b.stat().st_size
+    output = tmp_path / "assembled-master.mp4"
+    result = join_normalized_chapters([chapter_a, chapter_b], output,
+                                      expected_seconds=600)
+    assert result["width"] == 720
+    assert result["height"] == 1280
+    assert result["audio_present"] is True
+    assert output.stat().st_size > 0
+    measured = inspect_chapter_master(output)
+    assert abs(measured["duration_seconds"] - 600) <= 12
+    assert measured["audio_present"] is True
+    assert chapter_a.stat().st_size == before_a
+    assert chapter_b.stat().st_size == before_b
+    assert source_a.exists() and source_b.exists()
+    assert not output.with_suffix(".concat.txt").exists()
