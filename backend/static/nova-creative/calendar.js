@@ -546,6 +546,37 @@
         }
       }, entry);
       reviewPanel.appendChild(scriptSuggestionButton);
+      var aiRewriteButton = button("Request optional AI rewrite (may incur charges)", async function () {
+        if (active() !== project || busy) return;
+        if (!window.confirm("This is an optional model request that may incur charges and uses one of two daily slots. The resulting text is a draft only. Continue?")) return;
+        busy = true;
+        aiRewriteButton.disabled = true;
+        try {
+          var result = await bridge.api(basePath(project) + "/" +
+            encodeURIComponent(entry.id) + "/assistant/previews/" +
+            encodeURIComponent(latestPreview.id) + "/ai-script-revision", {
+              method: "POST",
+              body: JSON.stringify({confirm_billable_model_request: true})
+            });
+          if (active() !== project || !host.contains(reviewPanel)) return;
+          if (!result || result.status !== "DRAFT_SCRIPT_REVISION" ||
+              !Number.isInteger(result.scene_index) || !rows[result.scene_index]) {
+            throw new Error("The model did not return a supported draft.");
+          }
+          preparedSceneIndex = result.scene_index;
+          originalScript.textContent = "Original narration: " + result.original_narration;
+          proposedScript.value = result.proposed_narration;
+          scriptMessage.textContent = result.explanation +
+            " Model use may have incurred charges; provider cost is not yet reconciled.";
+          feedback("AI revision is a draft. Review it and use the separate Apply button if acceptable.");
+        } catch (err) {
+          feedback(err.message || "Optional AI rewrite unavailable; your storyboard is unchanged.", true);
+        } finally {
+          busy = false;
+          aiRewriteButton.disabled = false;
+        }
+      }, entry);
+      reviewPanel.appendChild(aiRewriteButton);
       var applyScriptButton = button("Use proposed text in unsaved scene", function () {
         if (preparedSceneIndex === null || !rows[preparedSceneIndex]) {
           feedback("Create a supported narration suggestion first.", true);
