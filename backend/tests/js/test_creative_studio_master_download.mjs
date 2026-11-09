@@ -145,3 +145,108 @@ test("progress callback failure before close aborts the partial file", async () 
   assert.equal(f.file.closed, false);
   assert.equal(f.file.aborted, true);
 });
+
+
+// Exercise the existing normal, in-memory asset-download function separately.
+const normalStart = js.indexOf("  async function downloadProtectedAsset(");
+const normalEnd = js.indexOf("  function downloadProjectPackage(", normalStart);
+assert.ok(normalStart >= 0 && normalEnd > normalStart, "normal protected download helper present");
+const normalHelper = js.slice(normalStart, normalEnd);
+
+function normalFixture({reported = 4, actual = 4, mime = "video/mp4", status = 200}) {
+  let blobRead = false;
+  let clicked = false;
+  let revoked = false;
+  let sharedUrl = "";
+  const response = {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: {
+      get(name) {
+        return {
+          "content-type": mime,
+          "content-length": String(reported),
+          "content-disposition": 'attachment; filename="video.mp4"'
+        }[name.toLowerCase()] || null;
+      },
+    },
+    async blob() {
+      blobRead = true;
+      return new Blob([new Uint8Array(actual)], {type: mime});
+    },
+    async json() { return {}; }
+  };
+  const deps = {
+    session: () => ({ensureReady: async()=>{}, authFetch: async()=>response}),
+    token: () => "stub",
+    fetch: async()=>response,
+    assertDownloadUrlHasNoToken(url) {
+      sharedUrl = url;
+      assert.ok(!url.includes("?token="));
+    },
+    filenameFromDisposition: (_header, fallback) => fallback,
+    setToken: () => {},
+    setSignedIn: () => {},
+    document: {
+      createElement() {
+        return {
+          href: "", download: "",
+          click() { clicked = true; },
+          remove() {},
+        };
+      },
+      body: {appendChild(){}}
+    },
+    URL: {
+      createObjectURL() { return "blob:mock"; },
+      revokeObjectURL() { revoked = true; },
+    },
+    setTimeout(callback) { callback(); }
+  };
+  const factory = new Function("deps",
+    'const {session, token, fetch, assertDownloadUrlHasNoToken, filenameFromDisposition, ' +
+    'setToken, setSignedIn, document, URL, setTimeout}=deps;\n' +
+    normalHelper + '\nreturn downloadProtectedAsset;');
+  const normal = factory(deps);
+  return {
+    run: () => normal("/api/nova/creative/projects/project/assets/asset/file", "video.mp4"),
+    get blobRead() { return blobRead; },
+    get clicked() { return clicked; },
+    get revoked() { return revoked; },
+    get url() { return sharedUrl; },
+  };
+}
+
+test("regular MP4 download validates byte count and starts browser save", async () => {
+  const f = normalFixture({});
+  const result = await f.run();
+  assert.equal(result.fileName, "video.mp4");
+  assert.equal(f.blobRead, true);
+  assert.equal(f.clicked, true);
+  assert.equal(f.revoked, true);
+});
+
+test("regular MP4 download rejects incomplete response before browser save", async () => {
+  const f = normalFixture({reported: 6, actual: 4});
+  await assert.rejects(f.run(), /incomplete/);
+  assert.equal(f.clicked, false);
+});
+
+test("regular MP4 refuses oversized headers before buffering bytes", async () => {
+  const f = normalFixture({reported: 129 * 1024 * 1024, actual: 4});
+  await assert.rejects(f.run(), /too large/);
+  assert.equal(f.blobRead, false);
+  assert.equal(f.clicked, false);
+});
+
+test("regular MP4 rejects missing size metadata before buffering bytes", async () => {
+  const f = normalFixture({reported: 0, actual: 4});
+  await assert.rejects(f.run(), /size is unknown/);
+  assert.equal(f.blobRead, false);
+});
+
+test("regular MP4 rejects HTML disguised as a download", async () => {
+  const f = normalFixture({mime: "text/html"});
+  await assert.rejects(f.run(), /Download failed/);
+  assert.equal(f.blobRead, false);
+});
