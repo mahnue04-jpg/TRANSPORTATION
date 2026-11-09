@@ -282,3 +282,58 @@ def test_master_assembler_rejects_replaced_chapter_review_before_ffmpeg(monkeypa
                                         pinned=pinned)
     assert error.value.status_code == 409
     assert "quality review changed" in error.value.detail
+
+
+def test_failed_master_review_requires_correction_notes(monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    import pytest
+    from app.core.nova.creative_studio import calendar as studio
+
+    asset = SimpleNamespace(
+        id="master-1",
+        metadata={"sha256": "b" * 64, "source_asset_ids": ["chapter-a", "chapter-b"]},
+    )
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: None)
+    monkeypatch.setattr(studio, "_verified_master_assets", lambda *args: [asset])
+    monkeypatch.setattr(studio, "DbCreativeStudioStore", lambda db: SimpleNamespace(
+        save_asset=lambda *args: pytest.fail("Failed review without notes must not persist"),
+    ))
+    with pytest.raises(HTTPException) as error:
+        studio.review_master_version(
+            "project", "entry", "master-1",
+            studio.MasterReviewIn(
+                footage_ok=False, audio_ok=True, captions_ok=True,
+                continuity_ok=True, rights_reviewed=True,
+                notes="  ", correction_chapter_index=0,
+            ),
+            SimpleNamespace(user_id="owner"), object(),
+        )
+    assert error.value.status_code == 422
+
+
+def test_master_job_requires_pinned_review_digest(monkeypatch):
+    """Do not let a legacy queued snapshot bypass the quality-review pin."""
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    import pytest
+    from app.core.nova.creative_studio import calendar as studio
+    from app.core.nova.creative_studio import private_object_storage as remote
+
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args: None)
+    monkeypatch.setattr(studio, "_master_export_limit_seconds", lambda: 3600)
+    monkeypatch.setattr(remote, "enabled", lambda: True)
+    # There are deliberately no media reads: rejected before opening assets.
+    pinned = {
+        "duration_seconds": 600, "version_sha256": "b" * 64,
+        "chapters": [
+            {"chapter_index": 0, "asset_id": "a", "sha256": "a" * 64},
+            {"chapter_index": 1, "asset_id": "b", "sha256": "b" * 64},
+        ],
+    }
+    with pytest.raises(HTTPException) as error:
+        studio._assemble_chapter_master(object(), "owner", "project", "entry", pinned=pinned)
+    assert error.value.status_code == 409
+    assert "Pinned chapter selection" in error.value.detail
