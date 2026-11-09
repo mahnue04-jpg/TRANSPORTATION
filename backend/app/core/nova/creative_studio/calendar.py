@@ -1058,7 +1058,7 @@ def _master_export_limit_seconds() -> int:
 
 
 def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_id: str,
-                             checkpoint=None):
+                             checkpoint=None, pinned=None):
     """Combine verified chapter assets into one private 10–60m master."""
     import os
     import shutil
@@ -1070,41 +1070,44 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
 
     _project(db, owner_id, project_id)
     entry = _entry(db, owner_id, project_id, entry_id)
-    if entry.status != "approved":
-        raise HTTPException(status_code=409, detail="Approve the chapter plan before exporting.")
-    if not 600 <= entry.duration_seconds <= _master_export_limit_seconds():
+    if not isinstance(pinned, dict) or not isinstance(pinned.get("chapters"), list):
+        raise HTTPException(status_code=409, detail="Export has no approved pinned chapter selection.")
+    pinned_duration = pinned.get("duration_seconds")
+    if type(pinned_duration) is not int:
+        raise HTTPException(status_code=409, detail="Pinned duration is invalid.")
+    if not 600 <= pinned_duration <= _master_export_limit_seconds():
         raise HTTPException(status_code=422, detail="Master export duration exceeds the configured 10–60 or 10–120 minute limit.")
     if not remote.enabled():
         raise HTTPException(status_code=503, detail="Private durable object storage is required for long-form masters.")
     # Extended export needs enough scratch space for all downloaded chapters
     # plus the joined master; never start a large job without headroom.
-    if entry.duration_seconds > 3600:
+    if pinned_duration > 3600:
         import shutil
         if shutil.disk_usage(tempfile.gettempdir()).free < 4 * 1024 * 1024 * 1024:
             raise HTTPException(status_code=503, detail="Insufficient scratch disk for extended video export.")
-    chapters = json.loads(entry.chapters_json or "[]")
-    if not 2 <= len(chapters) <= 24 or sum(int(ch["duration_seconds"]) for ch in chapters) != entry.duration_seconds:
-        raise HTTPException(status_code=422, detail="Create 2–24 completed chapters totaling the planned duration.")
+    chapters = pinned["chapters"]
+    if not 2 <= len(chapters) <= 24 or any(
+            row.get("chapter_index") != i or not isinstance(row.get("asset_id"), str)
+            or not isinstance(row.get("sha256"), str) or len(row["sha256"]) != 64
+            for i, row in enumerate(chapters)):
+        raise HTTPException(status_code=409, detail="Pinned chapter selection is invalid.")
     store = DbCreativeStudioStore(db)
     assets = store.list_assets(project_id, owner_id)
     if checkpoint is not None:
         checkpoint("VERIFYING_CHAPTERS", {"chapter_count": len(chapters)})
     selected = []
     for index, chapter in enumerate(chapters):
-        matches = [
-            asset for asset in assets if asset.kind == "video"
-            and (asset.metadata or {}).get("pipeline") == "calendar_saved_clip_assembly"
-            and (asset.metadata or {}).get("calendar_entry_id") == entry_id
-            and (asset.metadata or {}).get("chapter_index") == index
-            and (asset.metadata or {}).get("source_asset_ids") == chapter["asset_ids"]
-            and abs(float((asset.metadata or {}).get("duration_seconds") or 0) -
-                    float(chapter["duration_seconds"])) <= 5
-        ]
-        if not matches:
-            raise HTTPException(status_code=422, detail=f"Chapter {index + 1} needs a completed MP4 before export.")
-        selected.append(matches[-1])
+        matches = [asset for asset in assets
+                   if asset.id == chapter["asset_id"] and asset.kind == "video"
+                   and (asset.metadata or {}).get("pipeline") == "calendar_saved_clip_assembly"
+                   and (asset.metadata or {}).get("calendar_entry_id") == entry_id
+                   and (asset.metadata or {}).get("chapter_index") == index
+                   and (asset.metadata or {}).get("sha256") == chapter["sha256"]]
+        if len(matches) != 1:
+            raise HTTPException(status_code=409, detail=f"Pinned chapter {index + 1} changed or is missing.")
+        selected.append(matches[0])
     signature = hashlib.sha256(
-        (entry_id + "|" + str(entry.duration_seconds) + "|" +
+        (entry_id + "|" + str(pinned_duration) + "|" +
          "|".join(f"{a.id}:{(a.metadata or {}).get('sha256','')}" for a in selected)).encode("utf-8")
     ).hexdigest()
     for asset in assets:
@@ -1231,7 +1234,7 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
         output = root / "finished-master.mp4"
         try:
             measured = join_normalized_chapters(
-                normalized_files, output, expected_seconds=entry.duration_seconds
+                normalized_files, output, expected_seconds=pinned_duration
             )
         except (ChapterMasterError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1246,7 +1249,7 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
         try:
             ref = remote.put_original_file(
                 owner_id, project_id, filename, output, sha,
-                max_bytes=(2 * 1024 * 1024 * 1024 if entry.duration_seconds > 3600
+                max_bytes=(2 * 1024 * 1024 * 1024 if pinned_duration > 3600
                            else 512 * 1024 * 1024),
             )
         except Exception as exc:
@@ -1260,6 +1263,7 @@ def _assemble_chapter_master(db: Session, owner_id: str, project_id: str, entry_
                 metadata={
                     "source": "chapter_master", "pipeline": "calendar_chapter_master",
                     "calendar_entry_id": entry_id, "master_signature": signature,
+                    "pinned_version_sha256": pinned.get("version_sha256"),
                     "source_asset_ids": [a.id for a in selected], "sha256": sha,
                     **measured, "quality_state": "OWNER_REVIEW_REQUIRED",
                     "commercial_complete": False, "publish_ready": False,
@@ -1429,8 +1433,13 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         if not _claim_queued_master(db, owner_id, project_id, entry_id, job_id):
             # Another process already claimed this work, or it was canceled.
             return
+        claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
+        saved = json.loads(claim.checkpoint_json or "{}") if claim and claim.job_id == job_id else {}
+        pinned = saved.get("pinned_master")
+        if not isinstance(pinned, dict):
+            raise RuntimeError("Master job has no pinned approved chapter selection")
         job.status = "RUNNING"
-        job.message = "Combining previously saved chapters into a private MP4."
+        job.message = "Combining pinned approved chapters into a private MP4."
         job.updated_at = _now()
         store.save_job(job)
         heartbeat_thread = threading.Thread(
@@ -1442,7 +1451,7 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         heartbeat_thread.start()
         try:
             result = _assemble_chapter_master(
-                db, owner_id, project_id, entry_id,
+                db, owner_id, project_id, entry_id, pinned=pinned,
                 checkpoint=lambda stage, details: _write_master_checkpoint(
                     owner_id, project_id, entry_id, job_id, stage, details
                 ),
