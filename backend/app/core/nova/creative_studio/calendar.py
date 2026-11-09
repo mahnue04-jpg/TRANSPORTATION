@@ -631,6 +631,7 @@ def _chapter_rebuild_plan(db: Session, owner_id: str, project_id: str, entry_id:
             "status": "REUSABLE" if verified is not None else "NEEDS_REBUILD",
             "asset_id": verified.id if verified is not None else None,
             "asset_sha256": str((verified.metadata or {}).get("sha256") or "") if verified is not None else None,
+            "file_size_bytes": (verified.metadata or {}).get("file_size_bytes") if verified is not None else None,
             "quality_review": (verified.metadata or {}).get("chapter_quality_review") if verified is not None else None,
             "source_clip_count": len(chapter.get("asset_ids") or []),
         })
