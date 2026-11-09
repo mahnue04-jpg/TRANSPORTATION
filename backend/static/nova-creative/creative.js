@@ -2809,7 +2809,7 @@
       ? await shared.authFetch(url, {method: "GET", headers: headers})
       : await fetch(url, {method: "GET", headers: headers});
     if (!response.ok || !response.body ||
-        !String(response.headers.get("content-type") || "").toLowerCase().startsWith("video/mp4")) {
+        String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase() !== "video/mp4") {
       throw new Error("Protected master download is unavailable.");
     }
     var reported = Number(response.headers.get("content-length"));
@@ -2819,21 +2819,23 @@
     }
     if (projectId !== activeProjectId) throw new Error("Project selection changed.");
     var writable = await fileHandle.createWritable();
-    var reader = response.body.getReader();
+    var reader = null;
     var total = 0;
     var lastReportedPercent = -1;
     try {
+      reader = response.body.getReader();
       while (true) {
         if (projectId !== activeProjectId) throw new Error("Project selection changed during download.");
         var part = await reader.read();
         if (part.done) break;
         total += part.value.byteLength;
-        if (total > 2 * 1024 * 1024 * 1024) {
-          throw new Error("Master exceeded the maximum safe download size.");
+        if (total > reported || total > 2 * 1024 * 1024 * 1024) {
+          throw new Error("Master exceeded its verified download size.");
         }
         await writable.write(part.value);
         if (typeof onProgress === "function") {
-          var percent = Math.min(100, Math.floor(100 * total / reported));
+          // 100% is reserved for an actually closed, completed file.
+          var percent = Math.min(99, Math.floor(100 * total / reported));
           if (percent !== lastReportedPercent) {
             lastReportedPercent = percent;
             onProgress({bytes: total, totalBytes: reported, percent: percent});
@@ -2844,12 +2846,16 @@
         throw new Error("Downloaded master is empty or incomplete.");
       }
       await writable.close();
+      if (typeof onProgress === "function") {
+        try { onProgress({bytes: total, totalBytes: reported, percent: 100}); }
+        catch (ignore) { /* UI progress callbacks cannot invalidate a saved file. */ }
+      }
       return {bytes: total, saved: true};
     } catch (err) {
       try { await writable.abort(); } catch (ignore) {}
       throw err;
     } finally {
-      try { await reader.cancel(); } catch (ignore) {}
+      try { if (reader) await reader.cancel(); } catch (ignore) {}
     }
   }
 
