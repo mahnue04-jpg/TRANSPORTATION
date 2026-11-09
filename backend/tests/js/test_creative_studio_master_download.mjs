@@ -73,7 +73,7 @@ function fixture({ chunks, expected, mime = "video/mp4", throwOnRead = false }) 
     helper + '\nreturn streamProtectedStudioMaster;'
   );
   const run = factory(deps);
-  return { file, progress, deps, run: () => run("project", "asset", p => progress.push(p)) };
+  return { file, progress, deps, run: (callback) => run("project", "asset", callback || (p => progress.push(p))) };
 }
 
 test("exact stream commits file only at 100% and reports progress", async () => {
@@ -122,4 +122,26 @@ test("missing trusted content length rejects before creating output", async () =
   await assert.rejects(f.run(), /invalid verified file size/);
   assert.deepEqual(f.file.chunks, []);
   assert.equal(f.file.closed, false);
+});
+
+
+test("switching project mid-download aborts rather than saving old customer media", async () => {
+  const f = fixture({chunks: [[1, 2], [3, 4]], expected: 4});
+  await assert.rejects(
+    f.run(p => {
+      f.progress.push(p);
+      f.deps.changeProject("other-project");
+    }),
+    /Project selection changed/
+  );
+  assert.equal(f.file.closed, false);
+  assert.equal(f.file.aborted, true);
+  assert.ok(f.progress.every(p => p.percent < 100));
+});
+
+test("progress callback failure before close aborts the partial file", async () => {
+  const f = fixture({chunks: [[1, 2], [3, 4]], expected: 4});
+  await assert.rejects(f.run(() => {throw new Error("UI rendering failed");}), /UI rendering failed/);
+  assert.equal(f.file.closed, false);
+  assert.equal(f.file.aborted, true);
 });
