@@ -66,6 +66,18 @@ def ensure_nova_creative_schema(engine: Engine | None = None) -> None:
                     "ALTER TABLE nova_creative_calendar_entries "
                     "ADD COLUMN storyboard_json TEXT NOT NULL DEFAULT '[]'"
                 ))
+        if "narrator_voice" not in existing:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE nova_creative_calendar_entries "
+                    "ADD COLUMN narrator_voice VARCHAR(16) NOT NULL DEFAULT 'en-us'"
+                ))
+        if "narrator_speed" not in existing:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE nova_creative_calendar_entries "
+                    "ADD COLUMN narrator_speed INTEGER NOT NULL DEFAULT 148"
+                ))
     if "nova_creative_render_claims" in inspector.get_table_names():
         claim_columns = {col["name"] for col in inspector.get_columns("nova_creative_render_claims")}
         if "checkpoint_json" not in claim_columns:
