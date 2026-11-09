@@ -192,3 +192,53 @@ def propose_studio_chapters(
         "model_called": False, "saved": False, "published": False,
         "message": "Editable outline only. Review the proposed chapter titles and lengths, then save in the existing chapter editor. No video or AI model was run.",
     }
+
+
+@router.post("/projects/{project_id}/calendar/{entry_id}/assistant/storyboard-proposal")
+def propose_studio_storyboard(
+    project_id: str, entry_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Turn the owner's existing script into editable, uncommitted scenes.
+
+    Deterministic offline storyboard: preserves original words and order, does
+    not fabricate source footage, edit media, charge providers or publish.
+    """
+    import re
+    _project(db, user.user_id, project_id)
+    plan = _as_dict(_entry(db, user.user_id, project_id, entry_id))
+    if plan["status"] == "canceled":
+        raise HTTPException(status_code=409, detail="Canceled plans cannot be revised.")
+    script = " ".join((plan.get("script") or "").split())
+    if not script:
+        raise HTTPException(status_code=422, detail="Save a script before requesting a storyboard.")
+    seconds = int(plan["duration_seconds"])
+    # 60 scenes, at most 120 seconds each, with each scene at least 1 second.
+    count = min(60, max(1, (seconds + 119) // 120))
+    if count > len(script.split()):
+        count = max(1, len(script.split()))
+    words = script.split()
+    base, remainder = divmod(seconds, count)
+    scenes = []
+    for index in range(count):
+        passage = " ".join(words[index * len(words) // count:(index + 1) * len(words) // count])
+        scenes.append({
+            "heading": f"Scene {index + 1} — {plan['topic']}"[:120],
+            "visual_note": (
+                "Choose original, properly licensed visuals matching this narration; "
+                "maintain consistent subject/style between adjacent scenes."
+            ),
+            "narration": passage,
+            "duration_seconds": base + (1 if index < remainder else 0),
+        })
+    # A storyboard with too few words for a long video needs explicit owner
+    # revision, not synthetic or repetitive content quietly invented by Nova.
+    if any(scene["duration_seconds"] > 600 for scene in scenes):
+        raise HTTPException(status_code=422, detail="More script content is needed to plan this video.")
+    return {
+        "status": "DRAFT_SUGGESTION", "scenes": scenes,
+        "duration_seconds": seconds, "model_called": False,
+        "saved": False, "media_generated": False, "published": False,
+        "message": "Review narration, visual notes, pacing and scene titles before saving. No media was generated.",
+    }
