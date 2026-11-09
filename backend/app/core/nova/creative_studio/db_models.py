@@ -191,6 +191,8 @@ class NovaCreativeCalendarEntry(Base):
     timeline_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     chapters_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     storyboard_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    narrator_voice: Mapped[str] = mapped_column(String(16), nullable=False, default="en-us")
+    narrator_speed: Mapped[int] = mapped_column(Integer, nullable=False, default=148)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
