@@ -19,9 +19,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import UserContext, get_current_user_context
-from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject
+from app.core.nova.creative_studio.db_models import NovaCreativeCalendarEntry, NovaCreativeProject, NovaCreativeRenderClaim
 from app.core.nova.creative_studio.models import CreativeAsset, GenerationJob, new_id
 from app.core.nova.creative_studio.store import DbCreativeStudioStore
 from app.core.nova.creative_studio.service import CreativeStudioError, get_service
@@ -964,6 +965,21 @@ async def export_calendar_master(
     )
 
 
+def _master_claim_key(owner_id: str, project_id: str, entry_id: str) -> str:
+    return hashlib.sha256(
+        (owner_id + ":" + project_id + ":" + entry_id).encode("utf-8")
+    ).hexdigest()
+
+
+def _finish_master_claim(db: Session, owner_id: str, project_id: str,
+                         entry_id: str, job_id: str, state: str) -> None:
+    claim = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
+    if claim is not None and claim.job_id == job_id:
+        claim.state = state
+        claim.updated_at = _now()
+        db.commit()
+
+
 # The master-export worker runs only within this application process. Records
 # remain in SQL; actual restart-resumable queues are a later production gate.
 _master_export_lock = threading.Lock()
@@ -981,6 +997,7 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
         if job is None:
             return
         job.status = "RUNNING"
+        _finish_master_claim(db, owner_id, project_id, entry_id, job_id, "RUNNING")
         job.message = "Combining previously saved chapters into a private MP4."
         job.updated_at = _now()
         store.save_job(job)
@@ -999,6 +1016,7 @@ def _run_chapter_master_job(owner_id: str, project_id: str,
             job.message = "Master export could not finish. Existing chapters remain saved."
         job.updated_at = _now()
         store.save_job(job)
+        _finish_master_claim(db, owner_id, project_id, entry_id, job_id, job.status)
     finally:
         db.close()
         with _master_export_lock:
@@ -1087,12 +1105,38 @@ def start_chapter_master_job(
         _master_export_active.add(key)
     try:
         now = _now()
-        job = DbCreativeStudioStore(db).save_job(GenerationJob(
-            id=new_id("cjob"), owner_id=user.user_id, project_id=project_id,
-            kind="calendar_master:" + entry_id, status="QUEUED",
-            message="Queued local master export with no paid-provider calls.",
-            created_at=now, updated_at=now,
-        ))
+        fresh_id = new_id("cjob")
+        claim_key = _master_claim_key(user.user_id, project_id, entry_id)
+        claim = db.get(NovaCreativeRenderClaim, claim_key)
+        if claim is not None and claim.state in {"QUEUED", "RUNNING"}:
+            with _master_export_lock:
+                _master_export_active.discard(key)
+            return {"status": "ALREADY_RUNNING",
+                    "message": "The database already has an active export claim."}
+        if claim is None:
+            db.add(NovaCreativeRenderClaim(
+                claim_key=claim_key, owner_id=user.user_id, project_id=project_id,
+                entry_id=entry_id, job_id=fresh_id, state="QUEUED", updated_at=now,
+            ))
+        else:
+            # Reclaim only a terminal state; never silently restart a stuck job.
+            claim.job_id = fresh_id
+            claim.state = "QUEUED"
+            claim.updated_at = now
+        try:
+            db.flush()
+            job = DbCreativeStudioStore(db).save_job(GenerationJob(
+                id=fresh_id, owner_id=user.user_id, project_id=project_id,
+                kind="calendar_master:" + entry_id, status="QUEUED",
+                message="Queued local master export with no paid-provider calls.",
+                created_at=now, updated_at=now,
+            ))
+        except IntegrityError:
+            db.rollback()
+            with _master_export_lock:
+                _master_export_active.discard(key)
+            return {"status": "ALREADY_RUNNING",
+                    "message": "Another worker claimed this export."}
         background_tasks.add_task(
             _run_chapter_master_job, user.user_id, project_id, entry_id, job.id
         )
