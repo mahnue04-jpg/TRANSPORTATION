@@ -105,7 +105,7 @@ def put_original_file(owner_id: str, project_id: str, filename: str, path, sha25
     """Stream a validated long-form MP4 from disk into private durable storage.
 
     Never loads the finished master into application memory. Restricted to
-    the existing owner/project key format and limited to 512 MiB.
+    the existing owner/project key format. Extended masters require an explicit opt-in.
     """
     from pathlib import Path
 
@@ -115,8 +115,11 @@ def put_original_file(owner_id: str, project_id: str, filename: str, path, sha25
     if not source.is_file():
         raise PrivateStorageError("Finished master is missing")
     length = source.stat().st_size
-    if not 0 < length <= max_bytes <= 512 * 1024 * 1024:
-        raise PrivateStorageError("Finished master exceeds secure storage limit")
+    hard_cap = 2 * 1024 * 1024 * 1024
+    extended = os.getenv("NOVA_STUDIO_EXTENDED_MASTER_EXPORTS", "").lower() in {"1", "true", "yes"}
+    allowed = hard_cap if extended else 512 * 1024 * 1024
+    if not 0 < max_bytes <= allowed or not 0 < length <= max_bytes:
+        raise PrivateStorageError("Finished master exceeds configured secure storage limit")
     digest = hashlib.sha256()
     with source.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
