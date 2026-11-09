@@ -555,6 +555,8 @@ def replace_calendar_chapter_clip(
     updated = existing.copy()
     updated[updated.index(old_id)] = new_id_value
     selected["asset_ids"] = updated
+    # Preserve the explicit correction brief; do not silently mark it complete.
+    selected["revision_note"] = str(selected.get("revision_note") or "")[:2000]
     entry.chapters_json = json.dumps(chapters)
     if entry.status == "approved":
         entry.status = "ready_for_review"
@@ -1892,6 +1894,49 @@ def propose_master_chapter_revision(
         "original_chapter": plan["current_chapter"],
         "message": "A revision brief was prepared. Make the real changes in the editor before saving.",
         "model_called": False, "saved": False, "rendered": False, "published": False,
+    }
+
+
+
+@router.get("/projects/{project_id}/calendar/{entry_id}/chapters/{chapter_index}/replacement-options")
+def chapter_replacement_options(
+    project_id: str, entry_id: str, chapter_index: int,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Present only saved replacement candidates in this authenticated project.
+
+    This is advisory. The replacement endpoint must revalidate storage and
+    approval; listing a candidate is never permission to change a chapter.
+    """
+    _project(db, user.user_id, project_id)
+    entry = _entry(db, user.user_id, project_id, entry_id)
+    chapters = json.loads(entry.chapters_json or "[]")
+    if not 0 <= chapter_index < len(chapters):
+        raise HTTPException(status_code=404, detail="Chapter not found.")
+    row = chapters[chapter_index]
+    assets = DbCreativeStudioStore(db).list_assets(project_id, user.user_id)
+    candidates = []
+    for asset in assets:
+        meta = asset.metadata or {}
+        if (asset.kind == "video" and asset.url
+                and meta.get("pipeline") == "calendar_assembled_scene_preview"
+                and meta.get("publish_ready") is False and meta.get("sha256")):
+            candidates.append({
+                "asset_id": asset.id,
+                "title": asset.title,
+                "duration_seconds": meta.get("duration_seconds"),
+                "preview_only": True,
+                "source_entry_id": meta.get("calendar_entry_id"),
+            })
+    return {
+        "chapter_index": chapter_index,
+        "chapter_title": row.get("title"),
+        "current_clip_ids": row.get("asset_ids", []),
+        "revision_note": row.get("revision_note", ""),
+        "replacement_candidates": candidates[:80],
+        "applied": False, "published": False,
+        "message": "Select one saved replacement and explicitly confirm. The original remains stored.",
     }
 
 
