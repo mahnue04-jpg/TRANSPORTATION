@@ -394,6 +394,9 @@ def test_master_checkpoint_parser_fails_closed_for_corrupt_metadata():
     assert _safe_master_checkpoint("{invalid") == {}
     assert _safe_master_checkpoint("[]") == {}
     assert _safe_master_checkpoint('"not a dict"') == {}
+    assert _safe_master_checkpoint('{"pinned_master": []}') == {}
+    assert _safe_master_checkpoint('{"pinned_master": "not a snapshot"}') == {}
+    assert _safe_master_checkpoint('{"pinned_master": null}') == {}
     assert _safe_master_checkpoint('{"pinned_master":{"version_sha256":"abc"}}') == {
         "pinned_master": {"version_sha256": "abc"}
     }
