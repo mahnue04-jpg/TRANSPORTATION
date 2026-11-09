@@ -441,6 +441,13 @@
                 !window.confirm("This chapter has changed since the reviewed master. Open the current chapter editor without changing it automatically?")) return;
             await editChapters(entry);
             if (active() !== project) return;
+            var selectedPanel = $("calendar-chapters").querySelector(
+              '[data-chapter-index="' + plan.chapter_index + '"]');
+            if (selectedPanel) {
+              selectedPanel.scrollIntoView({behavior: "smooth", block: "start"});
+              var input = selectedPanel.querySelector("input");
+              if (input) input.focus({preventScroll: true});
+            }
             feedback(plan.message + " Chapter " + (plan.chapter_index + 1) +
               " needs review: " + (plan.notes || "No correction notes provided."));
           } catch (err) {
@@ -1297,6 +1304,7 @@
         list.replaceChildren();
         chapterRows.forEach(function (row, index) {
           var panel = document.createElement("fieldset");
+          panel.dataset.chapterIndex = String(index);
           var legend = document.createElement("legend");
           legend.textContent = "Chapter " + (index + 1);
           panel.appendChild(legend);
