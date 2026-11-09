@@ -1461,6 +1461,7 @@ class StoryboardSceneIn(BaseModel):
     narration: str = Field(default="", max_length=6000)
     duration_seconds: int = Field(ge=1, le=600)
     visual_asset_id: str | None = Field(default=None, max_length=48)
+    transition: Literal["cut", "fade"] = "cut"
 
     @field_validator("heading")
     @classmethod
@@ -1505,6 +1506,7 @@ def save_calendar_storyboard(
             "visual_note": scene.visual_note, "narration": scene.narration,
             "duration_seconds": scene.duration_seconds,
             "visual_asset_id": scene.visual_asset_id,
+            "transition": scene.transition,
         }
         for index, scene in enumerate(payload.scenes)
     ]
@@ -1590,6 +1592,7 @@ def _render_storyboard_preview(db: Session, owner_id: str, project_id: str,
             "voiceover_text": scene["narration"],
             "subtitle_text": scene["narration"],
             "duration_seconds": scene["duration_seconds"],
+            "transition": scene.get("transition", "cut"),
         }
         visual_id = scene.get("visual_asset_id")
         if visual_id:
