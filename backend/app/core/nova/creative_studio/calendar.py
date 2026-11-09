@@ -1466,6 +1466,36 @@ def _master_claim_key(owner_id: str, project_id: str, entry_id: str) -> str:
     ).hexdigest()
 
 
+def _swap_terminal_master_claim(
+    db: Session, *, claim_key: str, owner_id: str, project_id: str,
+    entry_id: str, expected_job_id: str, expected_state: str,
+    next_job_id: str, checkpoint_json: str, updated_at: str,
+) -> bool:
+    """Atomic terminal-to-queued claim transition with owner and job fencing.
+
+    Caller commits this update together with its new saved job record.
+    A zero-row update leaves a competing export claim untouched.
+    """
+    if expected_state not in {"ERROR", "GENERATED"}:
+        return False
+    result = db.execute(
+        update(NovaCreativeRenderClaim)
+        .where(
+            NovaCreativeRenderClaim.claim_key == claim_key,
+            NovaCreativeRenderClaim.owner_id == owner_id,
+            NovaCreativeRenderClaim.project_id == project_id,
+            NovaCreativeRenderClaim.entry_id == entry_id,
+            NovaCreativeRenderClaim.job_id == expected_job_id,
+            NovaCreativeRenderClaim.state == expected_state,
+        )
+        .values(
+            job_id=next_job_id, state="QUEUED",
+            checkpoint_json=checkpoint_json, updated_at=updated_at,
+        )
+    )
+    return result.rowcount == 1
+
+
 def _claim_queued_master(db: Session, owner_id: str, project_id: str,
                          entry_id: str, job_id: str) -> bool:
     """Atomic SQL compare-and-swap: exactly one process can run a queued export.
@@ -1851,22 +1881,12 @@ def start_chapter_master_job(
                     _master_export_active.discard(key)
                 return {"status": "ALREADY_RUNNING",
                         "message": "The existing export claim needs reconciliation."}
-            swapped = db.execute(
-                update(NovaCreativeRenderClaim)
-                .where(
-                    NovaCreativeRenderClaim.claim_key == claim_key,
-                    NovaCreativeRenderClaim.owner_id == user.user_id,
-                    NovaCreativeRenderClaim.project_id == project_id,
-                    NovaCreativeRenderClaim.entry_id == entry_id,
-                    NovaCreativeRenderClaim.job_id == old_job_id,
-                    NovaCreativeRenderClaim.state == old_state,
-                )
-                .values(
-                    job_id=fresh_id, state="QUEUED",
-                    checkpoint_json=snapshot, updated_at=now,
-                )
-            )
-            if swapped.rowcount != 1:
+            if not _swap_terminal_master_claim(
+                db, claim_key=claim_key, owner_id=user.user_id,
+                project_id=project_id, entry_id=entry_id,
+                expected_job_id=old_job_id, expected_state=old_state,
+                next_job_id=fresh_id, checkpoint_json=snapshot, updated_at=now,
+            ):
                 db.rollback()
                 with _master_export_lock:
                     _master_export_active.discard(key)
