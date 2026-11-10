@@ -58,6 +58,7 @@
   const eligibleSelect = document.getElementById("operations-eligible-select");
   let eligibleTasks = [];
   let selectedTask = null;
+  let scopedBusy = false;
   if (loadEligible && eligibleSelect) {
     loadEligible.addEventListener("click", async function () {
       const session = window.AmiCorSession;
@@ -65,7 +66,14 @@
         ? session.getAuthHeaders() : {};
       const status = document.getElementById("operations-scoped-csv-result");
       if (!(headers.Authorization || headers.authorization)) {
+        selectedTask = null;
+        eligibleTasks = [];
+        eligibleSelect.replaceChildren(new Option("Sign in to load tasks", ""));
         status.textContent = "Sign in as the AMICOR owner first."; return;
+      }
+      if (scopedBusy) {
+        status.textContent = "Finish the current CSV review request before reloading tasks.";
+        return;
       }
       loadEligible.disabled = true;
       selectedTask = null;
@@ -102,6 +110,7 @@
       }
     });
     eligibleSelect.addEventListener("change", function () {
+      if (scopedBusy) return;
       selectedTask = null;
       document.getElementById("operations-scope-confirmed").checked = false;
       const index = Number(eligibleSelect.value);
@@ -113,6 +122,10 @@
   const scopedStatus = document.getElementById("operations-scoped-csv-result");
   if (scoped && scopedStatus) scoped.addEventListener("submit", async function (event) {
     event.preventDefault();
+    if (scopedBusy) {
+      scopedStatus.textContent = "CSV processing is already in progress. Do not submit again.";
+      return;
+    }
     const selected = selectedTask;
     const engagement = selected ? String(selected.engagement_id || "") : "";
     const task = selected ? String(selected.task_id || "") : "";
@@ -132,7 +145,10 @@
       scopedStatus.textContent = "CSV exceeds 1 MB."; return;
     }
     const button = scoped.querySelector('button[type="submit"]');
+    scopedBusy = true;
     button.disabled = true;
+    if (eligibleSelect) eligibleSelect.disabled = true;
+    if (loadEligible) loadEligible.disabled = true;
     scopedStatus.textContent = "Checking saved engagement and processing the CSV...";
     try {
       const url = "/api/nova/work/operations/engagements/" + encodeURIComponent(engagement) +
@@ -160,10 +176,14 @@
       scopedStatus.textContent = "Saved task " + task +
         ": downloaded " + (response.headers.get("X-Nova-Output-Rows") || "?") +
         " cleaned rows for your review. NOT delivered or marked complete.";
+      document.getElementById("operations-scope-confirmed").checked = false;
     } catch (_) {
       scopedStatus.textContent = "Network error. Task was not completed.";
     } finally {
+      scopedBusy = false;
       button.disabled = false;
+      if (eligibleSelect) eligibleSelect.disabled = false;
+      if (loadEligible) loadEligible.disabled = false;
     }
   });
 })();
