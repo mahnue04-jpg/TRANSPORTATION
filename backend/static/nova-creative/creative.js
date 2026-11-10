@@ -34,6 +34,7 @@
         if ($(id)) $(id).disabled = true;
       });
       renderPreflight(null);
+      renderFirstShotReadiness(null);
     }
     activeProjectId = next;
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
@@ -1847,6 +1848,62 @@
       }
     }
     throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
+  }
+
+  function renderFirstShotReadiness(report) {
+    var el = $("first-shot-readiness-status");
+    if (!el) return;
+    if (!report) {
+      el.textContent = "Select a project to check the first shot.";
+      return;
+    }
+    var blockers = Array.isArray(report.blockers) ? report.blockers : [];
+    var explanations = {
+      STORYBOARD_REQUIRED: "Create the storyboard for this project.",
+      FIRST_SCENE_PROMPT_REQUIRED: "Add visual direction to the first scene.",
+      FIRST_SCENE_REFERENCE_IMAGE_REQUIRED: "Create and save a matching first-scene reference image.",
+      VIDEO_PROVIDER_NOT_AVAILABLE: "Video provider is not ready; check credentials and owner activation.",
+      BUDGET_CONFIRMATION_REQUIRED: "Run the separate price preflight and confirm a budget before paid rendering."
+    };
+    var lines = [
+      "Shot target: 5 seconds (provider duration not yet verified)",
+      "Readiness: " + String(report.status || "UNKNOWN"),
+      "Provider: " + String(report.provider_status || "UNKNOWN"),
+      "Generation started: NO · Charges made by this check: NONE"
+    ];
+    if (!blockers.length) lines.push("All reported preconditions are met. Use the separately owner-gated Generate action; this does not verify finished footage.");
+    blockers.forEach(function (code) {
+      lines.push("Needs attention: " + (explanations[code] || String(code)));
+    });
+    el.innerHTML = lines.map(function (line) {
+      return "<div>" + escapeHtml(line) + "</div>";
+    }).join("");
+  }
+
+  var firstShotReadinessBtn = $("run-first-shot-readiness");
+  if (firstShotReadinessBtn) {
+    firstShotReadinessBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project before checking its first video shot.", false);
+        return;
+      }
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
+      firstShotReadinessBtn.disabled = true;
+      var status = $("first-shot-readiness-status");
+      if (status) status.textContent = "Checking first-shot requirements without provider submission...";
+      try {
+        var report = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/first-shot-readiness");
+        if (projectId !== activeProjectId || revision !== activeProjectRevision) return;
+        renderFirstShotReadiness(report);
+      } catch (err) {
+        if (projectId === activeProjectId && revision === activeProjectRevision && status) {
+          status.textContent = err.message || "First-shot readiness could not be checked.";
+        }
+      } finally {
+        firstShotReadinessBtn.disabled = false;
+      }
+    });
   }
 
   function renderPreflight(quote) {
