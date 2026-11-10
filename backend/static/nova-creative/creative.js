@@ -2025,6 +2025,13 @@
       el.textContent = "No controlled five-second shot has been submitted for this project.";
       return;
     }
+    // An existing controlled job is never an invitation to generate another.
+    // Make the owner review the current job instead of leaving a stale
+    // approval checkbox enabled on this project.
+    currentFirstShotReport = null;
+    var approvalBox = $("first-shot-explicit-approval");
+    if (approvalBox) { approvalBox.checked = false; approvalBox.disabled = true; }
+    refreshFirstShotSubmitButton();
     var job = jobs[0];
     var status = String(job.status || "UNKNOWN").toUpperCase();
     var line = document.createElement("div");
