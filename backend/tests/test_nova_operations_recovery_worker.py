@@ -42,6 +42,8 @@ def test_worker_staging_configuration_approved(config):
     ("NOVA_OPERATIONS_STAGING_DATABASE_URL",
      "postgresql://synthetic:synthetic@127.0.0.1/casting_stage"),
     ("NOVA_OPERATIONS_STAGING_DATABASE_URL", "sqlite:///local.db"),
+    ("NOVA_OPERATIONS_STAGING_DATABASE_URL",
+     "postgresql://another_user:different_secret@127.0.0.1/amicor_prod"),
 ])
 def test_worker_rejects_incorrect_configuration(config, monkeypatch, env_name, new_value):
     monkeypatch.setenv(env_name, new_value)
