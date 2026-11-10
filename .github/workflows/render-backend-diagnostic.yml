@@ -75,7 +75,9 @@ jobs:
         with:
           node-version: "22"
       - name: Verify browser code syntax
-        run: node --check static/nova-work/operations-csv.js
+        run: |
+          node --check static/nova-work/operations-csv.js
+          node --check static/nova-work/recovery-preview.js
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
