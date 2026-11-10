@@ -33,7 +33,7 @@ def harness(monkeypatch):
         "blockers": None,
         "service": "Synthetic CSV cleanup",
         "tasks": [{
-            "task_id": "task-a", "title": "Synthetic review task",
+            "task_id": "task-a", "title": "Synthetic CSV cleanup task",
             "status": "READY", "classification": "NOVA",
             "responsible_party": "NOVA", "review_required": True,
             "required_owner_input": None, "blocked_reason": None,
