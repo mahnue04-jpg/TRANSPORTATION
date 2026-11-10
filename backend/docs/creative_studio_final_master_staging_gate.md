@@ -80,6 +80,10 @@ A queued master job pins both each chapter media SHA and a digest of that chapte
 41. **Staging verifier refuses unplayable downloads:** Even when the full transfer SHA matches the expected source digest, the verifier must reject an MP4 missing H.264/AAC tracks, lacking a valid bounded duration, or failing FFprobe. Never rename an invalid partial transfer into an approved final evidence file.
 42. **Optional complete decode check:** In a test-only environment, run `backend/scripts/verify_studio_master_download.py --local-file /path/to/master.mp4 --sha256 ... --decode-check`. FFmpeg must decode both entire tracks with no reported corruption. This does not substitute for an owner watching the full production; expensive/long decodes are opt-in and have a bounded timeout.
 
+43. **Read-only interrupted-job status:** With a stale RUNNING claim, a saved matching private MP4, and a valid pinned version, the protected master-status GET must return `RECOVERABLE_ASSET_FOUND` but **must not** write a GENERATED job, finalize a SQL claim, enqueue an export, or trigger publishing. Preserve worker and source data.
+44. **Fresh worker lease:** With a RUNNING claim whose heartbeat is within the grace period, master-status must report RUNNING rather than claiming that a matching saved object proves completion.
+45. **Recovery action gate:** If `RECOVERABLE_ASSET_FOUND`, customers cannot use the failed-job resume route to start a duplicate. Operator reconciliation must separately verify exact job ID, pinned chapter reviews, remote bytes, active worker liveness, and owner approval. No automatic claim finalization is authorized by status polling.
+
 ## Evidence required before release
 
 Capture per-case result, exact Git commit SHA, staging environment identifier, timestamp, redacted project and chapter IDs, asset SHA256, browser/OS, CI run, FFprobe metadata and playback/download notes. Attach failures with reproduction steps and observed vs expected outcomes. Do not attach private customer video publicly.
@@ -90,7 +94,7 @@ Project > Calendar > Saved Chapters > **Check chapter rebuild readiness** > open
 
 ## Release criteria
 
-- CI and all forty-two staging scenarios pass with recorded evidence.
+- CI and all forty-five staging scenarios pass with recorded evidence.
 - No permission or source-retention regression.
 - A finished MP4 has actually been played and downloaded.
 - Owner explicitly approves release after reviewing the evidence.
