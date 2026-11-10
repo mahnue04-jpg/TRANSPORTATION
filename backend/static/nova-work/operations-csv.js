@@ -54,4 +54,109 @@
       button.disabled = false;
     }
   });
+  const loadEligible = document.getElementById("operations-load-eligible");
+  const eligibleSelect = document.getElementById("operations-eligible-select");
+  if (loadEligible && eligibleSelect) {
+    let eligibleTasks = [];
+    loadEligible.addEventListener("click", async function () {
+      const session = window.AmiCorSession;
+      const headers = session && typeof session.getAuthHeaders === "function"
+        ? session.getAuthHeaders() : {};
+      const status = document.getElementById("operations-scoped-csv-result");
+      if (!(headers.Authorization || headers.authorization)) {
+        status.textContent = "Sign in as the AMICOR owner first."; return;
+      }
+      loadEligible.disabled = true;
+      status.textContent = "Loading eligible Nova tasks...";
+      try {
+        const response = await fetch("/api/nova/work/operations/eligible-csv-tasks", {
+          credentials: "same-origin", headers: headers
+        });
+        if (!response.ok) {
+          let detail = "Task lookup unavailable (" + response.status + ").";
+          try { const error = await response.json(); detail = error.detail || detail; } catch (_) {}
+          status.textContent = detail; return;
+        }
+        const data = await response.json();
+        eligibleTasks = Array.isArray(data.tasks) ? data.tasks : [];
+        eligibleSelect.replaceChildren(new Option("Choose a saved task", ""));
+        eligibleTasks.forEach(function (task, index) {
+          const label = (task.engagement_title || task.engagement_id) +
+            " — " + (task.task_title || task.task_id);
+          eligibleSelect.appendChild(new Option(label, String(index)));
+        });
+        status.textContent = eligibleTasks.length
+          ? "Select a saved task, then confirm authority and choose its CSV."
+          : "No eligible Nova tasks were found. An ACTIVE engagement and an unblocked Nova review task are required.";
+      } catch (_) {
+        status.textContent = "Could not load saved tasks. Check your connection.";
+      } finally {
+        loadEligible.disabled = false;
+      }
+    });
+    eligibleSelect.addEventListener("change", function () {
+      const index = Number(eligibleSelect.value);
+      if (eligibleSelect.value === "" || !Number.isInteger(index) || !eligibleTasks[index]) return;
+      document.getElementById("operations-engagement-id").value =
+        eligibleTasks[index].engagement_id;
+      document.getElementById("operations-task-id").value =
+        eligibleTasks[index].task_id;
+      document.getElementById("operations-scope-confirmed").checked = false;
+    });
+  }
+  const scoped = document.getElementById("operations-scoped-csv-form");
+  const scopedStatus = document.getElementById("operations-scoped-csv-result");
+  if (scoped && scopedStatus) scoped.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const engagement = document.getElementById("operations-engagement-id").value.trim();
+    const task = document.getElementById("operations-task-id").value.trim();
+    const file = document.getElementById("operations-scoped-csv-file").files[0];
+    const consent = document.getElementById("operations-scope-confirmed").checked;
+    const session = window.AmiCorSession;
+    const headers = session && typeof session.getAuthHeaders === "function"
+      ? session.getAuthHeaders() : {};
+    if (!(headers.Authorization || headers.authorization)) {
+      scopedStatus.textContent = "Sign in as the AMICOR owner first."; return;
+    }
+    if (!engagement || !task || !file || !consent) {
+      scopedStatus.textContent = "Engagement, Nova task, authorized CSV, and confirmation are required."; return;
+    }
+    if (file.size > 1000000) {
+      scopedStatus.textContent = "CSV exceeds 1 MB."; return;
+    }
+    const button = scoped.querySelector('button[type="submit"]');
+    button.disabled = true;
+    scopedStatus.textContent = "Checking saved engagement and processing the CSV...";
+    try {
+      const url = "/api/nova/work/operations/engagements/" + encodeURIComponent(engagement) +
+        "/tasks/" + encodeURIComponent(task) + "/csv-clean";
+      const response = await fetch(url, {
+        method: "POST", credentials: "same-origin", body: file,
+        headers: Object.assign({}, headers, {
+          "Content-Type": "text/csv",
+          "X-Nova-File-Name": file.name,
+          "X-Nova-Owner-Action": "process-csv-for-owner-review",
+          "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization"
+        })
+      });
+      if (!response.ok) {
+        let detail = "Processing denied (" + response.status + ").";
+        try { const body = await response.json(); detail = body.detail || detail; } catch (_) {}
+        scopedStatus.textContent = detail; return;
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl; link.download = "nova-cleaned-review.csv";
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 10000);
+      scopedStatus.textContent = "Saved task " + task +
+        ": downloaded " + (response.headers.get("X-Nova-Output-Rows") || "?") +
+        " cleaned rows for your review. NOT delivered or marked complete.";
+    } catch (_) {
+      scopedStatus.textContent = "Network error. Task was not completed.";
+    } finally {
+      button.disabled = false;
+    }
+  });
 })();

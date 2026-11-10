@@ -63,6 +63,34 @@
         <button type="submit">Clean CSV for my review</button>
       </form>
       <p class="hint" id="operations-csv-result" aria-live="polite">Feature unavailable until separately enabled for an authorized owner.</p>
+      <div class="command-card">
+        <h3>Process CSV for a saved assignment</h3>
+        <p class="hint">Only for an ACTIVE, unblocked engagement with a saved Nova task requiring owner review. Processing does not complete or deliver the contract.</p>
+        <div class="command-actions">
+          <button type="button" id="operations-load-eligible" class="secondary">Load my eligible Nova tasks</button>
+        </div>
+        <label for="operations-eligible-select">Saved task to process
+          <select id="operations-eligible-select">
+            <option value="">Load tasks, then select an assignment</option>
+          </select>
+        </label>
+        <form id="operations-scoped-csv-form">
+          <label for="operations-engagement-id">Saved engagement ID
+            <input id="operations-engagement-id" maxlength="120" required autocomplete="off" placeholder="Copy from your Work engagement" />
+          </label>
+          <label for="operations-task-id">Saved Nova task ID
+            <input id="operations-task-id" maxlength="120" required autocomplete="off" placeholder="Copy from the engagement task" />
+          </label>
+          <label for="operations-scoped-csv-file">Authorized CSV
+            <input id="operations-scoped-csv-file" type="file" accept=".csv,text/csv" required />
+          </label>
+          <label><input id="operations-scope-confirmed" type="checkbox" required />
+            I confirm AMICOR has the client's authorization to process this data, and I will review the result before delivery.
+          </label>
+          <button type="submit">Process saved task for review</button>
+        </form>
+        <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed.</p>
+      </div>
     </section>
 
     <section class="command-card" aria-label="Creative image generation">
