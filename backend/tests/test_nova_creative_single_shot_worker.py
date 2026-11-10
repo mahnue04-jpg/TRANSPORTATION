@@ -91,3 +91,59 @@ def test_controlled_worker_fails_closed_if_provider_switched(tmp_path, monkeypat
         )
     assert error.value.code == "FIRST_SHOT_PROVIDER_CHANGED"
     assert provider.calls == 0
+
+
+def test_restart_does_not_resubmit_paid_first_shot(monkeypatch):
+    import importlib
+    from fastapi import BackgroundTasks
+
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    routes._scene_workers.clear()
+    job = SimpleNamespace(
+        id="single-job", kind="first_shot_video", status="RUNNING",
+        result_asset_ids=[],
+    )
+    updates = []
+
+    class FakeService:
+        store = SimpleNamespace(
+            list_jobs=lambda project, owner: [job],
+            list_assets=lambda project, owner: [],
+        )
+
+        def _finish_job(self, row, *, status, message, asset_ids):
+            updates.append((status, message))
+            row.status = status
+
+    tasks = BackgroundTasks()
+    routes._recover_scene_jobs(FakeService(), "owner", "project", tasks)
+    assert job.status == "ERROR"
+    assert "no automatic retry" in updates[0][1]
+    assert tasks.tasks == []
+
+
+def test_restart_can_recognize_saved_paid_video_without_resubmission():
+    import importlib
+    from fastapi import BackgroundTasks
+
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    routes._scene_workers.clear()
+    result = SimpleNamespace(id="clip-1", kind="video", status="GENERATED", url="/saved/clip.mp4")
+    job = SimpleNamespace(
+        id="single-job", kind="first_shot_video", status="RUNNING",
+        result_asset_ids=[result.id],
+    )
+
+    class FakeService:
+        store = SimpleNamespace(
+            list_jobs=lambda project, owner: [job],
+            list_assets=lambda project, owner: [result],
+        )
+
+        def _finish_job(self, row, *, status, message, asset_ids):
+            row.status = status
+
+    tasks = BackgroundTasks()
+    routes._recover_scene_jobs(FakeService(), "owner", "project", tasks)
+    assert job.status == "GENERATED"
+    assert tasks.tasks == []
