@@ -33,11 +33,15 @@ Use the staging site's owner login session; the preview does not create logins.
 3. Reopen the job from its saved history after a browser refresh.
 4. Click **Run one staging processing attempt**. Expect
    `AWAITING_REVIEW` and output `Name\nAda\n`.
-5. Download the review copy. Verify SHA-256, then **Approve for download**.
+5. Create two more fictional queued CSV jobs. Click **Run up to five queued staging
+   jobs** and confirm each is processed once, remains available in saved
+   history, and is never marked delivered. This is a manual supervised worker
+   pass, **not an autonomous background scheduler**.
+6. Download the review copy. Verify SHA-256, then **Approve for download**.
    Verify `APPROVED_FOR_DOWNLOAD`, **not** delivered, invoiced or paid.
-6. Repeat with a second job and reject it. Rejected outputs must be
+7. Repeat with a second job and reject it. Rejected outputs must be
    unavailable for download.
-7. Block/revoke the synthetic engagement; listing, status, processing,
+8. Block/revoke the synthetic engagement; listing, status, processing,
    review and download must reject or hide it.
 
 ## Restart, security and reliability exercises (engineering verification)
@@ -82,3 +86,10 @@ Use the staging site's owner login session; the preview does not create logins.
 
 Never call a green synthetic test run "customer-ready" without the staging
 and business-process evidence above.
+
+## Current development worker interface
+The default-off staging queue now supports `due_job_ids` and `run_due_jobs`
+with explicit owner/org scoping, a batch limit (up to 25 at the code layer,
+5 through the owner rehearsal API), and fresh saved-task authorization.
+No unattended scheduler, service deployment, restart proof, or production
+processing has been established. A green CI result is not proof of those.
