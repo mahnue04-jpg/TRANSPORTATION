@@ -24,8 +24,15 @@ def first_shot_readiness(
     first_index = int(getattr(first_scene, "index", 0)) if first_scene is not None else None
     if first_scene is None:
         blockers.append("STORYBOARD_REQUIRED")
-    elif not str(getattr(first_scene, "visual_prompt", "") or getattr(first_scene, "description", "")).strip():
-        blockers.append("FIRST_SCENE_PROMPT_REQUIRED")
+    else:
+        if not str(getattr(first_scene, "visual_prompt", "") or getattr(first_scene, "description", "")).strip():
+            blockers.append("FIRST_SCENE_PROMPT_REQUIRED")
+        try:
+            duration = int(getattr(first_scene, "duration_seconds", 5) or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        if duration != 5:
+            blockers.append("FIRST_SCENE_NOT_FIVE_SECONDS")
 
     status = str(getattr(provider_status, "status", "") or "").upper()
     if status != "AVAILABLE":
@@ -58,6 +65,7 @@ def first_shot_readiness(
     return {
         "status": "READY_TO_REQUEST" if not blockers else "BLOCKED",
         "target_seconds": 5,
+        "planned_first_scene_seconds": int(getattr(first_scene, "duration_seconds", 5) or 0) if first_scene is not None else None,
         "provider_status": status or "UNKNOWN",
         "first_scene_index": first_index,
         "reference_image_asset_id": str(getattr(source_images[-1], "id", "")) if source_images else None,
