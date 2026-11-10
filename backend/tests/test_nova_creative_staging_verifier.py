@@ -215,3 +215,24 @@ def test_remote_transfer_rejects_redirect_without_following_authorization(monkey
             digest(b"fake"), target, "mock-owner-token"
         )
     assert not target.exists()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg tools missing")
+def test_full_video_and_audio_decode_on_valid_synthetic_clip(tmp_path):
+    media = tmp_path / "decoded.mp4"
+    subprocess.run([
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=12:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(media),
+    ], check=True, capture_output=True, timeout=40)
+    assert verifier.decode_mp4(media) is None
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg tools missing")
+def test_full_decode_rejects_corrupt_pseudo_video(tmp_path):
+    bad = tmp_path / "corrupt.mp4"
+    bad.write_bytes(b"fake-mp4")
+    with pytest.raises(verifier.VerificationError, match="decode failed"):
+        verifier.decode_mp4(bad)
