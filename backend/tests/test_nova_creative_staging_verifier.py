@@ -105,6 +105,11 @@ def test_staging_download_streams_and_renames_only_verified_file(monkeypatch, tm
             assert request.full_url.endswith("/projects/project/assets/asset/file")
             return FakeResponse(payload)
     monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    # These are byte-transfer fixture bytes, not an MP4; actual probe paths
+    # are independently exercised with synthetic H.264/AAC fixtures below.
+    monkeypatch.setattr(verifier, "inspect_mp4", lambda path: {
+        "video_codec": "h264", "audio_codec": "aac", "duration_seconds": 1.0
+    })
     destination = tmp_path / "verified.mp4"
     assert verifier.download_staging_master(
         "https://studio.example.test", "project", "asset",
@@ -142,3 +147,22 @@ def test_staging_download_refuses_overwriting_existing_evidence(monkeypatch, tmp
             digest(b"other"), destination, "mock-owner-token",
         )
     assert destination.read_bytes() == b"existing"
+
+
+def test_staging_rejects_same_hash_non_video_before_finalizing(monkeypatch, tmp_path):
+    payload = b"fake-video-with-matching-checksum"
+    class FakeResponse(BytesIO):
+        status = 200
+        headers = {"Content-Length": str(len(payload)), "Content-Type": "video/mp4"}
+    class FakeOpener:
+        def open(self, request, timeout):
+            return FakeResponse(payload)
+    monkeypatch.setattr(verifier.urllib.request, "build_opener", lambda *handlers: FakeOpener())
+    output = tmp_path / "unplayable.mp4"
+    with pytest.raises(verifier.VerificationError, match="FFprobe"):
+        verifier.download_staging_master(
+            "https://studio.example.test", "project", "asset",
+            digest(payload), output, "mock-owner-token"
+        )
+    assert not output.exists()
+    assert not (tmp_path / "unplayable.mp4.partial").exists()
