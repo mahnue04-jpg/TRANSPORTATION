@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AMICOR Nova - Staging CSV Recovery Rehearsal</title>
+  <link rel="stylesheet" href="/static/branding/brand.css">
+  <link rel="stylesheet" href="/static/nova-work/work.css">
+</head>
+<body>
+  <main class="work-main">
+    <h1>AMICOR Nova - Recovery Rehearsal</h1>
+    <p><a href="/nova/work">Return to Work &amp; Revenue</a></p>
+    <p><strong>Staging only. Use fictional CSV data.</strong>
+       This screen does not accept contracts, send files to clients, invoice,
+       or claim work has been delivered. The preview fails closed unless
+       authorized staging PostgreSQL, private storage and the feature flag
+       are configured.</p>
+    <section class="command-card">
+      <h2>1. Choose a saved, eligible assignment</h2>
+      <button id="recovery-load-tasks" type="button">Load eligible assignments</button>
+      <label for="recovery-task-select">Assignment
+        <select id="recovery-task-select"><option value="">Load assignments first</option></select>
+      </label>
+      <form id="recovery-upload-form">
+        <label for="recovery-upload">Fictional UTF-8 CSV (max 1 MB)
+          <input id="recovery-upload" type="file" accept=".csv,text/csv" required>
+        </label>
+        <label><input id="recovery-consent" type="checkbox" required>
+          I confirm this is fictional test data and the selected assignment is authorized.
+        </label>
+        <button type="submit">Save input and queue review job</button>
+      </form>
+    </section>
+    <section class="command-card">
+      <h2>2. Reopen and process your review job</h2>
+      <button id="recovery-load-history" type="button">Reload my saved jobs</button>
+      <label for="recovery-job-select">Saved job
+        <select id="recovery-job-select"><option value="">Load jobs first</option></select>
+      </label>
+      <div class="command-actions">
+        <button id="recovery-check" type="button">Check status</button>
+        <button id="recovery-process" type="button">Run one staging processing attempt</button>
+        <button id="recovery-download" type="button">Download private review result</button>
+      </div>
+    </section>
+    <section class="command-card">
+      <h2>3. Owner review decision</h2>
+      <div class="command-actions">
+        <button id="recovery-approve" type="button">Approve for download</button>
+        <button id="recovery-reject" type="button">Reject result</button>
+      </div>
+      <p>Approval is for private review only; it is not customer delivery or payment.</p>
+    </section>
+    <p id="recovery-message" role="status" aria-live="polite">Sign in to the staging Work &amp; Revenue app as the authorized owner, then load assignments.</p>
+  </main>
+  <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-work/recovery-preview.js"></script>
+</body>
+</html>
