@@ -644,6 +644,98 @@ def clear_failed_video_assets(
         raise
 
 
+class FirstShotSubmitIn(BaseModel):
+    # Explicit action approval distinct from viewing a nonbillable quote.
+    confirm_paid_generation: bool = False
+    reference_image_asset_id: str = Field(min_length=1, max_length=160)
+
+
+@router.post("/projects/{project_id}/generate/first-shot")
+def generate_first_shot(
+    project_id: str,
+    payload: FirstShotSubmitIn,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Submit at most one five-second Kling shot for an approved one-scene project.
+
+    Never enable providers, grant a budget, buy credits, or generate fallback
+    image motion. Existing scene generation remains a separate workflow.
+    """
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+
+    _require_owner(user)
+    if payload.confirm_paid_generation is not True:
+        raise HTTPException(status_code=422, detail={
+            "code": "EXPLICIT_SHOT_APPROVAL_REQUIRED",
+            "message": "Approve exactly one potentially billable five-second Kling shot.",
+        })
+    service = get_service(db)
+    try:
+        service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        if video_provider().provider_id != "fal_kling_video":
+            raise CreativeStudioError(
+                "KLING_FIVE_SECOND_PROVIDER_REQUIRED",
+                "Select the guarded five-second Kling provider before starting this shot.",
+                http_status=422,
+            )
+        quote = service.preflight_quote(user.user_id, project_id)
+        report = first_shot_readiness(
+            scenes=service.store.list_scenes(project_id, user.user_id),
+            assets=service.store.list_assets(project_id, user.user_id),
+            provider_status=video_provider().status(),
+            budget_confirmed=quote.get("owner_budget_confirmed") is True,
+            media_resolver=_resolve_creative_media_url,
+        )
+        if report["status"] != "READY_TO_REQUEST":
+            raise CreativeStudioError(
+                "FIRST_SHOT_NOT_READY",
+                "The controlled five-second shot is blocked: " + ", ".join(report["blockers"]),
+                http_status=422,
+            )
+        if report["reference_image_asset_id"] != payload.reference_image_asset_id:
+            raise CreativeStudioError(
+                "FIRST_SHOT_REFERENCE_CHANGED",
+                "The reference image changed. Run the free readiness check again.",
+                http_status=409,
+            )
+        # The existing queued worker processes one storyboard scene per job.
+        # Refuse any prior scene video so a second paid post cannot be mistaken
+        # for part of the first acceptance test.
+        with _scene_lock:
+            if any(row.kind == "video" for row in service.store.list_jobs(project_id, user.user_id)):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_ALREADY_ATTEMPTED",
+                    "A video job already exists. Review or reconcile it before another paid submission.",
+                    http_status=409,
+                )
+            if any(row.kind == "video" for row in service.store.list_assets(project_id, user.user_id)):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_VIDEO_EXISTS",
+                    "This project already has video results. Use a fresh one-scene acceptance project.",
+                    http_status=409,
+                )
+            job = service._start_job(user.user_id, project_id, "video")
+            service._finish_job(
+                job, status="QUEUED",
+                message="One explicitly authorized five-second Kling shot queued.",
+                asset_ids=[],
+            )
+            _scene_workers.add(job.id)
+            background_tasks.add_task(_run_scene_background, user.user_id, project_id, job.id)
+        return {
+            "status": "PROCESSING", "job": job.as_dict(),
+            "scope": "ONE_FIVE_SECOND_KLING_SHOT",
+            "already_running": False,
+        }
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/generate/video")
 def generate_video(
     project_id: str,
