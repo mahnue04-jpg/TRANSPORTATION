@@ -41,6 +41,8 @@ class FakePrivateStore:
 def postgres(monkeypatch):
     url = os.getenv("NOVA_CSV_CI_DATABASE_URL", "")
     if not url or "127.0.0.1" not in url or "postgresql" not in url:
+        if os.getenv("CI", "").lower() == "true":
+            pytest.fail("CI must provide an isolated loopback PostgreSQL service")
         pytest.skip("explicit loopback ephemeral PostgreSQL required")
     engine = sa.create_engine(url, pool_size=5, max_overflow=5)
     assert engine.dialect.name == "postgresql"
