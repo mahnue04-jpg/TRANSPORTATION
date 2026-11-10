@@ -74,22 +74,24 @@
             <option value="">Load tasks, then select an assignment</option>
           </select>
         </label>
+        <p class="hint">Choose a task from the authenticated list above. Manual engagement and task IDs are not accepted. Tasks are rechecked by the server when you process the file.</p>
         <form id="operations-scoped-csv-form">
-          <label for="operations-engagement-id">Saved engagement ID
-            <input id="operations-engagement-id" maxlength="120" required autocomplete="off" placeholder="Copy from your Work engagement" />
-          </label>
-          <label for="operations-task-id">Saved Nova task ID
-            <input id="operations-task-id" maxlength="120" required autocomplete="off" placeholder="Copy from the engagement task" />
-          </label>
           <label for="operations-scoped-csv-file">Authorized CSV
             <input id="operations-scoped-csv-file" type="file" accept=".csv,text/csv" required />
           </label>
           <label><input id="operations-scope-confirmed" type="checkbox" required />
             I confirm AMICOR has the client's authorization to process this data, and I will review the result before delivery.
           </label>
-          <button type="submit">Process saved task for review</button>
+          <button type="submit">Create secure CSV review job</button>
         </form>
-        <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed.</p>
+        <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed. Production job service is unavailable until approved and enabled.</p>
+        <div class="command-actions">
+          <button type="button" class="secondary" id="operations-durable-status" disabled>Check job status</button>
+          <button type="button" class="secondary" id="operations-durable-download" disabled>Download private review copy</button>
+          <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
+          <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>
+        </div>
+        <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>
     </section>
 

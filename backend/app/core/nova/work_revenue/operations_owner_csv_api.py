@@ -17,7 +17,7 @@ from app.core.nova.work_revenue import service
 
 from app.auth import UserContext
 from app.core.nova.router import require_nova_access
-from app.core.nova.work_revenue.router import require_work_revenue_owner
+from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.core.nova.work_revenue.operations_csv_cleanup import (
     SpreadsheetInputError, clean_csv_text,
 )
@@ -30,6 +30,62 @@ router = APIRouter(
 
 LIMIT_BYTES = 1_000_000
 CSV_MIME_TYPES = {"text/csv", "application/csv", "application/vnd.ms-excel"}
+
+
+def _eligible_engagement(engagement: dict, org: str, owner_id: str) -> bool:
+    """Same fail-closed gate for owner task listing and processing."""
+    return (
+        str(engagement.get("organization_id") or "") == org
+        and str(engagement.get("owner_user_id") or "") == owner_id
+        and str(engagement.get("status") or "").strip().upper() == "ACTIVE"
+        and not str(engagement.get("blockers") or "").strip()
+    )
+
+
+def _csv_task_scope(task: dict) -> bool:
+    """Only tasks explicitly described as CSV/spreadsheet cleanup are eligible.
+
+    General Nova administrative work is not authorization to transform files.
+    This label gate is intentionally narrow; a future structured work-type
+    authorization should replace text labels before customer production.
+    """
+    description = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "deliverable")
+    )
+    return any(
+        label in description
+        for label in (
+            "csv", "spreadsheet cleanup", "spreadsheet cleaning",
+            "data cleanup", "data cleaning", "data validation",
+            "data reconciliation",
+        )
+    )
+
+
+def _eligible_task(task: dict, completed_task_ids: set[str]) -> bool:
+    """Restrict CSV work to unblocked, explicitly scoped supervised Nova tasks."""
+    dependency = str(task.get("depends_on_task_id") or "").strip()
+    return (
+        _csv_task_scope(task)
+        and str(task.get("classification") or "").strip().upper() == "NOVA"
+        and str(task.get("responsible_party") or "").strip().upper() == "NOVA"
+        and task.get("review_required") is True
+        and str(task.get("status") or "").strip().upper()
+        in {"READY", "NOT_STARTED", "IN_PROGRESS"}
+        and not str(task.get("blocked_reason") or "").strip()
+        and not str(task.get("required_owner_input") or "").strip()
+        and (not dependency or dependency in completed_task_ids)
+    )
+
+
+def _completed_task_ids(engagement: dict) -> set[str]:
+    return {
+        str(task.get("task_id") or "")
+        for task in engagement.get("tasks") or []
+        if isinstance(task, dict)
+        and str(task.get("status") or "").strip().upper() == "COMPLETE"
+    }
 
 
 @router.post("/csv-clean")
@@ -126,9 +182,7 @@ async def scoped_owner_csv_cleanup(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     if (
         str(engagement.get("engagement_id") or "") != engagement_id
-        or str(engagement.get("organization_id") or "") != org
-        or str(engagement.get("status") or "").strip().upper() != "ACTIVE"
-        or str(engagement.get("blockers") or "").strip()
+        or not _eligible_engagement(engagement, org, str(owner.user_id))
     ):
         raise HTTPException(status_code=409, detail="Engagement must be active, owner-scoped and unblocked")
     task = next(
@@ -138,13 +192,7 @@ async def scoped_owner_csv_cleanup(
     )
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found on authorized engagement")
-    if (
-        str(task.get("classification") or "").upper() != "NOVA"
-        or str(task.get("responsible_party") or "").upper() != "NOVA"
-        or not bool(task.get("review_required"))
-        or str(task.get("status") or "").upper() not in {"READY", "NOT_STARTED", "IN_PROGRESS"}
-        or str(task.get("blocked_reason") or "").strip()
-    ):
+    if not _eligible_task(task, _completed_task_ids(engagement)):
         raise HTTPException(status_code=409, detail="Task is not ready for supervised Nova processing")
     result = await owner_csv_cleanup(
         request, owner_action=owner_action, filename=filename, owner=owner,
@@ -153,6 +201,174 @@ async def scoped_owner_csv_cleanup(
     result.headers["X-Nova-Task-ID"] = task_id
     result.headers["X-Nova-Delivery-Status"] = "owner-review-only-not-delivered"
     return result
+
+
+
+# Durable customer-job endpoints are independent of the legacy in-memory
+# cleanup endpoint. They are default-off and require PostgreSQL + private S3.
+from . import operations_customer_csv_jobs as durable_csv
+
+
+def _check_saved_csv_assignment(
+    db: Session, *, owner: UserContext, engagement_id: str, task_id: str,
+) -> None:
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(403, "Specific owner organization required")
+    try:
+        engagement = service.get_engagement(
+            db, engagement_id, organization_id=org, user=owner,
+        )
+    except service.NovaWorkError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    if not _eligible_engagement(engagement, org, str(owner.user_id)):
+        raise HTTPException(409, "Engagement no longer eligible")
+    task = next(
+        (item for item in engagement.get("tasks") or []
+         if isinstance(item, dict) and item.get("task_id") == task_id),
+        None,
+    )
+    if task is None:
+        raise HTTPException(404, "Task not found on authorized engagement")
+    if not _eligible_task(task, _completed_task_ids(engagement)):
+        raise HTTPException(409, "Task not authorized for CSV processing")
+
+
+def _durable_error(exc: durable_csv.CustomerCSVBlocked):
+    raise HTTPException(exc.code, str(exc)) from exc
+
+
+@router.post("/durable/engagements/{engagement_id}/tasks/{task_id}/jobs", status_code=202)
+async def create_durable_csv_job(
+    engagement_id: str,
+    task_id: str,
+    request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    scope_confirmed: str | None = Header(default=None, alias="X-Nova-Scope-Confirmed"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    if scope_confirmed != "owner-confirmed-client-authorization":
+        raise HTTPException(403, "Owner data processing authorization required")
+    if not isinstance(filename, str) or not filename.lower().endswith(".csv") or len(filename) > 180 or any(
+        ord(c) < 32 or ord(c) == 127 or c in "/\\\\"
+        for c in filename
+    ):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    try:
+        durable_csv.require_runtime(db)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id,
+    )
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB")
+        content.extend(chunk)
+    try:
+        return durable_csv.submit_review_job(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            engagement_id=engagement_id, task_id=task_id,
+            request_key=request_key or "", raw=bytes(content),
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except (UnicodeDecodeError, SpreadsheetInputError) as exc:
+        raise HTTPException(400, "CSV content invalid") from exc
+
+
+@router.get("/durable/jobs/{job_id}")
+def durable_csv_job_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = durable_csv.job_status(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        return data
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.post("/durable/jobs/{job_id}/review")
+async def durable_csv_review(
+    job_id: str,
+    request: Request,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = durable_csv.job_status(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        payload = await request.json()
+        if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
+            raise HTTPException(400, "Boolean approve required")
+        return durable_csv.review_job(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id, approve=payload["approve"],
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.post("/durable/jobs/{job_id}/recover")
+def recover_durable_csv_job(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = durable_csv.job_status(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        return durable_csv.recover_stale_job(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/durable/jobs/{job_id}/download")
+def durable_csv_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = durable_csv.job_status(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        content = durable_csv.download_review(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        return Response(content=content, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-cleaned-review.csv"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+        })
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
 
 
 @router.get("/eligible-csv-tasks")
@@ -169,20 +385,11 @@ def eligible_csv_tasks(
     engagements = service.list_engagements(db, organization_id=org, user=owner)
     eligible = []
     for engagement in engagements:
-        if (
-            engagement.get("organization_id") != org
-            or str(engagement.get("status") or "").upper() != "ACTIVE"
-            or str(engagement.get("blockers") or "").strip()
-        ):
+        if not _eligible_engagement(engagement, org, str(owner.user_id)):
             continue
+        completed = _completed_task_ids(engagement)
         for task in engagement.get("tasks") or []:
-            if (
-                task.get("classification") != "NOVA"
-                or task.get("responsible_party") != "NOVA"
-                or not task.get("review_required")
-                or str(task.get("status") or "").upper() not in {"READY", "NOT_STARTED", "IN_PROGRESS"}
-                or str(task.get("blocked_reason") or "").strip()
-            ):
+            if not isinstance(task, dict) or not _eligible_task(task, completed):
                 continue
             eligible.append({
                 "engagement_id": engagement["engagement_id"],

@@ -73,46 +73,9 @@ from app.core.nova.work_revenue.schemas import (
 )
 from app.db.session import get_db
 
-def _work_revenue_owner_emails() -> set[str]:
-    configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
-    if configured:
-        return {item.strip().lower() for item in configured.split(",") if item.strip()}
-    owners = {
-        str(grant.get("email") or "").strip().lower()
-        for grant in OPERATOR_ACCOUNT_GRANTS
-        if str(grant.get("email") or "").strip()
-    }
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        owners.update({
-            "admin@amicor.local",
-            "dispatcher@amicor.local",
-            "staff@amicor.local",
-            "driver@amicor.local",
-        })
-    return owners
-
-
-def require_work_revenue_owner(
-    user: UserContext = Depends(get_current_user_context),
-    db: Session = Depends(get_db),
-) -> UserContext:
-    email = str(user.email or "").strip().lower()
-    owner_emails = _work_revenue_owner_emails()
-
-    # Internal owner access must win over SaaS tenant classification. The owner
-    # can legitimately test/sign up for Nova SaaS products inside the same
-    # organization; that must not lock the owner out of Work & Revenue.
-    if email in owner_emails:
-        return user
-
-    access = customer_access(
-        db,
-        organization_id=user.organization_id,
-        user_id=user.user_id,
-    )
-    if access.get("nova_saas_customer"):
-        raise HTTPException(status_code=403, detail="Work & Revenue is owner-only.")
-    raise HTTPException(status_code=403, detail="Work & Revenue is restricted to the AMICOR owner.")
+from app.core.nova.work_revenue.owner_auth import (
+    _work_revenue_owner_emails, require_work_revenue_owner,
+)
 
 
 router = APIRouter(
