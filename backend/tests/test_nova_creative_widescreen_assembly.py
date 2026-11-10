@@ -33,7 +33,7 @@ def test_assembly_chooses_explicit_canvas_and_keeps_audio(
     for path in inputs:
         path.write_bytes(b"test-fixture-not-real-video")
     output = tmp_path / "master.mp4"
-    monkeypatch.setattr(assembly, "_inspect", lambda path: {"duration_seconds": 60.0})
+    monkeypatch.setattr(assembly, "_inspect", lambda path: {"duration_seconds": 120.0 if Path(path).name in {"master.mp4", "out.mp4"} else 60.0})
     calls = []
 
     def fake_ffmpeg(command, **kwargs):
@@ -64,7 +64,7 @@ def test_default_format_remains_portrait(tmp_path, monkeypatch):
     one.write_bytes(b"one")
     two.write_bytes(b"two")
     result = {}
-    monkeypatch.setattr(assembly, "_inspect", lambda path: {"duration_seconds": 60.0})
+    monkeypatch.setattr(assembly, "_inspect", lambda path: {"duration_seconds": 120.0 if Path(path).name in {"master.mp4", "out.mp4"} else 60.0})
 
     def fake_ffmpeg(command, **kwargs):
         result["command"] = command
