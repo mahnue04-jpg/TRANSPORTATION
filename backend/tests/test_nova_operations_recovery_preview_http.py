@@ -55,6 +55,7 @@ def preview(monkeypatch):
         }],
     }
     monkeypatch.setattr(api.service, "get_engagement", lambda *a, **kw: engagement)
+    monkeypatch.setattr(api.service, "list_engagements", lambda *a, **kw: [engagement])
     owner = SimpleNamespace(organization_id="org-a", user_id="owner-a")
     app = FastAPI()
     app.include_router(api.router, prefix="/api/nova/work")
@@ -144,3 +145,15 @@ def test_recovery_preview_history_is_owner_scoped_and_revocable(preview):
     blocked = client.get(history_url)
     assert blocked.status_code == 200
     assert blocked.json()["jobs"] == []
+
+
+def test_staging_preview_eligibility_has_independent_selector(preview):
+    client, engagement, _ = preview
+    url = "/api/nova/work/operations/recovery-preview/eligible-csv-tasks"
+    result = client.get(url)
+    assert result.status_code == 200
+    assert result.json()["count"] == 1
+    assert result.json()["tasks"][0]["task_id"] == "task-a"
+    assert result.json()["execution_authorized"] is False
+    engagement["status"] = "BLOCKED"
+    assert client.get(url).json()["tasks"] == []
