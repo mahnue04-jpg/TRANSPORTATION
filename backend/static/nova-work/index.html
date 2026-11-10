@@ -74,13 +74,8 @@
             <option value="">Load tasks, then select an assignment</option>
           </select>
         </label>
+        <p class="hint">Choose a task from the authenticated list above. Manual engagement and task IDs are not accepted. Tasks are rechecked by the server when you process the file.</p>
         <form id="operations-scoped-csv-form">
-          <label for="operations-engagement-id">Saved engagement ID
-            <input id="operations-engagement-id" maxlength="120" required autocomplete="off" placeholder="Copy from your Work engagement" />
-          </label>
-          <label for="operations-task-id">Saved Nova task ID
-            <input id="operations-task-id" maxlength="120" required autocomplete="off" placeholder="Copy from the engagement task" />
-          </label>
           <label for="operations-scoped-csv-file">Authorized CSV
             <input id="operations-scoped-csv-file" type="file" accept=".csv,text/csv" required />
           </label>
