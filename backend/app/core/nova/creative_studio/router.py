@@ -1402,6 +1402,36 @@ def project_job(
         raise
 
 
+def _verified_remote_video_chunks(stream, expected_size: int, sha256: str):
+    """Stream bounded owner-authorized MP4 bytes with an end-to-end digest.
+
+    A checksum or length mismatch fails before HTTP stream completion.
+    The client must discard interrupted transfers; no new export is started.
+    """
+    import hashlib
+    if not isinstance(sha256, str) or len(sha256) != 64 or expected_size <= 0:
+        stream.close()
+        raise ValueError("Invalid verified private MP4 metadata.")
+    transferred = 0
+    digest = hashlib.sha256()
+    try:
+        while transferred < expected_size:
+            chunk = stream.read(min(256 * 1024, expected_size - transferred))
+            if not chunk:
+                raise OSError("Private MP4 stream ended before its verified size.")
+            transferred += len(chunk)
+            if transferred > expected_size:
+                raise OSError("Private MP4 stream exceeded its verified size.")
+            digest.update(chunk)
+            yield chunk
+        if stream.read(1):
+            raise OSError("Private MP4 stream exceeds its verified size.")
+        if digest.hexdigest() != sha256:
+            raise OSError("Private MP4 content checksum mismatch.")
+    finally:
+        stream.close()
+
+
 @router.get("/projects/{project_id}/assets/{asset_id}/file")
 def download_asset_file(
     project_id: str,
@@ -1428,20 +1458,15 @@ def download_asset_file(
         remote = studio.open_private_remote_asset(user.user_id, project_id, asset_id, part=part)
         if remote is not None:
             stream, media_type, filename = remote
-            def chunks():
-                try:
-                    while True:
-                        chunk = stream.read(256 * 1024)
-                        if not chunk:
-                            break
-                        yield chunk
-                finally:
-                    stream.close()
+            expected_bytes = remote.expected_bytes
+            expected_sha256 = remote.expected_sha256
             from urllib.parse import quote
             return StreamingResponse(
-                chunks(), media_type=media_type,
+                _verified_remote_video_chunks(stream, expected_bytes, expected_sha256),
+                media_type=media_type,
                 headers={
                     "Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename),
+                    "Content-Length": str(expected_bytes),
                     "Cache-Control": "private, no-store",
                     "X-Content-Type-Options": "nosniff",
                 },

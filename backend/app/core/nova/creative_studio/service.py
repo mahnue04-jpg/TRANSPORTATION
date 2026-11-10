@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -46,6 +47,21 @@ from app.core.nova.creative_studio.providers import (
 )
 from app.core.nova.creative_studio.safety import BLOCK, screen_creative_text
 from app.core.nova.creative_studio.store import CreativeStudioStore, DbCreativeStudioStore, get_db_store, get_store
+
+
+@dataclass(frozen=True)
+class PrivateRemoteVideo:
+    """Keep legacy three-field unpacking while attaching integrity metadata."""
+    stream: Any
+    media_type: str
+    filename: str
+    expected_bytes: int
+    expected_sha256: str
+
+    def __iter__(self):
+        yield self.stream
+        yield self.media_type
+        yield self.filename
 
 
 class CreativeStudioError(Exception):
@@ -2103,7 +2119,7 @@ class CreativeStudioService(ShortDramaMixin):
         }
 
     @serialized_media
-    def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str) -> dict[str, Any]:
+    def import_finished_video(self, owner_id: str, project_id: str, data: bytes, *, content_type: str, max_duration_seconds: int = 120) -> dict[str, Any]:
         """Archive an existing video, without changing scripts, approvals, or provider gates."""
         from app.core.nova.creative_studio.video_import import MAX_VIDEO_BYTES, validate_video
         from app.core.nova.creative_studio import private_object_storage as private_store
@@ -2118,6 +2134,8 @@ class CreativeStudioService(ShortDramaMixin):
             )
         if content_type != "video/mp4" or not data or len(data) > MAX_VIDEO_BYTES:
             raise CreativeStudioError("INVALID_VIDEO", "Choose an MP4 between 1 byte and 128 MB.", http_status=422)
+        if max_duration_seconds not in {120, 600}:
+            raise CreativeStudioError("INVALID_VIDEO", "Unsupported import duration limit.", http_status=422)
         digest = hashlib.sha256(data).hexdigest()
         from app.core.nova.creative_studio import private_object_storage as private_store
         for existing in self.store.list_assets(project_id, owner_id):
@@ -2140,7 +2158,8 @@ class CreativeStudioService(ShortDramaMixin):
             path = Path(temporary) / "upload.mp4"
             path.write_bytes(data)
             try:
-                measured = validate_video(path)
+                measured = (validate_video(path) if max_duration_seconds == 120
+                            else validate_video(path, max_duration_seconds=max_duration_seconds))
             except ValueError as exc:
                 raise CreativeStudioError("INVALID_VIDEO", str(exc), http_status=422) from exc
             name = new_id("imported_video") + ".mp4"
@@ -3074,13 +3093,39 @@ class CreativeStudioService(ShortDramaMixin):
         asset = next((row for row in self.store.list_assets(project_id, owner_id) if row.id == asset_id), None)
         if asset is None or not str(asset.url or "").startswith("private-studio-s3://"):
             return None
+        if asset.kind != "video":
+            raise CreativeStudioError(
+                "MEDIA_UNAVAILABLE", "This private asset is not a downloadable video.",
+                http_status=404,
+            )
         if not private_store.enabled():
             raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private media storage is disabled.", http_status=503)
+        # Owner authorization alone does not prove the requested object still
+        # matches its saved metadata. Reject missing/empty or wrong-SHA objects
+        # before opening a streaming download.
+        digest = str((asset.metadata or {}).get("sha256") or "")
         try:
+            expected_bytes = private_store.owned_object_size(
+                asset.url, owner_id, project_id, digest
+            )
+            if expected_bytes is None:
+                raise CreativeStudioError(
+                    "MEDIA_UNAVAILABLE",
+                    "This private video file is missing or failed saved checksum metadata validation.",
+                    http_status=503,
+                )
             stream = private_store.open_original(asset.url, owner_id, project_id)
+        except CreativeStudioError:
+            raise
         except Exception as exc:
-            raise CreativeStudioError("MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503) from exc
-        return stream, "video/mp4", _download_filename(asset.title, ".mp4")
+            raise CreativeStudioError(
+                "MEDIA_UNAVAILABLE", "Private original is unavailable.", http_status=503,
+            ) from exc
+        return PrivateRemoteVideo(
+            stream=stream, media_type="video/mp4",
+            filename=_download_filename(asset.title, ".mp4"),
+            expected_bytes=expected_bytes, expected_sha256=digest,
+        )
 
     def open_asset_file(
         self,

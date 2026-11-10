@@ -168,3 +168,88 @@ class NovaCreativeWebhookEvent(Base):
     order_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     processing_result: Mapped[str] = mapped_column(String(48), nullable=False, default="ok")
     created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeCalendarEntry(Base):
+    """An owner-controlled content plan, never an automatic publishing job."""
+
+    __tablename__ = "nova_creative_calendar_entries"
+    __table_args__ = (
+        Index("ix_nova_creative_calendar_owner_date", "owner_id", "scheduled_at"),
+        Index("ix_nova_creative_calendar_owner_project", "owner_id", "project_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    topic: Mapped[str] = mapped_column(String(300), nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    channels_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    scheduled_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    timeline_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    chapters_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    storyboard_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    narrator_voice: Mapped[str] = mapped_column(String(16), nullable=False, default="en-us")
+    narrator_speed: Mapped[int] = mapped_column(Integer, nullable=False, default=148)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeRenderClaim(Base):
+    """Unique per-plan render claim, shared across all application workers.
+
+    Claims may be marked interrupted after a restart; they are never
+    automatically rerun without verified recovery and explicit resubmission.
+    """
+
+    __tablename__ = "nova_creative_render_claims"
+
+    claim_key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    job_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    checkpoint_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class NovaCreativeAiRequestSlot(Base):
+    """Atomic daily allocation for optional model-backed Studio revisions.
+
+    A slot is never refunded automatically after an uncertain provider result.
+    This bounds request count across application workers; it is not a dollar
+    accounting ledger or proof of final provider charges.
+    """
+    __tablename__ = "nova_creative_ai_request_slots"
+    slot_key: Mapped[str] = mapped_column(String(150), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    day_utc: Mapped[str] = mapped_column(String(10), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    reserved_micro_usd: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_micro_usd: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    charge_status: Mapped[str] = mapped_column(String(36), nullable=False, default="reserved_unverified")
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class NovaCreativeStoryboardRevision(Base):
+    """Immutable owner-scoped snapshot of a saved storyboard revision."""
+    __tablename__ = "nova_creative_storyboard_revisions"
+    __table_args__ = (
+        Index("ix_nova_storyboard_revision_entry", "owner_id", "project_id", "entry_id", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    scenes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    narrator_voice: Mapped[str] = mapped_column(String(16), nullable=False)
+    narrator_speed: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)

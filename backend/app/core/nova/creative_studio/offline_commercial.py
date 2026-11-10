@@ -54,6 +54,29 @@ def draw_title_card(scene: dict[str, Any], dest: Path, *, width: int = 540, heig
     from PIL import Image, ImageDraw, ImageFont
     heading = str(scene.get("heading") or "Hook").strip()
     color = _COLORS.get(heading, (11, 42, 74))
+    selected_image = scene.get("visual_image_path")
+    if selected_image:
+        from PIL import ImageOps, UnidentifiedImageError
+        try:
+            with Image.open(selected_image) as source:
+                source.verify()
+            with Image.open(selected_image) as source:
+                if source.width < 256 or source.height < 256 or source.width * source.height > 20_000_000:
+                    raise ValueError("Scene visual dimensions are unsupported")
+                image = ImageOps.fit(source.convert("RGB"), (width, height), method=Image.Resampling.LANCZOS)
+        except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+            raise OfflineCommercialError("SCENE_VISUAL_INVALID", "The selected scene image cannot be decoded.") from exc
+        # Simple original-image preview, with restrained branding overlay.
+        from PIL import ImageDraw, ImageFont
+        draw = ImageDraw.Draw(image)
+        overlay_height = max(96, int(height * 0.13))
+        draw.rectangle((0, 0, width, overlay_height), fill=(12, 30, 54))
+        label = "Scene preview - owner-provided image"
+        font_path = str(_FONT) if _FONT.is_file() else None
+        font = ImageFont.truetype(font_path, max(16, width // 22)) if font_path else ImageFont.load_default()
+        draw.text((max(12, width // 25), max(12, height // 40)), label, fill=(255, 255, 255), font=font)
+        image.save(dest, format="PNG")
+        return
     image = Image.new("RGB", (width, height), color)
     draw = ImageDraw.Draw(image)
     font_path = str(_FONT) if _FONT.is_file() else None
@@ -141,7 +164,7 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
-def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
+def synthesize_narration(script: str, dest: Path, *, voice: str = "en-us", speed: int = 148) -> dict[str, Any]:
     """Speak the reviewed script with a local engine. No network and no provider charge."""
     binary = shutil.which("espeak-ng") or shutil.which("espeak")
     if not binary:
@@ -152,13 +175,14 @@ def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
     text = " ".join(str(script or "").split())
     if not text:
         raise OfflineCommercialError("SCRIPT_REQUIRED", "Offline narration needs the storyboard script.")
-    voice = "en-us"
+    if voice not in {"en-us", "en-gb"} or not 110 <= speed <= 185:
+        raise OfflineCommercialError("VOICE_SETTINGS_INVALID", "Choose an approved English voice and speaking speed.")
     probe = subprocess.run([binary, "--voices"], check=False, capture_output=True, text=True, timeout=20)
-    if voice not in (probe.stdout or "") and "en-us" not in (probe.stdout or ""):
-        voice = "en"
+    if probe.returncode != 0 or voice not in (probe.stdout or "").lower():
+        raise OfflineCommercialError("VOICE_UNAVAILABLE", "Selected local English voice is not installed; choose another voice.")
     dest.parent.mkdir(parents=True, exist_ok=True)
     run = subprocess.run(
-        [binary, "-w", str(dest), "-s", "148", "-v", voice, text[:1800]],
+        [binary, "-w", str(dest), "-s", str(speed), "-v", voice, text[:1800]],
         check=False,
         capture_output=True,
         text=True,
@@ -171,6 +195,7 @@ def synthesize_narration(script: str, dest: Path) -> dict[str, Any]:
     return {
         "engine": engine,
         "voice": voice,
+        "speed_wpm": speed,
         "license": "GPL-3.0-or-later",
         "license_status": "AMBER",
         "commercial_use": (
@@ -199,12 +224,79 @@ def probe_duration_seconds(path: Path) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
+def _build_scene_narration(
+    scenes: list[dict[str, Any]], dest: Path, scratch: Path,
+    *, voice: str, speed: int, ffmpeg: str,
+) -> tuple[dict[str, Any], list[float]]:
+    """Synthesize and pad scene-local narration; never cut off spoken text.
+
+    Each scene audio is measured first. If it cannot fit its approved time,
+    rendering stops with an actionable error instead of truncating speech.
+    Caption cues can then use the measured speaking window of each scene.
+    """
+    audio_paths: list[Path] = []
+    spoken_seconds: list[float] = []
+    narration_info: dict[str, Any] = {}
+    for index, scene in enumerate(scenes):
+        approved = float(scene["duration_seconds"])
+        content = str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
+        if not content:
+            raise OfflineCommercialError(
+                "SCENE_NARRATION_REQUIRED",
+                f"Scene {index + 1} needs narration for scene-aligned audio.",
+            )
+        audio_path = scratch / f"scene-audio-{index:02d}.wav"
+        narration_info = synthesize_narration(
+            content, audio_path, voice=voice, speed=speed
+        )
+        actual = probe_duration_seconds(audio_path)
+        if actual <= 0:
+            raise OfflineCommercialError(
+                "SCENE_AUDIO_INVALID", f"Scene {index + 1} narration could not be measured."
+            )
+        if actual > approved + 0.05:
+            raise OfflineCommercialError(
+                "SCENE_NARRATION_TOO_LONG",
+                f"Scene {index + 1} narration is {actual:.1f} seconds, "
+                f"but its allocated duration is {approved:.1f} seconds. "
+                "Shorten dialogue, select a faster voice, or increase the scene duration.",
+            )
+        audio_paths.append(audio_path)
+        spoken_seconds.append(actual)
+    if not audio_paths:
+        raise OfflineCommercialError("SCRIPT_REQUIRED", "Storyboard narration is empty.")
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+    for source in audio_paths:
+        cmd.extend(["-i", str(source)])
+    filters = []
+    for index, scene in enumerate(scenes):
+        approved = float(scene["duration_seconds"])
+        filters.append(
+            f"[{index}:a:0]aresample=44100,"
+            f"aformat=sample_fmts=s16:channel_layouts=mono,"
+            f"apad,atrim=0:{approved:.3f},asetpts=PTS-STARTPTS[a{index}]"
+        )
+    joined = "".join(f"[a{i}]" for i in range(len(audio_paths)))
+    filters.append(f"{joined}concat=n={len(audio_paths)}:v=0:a=1[out]")
+    cmd.extend([
+        "-filter_complex", ";".join(filters),
+        "-map", "[out]", "-c:a", "pcm_s16le", str(dest),
+    ])
+    _run(cmd, timeout=180)
+    if not dest.is_file() or not dest.stat().st_size:
+        raise OfflineCommercialError("SCENE_AUDIO_INVALID", "Combined narration was not saved.")
+    return narration_info, spoken_seconds
+
+
 def render_offline_montage(
     scenes: list[dict[str, Any]],
     *,
     output_mp4: Path,
     audio_wav: Path,
     vertical: bool = True,
+    voice: str = "en-us",
+    speed: int = 148,
+    include_cta: bool = True,
 ) -> dict[str, Any]:
     """Build one MP4 from storyboard beats. Duration follows the storyboard, not a 5s loop."""
     if not scenes:
@@ -216,10 +308,17 @@ def render_offline_montage(
         for scene in scenes
         if str(scene.get("voiceover_text") or scene.get("subtitle_text") or "").strip()
     )
-    narration = synthesize_narration(script, audio_wav)
+    scene_audio_mode = bool(all(scene.get("caption_by_scene") for scene in scenes))
     planned = 0.0
     with tempfile.TemporaryDirectory(prefix="nova-offline-") as temp_name:
         temp = Path(temp_name)
+        if scene_audio_mode:
+            narration, spoken_windows = _build_scene_narration(
+                scenes, audio_wav, temp, voice=voice, speed=speed, ffmpeg=ffmpeg
+            )
+        else:
+            narration = synthesize_narration(script, audio_wav, voice=voice, speed=speed)
+            spoken_windows = []
         clips: list[Path] = []
         for index, scene in enumerate(scenes, start=1):
             seconds = float(scene.get("duration_seconds") or 5)
@@ -235,6 +334,13 @@ def render_offline_montage(
                 f"crop={width}:{height}:x='(in_w-out_w)*t/{seconds:.3f}':y='(in_h-out_h)/2',"
                 f"fps=12,format=yuv420p"
             )
+            # A fade is a short fade-in from black, NOT an overlapping
+            # cross-dissolve. The original sequence and runtime are preserved.
+            transition = str(scene.get("transition") or "cut")
+            if transition not in {"cut", "fade"}:
+                raise OfflineCommercialError("INVALID_TRANSITION", "Only cut and fade-in transitions are supported.")
+            if index > 1 and transition == "fade":
+                pan += f",fade=t=in:st=0:d={min(0.5, seconds / 4):.3f}"
             _run(
                 [
                     ffmpeg, "-y", "-threads", "1", "-loop", "1", "-i", str(card),
@@ -261,7 +367,46 @@ def render_offline_montage(
                 "-t", f"{planned:.3f}", "-movflags", "+faststart", str(muxed),
             ]
         )
-        cues = even_spaced_cues(script or "Visit getamicor.com", planned)
+        if all(scene.get("caption_by_scene") for scene in scenes):
+            # Approximate, scene-bounded caption timing. This is not
+            # word-aligned transcription or verified speech synchronization.
+            cues = []
+            offset = 0.0
+            for index, scene in enumerate(scenes):
+                seconds = max(2.0, min(float(scene.get("duration_seconds") or 5), 12.0))
+                speech_window = min(seconds, spoken_windows[index]) if scene_audio_mode else seconds
+                text = str(scene.get("subtitle_text") or scene.get("voiceover_text") or "").strip()
+                manual = scene.get("caption_cues") or []
+                if manual:
+                    prev_end = 0.0
+                    for cue in manual:
+                        start = float(cue["start_seconds"])
+                        end = float(cue["end_seconds"])
+                        caption_text = str(cue["text"]).strip()
+                        if (not caption_text or start < prev_end or end <= start
+                                or end > speech_window + 0.01):
+                            raise OfflineCommercialError(
+                                "CAPTION_TIMING_INVALID",
+                                "Manual captions must fit inside measured scene speech; review their timing."
+                            )
+                        cues.append({
+                            "start": round(offset + start, 3),
+                            "end": round(offset + end, 3),
+                            "text": caption_text,
+                        })
+                        prev_end = end
+                elif text:
+                    for cue in even_spaced_cues(text, speech_window):
+                        cues.append({
+                            "start": round(offset + cue["start"], 3),
+                            "end": round(offset + cue["end"], 3),
+                            "text": cue["text"],
+                        })
+                offset += seconds
+            if not cues:
+                raise OfflineCommercialError("SCRIPT_REQUIRED", "Storyboard narration is required for captions.")
+        else:
+            cues = even_spaced_cues(script or "Visit getamicor.com", planned)
         polished, srt = burn_captions_and_cta_fade(
             muxed,
             cues,
@@ -269,6 +414,7 @@ def render_offline_montage(
             height=height,
             cta_text="getamicor.com/nova-today",
             fade_seconds=min(2.5, max(1.0, planned / 8)),
+            include_cta=include_cta,
         )
         output_mp4.parent.mkdir(parents=True, exist_ok=True)
         output_mp4.write_bytes(polished.read_bytes())
@@ -287,6 +433,11 @@ def render_offline_montage(
         "width": width,
         "height": height,
         "captions_burned_in": True,
+        "captions_scene_bounded": bool(all(scene.get("caption_by_scene") for scene in scenes)),
+        "captions_speech_aligned": False,
+        "manual_caption_cues_used": any(bool(scene.get("caption_cues")) for scene in scenes),
+        "narration_scene_audio_aligned": scene_audio_mode,
+        "caption_alignment_mode": "scene_speech_window_estimate" if scene_audio_mode else "global_even_spacing",
         "subtitle_path": str(output_mp4.with_suffix(".srt")),
         "audio_present": has_audio,
         "lip_sync": False,

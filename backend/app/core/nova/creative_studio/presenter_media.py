@@ -153,6 +153,7 @@ def burn_captions_and_cta_fade(
     height: int = 1280,
     cta_text: str = 'getamicor.com',
     fade_seconds: float = 2.5,
+    include_cta: bool = True,
 ) -> tuple[Path, Path]:
     """Burn timed English captions and a soft end-card CTA fade onto a vertical MP4.
 
@@ -186,10 +187,11 @@ def burn_captions_and_cta_fade(
         safe = cue['text'].replace('\\', '＼').replace('{', '｛').replace('}', '｝')
         wrapped = r'\N'.join(textwrap.wrap(safe, 34, break_long_words=True, break_on_hyphens=False))
         lines.append(f"Dialogue: 0,{_time(cue['start'], True)},{_time(cue['end'], True)},Default,{wrapped}")
-    lines.append(
-        f"Dialogue: 1,{_time(fade_start, True)},{_time(duration, True)},CTA,"
-        f"{{\\fad({fade_ms},{max(200, fade_ms // 4)})}}{safe_cta}"
-    )
+    if include_cta:
+        lines.append(
+            f"Dialogue: 1,{_time(fade_start, True)},{_time(duration, True)},CTA,"
+            f"{{\\fad({fade_ms},{max(200, fade_ms // 4)})}}{safe_cta}"
+        )
     ass.write_text('\n'.join(lines), encoding='utf-8')
     srt = video.with_name(video.stem + '-final.srt')
     srt.write_text(srt_text(cues), encoding='utf-8')

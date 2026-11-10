@@ -39,6 +39,9 @@
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nova-studio-project-selected", { detail: { projectId: activeProjectId } }));
+    }
   }
 
   function syncContentBrief(detail, projectId, revision) {
@@ -471,8 +474,22 @@
       if (!detail && errBody && errBody.detail && errBody.detail.message) detail = String(errBody.detail.message);
       throw new Error(detail || ("Download failed. (" + res.status + ")"));
     }
+    var requestedMime = (contentType.split(";")[0] || "").trim().toLowerCase();
+    var expectedVideoBytes = 0;
+    if (requestedMime === "video/mp4") {
+      // The regular blob download buffers the entire response. Long-form
+      // exports must use the disk-streaming save path, not this button.
+      expectedVideoBytes = Number(res.headers.get("content-length"));
+      if (!Number.isSafeInteger(expectedVideoBytes) || expectedVideoBytes <= 0 ||
+          expectedVideoBytes > 128 * 1024 * 1024) {
+        throw new Error("This MP4 is too large or its size is unknown. Use Save full MP4 to computer (streaming).");
+      }
+    }
     var blob = await res.blob();
     if (!blob || !blob.size) throw new Error("Download was empty.");
+    if (requestedMime === "video/mp4" && blob.size !== expectedVideoBytes) {
+      throw new Error("The MP4 download was incomplete; the file was not saved.");
+    }
     var mime = (contentType.split(";")[0] || blob.type || "application/octet-stream").trim();
     if (mime && blob.type !== mime) blob = new Blob([blob], { type: mime });
     var disposition = res.headers && typeof res.headers.get === "function" ? res.headers.get("content-disposition") : "";
@@ -2767,6 +2784,122 @@
       }
     });
   });
+
+  async function streamProtectedStudioMaster(projectId, assetId, onProgress) {
+    // File System Access API prompt must occur in the originating click gesture.
+    // This avoids buffering 2 GiB in a Blob; browser support is intentionally gated.
+    if (!projectId || !assetId || projectId !== activeProjectId) {
+      throw new Error("Select the matching Studio project.");
+    }
+    if (typeof window.showSaveFilePicker !== "function") {
+      throw new Error("Large-file streaming save requires a compatible desktop browser.");
+    }
+    var fileHandle = await window.showSaveFilePicker({
+      suggestedName: "creative-studio-master-" + assetId + ".mp4",
+      types: [{description: "MP4 video", accept: {"video/mp4": [".mp4"]}}]
+    });
+    var url = "/api/nova/creative/projects/" + encodeURIComponent(projectId) +
+      "/assets/" + encodeURIComponent(assetId) + "/file";
+    assertDownloadUrlHasNoToken(url);
+    var shared = session();
+    if (shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+    var headers = {};
+    if (token()) headers.Authorization = "Bearer " + token();
+    var response = shared && typeof shared.authFetch === "function"
+      ? await shared.authFetch(url, {method: "GET", headers: headers})
+      : await fetch(url, {method: "GET", headers: headers});
+    if (!response.ok || !response.body ||
+        String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase() !== "video/mp4") {
+      throw new Error("Protected master download is unavailable.");
+    }
+    var reported = Number(response.headers.get("content-length"));
+    if (!Number.isSafeInteger(reported) || reported <= 0 ||
+        reported > 2 * 1024 * 1024 * 1024) {
+      throw new Error("Protected master download has an invalid verified file size.");
+    }
+    if (projectId !== activeProjectId) throw new Error("Project selection changed.");
+    var writable = await fileHandle.createWritable();
+    var reader = null;
+    var total = 0;
+    var lastReportedPercent = -1;
+    try {
+      reader = response.body.getReader();
+      while (true) {
+        if (projectId !== activeProjectId) throw new Error("Project selection changed during download.");
+        var part = await reader.read();
+        if (part.done) break;
+        total += part.value.byteLength;
+        if (total > reported || total > 2 * 1024 * 1024 * 1024) {
+          throw new Error("Master exceeded its verified download size.");
+        }
+        await writable.write(part.value);
+        if (typeof onProgress === "function") {
+          // 100% is reserved for an actually closed, completed file.
+          var percent = Math.min(99, Math.floor(100 * total / reported));
+          if (percent !== lastReportedPercent) {
+            lastReportedPercent = percent;
+            onProgress({bytes: total, totalBytes: reported, percent: percent});
+          }
+        }
+      }
+      if (reported !== total) {
+        throw new Error("Downloaded master is empty or incomplete.");
+      }
+      await writable.close();
+      if (typeof onProgress === "function") {
+        try { onProgress({bytes: total, totalBytes: reported, percent: 100}); }
+        catch (ignore) { /* UI progress callbacks cannot invalidate a saved file. */ }
+      }
+      return {bytes: total, saved: true};
+    } catch (err) {
+      try { await writable.abort(); } catch (ignore) {}
+      throw err;
+    } finally {
+      try { if (reader) await reader.cancel(); } catch (ignore) {}
+    }
+  }
+
+  async function fetchProtectedStudioVideo(projectId, assetId) {
+    // Authenticated blob fetch only; never place bearer tokens in a video URL.
+    if (!projectId || !assetId || projectId !== activeProjectId) {
+      throw new Error("Select the matching Studio project.");
+    }
+    var url = "/api/nova/creative/projects/" + encodeURIComponent(projectId) +
+      "/assets/" + encodeURIComponent(assetId) + "/file";
+    assertDownloadUrlHasNoToken(url);
+    var shared = session();
+    if (shared && typeof shared.ensureReady === "function") await shared.ensureReady();
+    var headers = {};
+    if (token()) headers.Authorization = "Bearer " + token();
+    var response = shared && typeof shared.authFetch === "function"
+      ? await shared.authFetch(url, {method: "GET", headers: headers})
+      : await fetch(url, {method: "GET", headers: headers});
+    if (!response.ok) throw new Error("Preview media unavailable (" + response.status + ").");
+    var mime = String(response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (mime !== "video/mp4") throw new Error("The selected preview is not an MP4 video.");
+    var expectedSize = Number(response.headers.get("content-length"));
+    if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0 ||
+        expectedSize > 128 * 1024 * 1024) {
+      throw new Error("Preview size cannot be safely verified for playback.");
+    }
+    var blob = await response.blob();
+    if (!blob.size || blob.size !== expectedSize) {
+      throw new Error("Preview download is incomplete or mismatched.");
+    }
+    if (projectId !== activeProjectId) throw new Error("The active project changed.");
+    return blob;
+  }
+
+  // The calendar shares the same session-aware API and selected project.
+  // It cannot bypass Creative Studio authentication or trigger publishing.
+  window.NovaCreativeCalendarBridge = {
+    api: api,
+    selectedProject: function () { return activeProjectId; },
+    refreshProductionAssets: refreshAssets,
+    fetchProtectedVideo: fetchProtectedStudioVideo,
+    downloadProtectedAsset: downloadProtectedAsset,
+    streamProtectedMaster: streamProtectedStudioMaster
+  };
 
   boot();
 })();

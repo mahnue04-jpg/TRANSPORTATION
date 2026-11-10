@@ -332,6 +332,61 @@
       <p class="hint">Saving the plan is free. Motion and voice generation use the configured providers and may consume credits. A failed motion request stays failed. The rendered video is a preview for review before publishing.</p>
     </section>
 
+    <section class="card" id="autopilot-calendar" aria-labelledby="autopilot-calendar-title">
+      <h2 id="autopilot-calendar-title">Nova Autopilot — Content Calendar</h2>
+      <p class="hint">Plan daily faceless, presenter, educational or drama videos. Entries are saved to your selected Creative Studio project. This is a planning tool: approval does not generate or publish a video.</p>
+      <p id="calendar-project-status" class="hint" role="status">Select a Creative Studio project to manage your content calendar.</p>
+      <form id="calendar-form">
+        <input type="hidden" id="calendar-edit-id" value="">
+        <div class="grid">
+          <label>Video topic<input id="calendar-topic" maxlength="300" required placeholder="Episode idea or video topic"></label>
+          <label>Content type<select id="calendar-mode">
+            <option value="faceless">Faceless video</option><option value="presenter">AI presenter</option>
+            <option value="drama">Drama / series</option><option value="education">Educational</option>
+          </select></label>
+        </div>
+        <label>Video length<select id="calendar-duration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="60">1 minute</option><option value="180">3 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="1200">20 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option></select></label>
+        <p class="hint">Long-form planning supports up to 2 hours. Rendering long videos is a separate production capability and is not yet live. The free title-card preview currently supports 30 seconds.</p>
+        <label>Script<textarea id="calendar-script" rows="4" maxlength="120000" placeholder="Write or paste the reviewed narration or story"></textarea></label>
+        <fieldset><legend>Target platforms</legend>
+          <div class="actions wrap">
+            <label><input type="checkbox" name="calendar-channel" value="TikTok"> TikTok</label>
+            <label><input type="checkbox" name="calendar-channel" value="Instagram"> Instagram</label>
+            <label><input type="checkbox" name="calendar-channel" value="Facebook"> Facebook</label>
+            <label><input type="checkbox" name="calendar-channel" value="YouTube Shorts"> YouTube Shorts</label>
+          </div>
+        </fieldset>
+        <label>Planned date and time (your device time zone)<input id="calendar-date" type="datetime-local" required></label>
+        <div class="actions wrap">
+          <button id="calendar-save" type="submit">Save video plan</button>
+          <button id="calendar-clear" type="button" class="secondary">New plan</button>
+          <button id="calendar-refresh" type="button" class="secondary">Refresh calendar</button>
+        </div>
+      </form>
+      <details class="studio-details" id="studio-guide-panel" open>
+        <summary>Nova Studio Guide — Video Creation Assistant</summary>
+        <p class="hint">Tell the Studio Guide what you want to create. It gives an actionable production outline based on your selected length and format. This initial guided assistant does not yet use a conversational AI model, generate footage, or make paid provider requests.</p>
+        <label>What would you like help creating?<textarea id="studio-guide-request" rows="3" maxlength="1000" placeholder="Help me plan a 10-minute educational video about..."></textarea></label>
+        <button type="button" id="studio-guide-help" class="secondary">Help me plan my video</button>
+        <div id="studio-guide-response" class="output" role="status" aria-live="polite"></div>
+        <h4>Ask Nova about your saved video plan</h4>
+        <p class="hint">Select a saved plan to ask Nova for script, chapter or production advice. AI conversation requires owner-enabled model access; otherwise Nova gives basic project guidance without charging a provider.</p>
+        <label>Saved plan<select id="studio-assistant-entry"><option value="">Select a saved plan</option></select></label>
+        <div id="studio-assistant-conversation" class="output" aria-live="polite"></div>
+        <label>Question to Nova<textarea id="studio-assistant-question" rows="2" maxlength="2000" placeholder="How can I improve my opening scene?"></textarea></label>
+        <button type="button" id="studio-assistant-send" class="secondary">Ask Nova Studio</button>
+        <button type="button" id="studio-assistant-propose-chapters" class="secondary">Suggest editable chapters</button>
+        <button type="button" id="studio-assistant-propose-storyboard" class="secondary">Suggest editable storyboard</button>
+        <p id="studio-assistant-feedback" class="hint" role="status"></p>
+      </details>
+      <p id="calendar-feedback" class="hint" role="status" aria-live="polite"></p>
+      <h3>Saved video plans</h3>
+      <div id="calendar-list" class="list" aria-live="polite">Select a project to view its calendar.</div>
+      <div id="calendar-assembly" class="list" aria-live="polite"></div>
+      <div id="calendar-chapters" class="list" aria-live="polite"></div>
+      <div id="calendar-storyboard" class="list" aria-live="polite"></div>
+    </section>
+
     <section id="studio-project-history" class="card" aria-label="Project history">
       <h2>11. Project history</h2>
       <div id="project-list" class="list"></div>
@@ -380,7 +435,8 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope"></script>
+  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope-calendar"></script>
+  <script src="/static/nova-creative/calendar.js?v=20261108"></script>
 </body>
 </html>
 

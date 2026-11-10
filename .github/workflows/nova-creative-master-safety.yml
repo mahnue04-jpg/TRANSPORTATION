@@ -1,0 +1,79 @@
+name: Nova Creative Studio master export safety
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/core/nova/creative_studio/calendar.py"
+      - "backend/app/core/nova/creative_studio/master_worker.py"
+      - "backend/app/core/nova/creative_studio/private_object_storage.py"
+      - "backend/app/core/nova/creative_studio/service.py"
+      - "backend/app/core/nova/creative_studio/router.py"
+      - "backend/static/nova-creative/calendar.js"
+      - "backend/static/nova-creative/creative.js"
+      - "backend/tests/js/test_creative_studio_master_download.mjs"
+      - "backend/tests/test_nova_creative_remote_master_stream.py"
+      - "backend/tests/test_nova_creative_master_download_http.py"
+      - "backend/tests/test_nova_creative_private_master_download.py"
+      - "backend/app/core/nova/creative_studio/resumable_master.py"
+      - "backend/app/core/nova/creative_studio/chapter_master.py"
+      - "backend/tests/test_nova_creative_master_media_smoke.py"
+      - "backend/tests/test_nova_creative_staging_verifier.py"
+      - "backend/scripts/verify_studio_master_download.py"
+      - "backend/tests/test_nova_creative_master_claims.py"
+      - "backend/tests/test_nova_creative_master_readiness.py"
+      - "backend/tests/test_nova_creative_master_recovery_readonly.py"
+      - "backend/tests/test_nova_creative_master_worker.py"
+      - "backend/tests/test_nova_creative_remote_master_head_gate.py"
+      - ".github/workflows/nova-creative-master-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  master-export-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NOVA_CREATIVE_VIDEO_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_KLING_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_IMAGE_LIVE_ENABLED: "false"
+      NOVA_CREATIVE_VOICE_LIVE_ENABLED: "false"
+      NOVA_STUDIO_MASTER_WORKER_ENABLED: "false"
+      NOVA_STUDIO_PRIVATE_OBJECT_STORAGE: "false"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Check Creative Studio customer review and download JavaScript
+        run: |
+          node --check backend/static/nova-creative/calendar.js
+          node --check backend/static/nova-creative/creative.js
+      - name: Exercise customer browser MP4 stream failure recovery
+        run: node --test backend/tests/js/test_creative_studio_master_download.mjs
+      - name: Install FFmpeg media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Install backend dependencies
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pytest
+      - name: Run no-provider master claim, recovery, worker and storage tests
+        working-directory: backend
+        run: |
+          python -m pytest -q \
+            tests/test_nova_creative_master_claims.py \
+            tests/test_nova_creative_master_readiness.py \
+            tests/test_nova_creative_master_recovery_readonly.py \
+            tests/test_nova_creative_master_worker.py \
+            tests/test_nova_creative_remote_master_head_gate.py \
+            tests/test_nova_creative_private_master_download.py \
+            tests/test_nova_creative_remote_master_stream.py \
+            tests/test_nova_creative_master_download_http.py \
+            tests/test_nova_creative_master_media_smoke.py \
+            tests/test_nova_creative_staging_verifier.py
