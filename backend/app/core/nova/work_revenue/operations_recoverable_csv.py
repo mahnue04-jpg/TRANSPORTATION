@@ -54,6 +54,13 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _aware(value: datetime) -> datetime:
+    """Treat UTC database timestamps consistently across DB drivers and fixtures."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def require_runtime(db: Session) -> None:
     if os.getenv("NOVA_OPERATIONS_RECOVERABLE_CSV_ENABLED", "").lower() != "true":
         raise CustomerCSVBlocked("Recoverable CSV jobs are disabled", 503)
@@ -181,9 +188,9 @@ def claim(db: Session, *, org: str, owner: str, job_id: str,
         db.rollback()
         raise CustomerCSVBlocked("Job not found or locked", 409)
     ready = (
-        (row["status"] == "QUEUED" and row["available_at"] <= stamp)
+        (row["status"] == "QUEUED" and _aware(row["available_at"]) <= stamp)
         or (row["status"] == "RUNNING" and row["lease_until"] is not None
-            and row["lease_until"] <= stamp)
+            and _aware(row["lease_until"]) <= stamp)
     )
     if not ready or row["attempts"] >= row["max_attempts"] or not row["input_ref"]:
         db.rollback()
@@ -225,7 +232,7 @@ def fail_claim(db: Session, *, org: str, owner: str, job_id: str,
     stamp = now or _now()
     row = _owned(db, org=org, owner=owner, job_id=job_id)
     if row["status"] != "RUNNING" or row["lease_token"] != token or (
-            row["lease_until"] is None or row["lease_until"] <= stamp):
+            row["lease_until"] is None or _aware(row["lease_until"]) <= stamp):
         db.rollback()
         return
     terminal = row["attempts"] >= row["max_attempts"]
