@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 import os
 
 import pytest
 import sqlalchemy as sa
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy.orm import Session
 
 from app.core.nova.work_revenue import operations_customer_csv_jobs as csvjobs
@@ -46,7 +50,29 @@ def postgres(monkeypatch):
         pytest.skip("explicit loopback ephemeral PostgreSQL required")
     engine = sa.create_engine(url, pool_size=5, max_overflow=5)
     assert engine.dialect.name == "postgresql"
-    csvjobs.metadata.create_all(engine)
+    migration_file = (
+        Path(__file__).resolve().parents[1] / "migrations" / "versions"
+        / "20261109_nova_operations_csv_jobs.py"
+    )
+    spec = spec_from_file_location("nova_csv_pg_migration_ci", migration_file)
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("NOVA_OPERATIONS_CSV_SCHEMA_APPROVED", "staging-only")
+    # Run the ACTUAL Alembic revision against disposable PostgreSQL.
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        monkeypatch.setattr(migration, "op", Operations(context))
+        migration.upgrade()
+    inspector = sa.inspect(engine)
+    assert csvjobs.jobs.name in inspector.get_table_names()
+    assert "uq_nova_customer_csv_request" in {
+        c["name"] for c in inspector.get_unique_constraints(csvjobs.jobs.name)
+    }
+    assert "ix_nova_customer_csv_owned" in {
+        ix["name"] for ix in inspector.get_indexes(csvjobs.jobs.name)
+    }
     monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_CSV_ENABLED", "true")
     monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE", "s3_private")
     store = FakePrivateStore()
