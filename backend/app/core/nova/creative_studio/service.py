@@ -1126,6 +1126,13 @@ class CreativeStudioService(ShortDramaMixin):
             # Mark POST_ATTEMPTED in shared SQL before any network request.
             # If we lose the task ID, a retry must NOT risk a second charge.
             from app.core.nova.creative_studio.store import DbCreativeStudioStore
+            from app.core.nova.creative_studio import private_object_storage as private_store
+            if not private_store.enabled():
+                raise CreativeStudioError(
+                    "PRIVATE_STORAGE_UNAVAILABLE",
+                    "Enable protected shot storage before submitting or recovering the saved shot.",
+                    http_status=503,
+                )
             if not isinstance(self.store, DbCreativeStudioStore):
                 raise CreativeStudioError(
                     "DURABLE_SHOT_CLAIM_REQUIRED",
@@ -1229,12 +1236,24 @@ class CreativeStudioService(ShortDramaMixin):
             fallback["runway_error"] = runway_message
             result = fallback
 
+        if single_shot_reference_id is not None and result.get("asset_generated"):
+            # Completion requires a decoded, owner-scoped durable object.
+            from app.core.nova.creative_studio.first_shot_storage import archive_first_shot
+            try:
+                saved_shot = archive_first_shot(owner_id, project_id, result.get("url"))
+                result = dict(result, url=saved_shot.pop("url"), protected_storage=saved_shot)
+            except Exception:
+                # Preserve the task ID; recovery polls the same paid task.
+                result = dict(result, status="PROCESSING", asset_generated=False, url=None,
+                              message="Kling output needs protected storage recovery. Check the saved task; do not submit another render.")
+
         status = result.get("status") or CONFIG_REQUIRED
         generated_url = str(result.get("url") or "").strip() or None if result.get("asset_generated") else None
         metadata = {
             "provider_result": {k: v for k, v in result.items() if k != "url"},
             "scene_index": scene_index,
             "scene_heading": scene.heading,
+            **(result.get("protected_storage") or {}),
         }
         if resume_asset is not None:
             # Replace the pending marker so a completed task cannot be resumed

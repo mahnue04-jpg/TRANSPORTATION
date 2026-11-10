@@ -14,7 +14,7 @@ function selectionContext(extra = {}) {
     activeProjectKey: 'test-active-project', latestPreflight: {project_id: 'original'},
     $: id => elements[id], elements,
     localStorage: {setItem() {}, removeItem() {}}, updateActiveProjectLabel() {},
-    renderProductionReadiness() {},
+    renderProductionReadiness() {}, clearFirstShotPreview() {},
     renderPreflight: () => { ctx.latestPreflight = null; },
     ...extra,
   });
@@ -89,7 +89,7 @@ test('a delayed asset fetch does not overwrite the selected project or expose mi
   const ctx = vm.createContext({
     activeProjectId: 'original', activeProjectRevision: 0, $: id => elements[id],
     api: () => new Promise(r => { resolve = r; }),
-    refreshDrama() {}, renderProductionReadiness() {}, document: {querySelectorAll: () => []},
+    refreshDrama() {}, renderProductionReadiness() {}, clearFirstShotPreview() {}, document: {querySelectorAll: () => []},
   });
   const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('\n  var clearLegacyPreviews'));
   vm.runInContext(refresh, ctx);
@@ -629,4 +629,15 @@ test('staging 401 message distinguishes temporary staging accounts from producti
   assert.match(script, /if \(isIsolatedStudioPreview\(\)\)/);
   assert.match(script, /Staging sign-in rejected \(401\)/);
   assert.match(script, /Do not change or reuse your production password/);
+});
+
+test('switching projects revokes the saved shot playback blob', () => {
+  const revoked = [];
+  const ctx = selectionContext({firstShotPreviewUrl: 'blob:old-shot', URL: {revokeObjectURL: url => revoked.push(url)}});
+  const start = source.indexOf('  function clearFirstShotPreview(');
+  const end = source.indexOf('  function renderFirstShotJobResult(', start);
+  vm.runInContext(source.slice(start, end), ctx);
+  ctx.setActiveProjectId('next');
+  assert.deepEqual(revoked, ['blob:old-shot']);
+  assert.equal(ctx.firstShotPreviewUrl, null);
 });

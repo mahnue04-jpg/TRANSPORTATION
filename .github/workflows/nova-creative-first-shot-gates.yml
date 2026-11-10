@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - "backend/app/core/nova/creative_studio/first_shot_readiness.py"
+      - "backend/app/core/nova/creative_studio/first_shot_storage.py"
+      - "backend/app/core/nova/creative_studio/service.py"
+      - "backend/app/core/nova/creative_studio/video_import.py"
+      - "backend/static/nova-creative/creative.js"
+      - "backend/tests/test_nova_creative_first_shot_storage.py"
       - "backend/app/core/nova/creative_studio/long_form_assembly.py"
       - "backend/app/core/nova/creative_studio/router.py"
       - "backend/tests/test_nova_creative_first_shot_readiness.py"
@@ -35,6 +40,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Check Creative Studio editor JavaScript syntax
         run: node --check backend/static/nova-creative/creative.js
+      - name: Install local media validation tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install backend dependencies
         run: |
           python -m pip install -r backend/requirements.txt
@@ -44,6 +51,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_nova_creative_first_shot_readiness.py \
+            tests/test_nova_creative_first_shot_storage.py \
             tests/test_nova_creative_single_shot_worker.py \
             tests/test_nova_creative_single_shot_db_claim.py \
             tests/test_nova_creative_widescreen_assembly.py
