@@ -26,6 +26,7 @@ def engagement(**changes):
 def task(**changes):
     item = {
         "task_id": "task-1",
+        "title": "CSV cleanup for approved records",
         "classification": "NOVA",
         "responsible_party": "NOVA",
         "status": "READY",
@@ -126,3 +127,14 @@ def test_engagement_detail_never_leaks_other_owner_tasks(monkeypatch):
             )
         assert denied.value.status_code == 404
     db_engine.dispose()
+
+
+def test_unrelated_nova_work_is_not_authorized_as_csv_cleanup():
+    assert not _eligible_task(task(title="Prepare client emails"), set())
+    assert not _eligible_task(task(title="Research suppliers", description="Public-source report"), set())
+    assert not _eligible_task(task(title="Draft onboarding guide", deliverable="Guide PDF"), set())
+
+
+def test_explicit_spreadsheet_cleanup_task_can_be_selected():
+    assert _eligible_task(task(title="Spreadsheet cleanup"), set())
+    assert _eligible_task(task(title="Process supplied CSV"), set())
