@@ -168,3 +168,24 @@ def test_recent_processing_job_cannot_be_recovered(state):
     with pytest.raises(jobs.CustomerCSVBlocked, match="not eligible"):
         jobs.recover_stale_job(db, org="org-a", owner="owner-a", job_id="active-1")
     assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="active-1")["status"] == "PROCESSING"
+
+
+def test_real_runtime_guard_rejects_sqlite_even_when_enabled(monkeypatch):
+    """Production-enabled flag must never allow local SQLite customer storage."""
+    engine = __import__("sqlalchemy").create_engine("sqlite:///:memory:")
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_CSV_ENABLED", "true")
+    with Session(engine) as db:
+        with pytest.raises(jobs.CustomerCSVBlocked, match="PostgreSQL required") as denied:
+            jobs.require_runtime(db)
+        assert denied.value.code == 503
+    engine.dispose()
+
+
+def test_runtime_guard_remains_default_off(monkeypatch):
+    engine = __import__("sqlalchemy").create_engine("sqlite:///:memory:")
+    monkeypatch.delenv("NOVA_OPERATIONS_DURABLE_CSV_ENABLED", raising=False)
+    with Session(engine) as db:
+        with pytest.raises(jobs.CustomerCSVBlocked, match="disabled") as denied:
+            jobs.require_runtime(db)
+        assert denied.value.code == 503
+    engine.dispose()
