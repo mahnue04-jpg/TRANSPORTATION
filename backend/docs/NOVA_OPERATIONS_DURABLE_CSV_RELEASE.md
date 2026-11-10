@@ -78,3 +78,13 @@ sent to a customer, and a review decision is not delivery or payment.
   rollback. Preserve metadata and audit; reconcile orphaned objects and retention.
 - No customer assignments, billing, signatures, external sends or production
   activation until owner explicitly approves the full release evidence.
+
+## Ephemeral PostgreSQL CI verification
+- `backend/tests/test_nova_operations_customer_csv_postgres.py` exercises the
+  real SQLAlchemy/PostgreSQL engine for owner isolation, review download,
+  two-connection idempotency and simultaneous duplicate-key submissions.
+- The Render diagnostic GitHub workflow now provisions a disposable PostgreSQL
+  16 service for this suite and uses a fake private store. This does not verify
+  S3 encryption, credentials, real auth or Render deployment.
+- A green `operations-csv-postgres` job is required before progressing to
+  isolated staging. Treat skipped tests as **not verified**.
