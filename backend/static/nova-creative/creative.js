@@ -34,7 +34,17 @@
         if ($(id)) $(id).disabled = true;
       });
       renderPreflight(null);
-      resetFirstShotSubmission();
+      // Inline UI reset keeps isolated legacy project-switching tests intact.
+      currentFirstShotReport = null;
+      currentFirstShotProject = null;
+      if ($("first-shot-explicit-approval")) {
+        $("first-shot-explicit-approval").checked = false;
+        $("first-shot-explicit-approval").disabled = true;
+      }
+      if ($("submit-first-shot")) $("submit-first-shot").disabled = true;
+      if ($("first-shot-approval-summary")) {
+        $("first-shot-approval-summary").textContent = "Check this project's first shot before any paid submission.";
+      }
       if ($("first-shot-readiness-status")) {
         $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
       }
