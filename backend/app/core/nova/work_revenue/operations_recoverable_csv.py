@@ -64,6 +64,10 @@ def _aware(value: datetime) -> datetime:
 def require_runtime(db: Session) -> None:
     if os.getenv("NOVA_OPERATIONS_RECOVERABLE_CSV_ENABLED", "").lower() != "true":
         raise CustomerCSVBlocked("Recoverable CSV jobs are disabled", 503)
+    environments = {os.getenv(name, "").strip().lower() for name in
+                    ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV") if os.getenv(name)}
+    if environments != {"staging"}:
+        raise CustomerCSVBlocked("Recoverable CSV preview is staging-only", 503)
     if db.get_bind().dialect.name != "postgresql":
         raise CustomerCSVBlocked("Isolated PostgreSQL required", 503)
     if not sa.inspect(db.get_bind()).has_table(recovery_jobs.name):
