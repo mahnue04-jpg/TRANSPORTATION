@@ -1548,7 +1548,7 @@ def _write_master_checkpoint(owner_id: str, project_id: str,
         current = db.get(NovaCreativeRenderClaim, _master_claim_key(owner_id, project_id, entry_id))
         if current is None or current.job_id != job_id or current.state != "RUNNING":
             raise RuntimeError("Master claim is no longer active")
-        saved = json.loads(current.checkpoint_json or "{}")
+        saved = _safe_master_checkpoint(current.checkpoint_json)
         pinned = saved.get("pinned_master")
         if not isinstance(pinned, dict):
             raise RuntimeError("Export has no pinned approved chapter snapshot")
@@ -1796,18 +1796,17 @@ def _master_job_status(db: Session, owner_id: str,
         except Exception:
             verified = False
         if verified:
-            latest.status = "GENERATED"
-            latest.result_asset_ids = [asset.id]
-            latest.message = "Verified saved master recovered after interrupted job update."
-            latest.updated_at = _now()
-            store.save_job(latest)
-            if claim is not None and claim.job_id == latest.id:
-                claim.state = "GENERATED"
-                claim.updated_at = _now()
-                db.commit()
-            return {"status": "GENERATED", "job": latest.as_dict(),
-                    "checkpoint": checkpoint,
-                    "message": "A previously completed private master was verified and recovered."}
+            # A read-only status request cannot determine that a remote worker
+            # is dead. Never mutate claims, approve outputs or mark an export
+            # GENERATED solely because a matching object was discovered.
+            return {
+                "status": "RECOVERABLE_ASSET_FOUND",
+                "job": latest.as_dict(),
+                "checkpoint": checkpoint,
+                "candidate_asset_id": asset.id,
+                "message": "A matching saved master was found, but the job is not finalized. "
+                           "Operator reconciliation is required before treating it as completed.",
+            }
     if latest.status == "ERROR":
         return {
             "status": "ERROR", "job": latest.as_dict(),
