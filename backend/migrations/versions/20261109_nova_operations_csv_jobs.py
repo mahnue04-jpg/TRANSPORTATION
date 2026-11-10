@@ -33,7 +33,14 @@ def _staging_approved() -> bool:
 
 
 def upgrade() -> None:
-    # Never touch live or unapproved environments, including ambiguous configs.
+    # Never touch live or ambiguous environments. Staging without explicit
+    # approval must FAIL instead of silently stamping the revision and leaving
+    # the required table absent.
+    raw_envs = {os.getenv(name, "").strip().lower()
+                for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")
+                if os.getenv(name)}
+    if "staging" in raw_envs and not _staging_approved():
+        raise RuntimeError("Staging CSV schema approval required")
     if not _staging_approved():
         return
     bind = op.get_bind()
