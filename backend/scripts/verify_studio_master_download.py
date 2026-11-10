@@ -78,12 +78,14 @@ def inspect_mp4(path: Path) -> dict:
     audio = next((x for x in streams if x.get("codec_type") == "audio"), None)
     if not video or not audio:
         raise VerificationError("Downloaded master must have both video and audio streams.")
+    if video.get("codec_name") != "h264" or audio.get("codec_name") != "aac":
+        raise VerificationError("Downloaded master must use H.264 video and AAC audio.")
     try:
         duration = float((result.get("format") or {}).get("duration") or 0)
     except (ValueError, TypeError):
         duration = 0
-    if not duration > 0:
-        raise VerificationError("Downloaded master has no valid duration.")
+    if not duration > 0 or duration > 60 * 60:
+        raise VerificationError("Downloaded master has invalid or excessive duration.")
     return {
         "duration_seconds": round(duration, 3),
         "video_codec": video.get("codec_name"),
@@ -136,6 +138,11 @@ def download_staging_master(base_url: str, project_id: str, asset_id: str,
             expected_bytes = int(raw_length)
             with partial.open("xb") as handle:
                 count = digest_reader(response, handle, expected_bytes, expected_sha)
+        # An exact checksum alone does not prove that the bytes are a
+        # playable MP4. Validate both streams BEFORE committing the final path.
+        inspect_mp4(partial)
+        if output.exists():
+            raise VerificationError("Refusing to overwrite an existing file.")
         partial.rename(output)
         return count
     except Exception:
