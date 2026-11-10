@@ -54,6 +54,56 @@
       button.disabled = false;
     }
   });
+  const loadEligible = document.getElementById("operations-load-eligible");
+  const eligibleSelect = document.getElementById("operations-eligible-select");
+  if (loadEligible && eligibleSelect) {
+    let eligibleTasks = [];
+    loadEligible.addEventListener("click", async function () {
+      const session = window.AmiCorSession;
+      const headers = session && typeof session.getAuthHeaders === "function"
+        ? session.getAuthHeaders() : {};
+      const status = document.getElementById("operations-scoped-csv-result");
+      if (!(headers.Authorization || headers.authorization)) {
+        status.textContent = "Sign in as the AMICOR owner first."; return;
+      }
+      loadEligible.disabled = true;
+      status.textContent = "Loading eligible Nova tasks...";
+      try {
+        const response = await fetch("/api/nova/work/operations/eligible-csv-tasks", {
+          credentials: "same-origin", headers: headers
+        });
+        if (!response.ok) {
+          let detail = "Task lookup unavailable (" + response.status + ").";
+          try { const error = await response.json(); detail = error.detail || detail; } catch (_) {}
+          status.textContent = detail; return;
+        }
+        const data = await response.json();
+        eligibleTasks = Array.isArray(data.tasks) ? data.tasks : [];
+        eligibleSelect.replaceChildren(new Option("Choose a saved task", ""));
+        eligibleTasks.forEach(function (task, index) {
+          const label = (task.engagement_title || task.engagement_id) +
+            " — " + (task.task_title || task.task_id);
+          eligibleSelect.appendChild(new Option(label, String(index)));
+        });
+        status.textContent = eligibleTasks.length
+          ? "Select a saved task, then confirm authority and choose its CSV."
+          : "No eligible Nova tasks were found. An ACTIVE engagement and an unblocked Nova review task are required.";
+      } catch (_) {
+        status.textContent = "Could not load saved tasks. Check your connection.";
+      } finally {
+        loadEligible.disabled = false;
+      }
+    });
+    eligibleSelect.addEventListener("change", function () {
+      const index = Number(eligibleSelect.value);
+      if (eligibleSelect.value === "" || !Number.isInteger(index) || !eligibleTasks[index]) return;
+      document.getElementById("operations-engagement-id").value =
+        eligibleTasks[index].engagement_id;
+      document.getElementById("operations-task-id").value =
+        eligibleTasks[index].task_id;
+      document.getElementById("operations-scope-confirmed").checked = false;
+    });
+  }
   const scoped = document.getElementById("operations-scoped-csv-form");
   const scopedStatus = document.getElementById("operations-scoped-csv-result");
   if (scoped && scopedStatus) scoped.addEventListener("submit", async function (event) {
