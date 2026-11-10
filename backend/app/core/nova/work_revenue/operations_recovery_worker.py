@@ -59,7 +59,14 @@ def _stage_only_config() -> tuple[str, str]:
     main_url = os.getenv("DATABASE_URL", "").strip()
     if main_url:
         try:
-            if parsed == sa.engine.make_url(main_url):
+            main_parsed = sa.engine.make_url(main_url)
+            # Compare server and database independently of credentials: two
+            # usernames may still target the same production database.
+            if (
+                parsed.host == main_parsed.host
+                and (parsed.port or 5432) == (main_parsed.port or 5432)
+                and parsed.database == main_parsed.database
+            ):
                 raise CustomerCSVBlocked("Worker database must be isolated", 503)
         except sa.exc.ArgumentError:
             raise CustomerCSVBlocked("Unsafe application database URL", 503)
