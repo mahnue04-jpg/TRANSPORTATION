@@ -215,6 +215,36 @@ def job_status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
             "output_sha256": row["output_sha256"]}
 
 
+
+def list_owned_jobs(
+    db: Session, *, org: str, owner: str, limit: int = 50,
+) -> list[dict]:
+    """Recent private job summaries; no artifact references or raw inputs."""
+    require_runtime(db)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise CustomerCSVBlocked("Job history limit must be between 1 and 50", 400)
+    rows = db.execute(
+        sa.select(
+            jobs.c.id, jobs.c.engagement_id, jobs.c.task_id,
+            jobs.c.status, jobs.c.created_at, jobs.c.updated_at,
+        )
+        .where(jobs.c.organization_id == org, jobs.c.owner_user_id == owner)
+        .order_by(jobs.c.created_at.desc(), jobs.c.id.desc())
+        .limit(limit)
+    ).mappings().all()
+    return [
+        {
+            "job_id": row["id"],
+            "engagement_id": row["engagement_id"],
+            "task_id": row["task_id"],
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat(),
+            "updated_at": row["updated_at"].isoformat(),
+        }
+        for row in rows
+    ]
+
+
 def review_job(
     db: Session, *, org: str, owner: str, job_id: str, approve: bool,
 ) -> dict:

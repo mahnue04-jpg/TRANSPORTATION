@@ -140,3 +140,29 @@ def test_invalid_file_and_idempotency_conflict(harness):
     assert create(client, body=b"X" * 1000001).status_code == 413
     assert create(client).status_code == 202
     assert create(client, body=b"Name\nOther\n").status_code == 409
+
+
+def test_saved_history_reopens_authorized_job(harness):
+    client, _, _, _ = harness
+    first = create(client, key="history-one").json()["job_id"]
+    second = create(client, key="history-two").json()["job_id"]
+    response = client.get("/api/nova/work/operations/durable/jobs")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["owner_only"] is True
+    assert payload["count"] == 2
+    assert {row["job_id"] for row in payload["jobs"]} == {first, second}
+    assert all("output_ref" not in row and "input_sha256" not in row for row in payload["jobs"])
+    assert client.get(f"/api/nova/work/operations/durable/jobs/{first}").status_code == 200
+    assert client.get("/api/nova/work/operations/durable/jobs?limit=0").status_code == 400
+
+
+def test_saved_history_is_hidden_after_assignment_revocation(harness):
+    client, engagement, _, _ = harness
+    job_id = create(client, key="history-revoke").json()["job_id"]
+    assert client.get("/api/nova/work/operations/durable/jobs").json()["count"] == 1
+    engagement["status"] = "BLOCKED"
+    history = client.get("/api/nova/work/operations/durable/jobs")
+    assert history.status_code == 200
+    assert history.json()["jobs"] == []
+    assert client.get(f"/api/nova/work/operations/durable/jobs/{job_id}").status_code == 409

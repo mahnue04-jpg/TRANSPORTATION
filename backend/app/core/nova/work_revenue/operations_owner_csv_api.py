@@ -282,6 +282,36 @@ async def create_durable_csv_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+@router.get("/durable/jobs")
+def durable_csv_owned_history(
+    limit: int = 50,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Reopen previously saved review jobs without exposing other owners' files."""
+    try:
+        entries = durable_csv.list_owned_jobs(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), limit=limit,
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    visible = []
+    for entry in entries:
+        try:
+            _check_saved_csv_assignment(
+                db, owner=owner, engagement_id=entry["engagement_id"],
+                task_id=entry["task_id"],
+            )
+        except HTTPException as exc:
+            # Authorization can change after submission; do not disclose
+            # inaccessible assignments in the owner history.
+            if exc.status_code in {403, 404, 409}:
+                continue
+            raise
+        visible.append(entry)
+    return {"jobs": visible, "count": len(visible), "owner_only": True}
+
+
 @router.get("/durable/jobs/{job_id}")
 def durable_csv_job_status(
     job_id: str,

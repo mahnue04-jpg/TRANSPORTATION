@@ -91,6 +91,16 @@
           <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
           <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>
         </div>
+        <div class="command-card" aria-label="Saved Operations review jobs">
+          <h3>Reopen a saved CSV job</h3>
+          <p class="hint">Owner-only history for assignments that remain authorized. No customer files are displayed here.</p>
+          <div class="command-actions"><button type="button" id="operations-durable-history-refresh" class="secondary">Load my saved jobs</button></div>
+          <label for="operations-durable-history-select">Saved review job
+            <select id="operations-durable-history-select"><option value="">Load saved jobs first</option></select>
+          </label>
+          <button type="button" id="operations-durable-history-open" class="secondary" disabled>Reopen selected job</button>
+          <p class="hint" id="operations-durable-history-result" aria-live="polite">Nothing has been loaded.</p>
+        </div>
         <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>
     </section>
