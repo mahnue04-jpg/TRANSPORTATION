@@ -93,3 +93,45 @@ with explicit owner/org scoping, a batch limit (up to 25 at the code layer,
 5 through the owner rehearsal API), and fresh saved-task authorization.
 No unattended scheduler, service deployment, restart proof, or production
 processing has been established. A green CI result is not proof of those.
+
+
+## Dedicated staging worker — development command
+
+Implemented module:
+`app.core.nova.work_revenue.operations_recovery_worker`.
+
+The command supports `--once` for an owner-approved one-pass rehearsal
+and `--loop --poll-seconds 30` for a future isolated background worker.
+**No autonomous worker service has been deployed.**
+
+Minimum separate staging settings (values are examples, not secrets):
+- `AMICOR_ENVIRONMENT=staging` and `APP_ENV=staging`;
+  never tolerate mismatched environment indicators.
+- `NOVA_OPERATIONS_RECOVERABLE_CSV_ENABLED=true` **only after**
+  isolated staging acceptance prerequisites are met.
+- `NOVA_OPERATIONS_RECOVERY_WORKER_ENABLED=true` **only on**
+  an approved dedicated staging worker, not the production API.
+- `NOVA_OPERATIONS_STAGING_DB_APPROVED=isolated-reviewed` only
+  after the dedicated database is separately verified.
+- `NOVA_OPERATIONS_STAGING_DATABASE_URL`: secret URL for the dedicated
+  Operations staging PostgreSQL database (must differ from `DATABASE_URL`,
+  including when credentials differ).
+- `NOVA_OPERATIONS_RECOVERY_OWNER_EMAIL`: verified owner email, looked up
+  in the staging `platform_users` table; no seeded owner fallback.
+- `PLATFORM_OPS_DOCUMENT_STORAGE=s3_private` and separately stored
+  limited staging storage credentials; never copy production secrets.
+
+Starting the process is **not sufficient** to prove recovery. Before
+launching it, verify staging schema is present, the owner and engagement
+records are isolated, storage permissions and encryption are verified,
+and the worker's designated permissions are restricted.
+
+The worker re-resolves the active owner each pass, rechecks the current
+saved-assignment scope for every job, and stops when its configured owner
+or database changes. It never transmits customer files. Run scripted
+restart/reclaim tests with fictional data before considering it reliable.
+
+The current worker is a foundation, not a hardened multi-tenant scheduler.
+Further release requirements include an approved service deployment,
+health monitoring, audited retention/orphan cleanup, lock-concurrency
+observability, and human review before external delivery.
