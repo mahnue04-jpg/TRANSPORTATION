@@ -516,6 +516,25 @@ def recovery_preview_owner_history(
         _durable_error(exc)
 
 
+@router.post("/recovery-preview/jobs/process-due")
+def recovery_preview_process_due(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-triggered bounded staging worker pass, not autonomous delivery."""
+    try:
+        recovery_csv.require_runtime(db)
+        return recovery_csv.run_due_jobs(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            limit=5,
+            authorization_check=lambda eng, task: _check_saved_csv_assignment(
+                db, owner=owner, engagement_id=eng, task_id=task,
+            ),
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/recovery-preview/jobs/{job_id}")
 def recovery_preview_status(
     job_id: str,
