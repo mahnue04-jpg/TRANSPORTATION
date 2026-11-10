@@ -122,3 +122,25 @@ def test_corrupted_input_never_generates_review_artifact(harness):
     state = scoped(db, recovery.status, job_id)
     assert state["status"] == "QUEUED"
     assert state["attempts"] == 1
+
+
+def test_reconcile_exhausted_expired_lease(harness):
+    db, _ = harness
+    job_id = submit(db, key="exhausted")["job_id"]
+    start = datetime.now(timezone.utc)
+    first = scoped(db, recovery.claim, job_id, now=start, lease_seconds=60)
+    assert first["attempts"] == 1
+    second = scoped(db, recovery.claim, job_id,
+                    now=start + timedelta(seconds=61), lease_seconds=60)
+    assert second["attempts"] == 2
+    third = scoped(db, recovery.claim, job_id,
+                   now=start + timedelta(seconds=122), lease_seconds=60)
+    assert third["attempts"] == 3
+    result = recovery.reconcile_stale_jobs(
+        db, org="org-a", owner="owner-a",
+        now=start + timedelta(seconds=183),
+    )
+    assert result["exhausted_jobs"] == 1
+    assert scoped(db, recovery.status, job_id)["status"] == "FAILED"
+    with pytest.raises(CustomerCSVBlocked):
+        scoped(db, recovery.claim, job_id, now=start + timedelta(seconds=184))
