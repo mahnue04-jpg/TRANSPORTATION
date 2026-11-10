@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/nova-saved-task-selector-issue-476
+      - feat/nova-durable-csv-job-history-20261110
     paths:
       - "backend/app/core/nova/work_revenue/operations_owner_csv_api.py"
       - "backend/tests/test_nova_operations_csv_eligibility.py"
