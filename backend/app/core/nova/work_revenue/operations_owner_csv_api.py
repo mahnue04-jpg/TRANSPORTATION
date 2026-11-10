@@ -17,7 +17,7 @@ from app.core.nova.work_revenue import service
 
 from app.auth import UserContext
 from app.core.nova.router import require_nova_access
-from app.core.nova.work_revenue.router import require_work_revenue_owner
+from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.core.nova.work_revenue.operations_csv_cleanup import (
     SpreadsheetInputError, clean_csv_text,
 )
