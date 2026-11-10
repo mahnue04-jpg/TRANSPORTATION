@@ -401,6 +401,120 @@ def durable_csv_download(
         _durable_error(exc)
 
 
+# Isolated staging rehearsal for the restart-recoverable queue.
+# Not a production/customer API; no external delivery or background scheduler.
+from . import operations_recoverable_csv as recovery_csv
+
+
+@router.post("/recovery-preview/engagements/{engagement_id}/tasks/{task_id}/jobs", status_code=202)
+async def create_recovery_preview_job(
+    engagement_id: str,
+    task_id: str,
+    request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    scope_confirmed: str | None = Header(default=None, alias="X-Nova-Scope-Confirmed"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    recovery_csv.require_runtime(db)
+    if scope_confirmed != "owner-confirmed-client-authorization":
+        raise HTTPException(403, "Owner data processing authorization required")
+    if not isinstance(filename, str) or not filename.lower().endswith(".csv") or len(filename) > 180 or any(
+        ord(c) < 32 or ord(c) == 127 or c in "/\\\\"
+        for c in filename
+    ):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id,
+    )
+    contents = bytearray()
+    async for chunk in request.stream():
+        if len(contents) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB")
+        contents.extend(chunk)
+    try:
+        return recovery_csv.enqueue(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            engagement_id=engagement_id, task_id=task_id,
+            request_key=request_key or "", raw=bytes(contents),
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except (UnicodeDecodeError, SpreadsheetInputError) as exc:
+        raise HTTPException(400, "CSV content invalid") from exc
+
+
+@router.get("/recovery-preview/jobs/{job_id}")
+def recovery_preview_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = recovery_csv.status(db, org=str(owner.organization_id),
+                                   owner=str(owner.user_id), job_id=job_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        return data
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.post("/recovery-preview/jobs/{job_id}/process")
+def process_recovery_preview_job(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    # Manual owner-rehearsal trigger only. A real queue worker needs its own
+    # scoped service identity, authorization lifecycle and deployment.
+    try:
+        recovery_csv.require_runtime(db)
+        data = recovery_csv.status(db, org=str(owner.organization_id),
+                                   owner=str(owner.user_id), job_id=job_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        return recovery_csv.process_job(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+            authorization_check=lambda eng, task: _check_saved_csv_assignment(
+                db, owner=owner, engagement_id=eng, task_id=task,
+            ),
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/recovery-preview/jobs/{job_id}/download")
+def recovery_preview_review_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = recovery_csv.status(db, org=str(owner.organization_id),
+                                   owner=str(owner.user_id), job_id=job_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        content = recovery_csv.review_download(
+            db, org=str(owner.organization_id),
+            owner=str(owner.user_id), job_id=job_id,
+        )
+        return Response(content=content, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-preview-review.csv"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+        })
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/eligible-csv-tasks")
 def eligible_csv_tasks(
     owner: UserContext = Depends(require_work_revenue_owner),
