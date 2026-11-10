@@ -156,3 +156,55 @@ def test_recovery_preview_fails_closed_in_production(harness, monkeypatch):
     with pytest.raises(CustomerCSVBlocked, match="staging-only") as blocked:
         ORIGINAL_RUNTIME_GATE(db)
     assert blocked.value.code == 503
+
+
+def test_due_job_discovery_is_owner_scoped_and_bounded(harness):
+    db, _ = harness
+    one = submit(db, key="due-one")["job_id"]
+    two = submit(db, key="due-two")["job_id"]
+    assert set(recovery.due_job_ids(
+        db, org="org-a", owner="owner-a",
+    )) == {one, two}
+    assert recovery.due_job_ids(
+        db, org="org-b", owner="owner-b",
+    ) == []
+    assert len(recovery.due_job_ids(
+        db, org="org-a", owner="owner-a", limit=1,
+    )) == 1
+    with pytest.raises(CustomerCSVBlocked):
+        recovery.due_job_ids(db, org="org-a", owner="owner-a", limit=0)
+
+
+def test_worker_pass_processes_only_authorized_due_jobs(harness):
+    db, store = harness
+    ids = [submit(db, key=f"worker-{i}")["job_id"] for i in range(2)]
+    calls = []
+    result = recovery.run_due_jobs(
+        db, org="org-a", owner="owner-a", limit=10,
+        authorization_check=lambda eng, task: calls.append((eng, task)),
+    )
+    assert result["attempted"] == 2
+    assert set(result["awaiting_review"]) == set(ids)
+    assert result["failed_attempts"] == []
+    assert result["delivered"] is False
+    assert len(calls) == 4
+    assert len(store.objects) == 4
+    assert recovery.due_job_ids(db, org="org-a", owner="owner-a") == []
+
+
+def test_worker_pass_fails_closed_on_revoked_scope(harness):
+    db, store = harness
+    job_id = submit(db, key="worker-revoked")["job_id"]
+
+    def deny(eng, task):
+        raise CustomerCSVBlocked("Assignment revoked", 409)
+
+    result = recovery.run_due_jobs(
+        db, org="org-a", owner="owner-a", authorization_check=deny,
+    )
+    assert result["attempted"] == 1
+    assert result["failed_attempts"] == [job_id]
+    assert recovery.status(
+        db, org="org-a", owner="owner-a", job_id=job_id,
+    )["status"] == "QUEUED"
+    assert len(store.objects) == 1
