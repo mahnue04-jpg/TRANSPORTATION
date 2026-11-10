@@ -168,6 +168,66 @@
       job.status + ". Owner review only. Not delivered or paid.";
   }
 
+  const historyRefresh = document.getElementById("operations-durable-history-refresh");
+  const historySelect = document.getElementById("operations-durable-history-select");
+  const historyOpen = document.getElementById("operations-durable-history-open");
+  const historyStatus = document.getElementById("operations-durable-history-result");
+  if (historyRefresh && historySelect && historyOpen && historyStatus) {
+    historySelect.addEventListener("change", function () {
+      historyOpen.disabled = !historySelect.value;
+    });
+    historyRefresh.addEventListener("click", async function () {
+      historyRefresh.disabled = true;
+      historyOpen.disabled = true;
+      historySelect.replaceChildren(new Option("Loading saved jobs...", ""));
+      historyStatus.textContent = "Loading saved owner jobs...";
+      try {
+        const auth = scopedAuthHeaders();
+        if (!(auth.Authorization || auth.authorization)) {
+          throw new Error("Sign in as the AMICOR owner first.");
+        }
+        const response = await fetch("/api/nova/work/operations/durable/jobs", {
+          credentials: "same-origin", headers: auth
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        const data = await response.json();
+        const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+        historySelect.replaceChildren(new Option("Choose a saved job", ""));
+        jobs.forEach(function (job) {
+          const label = (job.status || "UNKNOWN") + " · " +
+            (job.engagement_id || "") + " / " + (job.task_id || "") +
+            " · " + (job.created_at || "");
+          historySelect.appendChild(new Option(label, job.job_id));
+        });
+        historyStatus.textContent = jobs.length
+          ? "Select an authorized job to reopen its review controls."
+          : "No accessible saved jobs. Disabled durable processing does not erase earlier records.";
+      } catch (err) {
+        historySelect.replaceChildren(new Option("Saved jobs unavailable", ""));
+        historyStatus.textContent = err.message || "Unable to load saved jobs.";
+      } finally {
+        historyRefresh.disabled = false;
+      }
+    });
+    historyOpen.addEventListener("click", async function () {
+      const selectedId = historySelect.value;
+      if (!selectedId) return;
+      const previousId = currentJobId;
+      currentJobId = selectedId;
+      historyOpen.disabled = true;
+      try {
+        await refreshJobStatus();
+        historyStatus.textContent = "Job reopened for owner review. No customer delivery.";
+      } catch (err) {
+        currentJobId = previousId;
+        updateJobButtons("");
+        historyStatus.textContent = err.message || "Unable to reopen job.";
+      } finally {
+        historyOpen.disabled = !historySelect.value;
+      }
+    });
+  }
+
   if (scoped && scopedStatus) {
     scoped.addEventListener("submit", async function (event) {
       event.preventDefault();
