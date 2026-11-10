@@ -1121,6 +1121,50 @@ class CreativeStudioService(ShortDramaMixin):
             self._finish_job(job, status=provider_state.status, message=provider_state.message, asset_ids=[asset.id])
             return {"job": job.as_dict(), "asset": asset.as_dict(), "provider": result, "url": None}
 
+        if single_shot_reference_id is not None:
+            # This is the final provider-post gate, not merely HTTP preflight.
+            # Mark POST_ATTEMPTED in shared SQL before any network request.
+            # If we lose the task ID, a retry must NOT risk a second charge.
+            from app.core.nova.creative_studio.store import DbCreativeStudioStore
+            if not isinstance(self.store, DbCreativeStudioStore):
+                raise CreativeStudioError(
+                    "DURABLE_SHOT_CLAIM_REQUIRED",
+                    "A shared database is required before a paid provider post.",
+                    http_status=503,
+                )
+            fresh = self.store.get_project(project_id, owner_id)
+            previous = dict(fresh.metadata or {})
+            claim = dict(previous.get("first_shot_paid_claim") or {})
+            if claim.get("reference_image_asset_id") != single_shot_reference_id:
+                raise CreativeStudioError(
+                    "FIRST_SHOT_CLAIM_MISMATCH",
+                    "The owner-approved image reservation is unavailable or changed.",
+                    http_status=409,
+                )
+            if not resume_task_id:
+                if claim.get("state") != "RESERVED":
+                    raise CreativeStudioError(
+                        "FIRST_SHOT_POST_AMBIGUOUS",
+                        "A provider post may already have occurred. Reconcile provider usage before retrying.",
+                        http_status=409,
+                    )
+                updated = dict(previous)
+                updated["first_shot_paid_claim"] = dict(claim, state="POST_ATTEMPTED")
+                if not self.store.compare_and_swap_project_metadata(
+                    project_id, owner_id, previous, updated
+                ):
+                    raise CreativeStudioError(
+                        "FIRST_SHOT_CONCURRENT_WORKER",
+                        "Another worker claimed the provider request. No second request was made.",
+                        http_status=409,
+                    )
+            elif claim.get("state") != "POST_ATTEMPTED":
+                raise CreativeStudioError(
+                    "FIRST_SHOT_UNEXPECTED_RESUME",
+                    "Saved provider task does not match a submitted first-shot claim.",
+                    http_status=409,
+                )
+
         try:
             result = video_provider().generate(
                 brief={
