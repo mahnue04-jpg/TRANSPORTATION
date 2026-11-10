@@ -332,6 +332,30 @@ def status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     return summary(_owned(db, org=org, owner=owner, job_id=job_id))
 
 
+
+def decide_review(db: Session, *, org: str, owner: str, job_id: str,
+                  approve: bool) -> dict:
+    """Explicit owner decision, never an external delivery action."""
+    require_runtime(db)
+    if type(approve) is not bool:
+        raise CustomerCSVBlocked("Boolean review decision required", 400)
+    desired = "APPROVED_FOR_DOWNLOAD" if approve else "REJECTED"
+    updated = db.execute(sa.update(recovery_jobs).where(
+        recovery_jobs.c.id == job_id,
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+        recovery_jobs.c.status == "AWAITING_REVIEW",
+        recovery_jobs.c.output_ref.is_not(None),
+        recovery_jobs.c.output_sha256.is_not(None),
+    ).values(status=desired, updated_at=_now()))
+    if updated.rowcount != 1:
+        db.rollback()
+        raise CustomerCSVBlocked("Job is not awaiting review", 409)
+    db.commit()
+    return {"job_id": job_id, "status": desired, "delivered": False}
+
+
+
 def review_download(db: Session, *, org: str, owner: str, job_id: str) -> bytes:
     require_runtime(db)
     row = _owned(db, org=org, owner=owner, job_id=job_id)
