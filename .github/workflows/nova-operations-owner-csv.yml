@@ -10,6 +10,7 @@ on:
       - 'backend/static/nova-work/index.html'
       - 'backend/static/nova-work/operations-csv.js'
       - 'backend/tests/test_nova_operations_owner_csv_api.py'
+      - 'backend/tests/test_nova_operations_scoped_csv.py'
       - '.github/workflows/nova-operations-owner-csv.yml'
   workflow_dispatch:
 
@@ -32,4 +33,4 @@ jobs:
         env:
           DATABASE_URL: ''
           NOVA_OPERATIONS_OWNER_CSV_ENABLED: 'false'
-        run: PYTHONPATH=. python -m pytest --noconftest -q tests/test_nova_operations_owner_csv_api.py
+        run: PYTHONPATH=. python -m pytest --noconftest -q tests/test_nova_operations_owner_csv_api.py tests/test_nova_operations_scoped_csv.py
