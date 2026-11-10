@@ -180,3 +180,46 @@ def test_postgres_bounded_worker_pass_recovers_queue(postgres):
         assert second_pass["attempted"] == 1
         assert recovery.due_job_ids(db, org="org-a", owner="owner-a") == []
         assert len(store.items) == 4
+
+
+def test_postgres_fenced_lease_renewal_and_restart_claim(postgres):
+    engine, _ = postgres
+    with Session(engine) as db:
+        job_id = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="pg-lease-heartbeat",
+            raw=b"Name\nAda\n",
+        )["job_id"]
+        stamp = datetime.now(timezone.utc)
+        original = recovery.claim(
+            db, org="org-a", owner="owner-a",
+            job_id=job_id, now=stamp, lease_seconds=60,
+        )
+        renewed_until = recovery.renew_lease(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+            token=original["token"],
+            now=stamp + timedelta(seconds=30), lease_seconds=90,
+        )
+        assert renewed_until == stamp + timedelta(seconds=120)
+        with pytest.raises(CustomerCSVBlocked):
+            recovery.claim(
+                db, org="org-a", owner="owner-a", job_id=job_id,
+                now=stamp + timedelta(seconds=65),
+            )
+        replacement = recovery.claim(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+            now=stamp + timedelta(seconds=121),
+        )
+        with pytest.raises(CustomerCSVBlocked, match="Cannot renew"):
+            recovery.renew_lease(
+                db, org="org-a", owner="owner-a", job_id=job_id,
+                token=original["token"], now=stamp + timedelta(seconds=122),
+            )
+        recovery.complete(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+            token=replacement["token"], output_ref="private-stage-output",
+            output_sha256="f" * 64, now=stamp + timedelta(seconds=122),
+        )
+        assert recovery.status(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+        )["status"] == "AWAITING_REVIEW"
