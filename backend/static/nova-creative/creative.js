@@ -1885,6 +1885,7 @@
     submit.disabled = firstShotSubmitting || !approval || !approval.checked
       || !currentFirstShotReport || currentFirstShotReport.status !== "READY_TO_REQUEST"
       || !currentFirstShotReport.reference_image_asset_id
+      || !latestPreflight || latestPreflight.owner_budget_confirmed !== true
       || currentFirstShotProject !== activeProjectId;
   }
 
@@ -1922,12 +1923,14 @@
     var approval = $("first-shot-explicit-approval");
     var summary = $("first-shot-approval-summary");
     var ready = report.status === "READY_TO_REQUEST" && blockers.length === 0
-      && !!report.reference_image_asset_id && report.scene_count === 1;
+      && !!report.reference_image_asset_id && report.scene_count === 1
+      && !!latestPreflight && latestPreflight.owner_budget_confirmed === true;
     if (approval) { approval.checked = false; approval.disabled = !ready; }
     if (summary) summary.textContent = ready
       ? "Reference image: " + String(report.reference_image_asset_id)
-        + ". This may incur a provider charge. Confirm the exact provider price separately before authorizing."
-      : "Paid submission blocked. Resolve the issues listed above, then check this shot again.";
+        + ". Project planning estimate: $" + String(latestPreflight.estimated_total_usd)
+        + " USD (may include more than one service). Verify the exact one-shot provider price before approval."
+      : "Paid submission blocked. Resolve the listed issues, run and confirm this project\u0027s price preflight, then check the shot again.";
     refreshFirstShotSubmitButton();
   }
 
