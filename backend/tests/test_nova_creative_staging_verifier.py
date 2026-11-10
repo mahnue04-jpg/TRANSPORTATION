@@ -166,3 +166,52 @@ def test_staging_rejects_same_hash_non_video_before_finalizing(monkeypatch, tmp_
         )
     assert not output.exists()
     assert not (tmp_path / "unplayable.mp4.partial").exists()
+
+
+@pytest.mark.parametrize("video_codec,audio_codec", [
+    ("mpeg4", "aac"), ("h264", "mp3"), ("vp9", "opus"),
+])
+def test_probe_rejects_wrong_codecs(monkeypatch, tmp_path, video_codec, audio_codec):
+    import json
+    from types import SimpleNamespace
+    video = {"codec_type": "video", "codec_name": video_codec,
+             "width": 1280, "height": 720}
+    audio = {"codec_type": "audio", "codec_name": audio_codec}
+    fake = SimpleNamespace(stdout=json.dumps({
+        "format": {"duration": "650.0"}, "streams": [video, audio]
+    }))
+    monkeypatch.setattr(verifier.subprocess, "run", lambda *args, **kwargs: fake)
+    with pytest.raises(verifier.VerificationError, match="H.264"):
+        verifier.inspect_mp4(tmp_path / "dummy.mp4")
+
+
+@pytest.mark.parametrize("duration", ["0", "-1", "nan", "inf", "3601"])
+def test_probe_rejects_invalid_or_unbounded_duration(monkeypatch, tmp_path, duration):
+    import json
+    from types import SimpleNamespace
+    fake = SimpleNamespace(stdout=json.dumps({
+        "format": {"duration": duration},
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264", "width": 1280, "height": 720},
+            {"codec_type": "audio", "codec_name": "aac"},
+        ]
+    }))
+    monkeypatch.setattr(verifier.subprocess, "run", lambda *args, **kwargs: fake)
+    with pytest.raises(verifier.VerificationError, match="duration"):
+        verifier.inspect_mp4(tmp_path / "dummy.mp4")
+
+
+def test_remote_transfer_rejects_redirect_without_following_authorization(monkeypatch, tmp_path):
+    from urllib.error import HTTPError
+    class RedirectOpener:
+        def open(self, request, timeout):
+            raise verifier.VerificationError("Staging download redirected unexpectedly.")
+    monkeypatch.setattr(verifier.urllib.request, "build_opener",
+                        lambda *handlers: RedirectOpener())
+    target = tmp_path / "no-redirect.mp4"
+    with pytest.raises(verifier.VerificationError, match="redirected"):
+        verifier.download_staging_master(
+            "https://studio.example.test", "project", "asset",
+            digest(b"fake"), target, "mock-owner-token"
+        )
+    assert not target.exists()
