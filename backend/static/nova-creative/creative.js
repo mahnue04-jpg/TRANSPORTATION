@@ -1863,6 +1863,8 @@
     var explanations = {
       STORYBOARD_REQUIRED: "Create the storyboard for this project.",
       FIRST_SCENE_PROMPT_REQUIRED: "Add visual direction to the first scene.",
+      FIRST_SCENE_NOT_FIVE_SECONDS: "Set the first storyboard shot to exactly five seconds.",
+      MULTI_SCENE_PROJECT_NOT_SINGLE_SHOT: "This project has multiple scenes. Use a dedicated one-scene project for the first controlled five-second test.",
       FIRST_SCENE_REFERENCE_IMAGE_REQUIRED: "Create and save a matching first-scene reference image.",
       VIDEO_PROVIDER_NOT_AVAILABLE: "Video provider is not ready; check credentials and owner activation.",
       BUDGET_CONFIRMATION_REQUIRED: "Run the separate price preflight and confirm a budget before paid rendering."
