@@ -42,10 +42,32 @@ def _eligible_engagement(engagement: dict, org: str, owner_id: str) -> bool:
     )
 
 
+def _csv_task_scope(task: dict) -> bool:
+    """Only tasks explicitly described as CSV/spreadsheet cleanup are eligible.
+
+    General Nova administrative work is not authorization to transform files.
+    This label gate is intentionally narrow; a future structured work-type
+    authorization should replace text labels before customer production.
+    """
+    description = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "deliverable")
+    )
+    return any(
+        label in description
+        for label in (
+            "csv", "spreadsheet cleanup", "spreadsheet cleaning",
+            "data cleanup", "data cleaning", "data validation",
+            "data reconciliation",
+        )
+    )
+
+
 def _eligible_task(task: dict, completed_task_ids: set[str]) -> bool:
-    """Restrict CSV work to unblocked, supervised Nova tasks with satisfied dependencies."""
+    """Restrict CSV work to unblocked, explicitly scoped supervised Nova tasks."""
     dependency = str(task.get("depends_on_task_id") or "").strip()
     return (
+        _csv_task_scope(task)
         str(task.get("classification") or "").strip().upper() == "NOVA"
         and str(task.get("responsible_party") or "").strip().upper() == "NOVA"
         and task.get("review_required") is True
