@@ -45,6 +45,7 @@
       if ($("first-shot-approval-summary")) {
         $("first-shot-approval-summary").textContent = "Check this project's first shot before any paid submission.";
       }
+      clearFirstShotPreview();
       if ($("first-shot-job-result")) $("first-shot-job-result").textContent = "No first-shot job checked for this project yet.";
       if ($("first-shot-readiness-status")) {
         $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
@@ -2010,9 +2011,18 @@
     });
   }
 
+  var firstShotPreviewUrl = null;
+  function clearFirstShotPreview() {
+    if (firstShotPreviewUrl) {
+      URL.revokeObjectURL(firstShotPreviewUrl);
+      firstShotPreviewUrl = null;
+    }
+  }
+
   function renderFirstShotJobResult(detail, selectedProject) {
     var el = $("first-shot-job-result");
     if (!el) return;
+    clearFirstShotPreview();
     el.replaceChildren();
     if (!detail || !selectedProject) {
       el.textContent = "Select a project to check its saved first-shot job.";
@@ -2073,6 +2083,39 @@
       }
     });
     el.appendChild(link);
+    var play = document.createElement("button");
+    play.type = "button";
+    play.className = "secondary";
+    play.textContent = "Play saved five-second shot securely";
+    play.addEventListener("click", async function () {
+      var projectAtClick = activeProjectId;
+      var revisionAtClick = activeProjectRevision;
+      if (projectAtClick !== selectedProject) return;
+      play.disabled = true;
+      try {
+        var clip = await fetchProtectedStudioVideo(selectedProject, video.id);
+        if (projectAtClick !== activeProjectId ||
+            revisionAtClick !== activeProjectRevision || !el.isConnected) return;
+        clearFirstShotPreview();
+        var preview = document.createElement("video");
+        preview.controls = true;
+        preview.playsInline = true;
+        preview.preload = "metadata";
+        preview.style.width = "100%";
+        preview.style.maxWidth = "640px";
+        preview.setAttribute("aria-label", "Saved five-second Nova Creative Studio video");
+        firstShotPreviewUrl = URL.createObjectURL(clip);
+        preview.src = firstShotPreviewUrl;
+        el.appendChild(preview);
+        showBanner("Video loaded. Inspect movement, continuity and playback before accepting the shot.", true);
+      } catch (err) {
+        if (projectAtClick === activeProjectId)
+          showBanner(err.message || "Protected video preview unavailable.", false);
+      } finally {
+        play.disabled = false;
+      }
+    });
+    el.appendChild(play);
     var note = document.createElement("div");
     note.textContent = "Saved MP4 available; review in the project asset gallery. Technical availability does not prove natural acting or smooth phone playback.";
     el.appendChild(note);
