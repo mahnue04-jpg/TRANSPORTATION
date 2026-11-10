@@ -52,7 +52,7 @@ def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: Backgrou
                 service._finish_job(job, status="ERROR", message="Scene worker was interrupted. No saved Runway task is available; check provider history before retrying. Nova has not automatically submitted another video.", asset_ids=job.result_asset_ids)
 
 
-def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
+def _run_scene_background(owner_id: str, project_id: str, job_id: str, first_shot_reference_id: str | None = None) -> None:
     db = None
     job = None
     _scene_capacity.acquire()
@@ -63,7 +63,9 @@ def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
         deadline = time.monotonic() + 900
         while True:
             service._finish_job(job, status="RUNNING", message="Generating scene artwork and video.", asset_ids=job.result_asset_ids)
-            result = service.request_video_generation(owner_id, project_id, job=job)
+            result = service.request_video_generation(
+                owner_id, project_id, job=job, single_shot_reference_id=first_shot_reference_id,
+            )
             if result.get("provider", {}).get("status") != "PROCESSING":
                 break
             if time.monotonic() >= deadline:
@@ -725,7 +727,9 @@ def generate_first_shot(
                 asset_ids=[],
             )
             _scene_workers.add(job.id)
-            background_tasks.add_task(_run_scene_background, user.user_id, project_id, job.id)
+            background_tasks.add_task(
+                _run_scene_background, user.user_id, project_id, job.id, payload.reference_image_asset_id,
+            )
         return {
             "status": "PROCESSING", "job": job.as_dict(),
             "scope": "ONE_FIVE_SECOND_KLING_SHOT",
