@@ -3,6 +3,7 @@
 All tests are offline; a fake provider throws if a billable generation is called.
 """
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -101,6 +102,7 @@ def test_restart_does_not_resubmit_paid_first_shot(monkeypatch):
     routes._scene_workers.clear()
     job = SimpleNamespace(
         id="single-job", kind="first_shot_video", status="RUNNING",
+        updated_at=(datetime.now(timezone.utc) - timedelta(minutes=22)).isoformat(),
         result_asset_ids=[],
     )
     updates = []
@@ -131,6 +133,7 @@ def test_restart_can_recognize_saved_paid_video_without_resubmission():
     result = SimpleNamespace(id="clip-1", kind="video", status="GENERATED", url="/saved/clip.mp4")
     job = SimpleNamespace(
         id="single-job", kind="first_shot_video", status="RUNNING",
+        updated_at=(datetime.now(timezone.utc) - timedelta(minutes=22)).isoformat(),
         result_asset_ids=[result.id],
     )
 
@@ -146,4 +149,32 @@ def test_restart_can_recognize_saved_paid_video_without_resubmission():
     tasks = BackgroundTasks()
     routes._recover_scene_jobs(FakeService(), "owner", "project", tasks)
     assert job.status == "GENERATED"
+    assert tasks.tasks == []
+
+
+def test_fresh_job_on_other_process_is_not_marked_failed():
+    import importlib
+    from fastapi import BackgroundTasks
+
+    routes = importlib.import_module("app.core.nova.creative_studio.router")
+    routes._scene_workers.clear()
+    job = SimpleNamespace(
+        id="single-job", kind="first_shot_video", status="QUEUED",
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        result_asset_ids=[],
+    )
+    updated = []
+    class FakeService:
+        store = SimpleNamespace(
+            list_jobs=lambda project, owner: [job],
+            list_assets=lambda project, owner: [],
+        )
+        def _finish_job(self, row, *, status, message, asset_ids):
+            updated.append(status)
+            row.status = status
+
+    tasks = BackgroundTasks()
+    routes._recover_scene_jobs(FakeService(), "owner", "project", tasks)
+    assert job.status == "QUEUED"
+    assert updated == []
     assert tasks.tasks == []
