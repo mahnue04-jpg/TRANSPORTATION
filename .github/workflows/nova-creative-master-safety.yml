@@ -21,6 +21,7 @@ on:
       - "backend/scripts/verify_studio_master_download.py"
       - "backend/tests/test_nova_creative_master_claims.py"
       - "backend/tests/test_nova_creative_master_readiness.py"
+      - "backend/tests/test_nova_creative_master_recovery_readonly.py"
       - "backend/tests/test_nova_creative_master_worker.py"
       - "backend/tests/test_nova_creative_remote_master_head_gate.py"
       - ".github/workflows/nova-creative-master-safety.yml"
@@ -68,6 +69,7 @@ jobs:
           python -m pytest -q \
             tests/test_nova_creative_master_claims.py \
             tests/test_nova_creative_master_readiness.py \
+            tests/test_nova_creative_master_recovery_readonly.py \
             tests/test_nova_creative_master_worker.py \
             tests/test_nova_creative_remote_master_head_gate.py \
             tests/test_nova_creative_private_master_download.py \
