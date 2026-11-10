@@ -129,3 +129,10 @@ def test_flag_disabled_denies_get_and_post(harness, monkeypatch):
     monkeypatch.setenv("NOVA_OPERATIONS_OWNER_CSV_ENABLED", "false")
     assert client.get("/api/nova/work/operations/eligible-csv-tasks").status_code == 503
     assert _run(client, headers).status_code == 503
+
+
+def test_unrelated_nova_assignment_not_listed_or_executed(harness):
+    client, item, headers = harness
+    item["tasks"][0]["title"] = "Write marketing emails"
+    assert client.get("/api/nova/work/operations/eligible-csv-tasks").json()["tasks"] == []
+    assert _run(client, headers).status_code == 409
