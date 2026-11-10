@@ -450,6 +450,34 @@ async def create_recovery_preview_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+@router.get("/recovery-preview/jobs")
+def recovery_preview_owner_history(
+    limit: int = 50,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Only currently authorized work; no stored file references returned."""
+    try:
+        entries = recovery_csv.list_owned(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), limit=limit,
+        )
+        visible = []
+        for entry in entries:
+            try:
+                _check_saved_csv_assignment(
+                    db, owner=owner, engagement_id=entry["engagement_id"],
+                    task_id=entry["task_id"],
+                )
+            except HTTPException as exc:
+                if exc.status_code in {403, 404, 409}:
+                    continue
+                raise
+            visible.append(entry)
+        return {"jobs": visible, "count": len(visible), "owner_only": True}
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/recovery-preview/jobs/{job_id}")
 def recovery_preview_status(
     job_id: str,
