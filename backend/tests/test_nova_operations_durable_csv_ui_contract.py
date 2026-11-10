@@ -33,3 +33,17 @@ def test_no_automatic_customer_delivery_claim():
     assert "No customer delivery or payment occurred." in JS
     assert "Not delivered to a client." in JS
     assert "Owner review is not customer delivery" in HTML
+
+
+
+def test_saved_job_history_controls_and_reopen_endpoint():
+    for element_id in (
+        "operations-durable-history-refresh",
+        "operations-durable-history-select",
+        "operations-durable-history-open",
+        "operations-durable-history-result",
+    ):
+        assert f'id="{element_id}"' in HTML
+    assert '"/api/nova/work/operations/durable/jobs"' in JS
+    assert "await refreshJobStatus()" in JS
+    assert "No customer delivery" in JS
