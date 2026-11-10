@@ -94,6 +94,23 @@ def inspect_mp4(path: Path) -> dict:
     }
 
 
+def decode_mp4(path: Path) -> None:
+    """Read-decode both tracks without emitting new files or publishing video.
+
+    This is a deterministic corruption check, not evidence that a human
+    reviewed acting, synchronization or caption quality.
+    """
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error",
+             "-xerror", "-i", str(path), "-map", "0:v:0", "-map", "0:a:0",
+             "-f", "null", "-"],
+            check=True, text=True, capture_output=True, timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise VerificationError("Full H.264/AAC decode failed.") from exc
+
+
 def _download_url(base_url: str, project_id: str, asset_id: str) -> str:
     parts = urllib.parse.urlsplit(base_url)
     if (parts.scheme != "https" or not parts.netloc or parts.username
@@ -158,6 +175,8 @@ def main(argv=None) -> int:
     parser.add_argument("--local-file")
     parser.add_argument("--sha256", required=True)
     parser.add_argument("--output")
+    parser.add_argument("--decode-check", action="store_true",
+                        help="Decode the full MP4 with FFmpeg as an extra read-only corruption check")
     args = parser.parse_args(argv)
     try:
         if args.local_file:
@@ -175,7 +194,10 @@ def main(argv=None) -> int:
                 args.sha256, target, os.getenv("NOVA_STUDIO_STAGING_BEARER", ""),
             )
         media = inspect_mp4(target)
+        if args.decode_check:
+            decode_mp4(target)
         print(json.dumps({"result": "verified", "bytes": count, "sha256": args.sha256.lower(),
+                          "full_decode_verified": bool(args.decode_check),
                           "media": media}, sort_keys=True))
         return 0
     except (VerificationError, OSError, urllib.error.URLError) as exc:
