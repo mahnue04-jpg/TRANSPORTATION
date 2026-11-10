@@ -78,3 +78,39 @@ def test_recovery_rejects_mismatched_media_or_missing_remote_bytes(monkeypatch):
         assert result["status"] != "GENERATED"
         assert result["status"] != "RECOVERABLE_ASSET_FOUND" or changes == {}
         assert calls == {"save_job": 0, "commit": 0}
+
+
+def test_resume_endpoint_blocks_unfinalized_recoverable_asset(monkeypatch):
+    """A customer cannot rerender while a saved master awaits reconciliation."""
+    from fastapi import BackgroundTasks, HTTPException
+    import pytest
+    monkeypatch.setattr(studio, "_project", lambda *args: None)
+    monkeypatch.setattr(studio, "_entry", lambda *args:
+                        SimpleNamespace(status="approved"))
+    monkeypatch.setattr(studio, "_master_job_status", lambda *args: {
+        "status": "RECOVERABLE_ASSET_FOUND",
+        "candidate_asset_id": "master-new",
+        "job": {"status": "ERROR"},
+    })
+    monkeypatch.setattr(
+        studio, "start_chapter_master_job",
+        lambda *args: pytest.fail("Recovery must not launch a duplicate export"),
+    )
+    with pytest.raises(HTTPException) as err:
+        studio.resume_failed_master_job(
+            "project", "entry", BackgroundTasks(),
+            SimpleNamespace(user_id="owner"), object(),
+        )
+    assert err.value.status_code == 409
+
+
+def test_fresh_running_claim_never_reports_recovery_candidate(monkeypatch):
+    from datetime import datetime, timezone
+    db, claim, job, calls = _case(
+        monkeypatch, claim_state="RUNNING", job_status="RUNNING"
+    )
+    claim.updated_at = datetime.now(timezone.utc).isoformat()
+    result = studio._master_job_status(db, "owner", "project", "entry")
+    assert result["status"] == "RUNNING"
+    assert "candidate_asset_id" not in result
+    assert calls == {"save_job": 0, "commit": 0}
