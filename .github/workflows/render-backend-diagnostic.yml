@@ -44,6 +44,58 @@ jobs:
           tests/test_nova_multi_source_discovery.py
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
 
+  operations-csv-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TESTING: "true"
+      DATABASE_URL: sqlite:///./test_nova_operations_csv_pr_ci.db
+      APP_ENV: development
+      AMICOR_ENVIRONMENT: development
+      NOVA_OPERATIONS_OWNER_CSV_ENABLED: "false"
+      NOVA_OPERATIONS_DURABLE_CSV_ENABLED: "false"
+      AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
+      HEALTH_ISF_STRIPE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+      ALLOWED_ORIGINS: https://example.invalid
+      AMICOR_PUBLIC_URL: https://example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify browser code syntax
+        run: node --check static/nova-work/operations-csv.js
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Run isolated CSV job API and recovery regressions
+        run: |
+          set -euo pipefail
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
+          python -m pytest -q -rs \
+            tests/test_nova_operations_csv_eligibility.py \
+            tests/test_nova_operations_csv_http.py \
+            tests/test_nova_operations_exact_claim_recovery.py \
+            tests/test_nova_operations_atomic_completion.py \
+            tests/test_nova_operations_csv_runner.py \
+            tests/test_nova_operations_csv_offline_bridge.py \
+            tests/test_nova_operations_customer_csv_jobs.py \
+            tests/test_nova_operations_customer_csv_http.py \
+            tests/test_nova_operations_durable_csv_ui_contract.py
+          echo "CSV regressions use synthetic fixtures; not proof of production storage, real authorization, or customer-job readiness." >> "$GITHUB_STEP_SUMMARY"
+
   backend-diagnostic:
     runs-on: ubuntu-latest
     services:
