@@ -47,3 +47,19 @@ def test_saved_job_history_controls_and_reopen_endpoint():
     assert '"/api/nova/work/operations/durable/jobs"' in JS
     assert "await refreshJobStatus()" in JS
     assert "No customer delivery" in JS
+
+
+def test_staging_recovery_rehearsal_ui_is_owner_scoped_and_non_delivery():
+    preview_html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    preview_js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert "Staging only. Use fictional CSV data." in preview_html
+    for element_id in (
+        "recovery-load-tasks", "recovery-task-select", "recovery-upload-form",
+        "recovery-load-history", "recovery-job-select", "recovery-process",
+        "recovery-check", "recovery-download", "recovery-approve", "recovery-reject",
+    ):
+        assert f'id="{element_id}"' in preview_html
+    for route in ("/eligible-csv-tasks", "/jobs", "/process", "/review", "/download"):
+        assert route in preview_js
+    assert 'session.getAuthHeaders' in preview_js
+    assert 'Not delivered' in preview_js
