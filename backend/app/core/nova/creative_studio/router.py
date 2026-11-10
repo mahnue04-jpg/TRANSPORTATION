@@ -37,6 +37,28 @@ def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: Backgrou
     with _scene_lock:
         assets = {row.id: row for row in service.store.list_assets(project_id, owner_id)}
         for job in service.store.list_jobs(project_id, owner_id):
+            if job.kind == "first_shot_video" and job.status in {"QUEUED", "RUNNING"} and job.id not in _scene_workers:
+                # A restarted controlled paid-shot worker must never resubmit
+                # without reconciling a persisted provider task identifier.
+                # Keep a completed saved asset if present; otherwise report
+                # ambiguity for owner review rather than claiming a safe retry.
+                linked = [assets[asset_id] for asset_id in job.result_asset_ids
+                          if asset_id in assets and assets[asset_id].kind == "video"]
+                complete = [row for row in linked if row.status == "GENERATED" and row.url]
+                if complete:
+                    service._finish_job(
+                        job, status="GENERATED",
+                        message="Recovered a saved controlled five-second video; inspect playback and motion.",
+                        asset_ids=[row.id for row in complete],
+                    )
+                else:
+                    service._finish_job(
+                        job, status="ERROR",
+                        message="Controlled shot interrupted. Provider submission may have occurred. "
+                                "Review saved task ID and provider usage manually; no automatic retry.",
+                        asset_ids=job.result_asset_ids,
+                    )
+                continue
             if job.kind != "video" or job.status not in {"QUEUED", "RUNNING"} or job.id in _scene_workers:
                 continue
             results = [assets[aid] for aid in job.result_asset_ids if aid in assets and assets[aid].kind == "video"]
