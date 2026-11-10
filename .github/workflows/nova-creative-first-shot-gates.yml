@@ -7,6 +7,7 @@ on:
       - "backend/app/core/nova/creative_studio/long_form_assembly.py"
       - "backend/app/core/nova/creative_studio/router.py"
       - "backend/tests/test_nova_creative_first_shot_readiness.py"
+      - "backend/tests/test_nova_creative_single_shot_worker.py"
       - "backend/tests/test_nova_creative_widescreen_assembly.py"
       - ".github/workflows/nova-creative-first-shot-gates.yml"
   workflow_dispatch:
@@ -42,4 +43,5 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_nova_creative_first_shot_readiness.py \
+            tests/test_nova_creative_single_shot_worker.py \
             tests/test_nova_creative_widescreen_assembly.py
