@@ -136,7 +136,7 @@
               encodeURIComponent(selected.id) + "/master-status", { method: "GET" });
             var step = info.checkpoint && info.checkpoint.stage;
             feedback((info.message || ("Master export: " + info.status)) + (step ? " Last saved stage: " + step.replace(/_/g, " ").toLowerCase() + "." : ""),
-              info.status === "COMPLETED_ASSET_UNVERIFIED");
+              info.status === "COMPLETED_ASSET_UNVERIFIED" || info.status === "RECOVERABLE_ASSET_FOUND");
             if (info.status === "GENERATED" && typeof bridge.refreshProductionAssets === "function") {
               await bridge.refreshProductionAssets();
             }
@@ -247,6 +247,10 @@
       if (active() !== project) return;
       if (status.status === "COMPLETED_ASSET_UNVERIFIED") {
         feedback("The export record says completed, but the saved MP4 could not be verified. Do not publish or download this version. Request storage recovery.", true);
+        return;
+      }
+      if (status.status === "RECOVERABLE_ASSET_FOUND") {
+        feedback("A matching saved MP4 was found, but the job is not finalized. Request operator reconciliation; do not resume, publish or report completed.", true);
         return;
       }
       if (status.status === "GENERATED") {
@@ -561,7 +565,8 @@
           return;
         }
         if (status.status === "ERROR" || status.status === "INTERRUPTED_UNCONFIRMED" ||
-            status.status === "COMPLETED_ASSET_UNVERIFIED") {
+            status.status === "COMPLETED_ASSET_UNVERIFIED" ||
+            status.status === "RECOVERABLE_ASSET_FOUND") {
           feedback(status.message || "Master export needs attention. Saved chapters are preserved.", true);
           return;
         }
@@ -1815,6 +1820,10 @@
               feedback("Combined MP4 saved. Review and download from Studio's Asset list.");
               host.replaceChildren();
               if (typeof bridge.refreshProductionAssets === "function") await bridge.refreshProductionAssets();
+              return;
+            }
+            if (state === "RECOVERABLE_ASSET_FOUND") {
+              feedback(snapshot.message || "Saved output found but final recovery requires operator review.", true);
               return;
             }
             if (state === "INTERRUPTED_UNCONFIRMED") {
