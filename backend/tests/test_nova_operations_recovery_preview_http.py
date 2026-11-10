@@ -98,6 +98,12 @@ def test_recovery_preview_owner_roundtrip(preview):
     assert download.status_code == 200
     assert download.content == b"Name\nAda\n"
     assert download.headers["X-Nova-Delivery-Status"] == "not-delivered"
+    decision = client.post(base + "/review", json={"approve": True})
+    assert decision.status_code == 200
+    assert decision.json()["status"] == "APPROVED_FOR_DOWNLOAD"
+    assert decision.json()["delivered"] is False
+    assert client.post(base + "/review", json={"approve": False}).status_code == 409
+    assert client.get(base + "/download").content == b"Name\\nAda\\n"
     assert len(store.objects) == 2
 
 
@@ -108,4 +114,15 @@ def test_revocation_blocks_owner_rehearsal(preview):
     base = f"/api/nova/work/operations/recovery-preview/jobs/{job_id}"
     assert client.get(base).status_code == 409
     assert client.post(base + "/process").status_code == 409
+    assert client.get(base + "/download").status_code == 409
+
+
+def test_recovery_preview_rejected_output_cannot_be_downloaded(preview):
+    client, _, _ = preview
+    job_id = create(client, key="rejected").json()["job_id"]
+    base = f"/api/nova/work/operations/recovery-preview/jobs/{job_id}"
+    assert client.post(base + "/process").status_code == 200
+    result = client.post(base + "/review", json={"approve": False})
+    assert result.status_code == 200
+    assert result.json()["status"] == "REJECTED"
     assert client.get(base + "/download").status_code == 409
