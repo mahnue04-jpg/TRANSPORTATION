@@ -708,7 +708,7 @@ def generate_first_shot(
         # Refuse any prior scene video so a second paid post cannot be mistaken
         # for part of the first acceptance test.
         with _scene_lock:
-            if any(row.kind == "video" for row in service.store.list_jobs(project_id, user.user_id)):
+            if any(row.kind in {"video", "first_shot_video"} for row in service.store.list_jobs(project_id, user.user_id)):
                 raise CreativeStudioError(
                     "FIRST_SHOT_ALREADY_ATTEMPTED",
                     "A video job already exists. Review or reconcile it before another paid submission.",
@@ -720,7 +720,7 @@ def generate_first_shot(
                     "This project already has video results. Use a fresh one-scene acceptance project.",
                     http_status=409,
                 )
-            job = service._start_job(user.user_id, project_id, "video")
+            job = service._start_job(user.user_id, project_id, "first_shot_video")
             service._finish_job(
                 job, status="QUEUED",
                 message="One explicitly authorized five-second Kling shot queued.",
@@ -751,6 +751,14 @@ def generate_video(
     try:
         service = get_service(db)
         service._project_or_404(user.user_id, project_id)
+        # A controlled paid first shot has a separate immutable job kind. Do
+        # not allow the general storyboard route to start a second render.
+        if any(row.kind == "first_shot_video" for row in service.store.list_jobs(project_id, user.user_id)):
+            raise CreativeStudioError(
+                "CONTROLLED_FIRST_SHOT_PROJECT",
+                "A controlled first-shot job exists; review its saved result before more generation.",
+                http_status=409,
+            )
         service.require_budget_confirmation_for_paid(user.user_id, project_id)
         if not service.store.list_scenes(project_id, user.user_id):
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard before generating scene videos.", http_status=422)
