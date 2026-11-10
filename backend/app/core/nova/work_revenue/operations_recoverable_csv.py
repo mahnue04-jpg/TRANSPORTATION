@@ -327,6 +327,86 @@ def reconcile_stale_jobs(db: Session, *, org: str, owner: str,
             "exhausted_jobs": expired.rowcount, "delivered": False}
 
 
+
+def due_job_ids(
+    db: Session, *, org: str, owner: str, now: datetime | None = None,
+    limit: int = 10,
+) -> list[str]:
+    """Bounded worker-discovery query; never returns input or output objects.
+
+    Scans only a single preauthorized owner and organization, and never
+    claims work itself. The eventual worker must recheck saved-task authority
+    before calling process_job (which checks it again).
+    """
+    require_runtime(db)
+    if not org or not owner or org.lower() == "global":
+        raise CustomerCSVBlocked("Specific worker owner scope required", 403)
+    if type(limit) is not int or not 1 <= limit <= 25:
+        raise CustomerCSVBlocked("Worker batch limit must be 1 to 25", 400)
+    stamp = now or _now()
+    rows = db.execute(sa.select(recovery_jobs.c.id).where(
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+        recovery_jobs.c.input_ref.is_not(None),
+        recovery_jobs.c.attempts < recovery_jobs.c.max_attempts,
+        sa.or_(
+            sa.and_(
+                recovery_jobs.c.status == "QUEUED",
+                recovery_jobs.c.available_at <= stamp,
+            ),
+            sa.and_(
+                recovery_jobs.c.status == "RUNNING",
+                recovery_jobs.c.lease_until.is_not(None),
+                recovery_jobs.c.lease_until <= stamp,
+            ),
+        ),
+    ).order_by(
+        recovery_jobs.c.available_at.asc(),
+        recovery_jobs.c.created_at.asc(),
+        recovery_jobs.c.id.asc(),
+    ).limit(limit)).scalars().all()
+    return list(rows)
+
+
+def run_due_jobs(
+    db: Session, *, org: str, owner: str, authorization_check,
+    now: datetime | None = None, limit: int = 10,
+) -> dict:
+    """One bounded staging worker pass; no delivery or billing.
+
+    Each job has a fresh scope check inside process_job. A lost lease is
+    skipped by this pass and can be picked up in a later pass; no queued
+    work is silently represented as completed.
+    """
+    if not callable(authorization_check):
+        raise CustomerCSVBlocked("Fresh job authorization required", 403)
+    pending = due_job_ids(db, org=org, owner=owner, now=now, limit=limit)
+    completed = []
+    failed = []
+    skipped = []
+    for job_id in pending:
+        try:
+            result = process_job(
+                db, org=org, owner=owner, job_id=job_id,
+                authorization_check=authorization_check, now=now,
+            )
+            completed.append(result["job_id"])
+        except CustomerCSVBlocked as exc:
+            db.rollback()
+            if exc.code == 409 and "eligible for claim" in str(exc):
+                skipped.append(job_id)
+            else:
+                failed.append(job_id)
+        except Exception:
+            db.rollback()
+            failed.append(job_id)
+    return {
+        "attempted": len(pending), "awaiting_review": completed,
+        "failed_attempts": failed, "skipped_claims": skipped,
+        "delivered": False,
+    }
+
+
 def status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     require_runtime(db)
     return summary(_owned(db, org=org, owner=owner, job_id=job_id))
