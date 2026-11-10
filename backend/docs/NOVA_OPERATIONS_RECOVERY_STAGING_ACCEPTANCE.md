@@ -135,3 +135,29 @@ The current worker is a foundation, not a hardened multi-tenant scheduler.
 Further release requirements include an approved service deployment,
 health monitoring, audited retention/orphan cleanup, lock-concurrency
 observability, and human review before external delivery.
+
+
+## November 10, 2026 provisioning evidence and blocker
+
+The Render workspace currently has `amicor-prod` and
+`amicor-casting-staging-db`, but **no dedicated Operations recovery staging
+database**. A create request for a new **free-tier** database was rejected by
+Render with: `cannot have more than one active free tier database`.
+
+No paid database was created. Do not repurpose the production or casting
+database or incur a new paid plan without explicit budget approval.
+
+A read-only `operations_staging_preflight.py` check now exists. It requires
+an explicitly approved staging database and recovery schema, and it inspects
+a dedicated S3 bucket for all four Block Public Access settings and
+default SSE encryption. Run it on an approved staging environment with:
+
+```sh
+python -m app.core.nova.work_revenue.operations_staging_preflight
+```
+
+Exit code 0 means **configured infrastructure checks passed**, not that
+owner authentication, real worker restarts, retention, or delivery passed.
+Exit code 2 means a configuration or policy requirement is blocked.
+Only sanitized verdicts are printed. It performs no migration, writes,
+storage upload, or customer processing.
