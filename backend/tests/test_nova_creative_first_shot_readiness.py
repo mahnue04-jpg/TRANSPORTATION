@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
 
 
-def _scene(index=1, visual_prompt="Two actors work beside a canoe"):
-    return SimpleNamespace(index=index, visual_prompt=visual_prompt, description="")
+def _scene(index=1, visual_prompt="Two actors work beside a canoe", duration_seconds=5):
+    return SimpleNamespace(index=index, visual_prompt=visual_prompt, description="", duration_seconds=duration_seconds)
 
 
 def _image(path, *, scene_index=1):
@@ -65,3 +65,22 @@ def test_missing_prompt_blocks_generation(tmp_path):
     state = _run(scenes=[_scene(visual_prompt="")], assets=[_image(image)])
     assert state["status"] == "BLOCKED"
     assert "FIRST_SCENE_PROMPT_REQUIRED" in state["blockers"]
+
+
+def test_longer_first_scene_blocks_five_second_readiness(tmp_path):
+    picture = tmp_path / "image.png"
+    picture.write_bytes(b"fixture")
+    state = _run(scenes=[_scene(duration_seconds=10)], assets=[_image(picture)])
+    assert state["status"] == "BLOCKED"
+    assert state["planned_first_scene_seconds"] == 10
+    assert "FIRST_SCENE_NOT_FIVE_SECONDS" in state["blockers"]
+
+
+def test_multiple_scenes_not_reported_as_single_five_second_job(tmp_path):
+    picture = tmp_path / "image.png"
+    picture.write_bytes(b"fixture")
+    state = _run(scenes=[_scene(1), _scene(2)], assets=[_image(picture)])
+    assert state["status"] == "BLOCKED"
+    assert state["scene_count"] == 2
+    assert "MULTI_SCENE_PROJECT_NOT_SINGLE_SHOT" in state["blockers"]
+    assert state["generation_submitted"] is False
