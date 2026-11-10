@@ -2490,14 +2490,17 @@ def get_engagement(db: Session, engagement_id: str, *, organization_id: str, use
     row = _owner_filter(query, NovaWorkEngagement, user).first()
     if row is None:
         raise NovaWorkError("Engagement not found", status_code=404)
-    tasks = (
-        db.query(NovaWorkTask)
-        .filter(
+    # Nested tasks must pass the same owner boundary as the engagement itself.
+    # Do not expose another owner's task when a tenant shares an engagement ref.
+    task_query = _owner_filter(
+        db.query(NovaWorkTask).filter(
             NovaWorkTask.organization_id == organization_id,
             NovaWorkTask.engagement_id == engagement_id,
-        )
-        .all()
+        ),
+        NovaWorkTask,
+        user,
     )
+    tasks = task_query.all()
     return _engagement_out(row, tasks)
 
 
