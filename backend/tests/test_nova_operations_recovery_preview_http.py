@@ -126,3 +126,21 @@ def test_recovery_preview_rejected_output_cannot_be_downloaded(preview):
     assert result.status_code == 200
     assert result.json()["status"] == "REJECTED"
     assert client.get(base + "/download").status_code == 409
+
+
+def test_recovery_preview_history_is_owner_scoped_and_revocable(preview):
+    client, engagement, _ = preview
+    first = create(client, key="history-a").json()["job_id"]
+    second = create(client, key="history-b").json()["job_id"]
+    history_url = "/api/nova/work/operations/recovery-preview/jobs"
+    response = client.get(history_url)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["owner_only"] is True
+    assert {row["job_id"] for row in payload["jobs"]} == {first, second}
+    assert all("input_ref" not in row and "output_ref" not in row for row in payload["jobs"])
+    assert client.get(history_url + "?limit=0").status_code == 400
+    engagement["status"] = "BLOCKED"
+    blocked = client.get(history_url)
+    assert blocked.status_code == 200
+    assert blocked.json()["jobs"] == []
