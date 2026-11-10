@@ -17,7 +17,6 @@ import logging
 import os
 import sys
 import time
-from urllib.parse import urlsplit
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
@@ -123,7 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         sessions = sessionmaker(bind=engine, expire_on_commit=False)
         while True:
             # A worker disabled between passes must stop before new work.
-            _stage_only_config()
+            active_url, active_owner = _stage_only_config()
+            if active_url != url or active_owner != owner_email:
+                raise CustomerCSVBlocked("Recovery worker configuration changed; restart required", 503)
             outcome = run_once(sessions, owner_email=owner_email)
             LOG.info(
                 "Recovery staging pass: attempted=%s reviewed=%s failed=%s skipped=%s",
