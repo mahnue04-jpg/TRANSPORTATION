@@ -304,6 +304,12 @@ def process_job(db: Session, *, org: str, owner: str, job_id: str,
         cleaned = clean_csv_text(contents.decode("utf-8-sig", errors="strict"),
                                  max_bytes=1_000_000, max_rows=10_000)
         output = cleaned.cleaned_csv.encode("utf-8")
+        # Renew before writing the output, so slow input retrieval or
+        # transformation does not allow an expired worker to publish.
+        renew_lease(
+            db, org=org, owner=owner, job_id=job_id,
+            token=work["token"], now=now,
+        )
         _, output_ref, size = _store().store(
             organization_id=org, application_id=job_id,
             category="nova-csv-review", filename="cleaned.bin",
@@ -311,8 +317,13 @@ def process_job(db: Session, *, org: str, owner: str, job_id: str,
         )
         if size != len(output):
             raise CustomerCSVBlocked("Output size mismatch", 503)
-        # Verify authorization again after potentially slow processing.
+        # Recheck scope and claim after upload: another worker could have
+        # reclaimed the job while private storage was writing.
         authorization_check(row["engagement_id"], row["task_id"])
+        renew_lease(
+            db, org=org, owner=owner, job_id=job_id,
+            token=work["token"], now=now,
+        )
         complete(db, org=org, owner=owner, job_id=job_id,
                  token=work["token"], output_ref=output_ref,
                  output_sha256=hashlib.sha256(output).hexdigest(), now=now)
