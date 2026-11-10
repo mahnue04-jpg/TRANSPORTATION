@@ -63,9 +63,13 @@ def _run_scene_background(owner_id: str, project_id: str, job_id: str, first_sho
         deadline = time.monotonic() + 900
         while True:
             service._finish_job(job, status="RUNNING", message="Generating scene artwork and video.", asset_ids=job.result_asset_ids)
-            result = service.request_video_generation(
-                owner_id, project_id, job=job, single_shot_reference_id=first_shot_reference_id,
-            )
+            if first_shot_reference_id is None:
+                result = service.request_video_generation(owner_id, project_id, job=job)
+            else:
+                result = service.request_video_generation(
+                    owner_id, project_id, job=job,
+                    single_shot_reference_id=first_shot_reference_id,
+                )
             if result.get("provider", {}).get("status") != "PROCESSING":
                 break
             if time.monotonic() >= deadline:
