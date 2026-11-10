@@ -38,6 +38,17 @@ def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: Backgrou
         assets = {row.id: row for row in service.store.list_assets(project_id, owner_id)}
         for job in service.store.list_jobs(project_id, owner_id):
             if job.kind == "first_shot_video" and job.status in {"QUEUED", "RUNNING"} and job.id not in _scene_workers:
+                # A different web process may be checking a fresh job while the
+                # actual worker is still running. Do not overwrite its state.
+                try:
+                    touched = datetime.fromisoformat(str(job.updated_at).replace("Z", "+00:00"))
+                    if touched.tzinfo is None:
+                        touched = touched.replace(tzinfo=timezone.utc)
+                    age_seconds = (datetime.now(timezone.utc) - touched).total_seconds()
+                except (TypeError, ValueError, OverflowError):
+                    age_seconds = 1200
+                if age_seconds < 1200:
+                    continue
                 # A restarted controlled paid-shot worker must never resubmit
                 # without reconciling a persisted provider task identifier.
                 # Keep a completed saved asset if present; otherwise report
