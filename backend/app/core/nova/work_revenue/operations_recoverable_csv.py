@@ -292,6 +292,37 @@ def process_job(db: Session, *, org: str, owner: str, job_id: str,
         raise
 
 
+
+def reconcile_stale_jobs(db: Session, *, org: str, owner: str,
+                         now: datetime | None = None) -> dict:
+    """Fail abandoned uploads and exhausted leases; never delete artifacts.
+
+    Records remain available for authorized owner inspection and later
+    audited cleanup. Requires an authorized scheduler/owner call.
+    """
+    require_runtime(db)
+    stamp = now or _now()
+    upload_cutoff = stamp - timedelta(minutes=15)
+    abandoned = db.execute(sa.update(recovery_jobs).where(
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+        recovery_jobs.c.status == "UPLOADING",
+        recovery_jobs.c.created_at < upload_cutoff,
+    ).values(status="FAILED", last_error_code="ABANDONED_UPLOAD",
+             updated_at=stamp))
+    expired = db.execute(sa.update(recovery_jobs).where(
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+        recovery_jobs.c.status == "RUNNING",
+        recovery_jobs.c.lease_until <= stamp,
+        recovery_jobs.c.attempts >= recovery_jobs.c.max_attempts,
+    ).values(status="FAILED", lease_token=None, lease_until=None,
+             last_error_code="MAX_ATTEMPTS_EXHAUSTED", updated_at=stamp))
+    db.commit()
+    return {"abandoned_uploads": abandoned.rowcount,
+            "exhausted_jobs": expired.rowcount, "delivered": False}
+
+
 def status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     require_runtime(db)
     return summary(_owned(db, org=org, owner=owner, job_id=job_id))
