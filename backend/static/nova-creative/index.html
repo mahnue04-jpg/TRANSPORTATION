@@ -165,6 +165,18 @@
       <div class="actions wrap">
         <button type="button" id="run-first-shot-readiness" class="secondary">Check first shot (free)</button>
       </div>
+      <div class="hint" id="first-shot-approval-summary">
+        Controlled Kling submission is disabled until all requirements are checked for this project.
+        The separate quote may estimate multiple scene/services; verify the exact cost before authorizing a paid shot.
+      </div>
+      <label class="wide">
+        <input id="first-shot-explicit-approval" type="checkbox" disabled />
+        I authorize one potentially billable five-second Kling shot for the selected project and reference image. No auto-retries or additional shots.
+      </label>
+      <div class="actions wrap">
+        <button type="button" id="submit-first-shot" disabled>Generate one approved five-second shot</button>
+      </div>
+      <div class="hint" id="first-shot-submit-status" role="status" aria-live="polite">No controlled generation submitted.</div>
     </section>
 
     <section class="card" aria-label="Brand profile">
