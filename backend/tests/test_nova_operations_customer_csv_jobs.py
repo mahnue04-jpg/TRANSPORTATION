@@ -131,3 +131,40 @@ def test_disabled_runtime_fails_closed_before_any_job_insert(state, monkeypatch)
     assert exc.value.code == 503
     count = db.execute(jobs.sa.select(jobs.sa.func.count()).select_from(jobs.jobs)).scalar_one()
     assert count == 0
+
+
+def test_expired_processing_job_can_be_marked_failed_without_delivering(state):
+    from datetime import timedelta
+    db, _ = state
+    created_at = jobs._utc() - timedelta(minutes=30)
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="stranded-1", organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-a", request_key="stale-a",
+        input_sha256="a" * 64, status="PROCESSING",
+        created_at=created_at, updated_at=created_at,
+    ))
+    db.commit()
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        jobs.recover_stale_job(db, org="org-a", owner="owner-b", job_id="stranded-1")
+    recovered = jobs.recover_stale_job(
+        db, org="org-a", owner="owner-a", job_id="stranded-1"
+    )
+    assert recovered["status"] == "FAILED"
+    assert recovered["requires_new_request_key"] is True
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        jobs.download_review(db, org="org-a", owner="owner-a", job_id="stranded-1")
+
+
+def test_recent_processing_job_cannot_be_recovered(state):
+    db, _ = state
+    created_at = jobs._utc()
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="active-1", organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-a", request_key="active-a",
+        input_sha256="a" * 64, status="PROCESSING",
+        created_at=created_at, updated_at=created_at,
+    ))
+    db.commit()
+    with pytest.raises(jobs.CustomerCSVBlocked, match="not eligible"):
+        jobs.recover_stale_job(db, org="org-a", owner="owner-a", job_id="active-1")
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="active-1")["status"] == "PROCESSING"
