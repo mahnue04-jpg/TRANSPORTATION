@@ -104,3 +104,35 @@ def test_scoped_endpoint_protected_by_parent_owner_router():
     assert "Depends(require_work_revenue_owner)" in csv_source
     assert "Depends(require_nova_access)" in csv_source
     assert '/engagements/{engagement_id}/tasks/{task_id}/csv-clean' in csv_source
+
+
+def test_eligible_task_endpoint_restricts_to_active_owner_engagements():
+    source = ast.parse(API.read_text(encoding="utf-8"))
+    fn = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == "eligible_csv_tasks")
+    fn.decorator_list = []
+    engagements = [
+        {**BASE, "engagement_id": "eng-active", "title": "Approved scope"},
+        {**BASE, "engagement_id": "eng-blocked", "blockers": "Missing contract"},
+        {**BASE, "engagement_id": "eng-foreign", "organization_id": "other-tenant"},
+        {**BASE, "engagement_id": "eng-done", "status": "COMPLETE"},
+    ]
+    namespace = {
+        "os": __import__("os"), "HTTPException": HTTPException,
+        "Depends": Depends, "UserContext": object,
+        "Session": object, "get_db": lambda: None,
+        "require_work_revenue_owner": lambda: None,
+        "service": SimpleNamespace(list_engagements=lambda db, *, organization_id, user: engagements),
+    }
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[
+        ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+        fn], type_ignores=[])), str(API), "exec"), namespace)
+    with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
+        __import__("os").environ, {"NOVA_OPERATIONS_OWNER_CSV_ENABLED": "true"}
+    ):
+        result = namespace["eligible_csv_tasks"](
+            owner=SimpleNamespace(organization_id="tenant-1"), db=object(),
+        )
+    assert result["count"] == 1
+    assert result["tasks"][0]["engagement_id"] == "eng-active"
+    assert result["tasks"][0]["task_id"] == "task-1"
+    assert result["execution_authorized"] is False
