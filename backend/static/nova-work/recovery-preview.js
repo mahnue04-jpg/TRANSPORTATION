@@ -165,6 +165,18 @@
     });
   });
 
+  byId("recovery-process-due").addEventListener("click", function () {
+    action("Processing up to five authorized queued staging jobs...", async function () {
+      const response = await request(prefix + "/jobs/process-due", {method: "POST"});
+      const outcome = await response.json();
+      await loadHistory(jobSelect.value);
+      message.textContent = "Staging worker attempted " + outcome.attempted +
+        " jobs; awaiting review: " + outcome.awaiting_review.length +
+        "; failed attempts: " + outcome.failed_attempts.length +
+        ". No delivery or invoicing.";
+    });
+  });
+
   byId("recovery-download").addEventListener("click", function () {
     action("Retrieving private review copy...", async function () {
       const response = await request(activeJob() + "/download");
