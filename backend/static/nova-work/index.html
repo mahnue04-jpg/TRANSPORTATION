@@ -66,6 +66,14 @@
       <div class="command-card">
         <h3>Process CSV for a saved assignment</h3>
         <p class="hint">Only for an ACTIVE, unblocked engagement with a saved Nova task requiring owner review. Processing does not complete or deliver the contract.</p>
+        <div class="command-actions">
+          <button type="button" id="operations-load-eligible" class="secondary">Load my eligible Nova tasks</button>
+        </div>
+        <label for="operations-eligible-select">Saved task to process
+          <select id="operations-eligible-select">
+            <option value="">Load tasks, then select an assignment</option>
+          </select>
+        </label>
         <form id="operations-scoped-csv-form">
           <label for="operations-engagement-id">Saved engagement ID
             <input id="operations-engagement-id" maxlength="120" required autocomplete="off" placeholder="Copy from your Work engagement" />
