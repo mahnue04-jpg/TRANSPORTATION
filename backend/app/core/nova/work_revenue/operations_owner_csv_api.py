@@ -492,6 +492,34 @@ def process_recovery_preview_job(
         _durable_error(exc)
 
 
+@router.post("/recovery-preview/jobs/{job_id}/review")
+async def recovery_preview_owner_review(
+    job_id: str,
+    request: Request,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = recovery_csv.status(
+            db, org=str(owner.organization_id),
+            owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"],
+            task_id=data["task_id"],
+        )
+        body = await request.json()
+        if not isinstance(body, dict) or type(body.get("approve")) is not bool:
+            raise HTTPException(400, "Boolean approve required")
+        return recovery_csv.decide_review(
+            db, org=str(owner.organization_id),
+            owner=str(owner.user_id), job_id=job_id,
+            approve=body["approve"],
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/recovery-preview/jobs/{job_id}/download")
 def recovery_preview_review_download(
     job_id: str,
