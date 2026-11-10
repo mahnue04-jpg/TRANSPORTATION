@@ -82,9 +82,16 @@
           <label><input id="operations-scope-confirmed" type="checkbox" required />
             I confirm AMICOR has the client's authorization to process this data, and I will review the result before delivery.
           </label>
-          <button type="submit">Process saved task for review</button>
+          <button type="submit">Create secure CSV review job</button>
         </form>
-        <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed.</p>
+        <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed. Production job service is unavailable until approved and enabled.</p>
+        <div class="command-actions">
+          <button type="button" class="secondary" id="operations-durable-status" disabled>Check job status</button>
+          <button type="button" class="secondary" id="operations-durable-download" disabled>Download private review copy</button>
+          <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
+          <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>
+        </div>
+        <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>
     </section>
 
