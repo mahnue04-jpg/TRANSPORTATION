@@ -79,3 +79,50 @@ def test_task_dependency_must_be_complete():
     ])
     assert _completed_task_ids(e) == {"parent-1"}
     assert not _eligible_task(task(depends_on_task_id="parent-2"), _completed_task_ids(e))
+
+
+def test_engagement_detail_never_leaks_other_owner_tasks(monkeypatch):
+    """Regression for owner filtering on nested tasks in same organization."""
+    from types import SimpleNamespace
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.db.session import Base
+    from app.core.nova.work_revenue import service
+    from app.core.nova.work_revenue.models import NovaWorkEngagement, NovaWorkTask
+
+    db_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        db_engine,
+        tables=[NovaWorkEngagement.__table__, NovaWorkTask.__table__],
+    )
+    monkeypatch.setattr(service, "_ensure", lambda: None)
+    viewer = SimpleNamespace(user_id="owner-1", role="dispatcher")
+    other = SimpleNamespace(user_id="owner-2", role="dispatcher")
+    with Session(db_engine) as db:
+        db.add(NovaWorkEngagement(
+            engagement_id="eng-1", organization_id="org-owner",
+            owner_user_id="owner-1", client_name="Synthetic Client",
+            service="Synthetic CSV cleanup", status="ACTIVE",
+        ))
+        db.add(NovaWorkTask(
+            task_id="task-owner", engagement_id="eng-1",
+            organization_id="org-owner", owner_user_id="owner-1",
+            title="Owner CSV task", status="READY",
+        ))
+        db.add(NovaWorkTask(
+            task_id="task-other-owner", engagement_id="eng-1",
+            organization_id="org-owner", owner_user_id="owner-2",
+            title="Private task of another owner", status="READY",
+        ))
+        db.commit()
+        detail = service.get_engagement(
+            db, "eng-1", organization_id="org-owner", user=viewer,
+        )
+        assert [task["task_id"] for task in detail["tasks"]] == ["task-owner"]
+        with pytest.raises(service.NovaWorkError) as denied:
+            service.get_engagement(
+                db, "eng-1", organization_id="org-owner", user=other,
+            )
+        assert denied.value.status_code == 404
+    db_engine.dispose()
