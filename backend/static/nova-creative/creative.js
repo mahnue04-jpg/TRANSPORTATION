@@ -2050,8 +2050,15 @@
     el.appendChild(line);
     var linkedIds = Array.isArray(job.result_asset_ids) ? job.result_asset_ids : [];
     var video = (detail.assets || []).find(function (asset) {
+      // Provider CDN URLs can be previewable but are not necessarily present
+      // in Nova's authenticated file endpoint. Offer secure playback only for
+      // files persisted under Nova-controlled storage.
+      var url = String(asset.url || "");
+      var ownedStorage = url.indexOf("/media/nova-creative/") === 0
+        || url.indexOf("private-studio-s3://") === 0;
       return linkedIds.indexOf(asset.id) >= 0 && asset.kind === "video"
-        && asset.status === "GENERATED" && !!asset.url && asset.media_available === true;
+        && asset.status === "GENERATED" && ownedStorage
+        && asset.media_available === true;
     });
     if (status !== "GENERATED" || !video) {
       var note = document.createElement("div");
