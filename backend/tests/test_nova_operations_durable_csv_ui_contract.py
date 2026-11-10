@@ -57,9 +57,16 @@ def test_staging_recovery_rehearsal_ui_is_owner_scoped_and_non_delivery():
         "recovery-load-tasks", "recovery-task-select", "recovery-upload-form",
         "recovery-load-history", "recovery-job-select", "recovery-process",
         "recovery-check", "recovery-download", "recovery-approve", "recovery-reject",
+        "recovery-process-due",
     ):
         assert f'id="{element_id}"' in preview_html
     for route in ("/eligible-csv-tasks", "/jobs", "/process", "/review", "/download"):
         assert route in preview_js
     assert 'session.getAuthHeaders' in preview_js
     assert 'Not delivered' in preview_js
+
+
+def test_supervised_staging_batch_processing_wiring():
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert '/jobs/process-due' in js
+    assert "No delivery or invoicing" in js
