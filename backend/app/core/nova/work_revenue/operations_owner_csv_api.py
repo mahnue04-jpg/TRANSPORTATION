@@ -325,6 +325,26 @@ async def durable_csv_review(
         _durable_error(exc)
 
 
+@router.post("/durable/jobs/{job_id}/recover")
+def recover_durable_csv_job(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        data = durable_csv.job_status(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
+        )
+        return durable_csv.recover_stale_job(
+            db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/durable/jobs/{job_id}/download")
 def durable_csv_download(
     job_id: str,
