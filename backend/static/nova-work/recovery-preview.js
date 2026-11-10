@@ -6,6 +6,8 @@
   const taskSelect = byId("recovery-task-select");
   const jobSelect = byId("recovery-job-select");
   let tasks = [];
+  let pendingRequest = null;
+  let busy = false;
 
   function authHeaders() {
     const session = window.AmiCorSession;
@@ -40,11 +42,18 @@
   }
 
   async function action(description, fn) {
+    if (busy) return;
+    busy = true;
+    const controls = Array.from(document.querySelectorAll("button"));
+    controls.forEach(button => { button.disabled = true; });
     message.textContent = description;
     try {
       await fn();
     } catch (error) {
       message.textContent = (error && error.message) || "Staging request failed.";
+    } finally {
+      busy = false;
+      controls.forEach(button => { button.disabled = false; });
     }
   }
 
@@ -106,7 +115,17 @@
       if (!window.crypto || !window.crypto.randomUUID) {
         throw new Error("Secure request ID generation is unavailable.");
       }
-      const key = window.crypto.randomUUID();
+      if (!window.crypto.subtle) {
+        throw new Error("Secure file checksum is unavailable in this browser.");
+      }
+      const fingerprintBytes = await window.crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      const fingerprint = Array.from(new Uint8Array(fingerprintBytes))
+        .map(byte => byte.toString(16).padStart(2, "0")).join("");
+      const signature = [task.engagement_id, task.task_id, fingerprint].join("|");
+      if (!pendingRequest || pendingRequest.signature !== signature) {
+        pendingRequest = {signature: signature, key: window.crypto.randomUUID()};
+      }
+      const key = pendingRequest.key;
       const response = await request(
         prefix + "/engagements/" + encodeURIComponent(task.engagement_id) +
         "/tasks/" + encodeURIComponent(task.task_id) + "/jobs",
@@ -118,6 +137,7 @@
         }}
       );
       const job = await response.json();
+      pendingRequest = null;
       await loadHistory(job.job_id);
       byId("recovery-consent").checked = false;
       message.textContent = "Saved job " + job.job_id +
