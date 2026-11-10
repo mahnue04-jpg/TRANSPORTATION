@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.nova.work_revenue import operations_recoverable_csv as recovery
 from app.core.nova.work_revenue.operations_customer_csv_jobs import CustomerCSVBlocked
 
+ORIGINAL_RUNTIME_GATE = recovery.require_runtime
+
 
 class MemoryStore:
     def __init__(self):
@@ -144,3 +146,13 @@ def test_reconcile_exhausted_expired_lease(harness):
     assert scoped(db, recovery.status, job_id)["status"] == "FAILED"
     with pytest.raises(CustomerCSVBlocked):
         scoped(db, recovery.claim, job_id, now=start + timedelta(seconds=184))
+
+
+def test_recovery_preview_fails_closed_in_production(harness, monkeypatch):
+    db, _ = harness
+    monkeypatch.setenv("NOVA_OPERATIONS_RECOVERABLE_CSV_ENABLED", "true")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_ENV", "production")
+    with pytest.raises(CustomerCSVBlocked, match="staging-only") as blocked:
+        ORIGINAL_RUNTIME_GATE(db)
+    assert blocked.value.code == 503
