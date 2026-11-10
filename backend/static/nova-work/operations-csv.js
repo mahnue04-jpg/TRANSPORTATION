@@ -54,4 +54,59 @@
       button.disabled = false;
     }
   });
+  const scoped = document.getElementById("operations-scoped-csv-form");
+  const scopedStatus = document.getElementById("operations-scoped-csv-result");
+  if (scoped && scopedStatus) scoped.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const engagement = document.getElementById("operations-engagement-id").value.trim();
+    const task = document.getElementById("operations-task-id").value.trim();
+    const file = document.getElementById("operations-scoped-csv-file").files[0];
+    const consent = document.getElementById("operations-scope-confirmed").checked;
+    const session = window.AmiCorSession;
+    const headers = session && typeof session.getAuthHeaders === "function"
+      ? session.getAuthHeaders() : {};
+    if (!(headers.Authorization || headers.authorization)) {
+      scopedStatus.textContent = "Sign in as the AMICOR owner first."; return;
+    }
+    if (!engagement || !task || !file || !consent) {
+      scopedStatus.textContent = "Engagement, Nova task, authorized CSV, and confirmation are required."; return;
+    }
+    if (file.size > 1000000) {
+      scopedStatus.textContent = "CSV exceeds 1 MB."; return;
+    }
+    const button = scoped.querySelector('button[type="submit"]');
+    button.disabled = true;
+    scopedStatus.textContent = "Checking saved engagement and processing the CSV...";
+    try {
+      const url = "/api/nova/work/operations/engagements/" + encodeURIComponent(engagement) +
+        "/tasks/" + encodeURIComponent(task) + "/csv-clean";
+      const response = await fetch(url, {
+        method: "POST", credentials: "same-origin", body: file,
+        headers: Object.assign({}, headers, {
+          "Content-Type": "text/csv",
+          "X-Nova-File-Name": file.name,
+          "X-Nova-Owner-Action": "process-csv-for-owner-review",
+          "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization"
+        })
+      });
+      if (!response.ok) {
+        let detail = "Processing denied (" + response.status + ").";
+        try { const body = await response.json(); detail = body.detail || detail; } catch (_) {}
+        scopedStatus.textContent = detail; return;
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl; link.download = "nova-cleaned-review.csv";
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 10000);
+      scopedStatus.textContent = "Saved task " + task +
+        ": downloaded " + (response.headers.get("X-Nova-Output-Rows") || "?") +
+        " cleaned rows for your review. NOT delivered or marked complete.";
+    } catch (_) {
+      scopedStatus.textContent = "Network error. Task was not completed.";
+    } finally {
+      button.disabled = false;
+    }
+  });
 })();
