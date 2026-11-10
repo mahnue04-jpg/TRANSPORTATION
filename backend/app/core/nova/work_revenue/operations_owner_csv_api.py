@@ -153,3 +153,48 @@ async def scoped_owner_csv_cleanup(
     result.headers["X-Nova-Task-ID"] = task_id
     result.headers["X-Nova-Delivery-Status"] = "owner-review-only-not-delivered"
     return result
+
+
+@router.get("/eligible-csv-tasks")
+def eligible_csv_tasks(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """List eligible saved Nova tasks only for the authenticated owner."""
+    if os.getenv("NOVA_OPERATIONS_OWNER_CSV_ENABLED", "").strip().lower() != "true":
+        raise HTTPException(status_code=503, detail="Operations CSV processing not enabled")
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(status_code=403, detail="Owner organization scope required")
+    engagements = service.list_engagements(db, organization_id=org, user=owner)
+    eligible = []
+    for engagement in engagements:
+        if (
+            engagement.get("organization_id") != org
+            or str(engagement.get("status") or "").upper() != "ACTIVE"
+            or str(engagement.get("blockers") or "").strip()
+        ):
+            continue
+        for task in engagement.get("tasks") or []:
+            if (
+                task.get("classification") != "NOVA"
+                or task.get("responsible_party") != "NOVA"
+                or not task.get("review_required")
+                or str(task.get("status") or "").upper() not in {"READY", "NOT_STARTED", "IN_PROGRESS"}
+                or str(task.get("blocked_reason") or "").strip()
+            ):
+                continue
+            eligible.append({
+                "engagement_id": engagement["engagement_id"],
+                "engagement_title": str(engagement.get("title") or engagement.get("service") or "")[:120],
+                "task_id": task["task_id"],
+                "task_title": str(task.get("title") or "")[:120],
+                "task_status": task["status"],
+                "review_required": True,
+            })
+            if len(eligible) >= 100:
+                break
+        if len(eligible) >= 100:
+            break
+    return {"tasks": eligible, "count": len(eligible), "owner_only": True,
+            "execution_authorized": False, "handoff_created": False}
