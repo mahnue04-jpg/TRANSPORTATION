@@ -809,10 +809,47 @@ class CreativeStudioService(ShortDramaMixin):
         }
 
     @serialized_media
-    def request_video_generation(self, owner_id: str, project_id: str, *, job: GenerationJob | None = None) -> dict[str, Any]:
+    def request_video_generation(self, owner_id: str, project_id: str, *, job: GenerationJob | None = None, single_shot_reference_id: str | None = None) -> dict[str, Any]:
         background = job is not None
         project = self._project_or_404(owner_id, project_id)
-        self.store.delete_failed_video_assets(project_id, owner_id)
+        if single_shot_reference_id is not None:
+            from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+            scenes_for_gate = self.store.list_scenes(project_id, owner_id)
+            assets_for_gate = self.store.list_assets(project_id, owner_id)
+            current_provider = video_provider()
+            if current_provider.provider_id != "fal_kling_video":
+                raise CreativeStudioError(
+                    "FIRST_SHOT_PROVIDER_CHANGED",
+                    "The guarded five-second Kling provider is no longer selected.",
+                    http_status=409,
+                )
+            quote = self.preflight_quote(owner_id, project_id)
+            gate = first_shot_readiness(
+                scenes=scenes_for_gate, assets=assets_for_gate,
+                provider_status=current_provider.status(),
+                budget_confirmed=quote.get("owner_budget_confirmed") is True,
+                media_resolver=_resolve_creative_media_url,
+            )
+            if gate["status"] != "READY_TO_REQUEST" or gate["reference_image_asset_id"] != single_shot_reference_id:
+                raise CreativeStudioError(
+                    "FIRST_SHOT_REVALIDATION_FAILED",
+                    "A storyboard, image, provider or budget requirement changed. "
+                    "No additional provider request was submitted.",
+                    http_status=409,
+                )
+            for asset in assets_for_gate:
+                if asset.kind != "video":
+                    continue
+                provider_result = (asset.metadata or {}).get("provider_result") or {}
+                if str(provider_result.get("status") or "").upper() == "PROCESSING" and provider_result.get("task_id"):
+                    continue
+                raise CreativeStudioError(
+                    "FIRST_SHOT_VIDEO_ALREADY_EXISTS",
+                    "Existing video must be reviewed before another five-second request.",
+                    http_status=409,
+                )
+        else:
+            self.store.delete_failed_video_assets(project_id, owner_id)
         job = job or self._start_job(owner_id, project_id, "video")
         brief = self._brief_for(owner_id, project)
         scenes = self.store.list_scenes(project_id, owner_id)
@@ -908,7 +945,22 @@ class CreativeStudioService(ShortDramaMixin):
             )
 
         source_image_url = None
-        if not resume_task_id:
+        if not resume_task_id and single_shot_reference_id is not None:
+            # Never generate new image artwork during a single paid-shot request.
+            # The owner-approved image ID is pinned from the authenticated route.
+            approved = next(
+                (a for a in self.store.list_assets(project_id, owner_id)
+                 if a.id == single_shot_reference_id and a.kind == "image"),
+                None,
+            )
+            if approved is None or not approved.url or _resolve_creative_media_url(approved.url) is None:
+                raise CreativeStudioError(
+                    "FIRST_SHOT_REFERENCE_NOT_FOUND",
+                    "Approved first-scene artwork is missing; no generation was started.",
+                    http_status=409,
+                )
+            source_image_url = approved.url
+        if not resume_task_id and single_shot_reference_id is None:
             aspect_ratio = "9:16" if str(project.platform or "").strip().lower() in {
                 "tiktok", "instagram", "youtube shorts"
             } else "16:9"
@@ -998,7 +1050,7 @@ class CreativeStudioService(ShortDramaMixin):
 
         # When live video providers are gated/unfunded, create deliberate local
         # motion instead of leaving the project stuck or falling back to a still slideshow.
-        if provider_unavailable and source_image_url and not resume_task_id and project.project_type != "short_drama":
+        if single_shot_reference_id is None and provider_unavailable and source_image_url and not resume_task_id and project.project_type != "short_drama":
             try:
                 fallback = self._build_local_scene_motion(
                     source_image_url=source_image_url,
@@ -1104,7 +1156,7 @@ class CreativeStudioService(ShortDramaMixin):
                 or "fal account needs credits" in runway_message.lower()
             )
         )
-        if credit_exhausted and source_image_url and not resume_task_id and project.project_type != "short_drama":
+        if single_shot_reference_id is None and credit_exhausted and source_image_url and not resume_task_id and project.project_type != "short_drama":
             try:
                 fallback = self._build_local_scene_motion(
                     source_image_url=source_image_url,
