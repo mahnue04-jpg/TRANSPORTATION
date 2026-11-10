@@ -36,12 +36,24 @@ def _inspect(path: Path) -> dict:
         raise LongFormAssemblyError("A saved segment could not be validated as H.264/AAC MP4.") from exc
 
 
-def assemble_clips(paths: list[Path], target: Path, *, target_seconds: int) -> dict:
+def assemble_clips(
+    paths: list[Path],
+    target: Path,
+    *,
+    target_seconds: int,
+    aspect_ratio: str = "9:16",
+) -> dict:
     """Re-encode mixed frame sizes and preserve sound of every supplied segment.
 
     The owner supplies clips already reviewed for rights, narration and captions.
     No synthetic or empty media is substituted on errors.
     """
+    # Preserve the existing portrait customer workflow unless film format is
+    # explicitly selected. Do not infer orientation from individual clips.
+    canvas = {"9:16": (720, 1280), "16:9": (1280, 720)}.get(aspect_ratio)
+    if canvas is None:
+        raise LongFormAssemblyError("Select 9:16 portrait or 16:9 widescreen output.")
+    width, height = canvas
     if not 120 <= target_seconds <= 600 or not 2 <= len(paths) <= 16:
         raise LongFormAssemblyError("Choose a 2-10 minute plan and 2-16 existing video segments.")
     paths = [Path(p).resolve(strict=True) for p in paths]
@@ -63,8 +75,8 @@ def assemble_clips(paths: list[Path], target: Path, *, target_seconds: int) -> d
     filters = []
     for i in range(len(paths)):
         filters.extend([
-            f"[{i}:v:0]fps=24,scale=720:1280:force_original_aspect_ratio=decrease,"
-            f"pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v{i}]",
+            f"[{i}:v:0]fps=24,scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v{i}]",
             f"[{i}:a:0]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]",
         ])
     joined = "".join(f"[v{i}][a{i}]" for i in range(len(paths)))
@@ -83,7 +95,7 @@ def assemble_clips(paths: list[Path], target: Path, *, target_seconds: int) -> d
         measured = _inspect(target)
         if abs(measured["duration_seconds"] - target_seconds) > max(5, 0.05 * target_seconds):
             raise LongFormAssemblyError("Final MP4 duration did not match the approved plan.")
-        return {"duration_seconds": measured["duration_seconds"], "segment_count": len(paths)}
+        return {"duration_seconds": measured["duration_seconds"], "segment_count": len(paths), "aspect_ratio": aspect_ratio, "width": width, "height": height}
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise LongFormAssemblyError("Video assembly interrupted or timed out. Originals remain saved.") from exc
     finally:
