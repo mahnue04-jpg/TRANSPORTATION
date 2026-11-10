@@ -21,6 +21,8 @@ def first_shot_readiness(
     blockers: list[str] = []
     ordered_scenes = sorted(scenes, key=lambda row: int(getattr(row, "index", 0)))
     first_scene = ordered_scenes[0] if ordered_scenes else None
+    if len(ordered_scenes) > 1:
+        blockers.append("MULTI_SCENE_PROJECT_NOT_SINGLE_SHOT")
     first_index = int(getattr(first_scene, "index", 0)) if first_scene is not None else None
     if first_scene is None:
         blockers.append("STORYBOARD_REQUIRED")
@@ -63,9 +65,10 @@ def first_shot_readiness(
         blockers.append("FIRST_SCENE_REFERENCE_IMAGE_REQUIRED")
 
     return {
+        "scene_count": len(ordered_scenes),
         "status": "READY_TO_REQUEST" if not blockers else "BLOCKED",
         "target_seconds": 5,
-        "planned_first_scene_seconds": int(getattr(first_scene, "duration_seconds", 5) or 0) if first_scene is not None else None,
+        "planned_first_scene_seconds": duration if first_scene is not None else None,
         "provider_status": status or "UNKNOWN",
         "first_scene_index": first_index,
         "reference_image_asset_id": str(getattr(source_images[-1], "id", "")) if source_images else None,
