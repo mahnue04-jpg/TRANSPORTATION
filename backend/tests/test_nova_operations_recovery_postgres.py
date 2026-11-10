@@ -127,7 +127,7 @@ def test_postgres_two_connections_cannot_claim_same_active_lease(postgres):
         job_id = recovery.enqueue(
             db, org="org-a", owner="owner-a",
             engagement_id="eng-a", task_id="task-a",
-            request_key="concurrent-pg-claim", raw=b"Name\\nAda\\n",
+            request_key="concurrent-pg-claim", raw=b"Name\nAda\n",
         )["job_id"]
     gate = Barrier(2)
     timestamp = datetime.now(timezone.utc)
