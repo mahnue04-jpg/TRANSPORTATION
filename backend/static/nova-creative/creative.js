@@ -45,6 +45,7 @@
       if ($("first-shot-approval-summary")) {
         $("first-shot-approval-summary").textContent = "Check this project's first shot before any paid submission.";
       }
+      if ($("first-shot-job-result")) $("first-shot-job-result").textContent = "No first-shot job checked for this project yet.";
       if ($("first-shot-readiness-status")) {
         $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
       }
@@ -2005,6 +2006,92 @@
       } finally {
         firstShotSubmitting = false;
         refreshFirstShotSubmitButton();
+      }
+    });
+  }
+
+  function renderFirstShotJobResult(detail, selectedProject) {
+    var el = $("first-shot-job-result");
+    if (!el) return;
+    el.replaceChildren();
+    if (!detail || !selectedProject) {
+      el.textContent = "Select a project to check its saved first-shot job.";
+      return;
+    }
+    var jobs = (detail.jobs || []).filter(function (row) {
+      return row.kind === "first_shot_video";
+    });
+    if (!jobs.length) {
+      el.textContent = "No controlled five-second shot has been submitted for this project.";
+      return;
+    }
+    var job = jobs[0];
+    var status = String(job.status || "UNKNOWN").toUpperCase();
+    var line = document.createElement("div");
+    line.textContent = "Controlled shot " + String(job.id || "") + " — " + status
+      + ". " + String(job.message || "");
+    el.appendChild(line);
+    var linkedIds = Array.isArray(job.result_asset_ids) ? job.result_asset_ids : [];
+    var video = (detail.assets || []).find(function (asset) {
+      return linkedIds.indexOf(asset.id) >= 0 && asset.kind === "video"
+        && asset.status === "GENERATED" && !!asset.url && asset.media_available === true;
+    });
+    if (status !== "GENERATED" || !video) {
+      var note = document.createElement("div");
+      note.textContent = status === "GENERATED"
+        ? "Job completed but no verified saved MP4 is available. Check protected storage before approving the shot."
+        : (status === "ERROR" || status === "FAILED"
+          ? "Review the saved job and provider usage. Do not submit again automatically."
+          : "No completed verified video yet. This status check does not start or retry generation.");
+      el.appendChild(note);
+      return;
+    }
+    var link = document.createElement("button");
+    link.type = "button";
+    link.className = "secondary";
+    link.textContent = "Download saved five-second shot";
+    link.addEventListener("click", async function () {
+      link.disabled = true;
+      try {
+        await downloadProtectedAsset(
+          "/api/nova/creative/projects/" + encodeURIComponent(selectedProject)
+          + "/assets/" + encodeURIComponent(video.id) + "/file",
+          "nova-five-second-shot.mp4"
+        );
+        showBanner("Saved video downloaded. Review actual motion and mobile playback before approval.", true);
+      } catch (err) {
+        showBanner(err.message || "Saved shot download failed.", false);
+      } finally {
+        link.disabled = false;
+      }
+    });
+    el.appendChild(link);
+    var note = document.createElement("div");
+    note.textContent = "Saved MP4 available; review in the project asset gallery. Technical availability does not prove natural acting or smooth phone playback.";
+    el.appendChild(note);
+  }
+
+  var firstShotResultBtn = $("first-shot-check-result");
+  if (firstShotResultBtn) {
+    firstShotResultBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project to check its first-shot result.", false);
+        return;
+      }
+      var selected = activeProjectId;
+      var revision = activeProjectRevision;
+      firstShotResultBtn.disabled = true;
+      var target = $("first-shot-job-result");
+      if (target) target.textContent = "Checking the saved job; no provider generation will be started...";
+      try {
+        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selected));
+        if (selected !== activeProjectId || revision !== activeProjectRevision) return;
+        renderFirstShotJobResult(detail, selected);
+      } catch (err) {
+        if (selected === activeProjectId && revision === activeProjectRevision && target)
+          target.textContent = err.message || "Unable to check saved video status.";
+      } finally {
+        firstShotResultBtn.disabled = false;
       }
     });
   }
