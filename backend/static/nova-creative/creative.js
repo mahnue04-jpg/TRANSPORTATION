@@ -34,7 +34,9 @@
         if ($(id)) $(id).disabled = true;
       });
       renderPreflight(null);
-      renderFirstShotReadiness(null);
+      if ($("first-shot-readiness-status")) {
+        $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
+      }
     }
     activeProjectId = next;
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
