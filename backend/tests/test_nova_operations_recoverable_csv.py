@@ -208,3 +208,54 @@ def test_worker_pass_fails_closed_on_revoked_scope(harness):
         db, org="org-a", owner="owner-a", job_id=job_id,
     )["status"] == "QUEUED"
     assert len(store.objects) == 1
+
+
+def test_lease_renewal_blocks_stale_worker(harness):
+    db, _ = harness
+    job_id = submit(db, key="lease-renew")["job_id"]
+    start = datetime.now(timezone.utc)
+    worker_a = scoped(db, recovery.claim, job_id, now=start, lease_seconds=60)
+    expiry = scoped(
+        db, recovery.renew_lease, job_id, token=worker_a["token"],
+        now=start + timedelta(seconds=30), lease_seconds=90,
+    )
+    assert expiry == start + timedelta(seconds=120)
+    with pytest.raises(CustomerCSVBlocked):
+        scoped(db, recovery.claim, job_id, now=start + timedelta(seconds=65))
+    with pytest.raises(CustomerCSVBlocked, match="Cannot renew"):
+        scoped(
+            db, recovery.renew_lease, job_id, token=worker_a["token"],
+            now=start + timedelta(seconds=121),
+        )
+    worker_b = scoped(db, recovery.claim, job_id,
+                      now=start + timedelta(seconds=121))
+    with pytest.raises(CustomerCSVBlocked, match="Cannot renew"):
+        scoped(
+            db, recovery.renew_lease, job_id, token=worker_a["token"],
+            now=start + timedelta(seconds=122),
+        )
+    scoped(db, recovery.complete, job_id, token=worker_b["token"],
+           output_ref="winning-private-object", output_sha256="b" * 64,
+           now=start + timedelta(seconds=122))
+    assert scoped(db, recovery.status, job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_recovery_after_first_process_disappears(harness):
+    db, store = harness
+    job_id = submit(db, key="crash-restart")["job_id"]
+    start = datetime.now(timezone.utc) - timedelta(minutes=7)
+    vanished_worker = scoped(db, recovery.claim, job_id, now=start, lease_seconds=60)
+    assert recovery.due_job_ids(db, org="org-a", owner="owner-a") == [job_id]
+    result = recovery.run_due_jobs(
+        db, org="org-a", owner="owner-a",
+        authorization_check=lambda eng, task: None,
+    )
+    assert result["awaiting_review"] == [job_id]
+    with pytest.raises(CustomerCSVBlocked, match="Stale worker"):
+        scoped(
+            db, recovery.complete, job_id, token=vanished_worker["token"],
+            output_ref="stale-private-object", output_sha256="a" * 64,
+        )
+    assert scoped(db, recovery.status, job_id)["attempts"] == 2
+    assert scoped(db, recovery.review_download, job_id) == b"Name\nAda\n"
+    assert len(store.objects) == 2
