@@ -146,12 +146,14 @@ def submit_review_job(
         storage_ref = saved[1]
         if saved[2] != len(result.cleaned_csv.encode("utf-8")):
             raise CustomerCSVBlocked("Artifact size mismatch", 503)
-        db.execute(sa.update(jobs).where(
+        finalized = db.execute(sa.update(jobs).where(
             jobs.c.id == job_id, jobs.c.status == "PROCESSING",
         ).values(
             status="AWAITING_REVIEW", output_ref=storage_ref,
             output_sha256=result.output_sha256, updated_at=_utc(),
         ))
+        if finalized.rowcount != 1:
+            raise CustomerCSVBlocked("Job processing state changed before completion", 409)
         db.commit()
         return {"job_id": job_id, "status": "AWAITING_REVIEW",
                 "output_sha256": result.output_sha256, "replayed": False}
@@ -172,6 +174,36 @@ def submit_review_job(
             except Exception:
                 pass  # audited orphan cleanup is required before release
         raise
+
+
+
+def recover_stale_job(
+    db: Session, *, org: str, owner: str, job_id: str,
+) -> dict:
+    """Stop a stranded PROCESSING record after 15 minutes.
+
+    This never auto-resubmits customer bytes. The owner must review the
+    failure and upload again under a NEW request key. Stale S3 artifacts
+    require separate orphan-cleanup reconciliation before production release.
+    """
+    require_runtime(db)
+    cutoff = _utc() - timedelta(minutes=15)
+    try:
+        changed = db.execute(sa.update(jobs).where(
+            jobs.c.id == job_id,
+            jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner,
+            jobs.c.status == "PROCESSING",
+            jobs.c.updated_at < cutoff,
+        ).values(status="FAILED", updated_at=_utc()))
+        if changed.rowcount != 1:
+            raise CustomerCSVBlocked("Job is not eligible for stale recovery", 409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"job_id": job_id, "status": "FAILED",
+            "requires_new_request_key": True, "delivered": False}
 
 
 def job_status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
