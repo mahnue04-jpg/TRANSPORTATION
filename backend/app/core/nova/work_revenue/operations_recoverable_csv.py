@@ -210,6 +210,40 @@ def claim(db: Session, *, org: str, owner: str, job_id: str,
             "input_sha256": row["input_sha256"], "attempts": row["attempts"] + 1}
 
 
+
+def renew_lease(
+    db: Session, *, org: str, owner: str, job_id: str, token: str,
+    lease_seconds: int = 300, now: datetime | None = None,
+) -> datetime:
+    """Extend only a currently live, matching worker lease.
+
+    An expired or superseded worker cannot revive its claim. In a live
+    worker, renewal should occur before slow external storage operations;
+    long-running tasks will eventually need a dedicated heartbeat thread.
+    """
+    require_runtime(db)
+    if type(lease_seconds) is not int or not 30 <= lease_seconds <= 3600:
+        raise CustomerCSVBlocked("Invalid worker lease duration", 400)
+    if not token:
+        raise CustomerCSVBlocked("Worker lease token required", 403)
+    stamp = now or _now()
+    new_expiry = stamp + timedelta(seconds=lease_seconds)
+    updated = db.execute(sa.update(recovery_jobs).where(
+        recovery_jobs.c.id == job_id,
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+        recovery_jobs.c.status == "RUNNING",
+        recovery_jobs.c.lease_token == token,
+        recovery_jobs.c.lease_until > stamp,
+    ).values(lease_until=new_expiry, updated_at=stamp))
+    if updated.rowcount != 1:
+        db.rollback()
+        raise CustomerCSVBlocked("Cannot renew expired or superseded lease", 409)
+    db.commit()
+    return new_expiry
+
+
+
 def complete(db: Session, *, org: str, owner: str, job_id: str,
              token: str, output_ref: str, output_sha256: str,
              now: datetime | None = None) -> None:
