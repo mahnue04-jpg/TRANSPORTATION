@@ -680,7 +680,7 @@ def generate_first_shot(
         })
     service = get_service(db)
     try:
-        service._project_or_404(user.user_id, project_id)
+        project = service._project_or_404(user.user_id, project_id)
         service.require_budget_confirmation_for_paid(user.user_id, project_id)
         if video_provider().provider_id != "fal_kling_video":
             raise CreativeStudioError(
@@ -722,6 +722,38 @@ def generate_first_shot(
                 raise CreativeStudioError(
                     "FIRST_SHOT_VIDEO_EXISTS",
                     "This project already has video results. Use a fresh one-scene acceptance project.",
+                    http_status=409,
+                )
+            # A database compare-and-swap is authoritative across web processes.
+            # Refuse the in-memory fallback: it cannot guarantee one paid post.
+            from app.core.nova.creative_studio.store import DbCreativeStudioStore
+            if not isinstance(service.store, DbCreativeStudioStore):
+                raise CreativeStudioError(
+                    "DURABLE_SHOT_CLAIM_REQUIRED",
+                    "A shared database is required for a controlled paid shot.",
+                    http_status=503,
+                )
+            import uuid
+            claim_id = uuid.uuid4().hex
+            current_meta = dict(project.metadata or {})
+            if current_meta.get("first_shot_paid_claim"):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_ALREADY_RESERVED",
+                    "This project already has a controlled shot reservation.",
+                    http_status=409,
+                )
+            reserved_meta = dict(current_meta)
+            reserved_meta["first_shot_paid_claim"] = {
+                "id": claim_id,
+                "reference_image_asset_id": payload.reference_image_asset_id,
+                "state": "RESERVED",
+            }
+            if not service.store.compare_and_swap_project_metadata(
+                project_id, user.user_id, current_meta, reserved_meta
+            ):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_CONCURRENT_REQUEST",
+                    "Another request changed this project. No video was submitted.",
                     http_status=409,
                 )
             job = service._start_job(user.user_id, project_id, "first_shot_video")
