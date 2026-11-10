@@ -56,8 +56,9 @@
   });
   const loadEligible = document.getElementById("operations-load-eligible");
   const eligibleSelect = document.getElementById("operations-eligible-select");
+  let eligibleTasks = [];
+  let selectedTask = null;
   if (loadEligible && eligibleSelect) {
-    let eligibleTasks = [];
     loadEligible.addEventListener("click", async function () {
       const session = window.AmiCorSession;
       const headers = session && typeof session.getAuthHeaders === "function"
@@ -67,6 +68,10 @@
         status.textContent = "Sign in as the AMICOR owner first."; return;
       }
       loadEligible.disabled = true;
+      selectedTask = null;
+      eligibleTasks = [];
+      eligibleSelect.replaceChildren(new Option("Loading eligible tasks...", ""));
+      document.getElementById("operations-scope-confirmed").checked = false;
       status.textContent = "Loading eligible Nova tasks...";
       try {
         const response = await fetch("/api/nova/work/operations/eligible-csv-tasks", {
@@ -75,6 +80,7 @@
         if (!response.ok) {
           let detail = "Task lookup unavailable (" + response.status + ").";
           try { const error = await response.json(); detail = error.detail || detail; } catch (_) {}
+          eligibleSelect.replaceChildren(new Option("No tasks available", ""));
           status.textContent = detail; return;
         }
         const data = await response.json();
@@ -89,27 +95,27 @@
           ? "Select a saved task, then confirm authority and choose its CSV."
           : "No eligible Nova tasks were found. An ACTIVE engagement and an unblocked Nova review task are required.";
       } catch (_) {
+        eligibleSelect.replaceChildren(new Option("Could not load tasks", ""));
         status.textContent = "Could not load saved tasks. Check your connection.";
       } finally {
         loadEligible.disabled = false;
       }
     });
     eligibleSelect.addEventListener("change", function () {
+      selectedTask = null;
+      document.getElementById("operations-scope-confirmed").checked = false;
       const index = Number(eligibleSelect.value);
       if (eligibleSelect.value === "" || !Number.isInteger(index) || !eligibleTasks[index]) return;
-      document.getElementById("operations-engagement-id").value =
-        eligibleTasks[index].engagement_id;
-      document.getElementById("operations-task-id").value =
-        eligibleTasks[index].task_id;
-      document.getElementById("operations-scope-confirmed").checked = false;
+      selectedTask = eligibleTasks[index];
     });
   }
   const scoped = document.getElementById("operations-scoped-csv-form");
   const scopedStatus = document.getElementById("operations-scoped-csv-result");
   if (scoped && scopedStatus) scoped.addEventListener("submit", async function (event) {
     event.preventDefault();
-    const engagement = document.getElementById("operations-engagement-id").value.trim();
-    const task = document.getElementById("operations-task-id").value.trim();
+    const selected = selectedTask;
+    const engagement = selected ? String(selected.engagement_id || "") : "";
+    const task = selected ? String(selected.task_id || "") : "";
     const file = document.getElementById("operations-scoped-csv-file").files[0];
     const consent = document.getElementById("operations-scope-confirmed").checked;
     const session = window.AmiCorSession;
@@ -118,8 +124,9 @@
     if (!(headers.Authorization || headers.authorization)) {
       scopedStatus.textContent = "Sign in as the AMICOR owner first."; return;
     }
-    if (!engagement || !task || !file || !consent) {
-      scopedStatus.textContent = "Engagement, Nova task, authorized CSV, and confirmation are required."; return;
+    if (!selected || !engagement || !task || !file || !consent ||
+        !eligibleTasks.some(function (item) { return item === selected; })) {
+      scopedStatus.textContent = "Select a saved eligible task, choose its CSV, and confirm authorization."; return;
     }
     if (file.size > 1000000) {
       scopedStatus.textContent = "CSV exceeds 1 MB."; return;
