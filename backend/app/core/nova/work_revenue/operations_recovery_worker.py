@@ -71,7 +71,9 @@ def _stage_only_config() -> tuple[str, str]:
         except sa.exc.ArgumentError:
             raise CustomerCSVBlocked("Unsafe application database URL", 503)
     name = (parsed.database or "").lower()
-    if not name or any(term in name for term in ("prod", "casting")):
+    if (not name or "stag" not in name or not any(
+        term in name for term in ("nova", "operations")
+    ) or any(term in name for term in ("prod", "casting"))):
         raise CustomerCSVBlocked("Dedicated Operations staging database required", 503)
     email = os.getenv(OWNER_EMAIL_ENV, "").strip().lower()
     if not email or email not in _work_revenue_owner_emails():
