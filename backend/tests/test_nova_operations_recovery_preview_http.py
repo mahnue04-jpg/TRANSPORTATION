@@ -157,3 +157,33 @@ def test_staging_preview_eligibility_has_independent_selector(preview):
     assert result.json()["execution_authorized"] is False
     engagement["status"] = "BLOCKED"
     assert client.get(url).json()["tasks"] == []
+
+
+def test_owner_can_process_bounded_due_jobs_in_staging_preview(preview):
+    client, _, store = preview
+    ids = {
+        create(client, key="batch-one").json()["job_id"],
+        create(client, key="batch-two").json()["job_id"],
+    }
+    endpoint = "/api/nova/work/operations/recovery-preview/jobs/process-due"
+    response = client.post(endpoint)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["attempted"] == 2
+    assert set(payload["awaiting_review"]) == ids
+    assert payload["delivered"] is False
+    assert len(store.objects) == 4
+    assert client.post(endpoint).json()["attempted"] == 0
+
+
+def test_revoked_assignment_cannot_be_processed_by_batch(preview):
+    client, engagement, store = preview
+    job_id = create(client, key="batch-revoked").json()["job_id"]
+    engagement["status"] = "BLOCKED"
+    response = client.post(
+        "/api/nova/work/operations/recovery-preview/jobs/process-due"
+    )
+    assert response.status_code == 200
+    assert response.json()["awaiting_review"] == []
+    assert response.json()["failed_attempts"] == [job_id]
+    assert len(store.objects) == 1
