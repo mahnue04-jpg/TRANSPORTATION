@@ -143,6 +143,7 @@ jobs:
       - name: Run ephemeral PostgreSQL CSV concurrency and review tests
         run: |
           python -m pytest -v -rs tests/test_nova_operations_customer_csv_postgres.py
+          python -m pytest -v -rs tests/test_nova_operations_recovery_postgres.py
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
