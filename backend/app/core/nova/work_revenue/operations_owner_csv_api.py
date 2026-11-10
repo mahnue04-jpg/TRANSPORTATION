@@ -68,7 +68,7 @@ def _eligible_task(task: dict, completed_task_ids: set[str]) -> bool:
     dependency = str(task.get("depends_on_task_id") or "").strip()
     return (
         _csv_task_scope(task)
-        str(task.get("classification") or "").strip().upper() == "NOVA"
+        and str(task.get("classification") or "").strip().upper() == "NOVA"
         and str(task.get("responsible_party") or "").strip().upper() == "NOVA"
         and task.get("review_required") is True
         and str(task.get("status") or "").strip().upper()
