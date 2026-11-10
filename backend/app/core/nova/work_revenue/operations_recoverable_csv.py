@@ -356,6 +356,21 @@ def decide_review(db: Session, *, org: str, owner: str, job_id: str,
 
 
 
+
+def list_owned(db: Session, *, org: str, owner: str, limit: int = 50) -> list[dict]:
+    """Summaries only; private input/output object keys never leave storage."""
+    require_runtime(db)
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise CustomerCSVBlocked("Job history limit must be 1 to 50", 400)
+    rows = db.execute(sa.select(recovery_jobs).where(
+        recovery_jobs.c.organization_id == org,
+        recovery_jobs.c.owner_user_id == owner,
+    ).order_by(recovery_jobs.c.created_at.desc(),
+               recovery_jobs.c.id.desc()).limit(limit)).mappings().all()
+    return [summary(row) for row in rows]
+
+
+
 def review_download(db: Session, *, org: str, owner: str, job_id: str) -> bytes:
     require_runtime(db)
     row = _owned(db, org=org, owner=owner, job_id=job_id)
