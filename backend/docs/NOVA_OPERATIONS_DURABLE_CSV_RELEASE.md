@@ -28,9 +28,14 @@ sent to a customer, and a review decision is not delivery or payment.
    AMICOR_DOCUMENT_S3_ACCESS_KEY, AMICOR_DOCUMENT_S3_SECRET_KEY; optional
    AMICOR_DOCUMENT_S3_ENDPOINT must use HTTPS. Do not expose credentials.
 4. Have a migration reviewer evaluate
-   backend/migrations/sql/20261109_operations_customer_csv_jobs_postgres.sql;
-   run it on the **staging database only** after approval, and integrate it with
-   Alembic migration ordering before production.
+   `backend/migrations/versions/20261109_nova_operations_csv_jobs.py` and its
+   reference SQL. On isolated PostgreSQL staging only, set all configured
+   environment indicators consistently to `staging` and set
+   `NOVA_OPERATIONS_CSV_SCHEMA_APPROVED=staging-only` after approval, then
+   run the Alembic chain against the staging database. A staging run without
+   approval raises rather than silently stamping this migration. Production
+   does not execute this draft's DDL and requires a separate approved
+   production schema rollout.
 5. Leave NOVA_OPERATIONS_DURABLE_CSV_ENABLED=false until all staging gates pass.
    The old in-memory /csv-clean owner-demo endpoint is distinct.
 
@@ -57,7 +62,7 @@ sent to a customer, and a review decision is not delivery or payment.
 
 ## Current limitations blocking production
 - No completed staging evidence for this new customer-job path.
-- SQL migration is not yet in an approved Alembic migration chain.
+- Alembic migration is included but staging-gated, unexecuted, and not production-approved.
 - The request is processed synchronously. Stale recovery marks FAILED and
   requires a fresh user upload; fully restart-resumable worker processing is
   **not** implemented.
