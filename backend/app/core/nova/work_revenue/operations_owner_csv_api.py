@@ -406,6 +406,44 @@ def durable_csv_download(
 from . import operations_recoverable_csv as recovery_csv
 
 
+@router.get("/recovery-preview/eligible-csv-tasks")
+def recovery_preview_eligible_tasks(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Use the preview's own gate, independent of the legacy CSV flag."""
+    try:
+        recovery_csv.require_runtime(db)
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(403, "Specific owner organization required")
+    engagements = service.list_engagements(db, organization_id=org, user=owner)
+    tasks = []
+    for engagement in engagements:
+        if not _eligible_engagement(engagement, org, str(owner.user_id)):
+            continue
+        completed = _completed_task_ids(engagement)
+        for task in engagement.get("tasks") or []:
+            if not isinstance(task, dict) or not _eligible_task(task, completed):
+                continue
+            tasks.append({
+                "engagement_id": engagement["engagement_id"],
+                "engagement_title": str(
+                    engagement.get("title") or engagement.get("service") or ""
+                )[:120],
+                "task_id": task["task_id"],
+                "task_title": str(task.get("title") or "")[:120],
+            })
+            if len(tasks) >= 100:
+                break
+        if len(tasks) >= 100:
+            break
+    return {"tasks": tasks, "count": len(tasks), "owner_only": True,
+            "execution_authorized": False, "delivered": False}
+
+
 @router.post("/recovery-preview/engagements/{engagement_id}/tasks/{task_id}/jobs", status_code=202)
 async def create_recovery_preview_job(
     engagement_id: str,
