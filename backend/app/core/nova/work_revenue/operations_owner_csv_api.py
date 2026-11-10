@@ -417,7 +417,10 @@ async def create_recovery_preview_job(
     owner: UserContext = Depends(require_work_revenue_owner),
     db: Session = Depends(get_db),
 ):
-    recovery_csv.require_runtime(db)
+    try:
+        recovery_csv.require_runtime(db)
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
     if scope_confirmed != "owner-confirmed-client-authorization":
         raise HTTPException(403, "Owner data processing authorization required")
     if not isinstance(filename, str) or not filename.lower().endswith(".csv") or len(filename) > 180 or any(
