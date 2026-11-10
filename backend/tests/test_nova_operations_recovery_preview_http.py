@@ -103,7 +103,7 @@ def test_recovery_preview_owner_roundtrip(preview):
     assert decision.json()["status"] == "APPROVED_FOR_DOWNLOAD"
     assert decision.json()["delivered"] is False
     assert client.post(base + "/review", json={"approve": False}).status_code == 409
-    assert client.get(base + "/download").content == b"Name\\nAda\\n"
+    assert client.get(base + "/download").content == b"Name\nAda\n"
     assert len(store.objects) == 2
 
 
