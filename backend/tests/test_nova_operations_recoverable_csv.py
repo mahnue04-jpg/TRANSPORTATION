@@ -243,11 +243,14 @@ def test_lease_renewal_blocks_stale_worker(harness):
 def test_recovery_after_first_process_disappears(harness):
     db, store = harness
     job_id = submit(db, key="crash-restart")["job_id"]
-    start = datetime.now(timezone.utc) - timedelta(minutes=7)
+    start = datetime.now(timezone.utc)
     vanished_worker = scoped(db, recovery.claim, job_id, now=start, lease_seconds=60)
-    assert recovery.due_job_ids(db, org="org-a", owner="owner-a") == [job_id]
+    restart = start + timedelta(minutes=7)
+    assert recovery.due_job_ids(
+        db, org="org-a", owner="owner-a", now=restart,
+    ) == [job_id]
     result = recovery.run_due_jobs(
-        db, org="org-a", owner="owner-a",
+        db, org="org-a", owner="owner-a", now=restart,
         authorization_check=lambda eng, task: None,
     )
     assert result["awaiting_review"] == [job_id]
