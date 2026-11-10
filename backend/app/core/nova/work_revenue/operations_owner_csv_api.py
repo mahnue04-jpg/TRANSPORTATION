@@ -32,6 +32,40 @@ LIMIT_BYTES = 1_000_000
 CSV_MIME_TYPES = {"text/csv", "application/csv", "application/vnd.ms-excel"}
 
 
+def _eligible_engagement(engagement: dict, org: str, owner_id: str) -> bool:
+    """Same fail-closed gate for owner task listing and processing."""
+    return (
+        str(engagement.get("organization_id") or "") == org
+        and str(engagement.get("owner_user_id") or "") == owner_id
+        and str(engagement.get("status") or "").strip().upper() == "ACTIVE"
+        and not str(engagement.get("blockers") or "").strip()
+    )
+
+
+def _eligible_task(task: dict, completed_task_ids: set[str]) -> bool:
+    """Restrict CSV work to unblocked, supervised Nova tasks with satisfied dependencies."""
+    dependency = str(task.get("depends_on_task_id") or "").strip()
+    return (
+        str(task.get("classification") or "").strip().upper() == "NOVA"
+        and str(task.get("responsible_party") or "").strip().upper() == "NOVA"
+        and task.get("review_required") is True
+        and str(task.get("status") or "").strip().upper()
+        in {"READY", "NOT_STARTED", "IN_PROGRESS"}
+        and not str(task.get("blocked_reason") or "").strip()
+        and not str(task.get("required_owner_input") or "").strip()
+        and (not dependency or dependency in completed_task_ids)
+    )
+
+
+def _completed_task_ids(engagement: dict) -> set[str]:
+    return {
+        str(task.get("task_id") or "")
+        for task in engagement.get("tasks") or []
+        if isinstance(task, dict)
+        and str(task.get("status") or "").strip().upper() == "COMPLETE"
+    }
+
+
 @router.post("/csv-clean")
 async def owner_csv_cleanup(
     request: Request,
@@ -126,9 +160,7 @@ async def scoped_owner_csv_cleanup(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     if (
         str(engagement.get("engagement_id") or "") != engagement_id
-        or str(engagement.get("organization_id") or "") != org
-        or str(engagement.get("status") or "").strip().upper() != "ACTIVE"
-        or str(engagement.get("blockers") or "").strip()
+        or not _eligible_engagement(engagement, org, str(owner.user_id))
     ):
         raise HTTPException(status_code=409, detail="Engagement must be active, owner-scoped and unblocked")
     task = next(
@@ -138,13 +170,7 @@ async def scoped_owner_csv_cleanup(
     )
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found on authorized engagement")
-    if (
-        str(task.get("classification") or "").upper() != "NOVA"
-        or str(task.get("responsible_party") or "").upper() != "NOVA"
-        or not bool(task.get("review_required"))
-        or str(task.get("status") or "").upper() not in {"READY", "NOT_STARTED", "IN_PROGRESS"}
-        or str(task.get("blocked_reason") or "").strip()
-    ):
+    if not _eligible_task(task, _completed_task_ids(engagement)):
         raise HTTPException(status_code=409, detail="Task is not ready for supervised Nova processing")
     result = await owner_csv_cleanup(
         request, owner_action=owner_action, filename=filename, owner=owner,
@@ -169,20 +195,11 @@ def eligible_csv_tasks(
     engagements = service.list_engagements(db, organization_id=org, user=owner)
     eligible = []
     for engagement in engagements:
-        if (
-            engagement.get("organization_id") != org
-            or str(engagement.get("status") or "").upper() != "ACTIVE"
-            or str(engagement.get("blockers") or "").strip()
-        ):
+        if not _eligible_engagement(engagement, org, str(owner.user_id)):
             continue
+        completed = _completed_task_ids(engagement)
         for task in engagement.get("tasks") or []:
-            if (
-                task.get("classification") != "NOVA"
-                or task.get("responsible_party") != "NOVA"
-                or not task.get("review_required")
-                or str(task.get("status") or "").upper() not in {"READY", "NOT_STARTED", "IN_PROGRESS"}
-                or str(task.get("blocked_reason") or "").strip()
-            ):
+            if not isinstance(task, dict) or not _eligible_task(task, completed):
                 continue
             eligible.append({
                 "engagement_id": engagement["engagement_id"],
