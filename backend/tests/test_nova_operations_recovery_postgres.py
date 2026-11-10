@@ -151,3 +151,32 @@ def test_postgres_two_connections_cannot_claim_same_active_lease(postgres):
         row = recovery.status(db, org="org-a", owner="owner-a", job_id=job_id)
         assert row["status"] == "RUNNING"
         assert row["attempts"] == 1
+
+
+def test_postgres_bounded_worker_pass_recovers_queue(postgres):
+    engine, store = postgres
+    with Session(engine) as db:
+        first = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="pg-batch-one", raw=b"Name\nAda\n",
+        )
+        second = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="pg-batch-two", raw=b"Name\nBea\n",
+        )
+        result = recovery.run_due_jobs(
+            db, org="org-a", owner="owner-a", limit=1,
+            authorization_check=lambda eng, task: None,
+        )
+        assert result["attempted"] == 1
+        assert result["delivered"] is False
+        pending = recovery.due_job_ids(db, org="org-a", owner="owner-a")
+        assert len(pending) == 1
+        assert pending[0] in {first["job_id"], second["job_id"]}
+        second_pass = recovery.run_due_jobs(
+            db, org="org-a", owner="owner-a", limit=2,
+            authorization_check=lambda eng, task: None,
+        )
+        assert second_pass["attempted"] == 1
+        assert recovery.due_job_ids(db, org="org-a", owner="owner-a") == []
+        assert len(store.items) == 4
