@@ -7,6 +7,8 @@ on:
     paths:
       - "backend/app/core/nova/work_revenue/operations_owner_csv_api.py"
       - "backend/tests/test_nova_operations_csv_eligibility.py"
+      - "backend/tests/test_nova_operations_csv_http.py"
+      - "backend/app/core/nova/work_revenue/service.py"
       - "backend/static/nova-work/operations-csv.js"
       - "backend/static/nova-work/index.html"
       - ".github/workflows/nova-operations-csv-selector-ci.yml"
@@ -49,7 +51,7 @@ jobs:
         run: node --check static/nova-work/operations-csv.js
       - name: Check Python syntax
         run: |
-          python -m py_compile app/core/nova/work_revenue/operations_owner_csv_api.py tests/test_nova_operations_csv_eligibility.py
+          python -m py_compile app/core/nova/work_revenue/operations_owner_csv_api.py app/core/nova/work_revenue/service.py tests/test_nova_operations_csv_eligibility.py tests/test_nova_operations_csv_http.py
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
@@ -59,5 +61,6 @@ jobs:
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
           test -f tests/test_nova_operations_csv_eligibility.py
-          python -m pytest -v -rs tests/test_nova_operations_csv_eligibility.py
+          test -f tests/test_nova_operations_csv_http.py
+          python -m pytest -v -rs tests/test_nova_operations_csv_eligibility.py tests/test_nova_operations_csv_http.py
           echo "CSV selector tests are synthetic eligibility tests only, not an HTTP/staging or customer-data readiness certification." >> "$GITHUB_STEP_SUMMARY"
