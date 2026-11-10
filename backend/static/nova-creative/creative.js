@@ -34,6 +34,7 @@
         if ($(id)) $(id).disabled = true;
       });
       renderPreflight(null);
+      resetFirstShotSubmission();
       if ($("first-shot-readiness-status")) {
         $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
       }
@@ -1852,10 +1853,36 @@
     throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
   }
 
+  var currentFirstShotReport = null;
+  var currentFirstShotProject = null;
+  var firstShotSubmitting = false;
+
+  function resetFirstShotSubmission() {
+    currentFirstShotReport = null;
+    currentFirstShotProject = null;
+    var approval = $("first-shot-explicit-approval");
+    var submit = $("submit-first-shot");
+    var summary = $("first-shot-approval-summary");
+    if (approval) { approval.checked = false; approval.disabled = true; }
+    if (submit) submit.disabled = true;
+    if (summary) summary.textContent = "The controlled five-second render is not authorized. Check the first shot and confirm its specific cost first.";
+  }
+
+  function refreshFirstShotSubmitButton() {
+    var approval = $("first-shot-explicit-approval");
+    var submit = $("submit-first-shot");
+    if (!submit) return;
+    submit.disabled = firstShotSubmitting || !approval || !approval.checked
+      || !currentFirstShotReport || currentFirstShotReport.status !== "READY_TO_REQUEST"
+      || !currentFirstShotReport.reference_image_asset_id
+      || currentFirstShotProject !== activeProjectId;
+  }
+
   function renderFirstShotReadiness(report) {
     var el = $("first-shot-readiness-status");
     if (!el) return;
     if (!report) {
+      resetFirstShotSubmission();
       el.textContent = "Select a project to check the first shot.";
       return;
     }
@@ -1882,6 +1909,16 @@
     el.innerHTML = lines.map(function (line) {
       return "<div>" + escapeHtml(line) + "</div>";
     }).join("");
+    var approval = $("first-shot-explicit-approval");
+    var summary = $("first-shot-approval-summary");
+    var ready = report.status === "READY_TO_REQUEST" && blockers.length === 0
+      && !!report.reference_image_asset_id && report.scene_count === 1;
+    if (approval) { approval.checked = false; approval.disabled = !ready; }
+    if (summary) summary.textContent = ready
+      ? "Reference image: " + String(report.reference_image_asset_id)
+        + ". This may incur a provider charge. Confirm the exact provider price separately before authorizing."
+      : "Paid submission blocked. Resolve the issues listed above, then check this shot again.";
+    refreshFirstShotSubmitButton();
   }
 
   var firstShotReadinessBtn = $("run-first-shot-readiness");
@@ -1899,6 +1936,8 @@
       try {
         var report = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/first-shot-readiness");
         if (projectId !== activeProjectId || revision !== activeProjectRevision) return;
+        currentFirstShotReport = report;
+        currentFirstShotProject = projectId;
         renderFirstShotReadiness(report);
       } catch (err) {
         if (projectId === activeProjectId && revision === activeProjectRevision && status) {
@@ -1906,6 +1945,53 @@
         }
       } finally {
         firstShotReadinessBtn.disabled = false;
+      }
+    });
+  }
+
+  var firstShotApproval = $("first-shot-explicit-approval");
+  if (firstShotApproval) firstShotApproval.addEventListener("change", refreshFirstShotSubmitButton);
+  var singleShotSubmit = $("submit-first-shot");
+  if (singleShotSubmit) {
+    singleShotSubmit.addEventListener("click", async function () {
+      var report = currentFirstShotReport;
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
+      if (firstShotSubmitting || !projectId || currentFirstShotProject !== projectId ||
+          !report || report.status !== "READY_TO_REQUEST" ||
+          !report.reference_image_asset_id || !firstShotApproval || !firstShotApproval.checked) {
+        showBanner("Run the free readiness check and explicitly approve the selected shot.", false);
+        return;
+      }
+      // The backend revalidates all requirements and holds the shared SQL claim.
+      firstShotSubmitting = true;
+      refreshFirstShotSubmitButton();
+      var resultBox = $("first-shot-submit-status");
+      if (resultBox) resultBox.textContent = "Submitting the single authorized video request...";
+      try {
+        var response = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/generate/first-shot", {
+          method: "POST",
+          body: JSON.stringify({
+            confirm_paid_generation: true,
+            reference_image_asset_id: report.reference_image_asset_id
+          })
+        });
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
+        if (resultBox) resultBox.textContent =
+          "Single-shot job queued: " + String((response.job || {}).id || "unknown")
+          + ". Check saved jobs and assets for the result. Do not resubmit.";
+        currentFirstShotReport = null;
+        if (firstShotApproval) { firstShotApproval.checked = false; firstShotApproval.disabled = true; }
+        showBanner("One controlled shot queued. No automatic retry or further shots.", true);
+      } catch (err) {
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
+        if (resultBox) resultBox.textContent = (err.message || "Unable to submit.")
+          + " If a provider request may have started, reconcile the saved job before trying again.";
+        if (firstShotApproval) { firstShotApproval.checked = false; firstShotApproval.disabled = true; }
+        currentFirstShotReport = null;
+      } finally {
+        firstShotSubmitting = false;
+        refreshFirstShotSubmitButton();
       }
     });
   }
