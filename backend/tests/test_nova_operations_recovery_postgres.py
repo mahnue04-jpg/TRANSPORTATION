@@ -115,3 +115,39 @@ def test_postgres_fences_expired_worker(postgres):
         assert recovery.status(
             db, org="org-a", owner="owner-a", job_id=job["job_id"],
         )["status"] == "AWAITING_REVIEW"
+
+
+def test_postgres_two_connections_cannot_claim_same_active_lease(postgres):
+    """Separate DB sessions must never both obtain a valid claim."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    engine, _ = postgres
+    with Session(engine) as db:
+        job_id = recovery.enqueue(
+            db, org="org-a", owner="owner-a",
+            engagement_id="eng-a", task_id="task-a",
+            request_key="concurrent-pg-claim", raw=b"Name\\nAda\\n",
+        )["job_id"]
+    gate = Barrier(2)
+    timestamp = datetime.now(timezone.utc)
+
+    def take_claim():
+        with Session(engine) as session:
+            gate.wait(timeout=10)
+            try:
+                return recovery.claim(
+                    session, org="org-a", owner="owner-a",
+                    job_id=job_id, now=timestamp, lease_seconds=60,
+                )["token"]
+            except CustomerCSVBlocked as exc:
+                assert exc.code == 409
+                return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tokens = list(pool.map(lambda _: take_claim(), range(2)))
+    assert sum(token is not None for token in tokens) == 1
+    with Session(engine) as db:
+        row = recovery.status(db, org="org-a", owner="owner-a", job_id=job_id)
+        assert row["status"] == "RUNNING"
+        assert row["attempts"] == 1
