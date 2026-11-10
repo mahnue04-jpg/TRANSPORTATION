@@ -363,6 +363,33 @@ def project_preflight_quote(
         raise
 
 
+@router.get("/projects/{project_id}/first-shot-readiness")
+def first_shot_preflight(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-scoped, non-billable first-shot report; never posts to providers."""
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+
+    _require_owner(user)
+    try:
+        service = get_service(db)
+        service._project_or_404(user.user_id, project_id)
+        quote = service.preflight_quote(user.user_id, project_id)
+        return first_shot_readiness(
+            scenes=service.store.list_scenes(project_id, user.user_id),
+            assets=service.store.list_assets(project_id, user.user_id),
+            provider_status=video_provider().status(),
+            budget_confirmed=quote.get("owner_budget_confirmed") is True,
+            media_resolver=_resolve_creative_media_url,
+        )
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/budget-confirm")
 def confirm_project_render_budget(
     project_id: str,
