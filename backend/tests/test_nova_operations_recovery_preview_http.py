@@ -195,3 +195,18 @@ def test_preview_cleanup_debt_exposes_only_owner_count(preview):
     assert response.status_code == 200
     assert response.json() == {"unresolved_cleanup_failures": 0, "delivered": False}
     assert "storage_ref" not in response.text
+
+
+def test_staging_cleanup_retry_requires_dry_run_and_explicit_approval(preview):
+    client, _, store = preview
+    endpoint = "/api/nova/work/operations/recovery-preview/cleanup-retry"
+    assert client.post(endpoint, json={}).status_code == 400
+    assert client.post(endpoint, json={"dry_run": False}).status_code == 403
+    assert client.post(endpoint, json={"dry_run": True}).status_code == 200
+    body = client.post(
+        endpoint,
+        json={"dry_run": False, "approval": "owner-approved-staging-cleanup"},
+    )
+    assert body.status_code == 200
+    assert body.json()["deleted"] == 0
+    assert body.json()["delivered"] is False
