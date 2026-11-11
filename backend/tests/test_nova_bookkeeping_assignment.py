@@ -72,7 +72,7 @@ class ContractScopeTests(unittest.TestCase):
         self.assertEqual(result["status"], "AWAITING_HUMAN_REVIEW")
 
     def test_provenance_is_bound_to_tenant_and_task(self):
-        csv_text = "date,description,amount,reference\\n2026-11-01,Office supplies,-10.00,X1\\n"
+        csv_text = "date,description,amount,reference\n2026-11-01,Office supplies,-10.00,X1\n"
         common = dict(work_type="transaction_workpaper", contracted_work_types=frozenset({"transaction_workpaper"}))
         one = prepare_assignment_draft(self.approved(**common), primary_csv=csv_text)
         two = prepare_assignment_draft(self.approved(**dict(common, task_id="task-b")), primary_csv=csv_text)
@@ -82,7 +82,7 @@ class ContractScopeTests(unittest.TestCase):
     def test_payables_route_uses_explicit_contract_scope(self):
         result = prepare_assignment_draft(
             self.approved(work_type="payables_aging", contracted_work_types=frozenset({"payables_aging"})),
-            primary_csv="bill_id,vendor,bill_date,due_date,amount,paid\\nB1,Test Vendor,2026-11-01,2026-11-10,50,10\\n",
+            primary_csv="bill_id,vendor,bill_date,due_date,amount,paid\nB1,Test Vendor,2026-11-01,2026-11-10,50,10\n",
             as_of="2026-11-11",
         )
         self.assertEqual(result["status"], "AWAITING_HUMAN_REVIEW")
