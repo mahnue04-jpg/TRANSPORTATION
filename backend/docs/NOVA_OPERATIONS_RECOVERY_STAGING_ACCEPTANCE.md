@@ -222,3 +222,18 @@ report counts only. This does **not** establish that other systems have no
 references, nor an organization-wide retention/legal-hold policy. Until those
 rules and real staging behavior are verified, no real customer files should
 be processed or deleted.
+
+
+
+### Cleanup object-key restrictions
+
+Deletion retries now require the recorded private object key to match the
+originating job's exact `organization/job-id/nova-csv-input|nova-csv-review/`
+namespace, followed by the storage adapter's 64-hex-character filename and
+`.bin` extension. An audit entry with a mismatched organization, job,
+category, or invalid key is classified as unsafe and **never deleted**.
+The owner rehearsal displays the unsafe-reference count, not object keys.
+
+This is one additional safeguard. The current implementation still requires
+a comprehensive retention/legal-hold review, real S3 tests, and evidence that
+no other subsystem owns an object before production use.
