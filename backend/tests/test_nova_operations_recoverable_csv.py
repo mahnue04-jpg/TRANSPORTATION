@@ -320,7 +320,7 @@ def test_input_delete_failure_is_recorded_after_failed_upload(harness, monkeypat
 def test_cleanup_retry_dry_run_and_explicit_approval(harness):
     db, store = harness
     job_id = submit(db, key="cleanup-retry")["job_id"]
-    orphan_ref = "org-a/recovery-orphan.bin"
+    orphan_ref = f"org-a/{job_id}/nova-csv-review/{'b' * 64}.bin"
     store.objects[orphan_ref] = b"fictional cleanup debris"
     recovery.record_cleanup_failure(
         db, org="org-a", owner="owner-a", job_id=job_id,
@@ -376,7 +376,7 @@ def test_cleanup_retry_protects_any_job_reference_and_never_deletes(harness):
 def test_cleanup_retry_failed_delete_remains_unresolved(harness, monkeypatch):
     db, store = harness
     job = submit(db, key="cleanup-retry-failure")["job_id"]
-    orphan_ref = "org-a/still-orphan.bin"
+    orphan_ref = f"org-a/{job}/nova-csv-review/{'c' * 64}.bin"
     store.objects[orphan_ref] = b"fictional"
     recovery.record_cleanup_failure(
         db, org="org-a", owner="owner-a", job_id=job,
@@ -429,7 +429,7 @@ def test_cleanup_execution_refuses_unverified_private_bucket(harness, monkeypatc
     from app.core.nova.work_revenue import operations_staging_preflight
     db, store = harness
     job_id = submit(db, key="cleanup-bucket-gate")["job_id"]
-    orphan_ref = "org-a/unverified-private-object.bin"
+    orphan_ref = f"org-a/{job_id}/nova-csv-review/{'d' * 64}.bin"
     store.objects[orphan_ref] = b"fictional data"
     recovery.record_cleanup_failure(
         db, org="org-a", owner="owner-a", job_id=job_id,
@@ -449,4 +449,26 @@ def test_cleanup_execution_refuses_unverified_private_bucket(harness, monkeypatc
     assert orphan_ref in store.objects
     assert recovery.cleanup_debt_summary(
         db, org="org-a", owner="owner-a",
+    )["unresolved_cleanup_failures"] == 1
+
+
+def test_cleanup_rejects_misdirected_audit_key_even_with_owner_approval(harness):
+    db, store = harness
+    job_id = submit(db, key="cleanup-tampered")["job_id"]
+    wrong_namespace = f"org-b/{job_id}/nova-csv-review/{'e' * 64}.bin"
+    store.objects[wrong_namespace] = b"fictional"
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=job_id,
+        storage_ref=wrong_namespace, failure_code="OUTPUT_DELETE_FAILED",
+    )
+    outcome = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", dry_run=False,
+        approval="owner-approved-staging-cleanup",
+        now=datetime.now(timezone.utc) + timedelta(minutes=16),
+    )
+    assert outcome["unsafe_refs"] == 1
+    assert outcome["deleted"] == 0
+    assert wrong_namespace in store.objects
+    assert recovery.cleanup_debt_summary(
+        db, org="org-a", owner="owner-a"
     )["unresolved_cleanup_failures"] == 1
