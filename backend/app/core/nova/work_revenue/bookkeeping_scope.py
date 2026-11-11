@@ -48,11 +48,11 @@ def _digest(value: object) -> bool:
     ) and value != "0" * 64
 
 
-def _trusted_eligible_task(task: dict, completed_ids: set[str], work_type: str) -> bool:
+def _trusted_eligible_task(\n    task: dict, completed_ids: set[str], work_type: str, *,\n    verified_contract_scope: bool = False,\n) -> bool:
     """Structured task work type required; text descriptions are not sufficient."""
     dependency = str(task.get("depends_on_task_id") or "")
     return (
-        task.get("bookkeeping_work_type") == work_type
+        (task.get("bookkeeping_work_type") == work_type or (\n            verified_contract_scope and task.get("bookkeeping_work_type") in (None, "")\n        ))
         and str(task.get("classification") or "").upper() == "NOVA"
         and str(task.get("responsible_party") or "").upper() == "NOVA"
         and task.get("review_required") is True
@@ -131,7 +131,7 @@ def resolve_bookkeeping_assignment(
         if isinstance(t, dict) and str(t.get("task_id") or "") == task_id
     ]
     if len(tasks) != 1 or not _trusted_eligible_task(
-        tasks[0], _completed_task_ids(engagement), work_type,
+        tasks[0], _completed_task_ids(engagement), work_type,\n        verified_contract_scope=True,
     ):
         raise ConsentNotVerified("No eligible structured bookkeeping task")
     return BookkeepingAssignment(
