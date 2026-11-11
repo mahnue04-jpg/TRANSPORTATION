@@ -111,6 +111,18 @@ def main() -> int:
             if result["active_jobs"]:
                 raise PreflightBlocked("ACTIVE_JOBS_PRESENT")
             file = snapshot(args.source, args.backup_directory)
+            try:
+                # Recheck the actual consistent snapshot, not only the live
+                # inventory taken before backup. Fail closed on in-flight work
+                # or changed table counts and discard the candidate snapshot.
+                captured = inventory(file)
+                if captured["active_jobs"]:
+                    raise PreflightBlocked("BACKUP_CONTAINS_ACTIVE_JOBS")
+                if captured["tables"] != result["tables"]:
+                    raise PreflightBlocked("BACKUP_SOURCE_COUNTS_CHANGED")
+            except BaseException:
+                file.unlink(missing_ok=True)
+                raise
             result["backup_integrity"] = "ok"
             result["backup_created"] = True
             # The backup location is deliberately not logged.
