@@ -114,6 +114,36 @@ def test_existing_destination_is_never_overwritten(databases, tmp_path):
         assert conn.execute(select(meta.tables["platform_users"].c.id)).scalar_one() == "existing"
 
 
+def test_second_transfer_refuses_to_overwrite_successful_copy(databases, tmp_path):
+    path, source, destination, meta = databases
+    first = module.transfer(path, destination, apply=True, backup_directory=tmp_path / "first")
+    assert first["verified"] is True
+    with pytest.raises(module.TransferBlocked, match="TARGET_NOT_EMPTY"):
+        module.transfer(path, destination, apply=True, backup_directory=tmp_path / "second")
+    assert not (tmp_path / "second").exists()
+    with destination.connect() as conn:
+        assert conn.execute(select(meta.tables["platform_users"])).all()
+        assert conn.execute(select(meta.tables["nova_creative_assets"])).all()
+
+
+def test_nonempty_projects_destination_is_rejected(databases, tmp_path):
+    path, source, destination, meta = databases
+    with destination.begin() as conn:
+        conn.execute(meta.tables["nova_creative_projects"].insert(),
+                     {"id": "unrelated", "owner_id": None, "metadata_json": "{}"})
+    with pytest.raises(module.TransferBlocked, match="TARGET_NOT_EMPTY"):
+        module.transfer(path, destination, apply=True, backup_directory=tmp_path / "backups")
+    assert not (tmp_path / "backups").exists()
+
+
+def test_apply_requires_backup_directory(databases):
+    path, source, destination, meta = databases
+    with pytest.raises(module.TransferBlocked, match="BACKUP_DIRECTORY_REQUIRED"):
+        module.transfer(path, destination, apply=True)
+    with destination.connect() as conn:
+        assert conn.execute(select(meta.tables["platform_users"])).all() == []
+
+
 def test_mid_copy_failure_rolls_back_all_destination_rows(databases, tmp_path):
     path, source, destination, meta = databases
     def fail(connection, cursor, statement, parameters, context, many):
