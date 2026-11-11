@@ -38,7 +38,7 @@ APP_ENV=staging python backend/scripts/studio_staging_backup_preflight.py \
   --backup
 ```
 
-This creates an integrity-checked SQLite snapshot with owner-only file permissions; it does **not** export or preserve media bytes. An on-disk backup on the same Render disk is **not sufficient disaster recovery**: separately copy the verified database snapshot and private media to authorized external storage, confirm byte/hash integrity and test restoration in isolation. A restart or disk loss must not destroy the only backup. Never log or upload personal customer records to CI.
+This creates an integrity-checked SQLite snapshot with owner-only file permissions and reports its SHA-256 and byte size; it does **not** export or preserve media bytes. Check free disk headroom before backup (the utility fails closed if space is insufficient). Once the backup is exported to secure off-disk storage, compare its SHA-256 and byte count against the original report and independently test an isolated restore. An on-disk backup on the same Render disk is **not sufficient disaster recovery**: separately copy the verified database snapshot and private media to authorized external storage, confirm byte/hash integrity and test restoration in isolation. A restart or disk loss must not destroy the only backup. Never log or upload personal customer records to CI.
 
 Do not confuse database asset references with physically retrievable MP4 files. For remote references, confirm authorized access to the bucket and persisted bytes in a separate owner-scoped procedure. For local file references, enumerate and copy the real referenced bytes through a trusted service shell; the inventory output intentionally contains counts only. Keep provider billing off.
 
