@@ -7,6 +7,8 @@ No client data may be used until those release gates are proven in staging.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any
 
 from .bookkeeping_receivables import build_receivables_aging
@@ -90,7 +92,32 @@ def prepare_assignment_draft(
         draft = build_receivables_aging(primary_csv, as_of=as_of)
     else:
         raise AssignmentNotAuthorized("Unrecognized work type")
+    input_digest = hashlib.sha256(primary_csv.encode("utf-8")).hexdigest()
+    secondary_digest = (
+        hashlib.sha256(secondary_csv.encode("utf-8")).hexdigest()
+        if secondary_csv is not None else None
+    )
+    output_digest = hashlib.sha256(draft["workpaper_csv"].encode("utf-8")).hexdigest()
+    # Provenance binds authorization, scope, source bytes, and output bytes.
+    # This is not a signature and does not replace authenticated audit storage.
+    provenance = {
+        "organization_id": assignment.organization_id,
+        "owner_user_id": assignment.owner_user_id,
+        "engagement_id": assignment.engagement_id,
+        "task_id": assignment.task_id,
+        "work_type": assignment.work_type,
+        "as_of": as_of,
+        "input_sha256": input_digest,
+        "secondary_input_sha256": secondary_digest,
+        "output_sha256": output_digest,
+        "human_review_required": True,
+        "delivery_allowed": False,
+    }
+    provenance["scope_sha256"] = hashlib.sha256(
+        json.dumps(provenance, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return {
+        "provenance": provenance,
         "organization_id": assignment.organization_id,
         "engagement_id": assignment.engagement_id,
         "task_id": assignment.task_id,
