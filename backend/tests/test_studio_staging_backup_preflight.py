@@ -213,3 +213,22 @@ def test_main_successful_backup_keeps_path_private(source, tmp_path, monkeypatch
     assert result["tables"]["platform_users"] == 1
     assert str(private) not in message
     assert len(list(private.glob("*.sqlite"))) == 1
+
+
+def test_backup_rejects_low_disk_space_without_creating_file(source, tmp_path, monkeypatch):
+    from collections import namedtuple
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _: Usage(100, 90, 10))
+    destination = tmp_path / "private"
+    with pytest.raises(module.PreflightBlocked, match="INSUFFICIENT_DISK_SPACE_FOR_BACKUP"):
+        module.snapshot(source, destination)
+    assert list(destination.glob("*.sqlite")) == []
+
+
+def test_backup_accepts_sufficient_disk_headroom(source, tmp_path, monkeypatch):
+    from collections import namedtuple
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _: Usage(10**10, 0, 10**10))
+    backup = module.snapshot(source, tmp_path / "private")
+    with sqlite3.connect(backup) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
