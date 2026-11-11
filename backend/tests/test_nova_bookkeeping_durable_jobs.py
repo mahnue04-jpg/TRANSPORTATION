@@ -124,7 +124,7 @@ def test_non_bookkeeping_job_is_unavailable(state):
     legacy = jobs.submit_review_job(
         db, org="org-a", owner="owner-a", engagement_id="eng-a",
         task_id="task-a", request_key="legacy-1", raw=b"Name\nAda\n")
-    with pytest.raises(finance.BookkeepingJobBlocked) as err:
+    with pytest.raises(jobs.CustomerCSVBlocked) as err:
         finance.download_bookkeeping(db, org="org-a", owner="owner-a", job_id=legacy["job_id"])
     assert err.value.code == 404
 
