@@ -349,7 +349,7 @@ def test_postgres_cleanup_retry_dry_run_and_ref_protection(postgres, monkeypatch
             raw=b"Name\nAda\n",
         )["job_id"]
         live_input = next(iter(store.items))
-        orphan = "fictional/unattached-private-object"
+        orphan = f"org-a/{job_id}/nova-csv-review/{'f' * 64}.bin"
         store.items[orphan] = b"synthetic"
         recovery.record_cleanup_failure(
             db, org="org-a", owner="owner-a", job_id=job_id,
