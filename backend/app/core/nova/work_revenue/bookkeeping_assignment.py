@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from .bookkeeping_receivables import build_receivables_aging
+from .bookkeeping_payables import build_payables_workpaper
 from .bookkeeping_workpaper import build_bookkeeping_workpaper
 
 
-SUPPORTED_WORK_TYPES = frozenset({"transaction_workpaper", "receivables_aging"})
+SUPPORTED_WORK_TYPES = frozenset({"transaction_workpaper", "receivables_aging", "payables_aging"})
 DISALLOWED = frozenset({
     "payroll", "tax_filing", "1099_filing", "general_ledger_posting",
     "payment_execution", "full_cycle_bookkeeping", "bank_reconciliation_final",
@@ -79,6 +80,10 @@ def prepare_assignment_draft(
         if as_of is not None:
             raise AssignmentNotAuthorized("Unexpected as_of for transaction workpaper")
         draft = build_bookkeeping_workpaper(primary_csv, secondary_csv)
+    elif assignment.work_type == "payables_aging":
+        if secondary_csv is not None or not isinstance(as_of, str):
+            raise AssignmentNotAuthorized("Payables requires as_of and one CSV")
+        draft = build_payables_workpaper(primary_csv, as_of=as_of)
     elif assignment.work_type == "receivables_aging":
         if secondary_csv is not None or not isinstance(as_of, str):
             raise AssignmentNotAuthorized("Receivables requires as_of and one CSV")
