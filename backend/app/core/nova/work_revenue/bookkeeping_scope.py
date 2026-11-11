@@ -47,11 +47,16 @@ def _digest(value: object) -> bool:
     ) and value != "0" * 64
 
 
-def _trusted_eligible_task(\n    task: dict, completed_ids: set[str], work_type: str, *,\n    verified_contract_scope: bool = False,\n) -> bool:
+def _trusted_eligible_task(
+    task: dict, completed_ids: set[str], work_type: str, *,
+    verified_contract_scope: bool = False,
+) -> bool:
     """Structured task work type required; text descriptions are not sufficient."""
     dependency = str(task.get("depends_on_task_id") or "")
     return (
-        (task.get("bookkeeping_work_type") == work_type or (\n            verified_contract_scope and task.get("bookkeeping_work_type") in (None, "")\n        ))
+        (task.get("bookkeeping_work_type") == work_type or (
+            verified_contract_scope and task.get("bookkeeping_work_type") in (None, "")
+        ))
         and str(task.get("classification") or "").upper() == "NOVA"
         and str(task.get("responsible_party") or "").upper() == "NOVA"
         and task.get("review_required") is True
@@ -113,7 +118,10 @@ def resolve_bookkeeping_assignment(
     if verified > now or expires <= now or verified >= expires:
         raise ConsentNotVerified("Contract authorization expired or invalid")
 
-    # Resolve existing CSV-scope helpers after module initialization to avoid\n    # circular module imports with the registered owner-only router.\n    from .operations_owner_csv_api import _eligible_engagement, _completed_task_ids\n    try:
+    # Resolve existing CSV-scope helpers after module initialization to avoid
+    # circular module imports with the registered owner-only router.
+    from .operations_owner_csv_api import _eligible_engagement, _completed_task_ids
+    try:
         engagement = service.get_engagement(
             db, engagement_id, organization_id=org, user=owner,
         )
@@ -130,7 +138,8 @@ def resolve_bookkeeping_assignment(
         if isinstance(t, dict) and str(t.get("task_id") or "") == task_id
     ]
     if len(tasks) != 1 or not _trusted_eligible_task(
-        tasks[0], _completed_task_ids(engagement), work_type,\n        verified_contract_scope=True,
+        tasks[0], _completed_task_ids(engagement), work_type,
+        verified_contract_scope=True,
     ):
         raise ConsentNotVerified("No eligible structured bookkeeping task")
     return BookkeepingAssignment(
