@@ -204,3 +204,21 @@ The code is default-off and staging-only.
 This controlled retry is not a global bucket garbage collector; it cannot
 find objects that were never recorded as cleanup debt, and it does not
 replace retention and lifecycle management.
+
+
+### Cleanup retry hard gate (latest development)
+
+A previously recorded failure is eligible for examination only when older than
+15 minutes. A **dry run does not delete**. An approved retry requires the
+owner-only staging endpoint, the explicit approval token, and a successful
+live **staging S3 bucket policy check** before any delete. The check verifies
+the dedicated bucket name, all four S3 Block Public Access controls, and
+default bucket encryption. If verification fails, deletion is blocked.
+
+The retry query locks a bounded set of unresolved audit records and rechecks
+all saved recovery-job input and output references, **across all owners**,
+before attempting deletion. Referenced objects are not deleted. Outcomes
+report counts only. This does **not** establish that other systems have no
+references, nor an organization-wide retention/legal-hold policy. Until those
+rules and real staging behavior are verified, no real customer files should
+be processed or deleted.
