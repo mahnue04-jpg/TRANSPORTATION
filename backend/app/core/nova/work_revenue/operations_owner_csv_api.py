@@ -488,6 +488,20 @@ async def create_recovery_preview_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+@router.get("/recovery-preview/cleanup-debt")
+def recovery_preview_cleanup_debt(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Private audit count only; never return object references or file data."""
+    try:
+        return recovery_csv.cleanup_debt_summary(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/recovery-preview/jobs")
 def recovery_preview_owner_history(
     limit: int = 50,
