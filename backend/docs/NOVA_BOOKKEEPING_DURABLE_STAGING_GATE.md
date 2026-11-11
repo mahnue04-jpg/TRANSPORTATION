@@ -99,3 +99,14 @@ financial work.
   expected results, including edge cases and rounding.
 - Resolve the upstream PR #477 draft dependency. No deploy or merge without
   explicit owner approval.
+
+## Synthetic interruption and persistence tests (2026-11-11)
+
+- Added file-backed synthetic restart test: reopen SQLite metadata and fake private storage, verify digest and owner isolation, approve for download, then reopen again to verify state persistence.
+- Added bookkeeping-only stale PROCESSING recovery after 15 minutes: marks FAILED, never retries work or delivers files, and rejects different owners.
+- The recovery API checks current signed consent and task scope before marking an accounting job failed.
+- These synthetic checks are NOT actual PostgreSQL/S3 staging evidence. Feature flags remain OFF.
+
+## Render verification boundary
+
+Render connector requires explicit workspace selection before resource inspection. No workspace selected, database queried, deploy triggered, or environment changed during this work.
