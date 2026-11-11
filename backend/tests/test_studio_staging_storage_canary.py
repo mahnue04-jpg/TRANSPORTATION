@@ -127,3 +127,18 @@ def test_cli_apply_requires_explicit_ack(monkeypatch, capsys):
     monkeypatch.setattr(canary.storage, "_client", lambda: pytest.fail("Client forbidden"))
     assert canary.main(["--apply"]) == 1
     assert "EXPLICIT_STAGING_TEST_ACK_REQUIRED" in capsys.readouterr().err
+
+
+def test_apply_rejects_bucket_mismatch_without_network(monkeypatch, capsys):
+    monkeypatch.setenv("NOVA_STUDIO_S3_BUCKET", "private-stage-one")
+    monkeypatch.setattr(canary.storage, "_client", lambda: pytest.fail("No S3 call allowed"))
+    assert canary.main(["--apply", "--acknowledge-staging-test-object",
+                        "--expected-bucket", "private-prod-other"]) == 1
+    assert "EXPECTED_STAGING_BUCKET_MISMATCH" in capsys.readouterr().err
+
+
+def test_apply_requires_expected_bucket_without_network(monkeypatch, capsys):
+    monkeypatch.setenv("NOVA_STUDIO_S3_BUCKET", "private-stage-one")
+    monkeypatch.setattr(canary.storage, "_client", lambda: pytest.fail("No S3 call allowed"))
+    assert canary.main(["--apply", "--acknowledge-staging-test-object"]) == 1
+    assert "EXPECTED_STAGING_BUCKET_MISMATCH" in capsys.readouterr().err
