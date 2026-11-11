@@ -26,6 +26,9 @@ class BookkeepingWorkpaperTests(unittest.TestCase):
         self.assertEqual(report["net_total"], "125.00")
         self.assertEqual(report["unmatched_bank_rows"], [])
         self.assertIn("Software subscriptions", report["workpaper_csv"])
+        self.assertIn(",-25.00,", report["workpaper_csv"])
+        self.assertEqual(report["matched_bank_row_count"], 2)
+        self.assertTrue(report["all_bank_rows_accounted_for"])
         self.assertIn("NEEDS_HUMAN_REVIEW", report["workpaper_csv"])
 
     def test_duplicate_and_missing_bank_flagged(self):
@@ -33,6 +36,15 @@ class BookkeepingWorkpaperTests(unittest.TestCase):
         report = build_bookkeeping_workpaper(data, HEAD)
         self.assertEqual(report["issue_counts"]["possible_duplicate"], 2)
         self.assertEqual(report["issue_counts"]["bank_match_missing_or_ambiguous"], 2)
+
+    def test_duplicate_transactions_never_claim_a_unique_bank_match(self):
+        transactions = HEAD + "2026-11-01,Software subscription,-25.00,A1\\n" * 2
+        bank = HEAD + "2026-11-01,Bank charge,-25.00,A1\\n"
+        report = build_bookkeeping_workpaper(transactions, bank)
+        self.assertEqual(report["issue_counts"]["bank_match_missing_or_ambiguous"], 2)
+        self.assertEqual(report["matched_bank_row_count"], 0)
+        self.assertEqual(report["unmatched_bank_rows"], [2])
+        self.assertFalse(report["all_bank_rows_accounted_for"])
 
     def test_csv_injection_is_escaped(self):
         data = HEAD + '2026-11-01,"=HYPERLINK(""bad"")",10.00,AB\n'
