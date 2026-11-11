@@ -121,3 +121,41 @@ def test_bookkeeping_job_lifecycle_through_real_s3_adapter(mock_private_s3, monk
                 db, org=ORG, owner=OWNER, job_id=result["job_id"],
             )
     engine.dispose()
+
+
+def test_real_s3_adapter_cleans_up_when_final_consent_is_revoked(mock_private_s3, monkeypatch):
+    """A denial after object upload must not leave an orphaned review file."""
+    store, client = mock_private_s3
+    engine = create_engine("sqlite:///:memory:")
+    jobs.metadata.create_all(engine)
+    monkeypatch.setattr(jobs, "require_runtime", lambda session: None)
+    monkeypatch.setattr(jobs, "_store", lambda: store)
+    assignment = BookkeepingAssignment(
+        organization_id=ORG, owner_user_id=OWNER,
+        engagement_id="synthetic-engagement", task_id="synthetic-task",
+        work_type="receivables_aging", ai_assistance_permitted=True,
+        data_processing_authorized=True, human_review_required=True,
+        contracted_work_types=frozenset({"receivables_aging"}),
+    )
+
+    class SimulatedConsentRevoked(ValueError):
+        pass
+
+    def deny_at_finalization(session):
+        # The adapter has already written its object by this point.
+        listed = client.list_objects_v2(Bucket=BUCKET)
+        assert listed.get("KeyCount", 0) == 1
+        raise SimulatedConsentRevoked("synthetic consent revoked")
+
+    with Session(engine) as db:
+        with pytest.raises(SimulatedConsentRevoked):
+            finance.submit_bookkeeping_review(
+                db, assignment=assignment, request_id="moto-revocation-1",
+                primary=CSV, as_of="2026-11-11",
+                final_authorization=deny_at_finalization,
+            )
+        assert db.execute(
+            jobs.sa.select(jobs.jobs.c.status)
+        ).scalar_one() == "FAILED"
+        assert client.list_objects_v2(Bucket=BUCKET).get("KeyCount", 0) == 0
+    engine.dispose()
