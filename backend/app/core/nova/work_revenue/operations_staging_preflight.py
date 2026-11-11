@@ -66,8 +66,9 @@ def run_preflight() -> dict:
             # Read metadata only; never run Alembic, DDL, or job processing.
             connection.execute(sa.text("SELECT 1")).scalar_one()
             names = set(sa.inspect(connection).get_table_names())
-        if "nova_operations_csv_recovery_jobs" not in names:
-            raise CustomerCSVBlocked("Recovery migration not present", 503)
+        if ("nova_operations_csv_recovery_jobs" not in names
+                or "nova_operations_csv_cleanup_events" not in names):
+            raise CustomerCSVBlocked("Recovery and cleanup audit migrations required", 503)
         if "platform_users" not in names or "nova_work_engagements" not in names:
             raise CustomerCSVBlocked("Staging application schema incomplete", 503)
         checks["isolated_database_schema"] = "PASS"
