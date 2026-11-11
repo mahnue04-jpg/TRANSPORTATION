@@ -27,12 +27,16 @@ def _connect_ro(path: Path):
 
 
 def snapshot(source: Path, destination: Path):
+    if not source.is_file() or source.is_symlink():
+        raise PreflightBlocked("SOURCE_MISSING_OR_SYMLINK")
     source = source.resolve(strict=True)
+    if destination.is_symlink():
+        raise PreflightBlocked("BACKUP_DIRECTORY_NOT_PRIVATE")
     destination = destination.resolve()
     if destination == source or source in destination.parents:
         raise PreflightBlocked("BACKUP_INSIDE_SOURCE_PATH")
     destination.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if destination.is_symlink() or (stat.S_IMODE(destination.stat().st_mode) & 0o077):
+    if stat.S_IMODE(destination.stat().st_mode) & 0o077:
         raise PreflightBlocked("BACKUP_DIRECTORY_NOT_PRIVATE")
     backup_path = destination / ("studio_staging_" + secrets.token_hex(12) + ".sqlite")
     fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
