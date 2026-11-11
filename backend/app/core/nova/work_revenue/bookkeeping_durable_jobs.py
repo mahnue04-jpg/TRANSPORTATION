@@ -36,7 +36,7 @@ def require_bookkeeping_runtime(db: Session) -> None:
 
 
 def _row(db: Session, *, org: str, owner: str, job_id: str, lock: bool = False):
-    row = base._owned(db, job_id, org, owner, lock=lock)
+    row = base._owned(db, job_id, org, owner, lock=lock, bookkeeping=True)
     # Never permit accounting endpoints to operate on legacy CSV-cleanup jobs.
     if not str(row["request_key"]).startswith(JOB_PREFIX):
         raise BookkeepingJobBlocked("Bookkeeping job not found", 404)
