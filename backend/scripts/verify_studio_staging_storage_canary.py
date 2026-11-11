@@ -17,6 +17,12 @@ import json
 import os
 import secrets
 import sys
+from pathlib import Path
+
+# Allow direct execution from the repository root without pip-installing app.
+BACKEND_ROOT = str(Path(__file__).resolve().parents[1])
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
 
 from app.core.nova.creative_studio import private_object_storage as storage
 
