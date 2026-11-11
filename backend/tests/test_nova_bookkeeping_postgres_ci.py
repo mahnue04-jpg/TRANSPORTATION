@@ -462,3 +462,24 @@ def test_locked_postgres_consent_serializes_revocation(pg):
                 db, owner=owner, engagement_id="synthetic-engagement",
                 task_id="synthetic-task", work_type="receivables_aging",
             )
+
+
+def test_staging_preflight_on_disposable_postgres(pg):
+    from app.core.nova.work_revenue.bookkeeping_staging_preflight import inspect_staging_readiness
+    engine, _, _ = pg
+    report = inspect_staging_readiness(
+        config={
+            "APP_ENV": "staging", "AMICOR_ENVIRONMENT": "staging",
+            "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private",
+            "NOVA_BOOKKEEPING_DURABLE_ENABLED": "false",
+            "NOVA_OPERATIONS_DURABLE_CSV_ENABLED": "false",
+        },
+        engine=engine, verified_staging_identity=True,
+        signed_consent_process_reviewed=False,
+    )
+    checks = {item["check"]: item["passed"] for item in report["checks"]}
+    assert checks["postgres_tables_verified"] is True
+    assert report["status"] == "BLOCKED"
+    assert checks["s3_public_access_block"] is False
+    assert checks["signed_client_ai_consent_workflow_reviewed"] is False
+    assert report["production_release_authorized"] is False
