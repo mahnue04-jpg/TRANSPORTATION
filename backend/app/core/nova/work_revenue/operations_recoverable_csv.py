@@ -44,6 +44,18 @@ recovery_jobs = sa.Table(
     sa.UniqueConstraint("organization_id", "owner_user_id", "request_key",
                         name="uq_nova_csv_recovery_request"),
 )
+cleanup_events = sa.Table(
+    "nova_operations_csv_cleanup_events", metadata,
+    sa.Column("id", sa.String(36), primary_key=True),
+    sa.Column("organization_id", sa.String(36), nullable=False),
+    sa.Column("owner_user_id", sa.String(36), nullable=False),
+    sa.Column("job_id", sa.String(36), nullable=False),
+    sa.Column("storage_ref", sa.String(512), nullable=False),
+    sa.Column("failure_code", sa.String(40), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("resolved_at", sa.DateTime(timezone=True)),
+)
+
 _ALLOWED_STATUSES = {
     "UPLOADING", "QUEUED", "RUNNING", "AWAITING_REVIEW",
     "APPROVED_FOR_DOWNLOAD", "REJECTED", "FAILED",
@@ -74,6 +86,32 @@ def require_runtime(db: Session) -> None:
         raise CustomerCSVBlocked("Recoverable CSV schema unavailable", 503)
     if os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", "").lower() != "s3_private":
         raise CustomerCSVBlocked("Private object storage required", 503)
+
+
+def record_cleanup_failure(
+    db: Session, *, org: str, owner: str, job_id: str,
+    storage_ref: str, failure_code: str,
+) -> None:
+    """Durably record cleanup debt without disclosing private object paths."""
+    if failure_code not in {"INPUT_DELETE_FAILED", "OUTPUT_DELETE_FAILED"}:
+        raise CustomerCSVBlocked("Invalid storage cleanup event", 400)
+    db.execute(sa.insert(cleanup_events).values(
+        id=secrets.token_hex(16), organization_id=org, owner_user_id=owner,
+        job_id=job_id, storage_ref=storage_ref, failure_code=failure_code,
+        created_at=_now(),
+    ))
+    db.commit()
+
+
+def cleanup_debt_summary(db: Session, *, org: str, owner: str) -> dict:
+    """Return only tenant-scoped counts, never the private object references."""
+    require_runtime(db)
+    count = db.execute(sa.select(sa.func.count()).select_from(cleanup_events).where(
+        cleanup_events.c.organization_id == org,
+        cleanup_events.c.owner_user_id == owner,
+        cleanup_events.c.resolved_at.is_(None),
+    )).scalar_one()
+    return {"unresolved_cleanup_failures": count, "delivered": False}
 
 
 def _owned(db: Session, *, org: str, owner: str, job_id: str):
@@ -171,7 +209,11 @@ def enqueue(db: Session, *, org: str, owner: str, engagement_id: str,
             try:
                 _store().delete(storage_ref=storage_ref)
             except Exception:
-                pass
+                db.rollback()
+                record_cleanup_failure(
+                    db, org=org, owner=owner, job_id=job_id,
+                    storage_ref=storage_ref, failure_code="INPUT_DELETE_FAILED",
+                )
         raise
 
 
@@ -337,7 +379,11 @@ def process_job(db: Session, *, org: str, owner: str, job_id: str,
                 # Only delete this attempt's unique output, not another worker's.
                 _store().delete(storage_ref=output_ref)
             except Exception:
-                pass
+                db.rollback()
+                record_cleanup_failure(
+                    db, org=org, owner=owner, job_id=job_id,
+                    storage_ref=output_ref, failure_code="OUTPUT_DELETE_FAILED",
+                )
         raise
 
 
