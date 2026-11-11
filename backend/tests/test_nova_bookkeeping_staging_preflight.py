@@ -13,7 +13,10 @@ def test_default_configuration_is_blocked():
     assert result["production_release_authorized"] is False
     assert result["customer_data_allowed"] is False
     assert result["deployment_performed"] is False
-    assert not any(by_name(result).values())
+    assert by_name(result)["bookkeeping_disabled_until_release"] is True
+    assert by_name(result)["operations_csv_disabled_until_release"] is True
+    assert by_name(result)["environment_isolated_staging"] is False
+    assert by_name(result)["postgres_tables_verified"] is False
 
 
 def test_production_label_prevents_all_resource_inspection():
