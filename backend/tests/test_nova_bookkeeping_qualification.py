@@ -1,7 +1,14 @@
 """Contract scope controls: synthetic descriptions only."""
 import unittest
 
-from app.core.nova.v3.capability_catalog import capability_fit
+import importlib.util
+from pathlib import Path
+
+_MODULE = Path(__file__).resolve().parents[1] / "app/core/nova/v3/capability_catalog.py"
+_SPEC = importlib.util.spec_from_file_location("nova_catalog_isolated", _MODULE)
+_MODULE_OBJ = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE_OBJ)
+capability_fit = _MODULE_OBJ.capability_fit
 
 
 class NovaBookkeepingQualificationTests(unittest.TestCase):
