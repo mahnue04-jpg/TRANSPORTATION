@@ -165,3 +165,34 @@ def test_main_inventory_does_not_create_backup(source, tmp_path, monkeypatch, ca
     assert data["mode"] == "inventory"
     assert "backup_created" not in data
     assert data["tables"]["nova_creative_projects"] == 1
+
+
+def test_backup_includes_committed_sqlite_wal_changes(source, tmp_path):
+    # Keep a writer open so SQLite's committed updates remain in its WAL file.
+    writer = sqlite3.connect(source)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute("INSERT INTO platform_users VALUES ('wal-committed')")
+        writer.commit()
+        backup = module.snapshot(source, tmp_path / "private_wal")
+        with sqlite3.connect(backup) as conn:
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert conn.execute("SELECT COUNT(*) FROM platform_users").fetchone()[0] == 2
+    finally:
+        writer.close()
+
+
+def test_backup_directory_symlink_is_rejected(source, tmp_path):
+    actual_directory = tmp_path / "actual_private"
+    actual_directory.mkdir(mode=0o700)
+    link = tmp_path / "link_directory"
+    link.symlink_to(actual_directory, target_is_directory=True)
+    with pytest.raises(module.PreflightBlocked, match="BACKUP_DIRECTORY_NOT_PRIVATE"):
+        module.snapshot(source, link)
+    assert list(actual_directory.glob("*")) == []
+
+
+def test_snapshot_does_not_modify_source_content(source, tmp_path):
+    original = source.read_bytes()
+    module.snapshot(source, tmp_path / "private_copy")
+    assert source.read_bytes() == original
