@@ -47,3 +47,58 @@ def test_saved_job_history_controls_and_reopen_endpoint():
     assert '"/api/nova/work/operations/durable/jobs"' in JS
     assert "await refreshJobStatus()" in JS
     assert "No customer delivery" in JS
+
+
+def test_staging_recovery_rehearsal_ui_is_owner_scoped_and_non_delivery():
+    preview_html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    preview_js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert "Staging only. Use fictional CSV data." in preview_html
+    for element_id in (
+        "recovery-load-tasks", "recovery-task-select", "recovery-upload-form",
+        "recovery-load-history", "recovery-job-select", "recovery-process",
+        "recovery-check", "recovery-download", "recovery-approve", "recovery-reject",
+        "recovery-process-due",
+    ):
+        assert f'id="{element_id}"' in preview_html
+    for route in ("/eligible-csv-tasks", "/jobs", "/process", "/review", "/download"):
+        assert route in preview_js
+    assert 'session.getAuthHeaders' in preview_js
+    assert 'Not delivered' in preview_js
+
+
+def test_supervised_staging_batch_processing_wiring():
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert '/jobs/process-due' in js
+    assert "No delivery or invoicing" in js
+
+
+def test_staging_cleanup_audit_shows_counts_without_object_references():
+    html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert 'id="recovery-check-cleanup"' in html
+    assert 'id="recovery-cleanup-status"' in html
+    assert '"/cleanup-debt"' in js
+    assert "unresolved_cleanup_failures" in js
+    assert "no file references exposed" in js
+
+
+def test_staging_cleanup_retry_requires_explicit_owner_confirmation():
+    html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    for identifier in (
+        "recovery-cleanup-dry-run",
+        "recovery-cleanup-execute",
+        "recovery-cleanup-confirm",
+    ):
+        assert f'id="{identifier}"' in html
+    assert 'APPROVE STAGING CLEANUP' in js
+    assert '"owner-approved-staging-cleanup"' in js
+    assert '"/cleanup-retry"' in js
+    assert "No customer delivery" in js
+
+
+
+def test_cleanup_ui_reports_unsafe_reference_count():
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert "unsafe_refs" in js
+    assert "unsafe references blocked" in js

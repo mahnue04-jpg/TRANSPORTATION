@@ -75,7 +75,9 @@ jobs:
         with:
           node-version: "22"
       - name: Verify browser code syntax
-        run: node --check static/nova-work/operations-csv.js
+        run: |
+          node --check static/nova-work/operations-csv.js
+          node --check static/nova-work/recovery-preview.js
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
@@ -93,6 +95,10 @@ jobs:
             tests/test_nova_operations_csv_offline_bridge.py \
             tests/test_nova_operations_customer_csv_jobs.py \
             tests/test_nova_operations_customer_csv_http.py \
+            tests/test_nova_operations_recoverable_csv.py \
+            tests/test_nova_operations_recovery_worker.py \
+            tests/test_nova_operations_staging_preflight.py \
+            tests/test_nova_operations_recovery_preview_http.py \
             tests/test_nova_operations_durable_csv_ui_contract.py \
             tests/test_nova_operations_csv_alembic_gate.py
           echo "CSV regressions use synthetic fixtures; not proof of production storage, real authorization, or customer-job readiness." >> "$GITHUB_STEP_SUMMARY"
@@ -141,6 +147,8 @@ jobs:
       - name: Run ephemeral PostgreSQL CSV concurrency and review tests
         run: |
           python -m pytest -v -rs tests/test_nova_operations_customer_csv_postgres.py
+          python -m pytest -v -rs tests/test_nova_operations_recovery_postgres.py
+          echo "Includes separate real Python subprocess crash-and-resume test with ephemeral PostgreSQL and temp fake object files." >> "$GITHUB_STEP_SUMMARY"
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
