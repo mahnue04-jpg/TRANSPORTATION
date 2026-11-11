@@ -10,6 +10,8 @@ on:
       - 'backend/app/core/nova/work_revenue/bookkeeping_receivables.py'
       - 'backend/app/core/nova/work_revenue/bookkeeping_assignment.py'
       - 'backend/tests/test_nova_bookkeeping_assignment.py'
+      - 'backend/tests/test_nova_bookkeeping_payables.py'
+      - 'backend/app/core/nova/work_revenue/bookkeeping_payables.py'
       - 'backend/app/core/nova/v3/capability_catalog.py'
       - '.github/workflows/nova-bookkeeping-workpaper.yml'
   workflow_dispatch:
@@ -34,3 +36,4 @@ jobs:
           python -m unittest discover -s backend/tests -p 'test_nova_bookkeeping_qualification.py' -v
           python -m unittest discover -s backend/tests -p 'test_nova_bookkeeping_receivables.py' -v
           python -m unittest discover -s backend/tests -p 'test_nova_bookkeeping_assignment.py' -v
+          python -m unittest discover -s backend/tests -p 'test_nova_bookkeeping_payables.py' -v
