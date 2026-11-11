@@ -7,6 +7,7 @@ on:
       - 'backend/tests/test_provider_commercial_30s.py'
       - 'backend/tests/test_provider_commercial_assembly.py'
       - 'backend/tests/test_studio_content_import.py'
+      - 'backend/tests/test_nova_image_timeout.py'
       - 'backend/tests/test_nova_studio_private_object_storage.py'
       - 'backend/static/nova-creative/**'
       - 'tools/check_content_import_offline.py'
@@ -52,6 +53,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pytest -ra -vv --tb=short \
+            tests/test_nova_image_timeout.py \
             tests/test_provider_commercial_30s.py \
             tests/test_studio_content_import.py \
             tests/test_nova_studio_private_object_storage.py \
