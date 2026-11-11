@@ -126,6 +126,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--acknowledge-staging-test-object", action="store_true")
+    parser.add_argument("--expected-bucket", help="Exact, nonsecret staging bucket name")
     args = parser.parse_args(argv)
     try:
         _assert_staging()
@@ -135,7 +136,9 @@ def main(argv=None) -> int:
             return 0
         if not args.acknowledge_staging_test_object:
             raise CanaryBlocked("EXPLICIT_STAGING_TEST_ACK_REQUIRED")
-        print(json.dumps({"status": "passed", "checks": run_canary()}, sort_keys=True))
+        if not args.expected_bucket or args.expected_bucket != storage._bucket():
+            raise CanaryBlocked("EXPECTED_STAGING_BUCKET_MISMATCH")
+        print(json.dumps({"status": "passed", "checks": run_canary(bucket=args.expected_bucket)}, sort_keys=True))
         return 0
     except CanaryBlocked as exc:
         print(json.dumps({"status": "blocked", "reason": str(exc)}), file=sys.stderr)
