@@ -338,3 +338,43 @@ def test_postgres_consent_evidence_and_task_disagreement_fail_closed(pg, monkeyp
                 db, owner=owner, engagement_id="synthetic-engagement",
                 task_id="synthetic-task", work_type="receivables_aging",
             )
+
+
+def test_postgres_concurrent_accounting_idempotency_preserves_one_workpaper(pg):
+    """Real concurrent connections must create one owned durable job."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    engine, store, owner = pg
+    barrier = Barrier(2)
+
+    def submit_concurrently():
+        with Session(engine) as db:
+            assignment = scope.resolve_bookkeeping_assignment(
+                db, owner=owner, engagement_id="synthetic-engagement",
+                task_id="synthetic-task", work_type="receivables_aging",
+            )
+            barrier.wait(timeout=10)
+            return finance.submit_bookkeeping_review(
+                db, assignment=assignment,
+                request_id="pg-concurrent-accounting-1",
+                primary=SOURCE, as_of="2026-11-11",
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(submit_concurrently)
+        second = pool.submit(submit_concurrently)
+        outcomes = [first.result(timeout=20), second.result(timeout=20)]
+    assert len({entry["job_id"] for entry in outcomes}) == 1
+    assert sorted(entry["replayed"] for entry in outcomes) == [False, True]
+    assert store.writes == 1
+    with Session(engine) as db:
+        count = db.execute(sa.select(sa.func.count()).select_from(
+            csvjobs.jobs
+        )).scalar_one()
+        assert count == 1
+        scoped = finance.bookkeeping_status(
+            db, org="synthetic-org", owner="synthetic-owner",
+            job_id=outcomes[0]["job_id"],
+        )
+        assert scoped["status"] == "AWAITING_REVIEW"
