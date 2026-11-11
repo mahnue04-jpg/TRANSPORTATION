@@ -62,17 +62,17 @@ def run_canary(*, client=None, bucket: str | None = None,
     payload = secrets.token_bytes(4096)
     sha = hashlib.sha256(payload).hexdigest()
     _must_be_absent(client, bucket, key)
-    created = False
+    write_attempted = False
     failure = None
     try:
         # A conditional put avoids overwriting any unrelated key even in
         # the negligible event of a random identifier collision.
+        write_attempted = True
         client.put_object(
             Bucket=bucket, Key=key, Body=payload,
             ContentType="application/octet-stream",
             Metadata={"sha256": sha}, IfNoneMatch="*",
         )
-        created = True
         head = client.head_object(Bucket=bucket, Key=key)
         if (int(head.get("ContentLength", -1)) != len(payload) or
                 head.get("Metadata", {}).get("sha256") != sha):
@@ -92,7 +92,7 @@ def run_canary(*, client=None, bucket: str | None = None,
     except Exception as exc:
         failure = exc
     finally:
-        if created:
+        if write_attempted:
             try:
                 client.delete_object(Bucket=bucket, Key=key)
                 _must_be_absent(client, bucket, key)
