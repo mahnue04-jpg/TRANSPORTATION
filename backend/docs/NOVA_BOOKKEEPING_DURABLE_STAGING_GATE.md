@@ -149,3 +149,12 @@ Require separately approved dedicated accounting staging PostgreSQL and private 
 - The bookkeeping intake route re-resolves server-side scope after the CSV body has streamed and immediately before job insertion, preventing stale permission from an upload-length delay. A simulated revocation between checks must prevent any stored job or workpaper.
 - Added synthetic and PostgreSQL regressions for tampered artifact approval, plus an HTTP synthetic revocation-during-upload regression. They do not replace signed consent validation, real object storage, or a concurrency-safe consent transaction model in Render staging.
 - Existing current-consent checks remain mandatory on status/review/download/recovery. Approval does not deliver a client file or move money.
+
+
+## Consent revocation serialization hardening (2026-11-11)
+
+- The PostgreSQL-backed consent resolver now supports optional `FOR UPDATE` row locking. Accounting API finalization uses this lock in the same database transaction as the job transition from PROCESSING to AWAITING_REVIEW. Review and private download also lock current consent during their operations.
+- Ingestion validates consent before receiving CSV, after streaming, and again immediately before final job-state commit (following private artifact storage). If consent is revoked during private storage, processing fails closed and attempts to delete the generated private artifact; no draft is approved or delivered.
+- Added a two-session disposable PostgreSQL test where concurrent consent revocation waits until the authorization lock commits, then blocks subsequent processing. Also added a synthetic revocation-during-storage test and updated the test consent resolver to accept the locking interface.
+- Limitation: this ensures row-level serialization in tested PostgreSQL transactions; it does not replace actual signed consent verification, complete job audit/permission versioning, durable private storage deletion, or an approved isolated Render staging acceptance run.
+
