@@ -122,6 +122,32 @@ def _assert_staging_cleanup_storage() -> None:
     _check_bucket()
 
 
+def _valid_recovery_cleanup_ref(*, org: str, job_id: str,
+                                failure_code: str, ref: str) -> bool:
+    """Only delete objects from this exact recovery job's private namespace.
+
+    The storage adapter generates names like
+    org/job/nova-csv-review/<64 hex chars>.bin. An audit entry alone is
+    insufficient authorization to delete an arbitrary S3 object.
+    """
+    import re
+    category = {
+        "INPUT_DELETE_FAILED": "nova-csv-input",
+        "OUTPUT_DELETE_FAILED": "nova-csv-review",
+    }.get(failure_code)
+    if not category or not isinstance(ref, str):
+        return False
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,36}", org):
+        return False
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        return False
+    return re.fullmatch(
+        re.escape(org) + "/" + re.escape(job_id) + "/" +
+        category + r"/[a-f0-9]{64}\\.bin",
+        ref,
+    ) is not None
+
+
 def retry_private_cleanup(
     db: Session, *, org: str, owner: str, dry_run: bool = True,
     approval: str | None = None, limit: int = 5,
@@ -154,7 +180,7 @@ def retry_private_cleanup(
         cleanup_events.c.created_at <= safe_before,
     ).order_by(cleanup_events.c.created_at.asc(), cleanup_events.c.id.asc())
     .limit(limit).with_for_update(skip_locked=True)).mappings().all()
-    reviewed = deleted = protected = failed = 0
+    reviewed = deleted = protected = failed = unsafe = 0
     try:
         for event in events:
             reviewed += 1
@@ -164,6 +190,20 @@ def retry_private_cleanup(
             )).limit(1)).first()
             if attached:
                 protected += 1
+                continue
+            # Never let a corrupted or misdirected audit record delete an
+            # object belonging to another system, tenant, or job.
+            job_owner = db.execute(sa.select(recovery_jobs.c.id).where(
+                recovery_jobs.c.id == event["job_id"],
+                recovery_jobs.c.organization_id == org,
+                recovery_jobs.c.owner_user_id == owner,
+            )).first()
+            if not job_owner or not _valid_recovery_cleanup_ref(
+                org=org, job_id=event["job_id"],
+                failure_code=event["failure_code"],
+                ref=event["storage_ref"],
+            ):
+                unsafe += 1
                 continue
             if dry_run:
                 continue
@@ -187,8 +227,9 @@ def retry_private_cleanup(
         raise
     return {
         "reviewed": reviewed,
-        "eligible_unattached": reviewed - protected,
+        "eligible_unattached": reviewed - protected - unsafe,
         "protected_refs": protected,
+        "unsafe_refs": unsafe,
         "deleted": deleted,
         "failed_deletions": failed,
         "dry_run": dry_run,
