@@ -159,3 +159,43 @@ def test_real_s3_adapter_cleans_up_when_final_consent_is_revoked(mock_private_s3
         ).scalar_one() == "FAILED"
         assert client.list_objects_v2(Bucket=BUCKET).get("KeyCount", 0) == 0
     engine.dispose()
+
+
+def test_staging_preflight_verifies_bucket_controls_but_denies_release(mock_private_s3):
+    from app.core.nova.work_revenue.bookkeeping_staging_preflight import inspect_staging_readiness
+    _, client = mock_private_s3
+    client.put_bucket_encryption(
+        Bucket=BUCKET,
+        ServerSideEncryptionConfiguration={
+            "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}],
+        },
+    )
+    report = inspect_staging_readiness(
+        config={
+            "APP_ENV": "staging", "AMICOR_ENVIRONMENT": "staging",
+            "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private",
+        },
+        s3_client=client, bucket=BUCKET,
+        verified_staging_identity=True,
+        signed_consent_process_reviewed=False,
+    )
+    checks = {item["check"]: item["passed"] for item in report["checks"]}
+    assert checks["s3_public_access_block"] is True
+    assert checks["s3_default_encryption"] is True
+    assert checks["postgres_tables_verified"] is False
+    assert report["status"] == "BLOCKED"
+    assert report["production_release_authorized"] is False
+
+
+def test_staging_preflight_rejects_missing_bucket_default_encryption(mock_private_s3):
+    from app.core.nova.work_revenue.bookkeeping_staging_preflight import inspect_staging_readiness
+    _, client = mock_private_s3
+    report = inspect_staging_readiness(
+        config={"APP_ENV": "staging", "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private"},
+        s3_client=client, bucket=BUCKET,
+        verified_staging_identity=True,
+    )
+    checks = {item["check"]: item["passed"] for item in report["checks"]}
+    assert checks["s3_public_access_block"] is True
+    assert checks["s3_default_encryption"] is False
+    assert report["status"] == "BLOCKED"
