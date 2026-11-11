@@ -6,9 +6,10 @@ on:
       - nova/bookkeeping-durable-csv-integration-20261111
     paths:
       - "backend/app/core/nova/work_revenue/bookkeeping_*.py"
-      - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
+      - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py migrations/versions/20261111_nova_bookkeeping_consent.py"
       - "backend/tests/test_nova_bookkeeping_*.py"
       - "backend/tests/test_nova_operations_customer_csv_jobs.py"
+      - "backend/migrations/versions/20261111_nova_bookkeeping_consent.py"
       - ".github/workflows/nova-bookkeeping-durable-integration.yml"
   pull_request:
     paths:
@@ -59,6 +60,6 @@ jobs:
         run: |
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
-          python -m pytest -v -rs tests/test_nova_bookkeeping_durable_jobs.py tests/test_nova_operations_customer_csv_jobs.py
+          python -m pytest -v -rs tests/test_nova_bookkeeping_durable_jobs.py tests/test_nova_bookkeeping_scope_http.py tests/test_nova_operations_customer_csv_jobs.py
           python -m unittest discover -s tests -p 'test_nova_bookkeeping_assignment.py' -v
           echo "Synthetic SQLite/mock object-store tests only. Staging, actual PostgreSQL, S3 encryption and real sessions remain UNVERIFIED." >> "$GITHUB_STEP_SUMMARY"
