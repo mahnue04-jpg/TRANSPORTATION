@@ -1,0 +1,64 @@
+name: Nova bookkeeping durable integration (synthetic)
+
+on:
+  push:
+    branches:
+      - nova/bookkeeping-durable-csv-integration-20261111
+    paths:
+      - "backend/app/core/nova/work_revenue/bookkeeping_*.py"
+      - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
+      - "backend/tests/test_nova_bookkeeping_*.py"
+      - "backend/tests/test_nova_operations_customer_csv_jobs.py"
+      - ".github/workflows/nova-bookkeeping-durable-integration.yml"
+  pull_request:
+    paths:
+      - "backend/app/core/nova/work_revenue/bookkeeping_*.py"
+      - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
+      - "backend/tests/test_nova_bookkeeping_*.py"
+      - "backend/tests/test_nova_operations_customer_csv_jobs.py"
+      - ".github/workflows/nova-bookkeeping-durable-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bookkeeping-durable-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TESTING: "true"
+      APP_ENV: development
+      AMICOR_ENVIRONMENT: development
+      NOVA_OPERATIONS_DURABLE_CSV_ENABLED: "false"
+      NOVA_BOOKKEEPING_DURABLE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      HEALTH_ISF_STRIPE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+      DATABASE_URL: sqlite:///./test_nova_bookkeeping_durable_ci.db
+      ALLOWED_ORIGINS: https://example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Compile modified bookkeeping and CSV modules
+        run: |
+          python -m compileall -q app/core/nova/work_revenue/bookkeeping_*.py app/core/nova/work_revenue/operations_customer_csv_jobs.py
+      - name: Install backend test requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Run bookkeeping and existing CSV job regressions
+        run: |
+          set -euo pipefail
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
+          python -m pytest -v -rs tests/test_nova_bookkeeping_durable_jobs.py tests/test_nova_operations_customer_csv_jobs.py
+          python -m unittest discover -s tests -p 'test_nova_bookkeeping_assignment.py' -v
+          echo "Synthetic SQLite/mock object-store tests only. Staging, actual PostgreSQL, S3 encryption and real sessions remain UNVERIFIED." >> "$GITHUB_STEP_SUMMARY"
