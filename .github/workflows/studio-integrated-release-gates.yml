@@ -14,6 +14,8 @@ on:
       - 'backend/app/core/nova/creative_studio/private_object_storage.py'
       - 'backend/app/core/nova/creative_studio/service.py'
       - 'backend/tests/test_nova_creative_bucket_preflight.py'
+      - 'backend/scripts/verify_studio_staging_storage_canary.py'
+      - 'backend/tests/test_studio_staging_storage_canary.py'
       - '.github/workflows/studio-integrated-release-gates.yml'
   workflow_dispatch:
 
@@ -55,7 +57,8 @@ jobs:
             backend/tests/test_nova_creative_first_shot_readiness.py \
             backend/tests/test_nova_creative_widescreen_assembly.py \
             backend/tests/test_nova_creative_signed_in_montage.py \
-            backend/tests/test_nova_creative_bucket_preflight.py
+            backend/tests/test_nova_creative_bucket_preflight.py \
+            backend/tests/test_studio_staging_storage_canary.py
       - name: Run signed-in customer editor and MP4 UI cleanup tests
         run: node --test backend/static/nova-creative/creative-jobs.test.cjs backend/tests/js/test_creative_studio_master_download.mjs
       - name: Check customer editor syntax
