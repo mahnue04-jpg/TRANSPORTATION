@@ -40,6 +40,7 @@ def harness(monkeypatch):
     store = MemoryStore()
     monkeypatch.setattr(recovery, "require_runtime", lambda db: None)
     monkeypatch.setattr(recovery, "_store", lambda: store)
+    monkeypatch.setattr(recovery, "_assert_staging_cleanup_storage", lambda: None)
     with Session(engine) as session:
         yield session, store
     engine.dispose()
