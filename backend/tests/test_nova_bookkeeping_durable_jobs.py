@@ -102,7 +102,20 @@ def test_other_owner_cannot_read_review_or_download(state):
         lambda: finance.review_bookkeeping(db, org="org-b", owner="owner-a", job_id=job_id, approve=True),
         lambda: finance.download_bookkeeping(db, org="org-a", owner="owner-b", job_id=job_id),
     ):
-        with pytest.raises(finance.BookkeepingJobBlocked):
+        with pytest.raises(jobs.CustomerCSVBlocked):
+            call()
+
+
+def test_csv_endpoints_cannot_read_or_review_accounting_jobs(state):
+    db, _ = state
+    jid = submit(db)["job_id"]
+    for call in (
+        lambda: jobs.job_status(db, org="org-a", owner="owner-a", job_id=jid),
+        lambda: jobs.review_job(db, org="org-a", owner="owner-a", job_id=jid, approve=True),
+        lambda: jobs.download_review(db, org="org-a", owner="owner-a", job_id=jid),
+        lambda: jobs.recover_stale_job(db, org="org-a", owner="owner-a", job_id=jid),
+    ):
+        with pytest.raises(jobs.CustomerCSVBlocked):
             call()
 
 
