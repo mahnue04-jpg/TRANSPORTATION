@@ -59,7 +59,7 @@ def demo(monkeypatch):
         with Session(db_engine) as db:
             yield db
 
-    def verified_assignment(db, *, owner, engagement_id, task_id, work_type):
+    def verified_assignment(db, *, owner, engagement_id, task_id, work_type, lock_consent=False):
         if (
             not access["active"]
             or owner.organization_id != "test-org"
