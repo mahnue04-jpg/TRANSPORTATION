@@ -143,7 +143,7 @@ def _valid_recovery_cleanup_ref(*, org: str, job_id: str,
         return False
     return re.fullmatch(
         re.escape(org) + "/" + re.escape(job_id) + "/" +
-        category + r"/[a-f0-9]{64}\\.bin",
+        category + r"/[a-f0-9]{64}\.bin",
         ref,
     ) is not None
 
