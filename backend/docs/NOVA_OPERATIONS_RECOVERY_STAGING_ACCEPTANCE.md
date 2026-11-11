@@ -178,3 +178,29 @@ retention periods, deletion retries, and storage-provider permissions in an
 approved staging environment. Investigate any unresolved count before
 processing customer files. Never include private S3 references in owner-facing
 history payloads, logs, or delivery files.
+
+
+## Controlled cleanup retry (development-only)
+
+The staging recovery preview now offers **Preview safe cleanup candidates**
+and **Retry approved cleanup (staging only)**. It only examines unresolved
+failure records older than 15 minutes (at most five per API call). A dry run
+does not delete objects. A retry requires a currently authenticated AMICOR
+owner and typed confirmation `APPROVE STAGING CLEANUP` in the browser.
+
+Each candidate is checked against **all** saved recovery job input/output
+references (not only the current tenant). Attached references remain
+protected. Successful cleanup marks the audit record resolved; failures stay
+unresolved. Responses contain counts, not private storage object paths.
+The code is default-off and staging-only.
+
+**Before enabling deletion in a real staging service**, verify:
+- A bucket-scoped storage identity with no production or casting privileges
+- A retention/legal-hold policy and evidence that the object is not referenced
+  by any alternate subsystem or pending storage operation
+- Idempotent deletion and retry behavior under simultaneous workers
+- Audit-trail review and owner consent for the exact staging rehearsal
+
+This controlled retry is not a global bucket garbage collector; it cannot
+find objects that were never recorded as cleanup debt, and it does not
+replace retention and lifecycle management.
