@@ -336,3 +336,44 @@ def test_postgres_cleanup_debt_survives_separate_database_session(postgres, monk
         assert len(records) == 1
         assert records[0]["failure_code"] == "OUTPUT_DELETE_FAILED"
         assert records[0]["job_id"] == job_id
+
+
+def test_postgres_cleanup_retry_dry_run_and_ref_protection(postgres, monkeypatch):
+    engine, store = postgres
+    stamp = datetime.now(timezone.utc) + timedelta(minutes=16)
+    with Session(engine) as db:
+        job_id = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="pg-retry-cleanup",
+            raw=b"Name\nAda\n",
+        )["job_id"]
+        live_input = next(iter(store.items))
+        orphan = "fictional/unattached-private-object"
+        store.items[orphan] = b"synthetic"
+        recovery.record_cleanup_failure(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+            storage_ref=live_input, failure_code="INPUT_DELETE_FAILED",
+        )
+        recovery.record_cleanup_failure(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+            storage_ref=orphan, failure_code="OUTPUT_DELETE_FAILED",
+        )
+        preview = recovery.retry_private_cleanup(
+            db, org="org-a", owner="owner-a", now=stamp,
+        )
+        assert preview["reviewed"] == 2
+        assert preview["protected_refs"] == 1
+        assert preview["deleted"] == 0
+        assert orphan in store.items
+        completed = recovery.retry_private_cleanup(
+            db, org="org-a", owner="owner-a", now=stamp,
+            dry_run=False, approval="owner-approved-staging-cleanup",
+        )
+        assert completed["deleted"] == 1
+        assert completed["protected_refs"] == 1
+        assert live_input in store.items
+        assert orphan not in store.items
+    with Session(engine) as db:
+        assert recovery.cleanup_debt_summary(
+            db, org="org-a", owner="owner-a",
+        )["unresolved_cleanup_failures"] == 1
