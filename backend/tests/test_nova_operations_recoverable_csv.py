@@ -313,3 +313,84 @@ def test_input_delete_failure_is_recorded_after_failed_upload(harness, monkeypat
     event = db.execute(sa.select(recovery.cleanup_events)).mappings().one()
     assert event["failure_code"] == "INPUT_DELETE_FAILED"
     assert event["storage_ref"] in store.objects
+
+
+def test_cleanup_retry_dry_run_and_explicit_approval(harness):
+    db, store = harness
+    job_id = submit(db, key="cleanup-retry")["job_id"]
+    orphan_ref = "org-a/recovery-orphan.bin"
+    store.objects[orphan_ref] = b"fictional cleanup debris"
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=job_id,
+        storage_ref=orphan_ref, failure_code="OUTPUT_DELETE_FAILED",
+    )
+    stamp = datetime.now(timezone.utc) + timedelta(minutes=16)
+    dry = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", now=stamp,
+    )
+    assert dry["reviewed"] == 1 and dry["deleted"] == 0
+    assert dry["dry_run"] is True
+    assert orphan_ref in store.objects
+    with pytest.raises(CustomerCSVBlocked, match="Explicit owner"):
+        recovery.retry_private_cleanup(
+            db, org="org-a", owner="owner-a", dry_run=False, now=stamp,
+        )
+    denied = recovery.retry_private_cleanup(
+        db, org="different", owner="owner-a", now=stamp,
+    )
+    assert denied["reviewed"] == 0
+    finished = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", dry_run=False, now=stamp,
+        approval="owner-approved-staging-cleanup",
+    )
+    assert finished["deleted"] == 1
+    assert orphan_ref not in store.objects
+    assert recovery.cleanup_debt_summary(
+        db, org="org-a", owner="owner-a",
+    )["unresolved_cleanup_failures"] == 0
+
+
+def test_cleanup_retry_protects_any_job_reference_and_never_deletes(harness):
+    db, store = harness
+    job = submit(db, key="cleanup-protected")["job_id"]
+    input_ref = next(iter(store.objects))
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=job,
+        storage_ref=input_ref, failure_code="INPUT_DELETE_FAILED",
+    )
+    result = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", dry_run=False,
+        approval="owner-approved-staging-cleanup",
+        now=datetime.now(timezone.utc) + timedelta(minutes=16),
+    )
+    assert result["protected_refs"] == 1
+    assert result["deleted"] == 0
+    assert input_ref in store.objects
+    assert recovery.cleanup_debt_summary(
+        db, org="org-a", owner="owner-a",
+    )["unresolved_cleanup_failures"] == 1
+
+
+def test_cleanup_retry_failed_delete_remains_unresolved(harness, monkeypatch):
+    db, store = harness
+    job = submit(db, key="cleanup-retry-failure")["job_id"]
+    orphan_ref = "org-a/still-orphan.bin"
+    store.objects[orphan_ref] = b"fictional"
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=job,
+        storage_ref=orphan_ref, failure_code="OUTPUT_DELETE_FAILED",
+    )
+    monkeypatch.setattr(
+        store, "delete",
+        lambda **kw: (_ for _ in ()).throw(OSError("synthetic outage")),
+    )
+    out = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", dry_run=False,
+        approval="owner-approved-staging-cleanup",
+        now=datetime.now(timezone.utc) + timedelta(minutes=16),
+    )
+    assert out["failed_deletions"] == 1
+    assert out["deleted"] == 0
+    assert recovery.cleanup_debt_summary(
+        db, org="org-a", owner="owner-a",
+    )["unresolved_cleanup_failures"] == 1
