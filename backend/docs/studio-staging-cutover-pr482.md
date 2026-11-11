@@ -70,7 +70,8 @@ The real-video worker already refuses paid provider submission when protected st
 3. Only with separate authorization for this **staging-only test object**, run:
    ```sh
    python backend/scripts/verify_studio_staging_storage_canary.py \
-     --apply --acknowledge-staging-test-object
+     --apply --acknowledge-staging-test-object \
+     --expected-bucket ACTUAL_PRIVATE_STAGING_BUCKET
    ```
    This creates one random 4 KiB object under `studio-readiness-canary/`, uses a conditional no-overwrite PUT, verifies size and hash metadata by HEAD, downloads and hashes the full bytes, then deletes the exact random object and confirms absence. It never touches customer media, generates video, alters databases, or invokes billable providers.
 4. If any check fails, **do not enable paid Kling**. If cleanup cannot be confirmed, inspect the staging bucket for the isolated test object before retrying. A successful canary is *storage-only* evidence, not proof of owner-scoped MP4 routing or film generation.
