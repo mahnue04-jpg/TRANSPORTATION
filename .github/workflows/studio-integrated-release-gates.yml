@@ -58,3 +58,18 @@ jobs:
         run: |
           node --check backend/static/nova-creative/creative.js
           node --check backend/static/nova-creative/calendar.js
+
+  staging-http-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify actual staging SQLite health and authentication boundaries
+        run: |
+          python backend/scripts/check_studio_staging_release.py \
+            --base-url https://nova-studio-validation-350.onrender.com
