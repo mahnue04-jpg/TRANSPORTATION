@@ -145,6 +145,42 @@
     });
   });
 
+  byId("recovery-cleanup-dry-run").addEventListener("click", function () {
+    action("Previewing stale cleanup records; nothing will be deleted...", async function () {
+      const response = await request(prefix + "/cleanup-retry", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({dry_run: true})
+      });
+      const data = await response.json();
+      byId("recovery-cleanup-status").textContent =
+        "Dry run: " + data.reviewed + " reviewed; " +
+        data.protected_refs + " protected; " +
+        data.eligible_unattached + " unattached candidates. No deletion.";
+      message.textContent = "Dry-run complete. No files deleted.";
+    });
+  });
+
+  byId("recovery-cleanup-execute").addEventListener("click", function () {
+    action("Validating staging cleanup approval...", async function () {
+      const confirmField = byId("recovery-cleanup-confirm");
+      if (confirmField.value.trim() !== "APPROVE STAGING CLEANUP") {
+        throw new Error("Type APPROVE STAGING CLEANUP before deleting unattached staging files.");
+      }
+      const response = await request(prefix + "/cleanup-retry", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          dry_run: false, approval: "owner-approved-staging-cleanup"
+        })
+      });
+      const data = await response.json();
+      confirmField.value = "";
+      byId("recovery-cleanup-status").textContent =
+        "Staging cleanup: deleted " + data.deleted + "; protected " +
+        data.protected_refs + "; deletion failures " + data.failed_deletions + ".";
+      message.textContent = "Staging cleanup retry finished. No customer delivery.";
+    });
+  });
+
   byId("recovery-check-cleanup").addEventListener("click", function () {
     action("Checking unresolved private storage cleanup issues...", async function () {
       const response = await request(prefix + "/cleanup-debt");
