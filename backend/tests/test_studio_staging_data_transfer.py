@@ -7,7 +7,7 @@ import sqlite3
 import stat
 
 import pytest
-from sqlalchemy import Boolean, Column, DateTime, MetaData, String, Table, Text, create_engine, event, select
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, MetaData, String, Table, Text, create_engine, event, select
 from sqlalchemy.engine import make_url
 
 spec = importlib.util.spec_from_file_location("studio_staging_transfer", Path(__file__).resolve().parents[1] / "scripts/migrate_studio_staging.py")
@@ -29,9 +29,9 @@ def databases(tmp_path):
     users = Table("platform_users", meta, Column("id", String, primary_key=True), Column("email", String),
                   Column("hashed_password", String), Column("is_active", Boolean), Column("created_at", DateTime(timezone=True)))
     projects = Table("nova_creative_projects", meta, Column("id", String, primary_key=True),
-                     Column("owner_id", String), Column("metadata_json", Text))
+                     Column("owner_id", String, ForeignKey("platform_users.id")), Column("metadata_json", Text))
     assets = Table("nova_creative_assets", meta, Column("id", String, primary_key=True),
-                   Column("owner_id", String), Column("project_id", String), Column("url", Text))
+                   Column("owner_id", String, ForeignKey("platform_users.id")), Column("project_id", String, ForeignKey("nova_creative_projects.id")), Column("url", Text))
     jobs = Table("nova_creative_jobs", meta, Column("id", String, primary_key=True), Column("status", String))
     tokens = Table("platform_refresh_tokens", meta, Column("id", String, primary_key=True), Column("token_hash", String))
     meta.create_all(source)
@@ -80,6 +80,27 @@ def test_apply_preserves_account_ownership_metadata_and_file_refs_with_private_b
         assert conn.execute(select(meta.tables["platform_refresh_tokens"])).all() == []
     with source.connect() as conn:
         assert conn.execute(select(meta.tables["platform_users"])).mappings().one()["hashed_password"] == "fixture-password-hash"
+
+
+def test_foreign_key_order_places_users_before_projects_before_assets(databases, tmp_path):
+    path, source, destination, meta = databases
+    names = ["nova_creative_assets", "nova_creative_projects", "platform_users"]
+    order = module._dependency_order(names, {name: meta.tables[name] for name in names})
+    assert order.index("platform_users") < order.index("nova_creative_projects")
+    assert order.index("nova_creative_projects") < order.index("nova_creative_assets")
+    report = module.transfer(path, destination, apply=True, backup_directory=tmp_path / "backups")
+    assert report["verified"] is True
+
+
+def test_cyclic_foreign_keys_block_without_copying(tmp_path):
+    meta = MetaData()
+    first = Table("nova_creative_first", meta, Column("id", String, primary_key=True),
+                  Column("other_id", String, ForeignKey("nova_creative_second.id")))
+    second = Table("nova_creative_second", meta, Column("id", String, primary_key=True),
+                   Column("other_id", String, ForeignKey("nova_creative_first.id")))
+    with pytest.raises(module.TransferBlocked, match="CYCLIC_STUDIO_FOREIGN_KEYS"):
+        module._dependency_order(["nova_creative_first", "nova_creative_second"],
+                                 {"nova_creative_first": first, "nova_creative_second": second})
 
 
 def test_existing_destination_is_never_overwritten(databases, tmp_path):
