@@ -222,3 +222,32 @@ def test_recent_bookkeeping_job_not_recoverable(state):
     assert finance.bookkeeping_status(
         db, org="org-a", owner="owner-a", job_id="recent-bookkeeping-1",
     )["status"] == "PROCESSING"
+
+
+def test_missing_or_tampered_workpaper_cannot_be_approved(state):
+    db, store = state
+    created = submit(db)
+    jid = created["job_id"]
+    key = next(iter(store.objects))
+    original = store.objects[key]
+    store.objects[key] = b"altered amount,999999.00"
+    with pytest.raises(finance.BookkeepingJobBlocked, match="integrity"):
+        finance.review_bookkeeping(
+            db, org="org-a", owner="owner-a", job_id=jid, approve=True,
+        )
+    assert finance.bookkeeping_status(
+        db, org="org-a", owner="owner-a", job_id=jid,
+    )["status"] == "AWAITING_REVIEW"
+    del store.objects[key]
+    with pytest.raises(finance.BookkeepingJobBlocked, match="unavailable"):
+        finance.review_bookkeeping(
+            db, org="org-a", owner="owner-a", job_id=jid, approve=True,
+        )
+    assert finance.bookkeeping_status(
+        db, org="org-a", owner="owner-a", job_id=jid,
+    )["status"] == "AWAITING_REVIEW"
+    store.objects[key] = original
+    result = finance.review_bookkeeping(
+        db, org="org-a", owner="owner-a", job_id=jid, approve=True,
+    )
+    assert result["status"] == "APPROVED_FOR_DOWNLOAD"
