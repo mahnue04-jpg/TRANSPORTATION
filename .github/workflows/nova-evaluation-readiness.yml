@@ -1,0 +1,24 @@
+name: Nova evaluation readiness prototype
+on:
+  pull_request:
+    paths:
+      - 'backend/app/core/nova/evaluation/**'
+      - 'backend/tests/evaluation/**'
+      - 'scripts/nova_evaluation/**'
+      - '.github/workflows/nova-evaluation-readiness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline tests and reproducible demonstration
+        run: |
+          test -f backend/tests/evaluation/test_readiness.py
+          python -m unittest discover -s backend/tests/evaluation -v
+          python scripts/nova_evaluation/run_demo.py --output evaluation-demo-output
