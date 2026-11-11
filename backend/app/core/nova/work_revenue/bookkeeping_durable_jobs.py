@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import secrets
+from datetime import timedelta
 from io import BytesIO
 
 import sqlalchemy as sa
@@ -213,3 +214,36 @@ def download_bookkeeping(db: Session, *, org: str, owner: str, job_id: str) -> b
     if len(data) > 1_000_000 or hashlib.sha256(data).hexdigest() != found["output_sha256"]:
         raise BookkeepingJobBlocked("Artifact integrity failure", 503)
     return data
+
+
+def recover_stale_bookkeeping(
+    db: Session, *, org: str, owner: str, job_id: str,
+) -> dict:
+    """Mark a stranded job failed, never automatically redo finance work.
+
+    Requires authenticated caller to independently revalidate present client
+    permission at HTTP boundary. This only changes stale PROCESSING records;
+    a separate reviewed cleanup service is needed for orphaned private files.
+    """
+    require_bookkeeping_runtime(db)
+    existing = _row(db, org=org, owner=owner, job_id=job_id)
+    if existing["status"] != "PROCESSING":
+        raise BookkeepingJobBlocked("Job is not running", 409)
+    cutoff = base._utc() - timedelta(minutes=15)
+    try:
+        changed = db.execute(sa.update(base.jobs).where(
+            base.jobs.c.id == job_id,
+            base.jobs.c.organization_id == org,
+            base.jobs.c.owner_user_id == owner,
+            base.jobs.c.request_key.like("bookkeeping:%"),
+            base.jobs.c.status == "PROCESSING",
+            base.jobs.c.updated_at < cutoff,
+        ).values(status="FAILED", updated_at=base._utc()))
+        if changed.rowcount != 1:
+            raise BookkeepingJobBlocked("Job is not eligible for recovery", 409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"job_id": job_id, "status": "FAILED", "delivered": False,
+            "requires_new_request_key": True, "automatic_retry": False}
