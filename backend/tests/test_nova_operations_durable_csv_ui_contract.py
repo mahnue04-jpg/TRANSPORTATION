@@ -95,3 +95,10 @@ def test_staging_cleanup_retry_requires_explicit_owner_confirmation():
     assert '"owner-approved-staging-cleanup"' in js
     assert '"/cleanup-retry"' in js
     assert "No customer delivery" in js
+
+
+
+def test_cleanup_ui_reports_unsafe_reference_count():
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert "unsafe_refs" in js
+    assert "unsafe references blocked" in js
