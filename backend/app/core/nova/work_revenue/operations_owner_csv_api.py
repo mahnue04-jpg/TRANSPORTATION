@@ -532,3 +532,20 @@ def bookkeeping_private_review_download(
         })
     except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
         _accounting_unavailable(exc)
+
+
+@router.post("/durable/bookkeeping/jobs/{job_id}/recover")
+def bookkeeping_owner_recover_stale_job(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit owner recovery only; no reprocessing, payment or client send."""
+    try:
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+        return bk_jobs.recover_stale_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id,
+        )
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
