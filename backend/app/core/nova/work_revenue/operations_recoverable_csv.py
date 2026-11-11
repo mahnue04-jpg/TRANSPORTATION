@@ -116,6 +116,12 @@ def cleanup_debt_summary(db: Session, *, org: str, owner: str) -> dict:
 
 
 
+def _assert_staging_cleanup_storage() -> None:
+    """Require verified dedicated staging bucket policy before deletion."""
+    from .operations_staging_preflight import _check_bucket
+    _check_bucket()
+
+
 def retry_private_cleanup(
     db: Session, *, org: str, owner: str, dry_run: bool = True,
     approval: str | None = None, limit: int = 5,
@@ -137,6 +143,8 @@ def retry_private_cleanup(
         raise CustomerCSVBlocked("Cleanup retry limit must be between 1 and 10", 400)
     if not dry_run and approval != "owner-approved-staging-cleanup":
         raise CustomerCSVBlocked("Explicit owner cleanup approval required", 403)
+    if not dry_run:
+        _assert_staging_cleanup_storage()
     stamp = now or _now()
     safe_before = stamp - timedelta(minutes=15)
     events = db.execute(sa.select(cleanup_events).where(
