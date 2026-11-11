@@ -161,3 +161,20 @@ owner authentication, real worker restarts, retention, or delivery passed.
 Exit code 2 means a configuration or policy requirement is blocked.
 Only sanitized verdicts are printed. It performs no migration, writes,
 storage upload, or customer processing.
+
+
+## Persistent private-object cleanup audit (development, not yet deployed)
+
+The staging-only migration `20261110_nova_csv_cleanup_events.py` follows
+`20261110_nova_csv_recovery_jobs.py`. Both tables must exist before the
+recovery feature gate can open. Failed input/output object deletion records
+an owner- and organization-scoped audit event with the private storage
+reference held only in PostgreSQL. The preview's `/cleanup-debt` route and
+**Check cleanup issues** control display an unresolved count only.
+
+**This audit does not automatically delete objects or establish a retention
+policy.** Before release, verify orphan-reference checks, concurrency safety,
+retention periods, deletion retries, and storage-provider permissions in an
+approved staging environment. Investigate any unresolved count before
+processing customer files. Never include private S3 references in owner-facing
+history payloads, logs, or delivery files.
