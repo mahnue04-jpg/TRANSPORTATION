@@ -185,3 +185,31 @@ def test_consent_revoked_during_upload_is_denied_before_job_creation(demo, monke
     assert denied.status_code == 403
     assert calls["count"] == 2
     assert store.objects == {}
+
+
+def test_consent_revoked_during_private_write_never_publishes_review_job(demo, monkeypatch):
+    client, access, user, store = demo
+    normal_store = store.store
+
+    def revoke_when_artifact_is_written(**kwargs):
+        result = normal_store(**kwargs)
+        access["active"] = False
+        return result
+
+    monkeypatch.setattr(store, "store", revoke_when_artifact_is_written)
+    response = client.post(
+        SUBMIT, content=CSV,
+        headers={**HEADERS, "Idempotency-Key": "revoked-during-storage"},
+    )
+    assert response.status_code == 403, response.text
+    # A rejected finalization must not expose a reviewable file.
+    assert store.objects == {}
+    access["active"] = True
+    # No successful result may be replayed under the rejected request key.
+    retry = client.post(
+        SUBMIT, content=CSV,
+        headers={**HEADERS, "Idempotency-Key": "revoked-during-storage"},
+    )
+    assert retry.status_code == 202
+    assert retry.json()["status"] == "FAILED"
+    assert retry.json()["delivered"] is False
