@@ -1,5 +1,6 @@
 """Contract scope tests: only synthetic fixture data is processed."""
 import importlib.util
+import hashlib
 from pathlib import Path
 import sys
 import types
@@ -43,6 +44,9 @@ class ContractScopeTests(unittest.TestCase):
         self.assertFalse(result["delivery_allowed"])
         self.assertFalse(result["financial_execution"])
         self.assertEqual(result["draft"]["total_outstanding"], "100.00")
+        self.assertEqual(result["provenance"]["output_sha256"], hashlib.sha256(result["draft"]["workpaper_csv"].encode("utf-8")).hexdigest())
+        self.assertEqual(len(result["provenance"]["scope_sha256"]), 64)
+        self.assertFalse(result["provenance"]["delivery_allowed"])
 
     def test_refuses_unauthorized_work(self):
         changes = [
@@ -66,6 +70,14 @@ class ContractScopeTests(unittest.TestCase):
         )
         self.assertEqual(result["draft"]["outgoing_total"], "10.00")
         self.assertEqual(result["status"], "AWAITING_HUMAN_REVIEW")
+
+    def test_provenance_is_bound_to_tenant_and_task(self):
+        csv_text = "date,description,amount,reference\\n2026-11-01,Office supplies,-10.00,X1\\n"
+        common = dict(work_type="transaction_workpaper", contracted_work_types=frozenset({"transaction_workpaper"}))
+        one = prepare_assignment_draft(self.approved(**common), primary_csv=csv_text)
+        two = prepare_assignment_draft(self.approved(**dict(common, task_id="task-b")), primary_csv=csv_text)
+        self.assertEqual(one["provenance"]["output_sha256"], two["provenance"]["output_sha256"])
+        self.assertNotEqual(one["provenance"]["scope_sha256"], two["provenance"]["scope_sha256"])
 
     def test_payables_route_uses_explicit_contract_scope(self):
         result = prepare_assignment_draft(
