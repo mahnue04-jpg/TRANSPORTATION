@@ -99,7 +99,7 @@ def submit_bookkeeping_review(
     if len(output) > 1_000_000:
         raise BookkeepingJobBlocked("Bookkeeping review artifact exceeds 1 MB", 413)
     fingerprint = _fingerprint(assignment, primary, secondary, as_of)
-    key = JOB_PREFIX + request_id
+    key = JOB_PREFIX + assignment.work_type + ":" + request_id
     now = base._utc()
     job_id = secrets.token_hex(16)
     try:
@@ -174,8 +174,12 @@ def submit_bookkeeping_review(
 def bookkeeping_status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     require_bookkeeping_runtime(db)
     found = _row(db, org=org, owner=owner, job_id=job_id)
+    work_type = str(found["request_key"]).split(":", 2)[1]
+    if work_type not in BOOKKEEPING_TYPES:
+        raise BookkeepingJobBlocked("Unsupported bookkeeping job type", 409)
     return {"job_id": job_id, "status": found["status"], "delivered": False,
-            "engagement_id": found["engagement_id"], "task_id": found["task_id"]}
+            "engagement_id": found["engagement_id"], "task_id": found["task_id"],
+            "work_type": work_type}
 
 
 def review_bookkeeping(db: Session, *, org: str, owner: str, job_id: str, approve: bool) -> dict:
