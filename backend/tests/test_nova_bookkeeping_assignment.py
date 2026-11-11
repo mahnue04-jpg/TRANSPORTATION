@@ -10,7 +10,7 @@ PKG = "isolated_nova_bookkeeping"
 pkg = types.ModuleType(PKG)
 pkg.__path__ = [str(ROOT)]
 sys.modules[PKG] = pkg
-for module in ("bookkeeping_workpaper", "bookkeeping_receivables", "bookkeeping_assignment"):
+for module in ("bookkeeping_workpaper", "bookkeeping_receivables", "bookkeeping_payables", "bookkeeping_assignment"):
     spec = importlib.util.spec_from_file_location(f"{PKG}.{module}", ROOT / f"{module}.py")
     loaded = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = loaded
@@ -66,6 +66,16 @@ class ContractScopeTests(unittest.TestCase):
         )
         self.assertEqual(result["draft"]["outgoing_total"], "10.00")
         self.assertEqual(result["status"], "AWAITING_HUMAN_REVIEW")
+
+    def test_payables_route_uses_explicit_contract_scope(self):
+        result = prepare_assignment_draft(
+            self.approved(work_type="payables_aging", contracted_work_types=frozenset({"payables_aging"})),
+            primary_csv="bill_id,vendor,bill_date,due_date,amount,paid\\nB1,Test Vendor,2026-11-01,2026-11-10,50,10\\n",
+            as_of="2026-11-11",
+        )
+        self.assertEqual(result["status"], "AWAITING_HUMAN_REVIEW")
+        self.assertEqual(result["draft"]["total_unpaid"], "40.00")
+        self.assertFalse(result["delivery_allowed"])
 
     def test_rejects_wrong_shape(self):
         with self.assertRaises(AssignmentNotAuthorized):
