@@ -123,3 +123,13 @@ Render connector requires explicit workspace selection before resource inspectio
 ## Next release gate
 
 Require separately approved dedicated accounting staging PostgreSQL and private storage, verified contract consent records, real login sessions, staged migration, retention controls, and approval before changes to live services.
+
+
+## Ephemeral PostgreSQL verification (2026-11-11)
+
+- Added `backend/tests/test_nova_bookkeeping_postgres_ci.py` and an isolated `postgres:16` GitHub Actions service.
+- Both actual staging-gated Alembic upgrade implementations were executed against a disposable loopback PostgreSQL database, with real table/index/uniqueness inspection.
+- Three PostgreSQL-specific tests passed: persisted accounting review, same-key idempotency, owner isolation, exact work-type gating, synthetic consent expiry and revocation.
+- The existing synthetic suite and three invented operator tasks also passed in CI run 43091269711.
+- Important separation: this is actual PostgreSQL behavior in GitHub Actions, but storage remains a fake in-memory object store, Work & Revenue saved engagement reads are mocked, and the records are invented. It is not Render staging, real client authorization, or production readiness.
+- Outstanding release blockers remain real Render-isolated accounting DB, encrypted S3 storage, real login/session, signed-consent provisioning and revocation race tests, private retention/orphan cleanup, and an approved deployment plan.
