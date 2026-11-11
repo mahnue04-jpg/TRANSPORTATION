@@ -295,3 +295,44 @@ def test_disposable_postgres_recovers_across_real_process_exit(postgres, tmp_pat
                 output_sha256="a" * 64,
             )
     assert len(list(shared_storage.directory.glob("*.bin"))) == 2
+
+
+def test_postgres_cleanup_debt_survives_separate_database_session(postgres, monkeypatch):
+    engine, store = postgres
+    with Session(engine) as db:
+        job_id = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="persist-cleanup-debt",
+            raw=b"Name\nAda\nAda\n",
+        )["job_id"]
+
+        checks = [0]
+
+        def revoke_after_processing(engagement_id, task_id):
+            checks[0] += 1
+            if checks[0] == 2:
+                raise CustomerCSVBlocked("Revoked during processing", 409)
+
+        monkeypatch.setattr(
+            store, "delete",
+            lambda **kwargs: (_ for _ in ()).throw(OSError("synthetic delete outage")),
+        )
+        with pytest.raises(CustomerCSVBlocked, match="Revoked"):
+            recovery.process_job(
+                db, org="org-a", owner="owner-a", job_id=job_id,
+                authorization_check=revoke_after_processing,
+            )
+
+    # New independent SQLAlchemy session must see the retained audit evidence.
+    with Session(engine) as reopened:
+        summary = recovery.cleanup_debt_summary(
+            reopened, org="org-a", owner="owner-a",
+        )
+        assert summary["unresolved_cleanup_failures"] == 1
+        assert recovery.cleanup_debt_summary(
+            reopened, org="org-b", owner="owner-a",
+        )["unresolved_cleanup_failures"] == 0
+        records = reopened.execute(sa.select(recovery.cleanup_events)).mappings().all()
+        assert len(records) == 1
+        assert records[0]["failure_code"] == "OUTPUT_DELETE_FAILED"
+        assert records[0]["job_id"] == job_id
