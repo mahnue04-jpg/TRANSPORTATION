@@ -69,6 +69,7 @@ def postgres(monkeypatch):
     monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE", "s3_private")
     store = FakePrivateStore()
     monkeypatch.setattr(recovery, "_store", lambda: store)
+    monkeypatch.setattr(recovery, "_assert_staging_cleanup_storage", lambda: None)
     yield engine, store
     recovery.metadata.drop_all(engine)
     engine.dispose()
