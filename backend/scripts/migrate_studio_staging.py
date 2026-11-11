@@ -136,8 +136,11 @@ def transfer(source_path: Path, target_engine, *, apply=False, backup_directory:
             if target.dialect.name == "postgresql":
                 quote = target.dialect.identifier_preparer.quote
                 target.execute(text("LOCK TABLE " + ",".join(quote(name) for name in names) + " IN ACCESS EXCLUSIVE MODE"))
-            source_tables = {name: Table(name, MetaData(), autoload_with=source) for name in names}
-            target_tables = {name: Table(name, MetaData(), autoload_with=target) for name in names}
+            # Use one metadata registry per connection so reflected foreign keys
+            # resolve related tables instead of raising NoReferencedTableError.
+            source_metadata, target_metadata = MetaData(), MetaData()
+            source_tables = {name: Table(name, source_metadata, autoload_with=source) for name in names}
+            target_tables = {name: Table(name, target_metadata, autoload_with=target) for name in names}
             plan = []
             for name in names:
                 src, dst = source_tables[name], target_tables[name]
