@@ -57,16 +57,41 @@ def apply(add, pages, status_table):
         card('Business Operations', '<strong>$299/month</strong>Business operations support within an agreed scope. Complex projects are quoted separately.', AGENT, 'View plan'),
     ]) + '</div><p class="notice">These are the starting options listed in the Nova app as of October 5, 2026. Review current terms and scope there before purchase. This corporate website does not collect payment. Media-provider credits and complex projects are not represented as included.</p>'
 
-    replace('/', 'AMICOR — Business Services and Nova AI Tools',
+    quote_url = '/early-access/?product=Business%20Services&intent=quote'
+    project_brief = (
+        '<p>Tell us the result you need, approximate volume, deadline, and preferred file format. '
+        'Start with a short description; share files only after we agree on a suitable way to receive them.</p>'
+        '<p>We confirm the supported scope, deliverables, price, and review process before work begins.</p>'
+        + button(quote_url, 'Request a Project Quote')
+        + ' ' + button('/samples/', 'View Sample Deliverables', False)
+    )
+
+    replace('/', 'AMICOR — Research, Data Cleanup and Business Support',
         'AI-assisted business research, administrative support, CRM and workflow assessment, and Nova software from Minnesota-based AMICOR.',
-        hero('AMICOR · Minnesota, USA', 'Less busywork.<br>More room to build.',
+        hero('AMICOR · Minnesota, USA', 'Research, data cleanup,<br>and business support.',
              'Research, reports, data cleanup, and workflow support—with AI-assisted preparation and human review.',
-             button('/business-services/', 'Explore Business Services') + button(AGENT, 'Try Nova', False))
-        + '<section class="section" id="home-products"><div class="wrap"><h2>Products</h2><p>Each product appears once, with its illustration, status, and next step. Open product is not an availability claim.</p>' + visual_grid('', eager=True, grid_id='home-product-catalog') + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>. The full status table is on the <a href="/products/">product catalog</a>.</p></div></section>'
+             button(quote_url, 'Request a Project Quote') + button('/samples/', 'View Sample Deliverables', False))
         + '<section class="section" id="customer-work"><div class="wrap"><h2>Bring us the work that slows you down</h2><p>These are business services, not catalog products.</p>' + home_service_cards + '</div></section>'
         + section('See how a task becomes a deliverable', '<div class="grid grid-3"><article class="card"><h3>1. Define the result</h3><p>Share your goal, inputs, deadline, and acceptance criteria.</p></article><article class="card"><h3>2. Prepare &amp; review</h3><p>AMICOR checks the scope. Nova assists with supported work, and a person reviews the output.</p></article><article class="card"><h3>3. Deliver the work</h3><p>Receive the agreed materials with sources, assumptions, and next steps where relevant.</p></article></div>')
         + section('Evaluate before you commit', button(AGENT, 'Run the Interactive Demo') + ' ' + button('/samples/', 'View Sample Deliverables', False) + '<p>The app demo illustrates a lead workflow. It does not contact customers or change a live CRM. Samples are fictional examples, not client case studies.</p>')
+        + section('Have a project in mind?', project_brief)
+        + '<section class="section" id="home-products"><div class="wrap"><h2>Products</h2><p>Explore Nova tools and see the availability of each product.</p>' + visual_grid('', grid_id='home-product-catalog') + '<p>Existing customer? <a href="/signin/">Sign in to your Nova account</a>. New customer? <a href="' + SIGNUP + '">Start a seven-day trial</a>. The full status table is on the <a href="/products/">product catalog</a>.</p></div></section>'
         + section('Future AMICOR initiatives', '<p>AMICOR Health, local delivery, Lifesaver, and connected hardware are included once in the product cards above. They are not live services on this page.</p>'))
+
+    replace('/solutions/', 'AMICOR Solutions — Research, Data Cleanup and Workflow Support',
+        'Get help with research reports, spreadsheet cleanup, documentation, and workflow assessment. Review sample deliverables and request a scoped project quote.',
+        hero('Business solutions', 'A clear deliverable.<br>A manageable first project.',
+             'Bring a research question, a spreadsheet that needs organizing, or a process that needs documenting. AMICOR combines AI-assisted preparation with human review.',
+             button(quote_url, 'Request a Project Quote') + button('/samples/', 'View Sample Deliverables', False))
+        + section('Choose the result you need', '<div class="grid grid-3">'
+            + card('Research you can check', 'Public-source findings, source links, a comparison, and a concise report with assumptions and open questions.', '/samples/', 'See sample deliverables')
+            + card('Data you can work with', 'A cleaned spreadsheet or CSV, a record of changes, and a list of duplicates or missing values for review.', '/business-services/', 'Explore data support')
+            + card('A process your team can follow', 'A workflow map, checklist or procedure, and prioritized next steps based on your approved inputs.', '/business-services/', 'Explore workflow support')
+            + '</div>')
+        + section('Start with one defined project', project_brief)
+        + section('Know what you are reviewing', '<p>Sample deliverables are fictional demonstrations, not client case studies. Your project scope sets the inputs, output format, deadline, and acceptance criteria. AI-assisted work is reviewed before delivery.</p>')
+        + section('Prefer to explore Nova software?', '<p>Try the interactive lead-workflow demo, or explore the product catalog for current availability.</p>'
+            + button(AGENT, 'Run the Interactive Demo') + button('/products/', 'Explore Nova Products', False)))
 
     replace('/business-services/', 'AMICOR Business Services — Research, Data and CRM Support',
         'Request scoped research, administrative support, data cleanup, documentation, and CRM workflow assessment from AMICOR.',
