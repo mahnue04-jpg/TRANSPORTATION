@@ -155,7 +155,8 @@
       byId("recovery-cleanup-status").textContent =
         "Dry run: " + data.reviewed + " reviewed; " +
         data.protected_refs + " protected; " +
-        data.eligible_unattached + " unattached candidates. No deletion.";
+        data.eligible_unattached + " eligible unattached; " +
+        data.unsafe_refs + " unsafe references blocked. No deletion.";
       message.textContent = "Dry-run complete. No files deleted.";
     });
   });
@@ -176,7 +177,8 @@
       confirmField.value = "";
       byId("recovery-cleanup-status").textContent =
         "Staging cleanup: deleted " + data.deleted + "; protected " +
-        data.protected_refs + "; deletion failures " + data.failed_deletions + ".";
+        data.protected_refs + "; unsafe references blocked " +
+        data.unsafe_refs + "; deletion failures " + data.failed_deletions + ".";
       message.textContent = "Staging cleanup retry finished. No customer delivery.";
     });
   });
