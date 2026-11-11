@@ -7,6 +7,7 @@ on:
     paths:
       - "backend/app/core/nova/work_revenue/bookkeeping_*.py"
       - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
+      - "backend/app/core/nova/work_revenue/operations_owner_csv_api.py"
       - "backend/migrations/versions/20261111_nova_bookkeeping_consent.py"
       - "backend/scripts/nova_synthetic_bookkeeping_job.py"
       - "backend/tests/test_nova_bookkeeping_restart_recovery.py"
@@ -55,7 +56,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Compile modified bookkeeping and CSV modules
         run: |
-          python -m compileall -q app/core/nova/work_revenue/bookkeeping_*.py app/core/nova/work_revenue/operations_customer_csv_jobs.py
+          python -m compileall -q app/core/nova/work_revenue/bookkeeping_*.py app/core/nova/work_revenue/operations_customer_csv_jobs.py app/core/nova/work_revenue/operations_owner_csv_api.py
       - name: Install backend test requirements
         run: |
           python -m pip install --upgrade pip
