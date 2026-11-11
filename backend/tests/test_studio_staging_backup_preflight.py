@@ -90,3 +90,78 @@ def test_missing_studio_tables_are_rejected(tmp_path):
         conn.execute("CREATE TABLE platform_users(id TEXT)")
     with pytest.raises(module.PreflightBlocked, match="STUDIO_TABLES_MISSING"):
         module.inventory(path)
+
+
+def test_main_blocks_active_jobs_before_creating_backup(source, tmp_path, monkeypatch, capsys):
+    with sqlite3.connect(source) as conn:
+        conn.execute("INSERT INTO nova_creative_jobs VALUES ('busy', 'QUEUED')")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--source", str(source), "--backup", "--backup-directory", str(tmp_path / "backups")],
+    )
+    assert module.main() == 1
+    assert not (tmp_path / "backups").exists()
+    output = capsys.readouterr().out
+    assert "ACTIVE_JOBS_PRESENT" in output
+
+
+def test_main_refuses_non_staging_environment(source, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--source", str(source), "--backup", "--backup-directory", str(tmp_path / "backups")],
+    )
+    assert module.main() == 1
+    assert "STAGING_ONLY" in capsys.readouterr().out
+    assert not (tmp_path / "backups").exists()
+
+
+def test_main_discards_snapshot_with_active_jobs(source, tmp_path, monkeypatch, capsys):
+    actual_snapshot = module.snapshot
+
+    def raced_snapshot(path, dest):
+        backup = actual_snapshot(path, dest)
+        with sqlite3.connect(backup) as conn:
+            conn.execute("INSERT INTO nova_creative_jobs VALUES ('late', 'PROCESSING')")
+        return backup
+
+    monkeypatch.setattr(module, "snapshot", raced_snapshot)
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--source", str(source), "--backup", "--backup-directory", str(tmp_path / "backups")],
+    )
+    assert module.main() == 1
+    assert "BACKUP_CONTAINS_ACTIVE_JOBS" in capsys.readouterr().out
+    assert list((tmp_path / "backups").glob("*.sqlite")) == []
+
+
+def test_main_discards_snapshot_with_changed_counts(source, tmp_path, monkeypatch, capsys):
+    actual_snapshot = module.snapshot
+
+    def raced_snapshot(path, dest):
+        backup = actual_snapshot(path, dest)
+        with sqlite3.connect(backup) as conn:
+            conn.execute("INSERT INTO platform_users VALUES ('late')")
+        return backup
+
+    monkeypatch.setattr(module, "snapshot", raced_snapshot)
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--source", str(source), "--backup", "--backup-directory", str(tmp_path / "backups")],
+    )
+    assert module.main() == 1
+    assert "BACKUP_SOURCE_COUNTS_CHANGED" in capsys.readouterr().out
+    assert list((tmp_path / "backups").glob("*.sqlite")) == []
+
+
+def test_main_inventory_does_not_create_backup(source, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setattr("sys.argv", ["preflight", "--source", str(source)])
+    assert module.main() == 0
+    data = __import__("json").loads(capsys.readouterr().out)
+    assert data["mode"] == "inventory"
+    assert "backup_created" not in data
+    assert data["tables"]["nova_creative_projects"] == 1
