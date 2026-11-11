@@ -70,3 +70,13 @@ def test_supervised_staging_batch_processing_wiring():
     js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
     assert '/jobs/process-due' in js
     assert "No delivery or invoicing" in js
+
+
+def test_staging_cleanup_audit_shows_counts_without_object_references():
+    html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    assert 'id="recovery-check-cleanup"' in html
+    assert 'id="recovery-cleanup-status"' in html
+    assert '"/cleanup-debt"' in js
+    assert "unresolved_cleanup_failures" in js
+    assert "no file references exposed" in js
