@@ -15,7 +15,7 @@ class PrivateStore:
         self.objects = {}
     def store(self, *, organization_id, application_id, category,
               filename, content_type, stream):
-        assert category == "nova-bookkeeping-review"
+        assert category in {"nova-bookkeeping-review", "nova-csv-review"}
         assert content_type == "text/csv"
         name = f"{organization_id}/{application_id}/{category}/{filename}"
         contents = stream.read()
