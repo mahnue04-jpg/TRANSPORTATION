@@ -12,7 +12,6 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from .bookkeeping_assignment import BookkeepingAssignment, SUPPORTED_WORK_TYPES
-from .operations_owner_csv_api import _eligible_engagement, _completed_task_ids
 from . import service
 
 metadata = sa.MetaData()
@@ -114,7 +113,7 @@ def resolve_bookkeeping_assignment(
     if verified > now or expires <= now or verified >= expires:
         raise ConsentNotVerified("Contract authorization expired or invalid")
 
-    try:
+    # Resolve existing CSV-scope helpers after module initialization to avoid\n    # circular module imports with the registered owner-only router.\n    from .operations_owner_csv_api import _eligible_engagement, _completed_task_ids\n    try:
         engagement = service.get_engagement(
             db, engagement_id, organization_id=org, user=owner,
         )
