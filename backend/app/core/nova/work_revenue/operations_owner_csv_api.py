@@ -425,6 +425,7 @@ def _accounting_unavailable(exc: Exception):
 
 def _require_accounting_job_scope(
     db: Session, *, owner: UserContext, job_id: str,
+    lock_consent: bool = False,
 ) -> dict:
     # Always revalidate consent on each read, review or download. Revoke
     # permission -> block all access; no previously issued download token.
@@ -434,6 +435,7 @@ def _require_accounting_job_scope(
     resolve_bookkeeping_assignment(
         db, owner=owner, engagement_id=info["engagement_id"],
         task_id=info["task_id"], work_type=info["work_type"],
+        lock_consent=lock_consent,
     )
     return info
 
@@ -477,9 +479,16 @@ async def create_bookkeeping_review_job(
             db, owner=owner, engagement_id=engagement_id,
             task_id=task_id, work_type=work_type,
         )
+        def final_authorization(session: Session) -> None:
+            resolve_bookkeeping_assignment(
+                session, owner=owner, engagement_id=engagement_id,
+                task_id=task_id, work_type=work_type, lock_consent=True,
+            )
+
         result = bk_jobs.submit_bookkeeping_review(
             db, assignment=assignment, request_id=request_key or "",
             primary=bytes(content), as_of=as_of,
+            final_authorization=final_authorization,
         )
         return {**result, "delivery_allowed": False}
     except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
@@ -505,10 +514,10 @@ async def bookkeeping_owner_review(
     db: Session = Depends(get_db),
 ):
     try:
-        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
         payload = await request.json()
         if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
             raise HTTPException(400, "Explicit Boolean review decision required")
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id, lock_consent=True)
         return bk_jobs.review_bookkeeping(
             db, org=str(owner.organization_id), owner=str(owner.user_id),
             job_id=job_id, approve=payload["approve"],
@@ -524,7 +533,7 @@ def bookkeeping_private_review_download(
     db: Session = Depends(get_db),
 ):
     try:
-        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id, lock_consent=True)
         output = bk_jobs.download_bookkeeping(
             db, org=str(owner.organization_id), owner=str(owner.user_id),
             job_id=job_id,
