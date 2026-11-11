@@ -43,6 +43,7 @@ def preview(monkeypatch):
     store = MemoryStore()
     monkeypatch.setattr(recovery, "require_runtime", lambda db: None)
     monkeypatch.setattr(recovery, "_store", lambda: store)
+    monkeypatch.setattr(recovery, "_assert_staging_cleanup_storage", lambda: None)
     engagement = {
         "engagement_id": "eng-a", "organization_id": "org-a",
         "owner_user_id": "owner-a", "status": "ACTIVE", "blockers": None,
