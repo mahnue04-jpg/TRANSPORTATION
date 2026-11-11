@@ -223,3 +223,65 @@ def test_postgres_fenced_lease_renewal_and_restart_claim(postgres):
         assert recovery.status(
             db, org="org-a", owner="owner-a", job_id=job_id,
         )["status"] == "AWAITING_REVIEW"
+
+
+def test_disposable_postgres_recovers_across_real_process_exit(postgres, tmp_path, monkeypatch):
+    """Two separate Python interpreters share durable DB and fake private files.
+
+    This simulates an abrupt worker exit after its claim was committed.
+    Lease expiry is advanced by test clock, not by sleeping a minute.
+    """
+    import json
+    import subprocess
+    import sys
+
+    engine, _ = postgres
+    from nova_recovery_process_helper import SharedFakePrivateStore
+
+    shared_storage = SharedFakePrivateStore(tmp_path / "private-synthetic-storage")
+    monkeypatch.setattr(recovery, "_store", lambda: shared_storage)
+    with Session(engine) as db:
+        queued = recovery.enqueue(
+            db, org="org-a", owner="owner-a", engagement_id="eng-a",
+            task_id="task-a", request_key="subprocess-restart",
+            raw=b"Name\nAda\nAda\n",
+        )
+    job_id = queued["job_id"]
+    start = datetime.now(timezone.utc)
+    env = os.environ.copy()
+    env["NOVA_CSV_PROCESS_TEST"] = "synthetic-only"
+    env["NOVA_CSV_CI_FAKE_STORE"] = str(shared_storage.directory)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    helper = str(Path(__file__).with_name("nova_recovery_process_helper.py"))
+
+    def invoke(step, clock):
+        done = subprocess.run(
+            [sys.executable, helper, job_id, step, clock.isoformat()],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env=env, capture_output=True, text=True, timeout=20,
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr[-1800:]
+        return json.loads(done.stdout.strip())
+
+    vanished = invoke("claim-and-exit", start)
+    assert vanished["attempts"] == 1
+    with Session(engine) as db:
+        assert recovery.status(db, org="org-a", owner="owner-a",
+                               job_id=job_id)["status"] == "RUNNING"
+    recovered = invoke("resume", start + timedelta(seconds=61))
+    assert recovered["status"] == "AWAITING_REVIEW"
+    assert recovered["delivered"] is False
+    with Session(engine) as db:
+        assert recovery.review_download(
+            db, org="org-a", owner="owner-a", job_id=job_id,
+        ) == b"Name\nAda\n"
+        assert recovery.status(db, org="org-a", owner="owner-a",
+                               job_id=job_id)["attempts"] == 2
+        with pytest.raises(CustomerCSVBlocked, match="Stale worker"):
+            recovery.complete(
+                db, org="org-a", owner="owner-a", job_id=job_id,
+                token=vanished["token"], output_ref="stale-output",
+                output_sha256="a" * 64,
+            )
+    assert len(list(shared_storage.directory.glob("*.bin"))) == 2
