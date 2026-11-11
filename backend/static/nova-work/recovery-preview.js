@@ -145,6 +145,21 @@
     });
   });
 
+  byId("recovery-check-cleanup").addEventListener("click", function () {
+    action("Checking unresolved private storage cleanup issues...", async function () {
+      const response = await request(prefix + "/cleanup-debt");
+      const payload = await response.json();
+      const count = payload.unresolved_cleanup_failures;
+      if (!Number.isInteger(count) || count < 0) {
+        throw new Error("Invalid cleanup audit response");
+      }
+      byId("recovery-cleanup-status").textContent =
+        count === 0 ? "No unresolved cleanup failures recorded." :
+        count + " unresolved cleanup failures require investigation.";
+      message.textContent = "Cleanup audit checked; no file references exposed.";
+    });
+  });
+
   byId("recovery-check").addEventListener("click", function () {
     action("Reading private job status...", async function () {
       const response = await request(activeJob());
