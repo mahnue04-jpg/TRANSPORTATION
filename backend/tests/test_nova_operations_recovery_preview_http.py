@@ -187,3 +187,11 @@ def test_revoked_assignment_cannot_be_processed_by_batch(preview):
     assert response.json()["awaiting_review"] == []
     assert response.json()["failed_attempts"] == [job_id]
     assert len(store.objects) == 1
+
+
+def test_preview_cleanup_debt_exposes_only_owner_count(preview):
+    client, _, _ = preview
+    response = client.get("/api/nova/work/operations/recovery-preview/cleanup-debt")
+    assert response.status_code == 200
+    assert response.json() == {"unresolved_cleanup_failures": 0, "delivered": False}
+    assert "storage_ref" not in response.text
