@@ -1,5 +1,6 @@
 """Synthetic private bookkeeping job lifecycle; not customer staging evidence."""
 import hashlib
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -168,3 +169,56 @@ def test_runtime_default_off(state, monkeypatch):
     with pytest.raises(finance.BookkeepingJobBlocked, match="disabled"):
         submit(db)
     assert db.execute(select(jobs.sa.func.count()).select_from(jobs.jobs)).scalar_one() == 0
+
+
+def test_stale_bookkeeping_recovery_does_not_retry_or_deliver(state):
+    db, _ = state
+    time = jobs._utc() - timedelta(minutes=30)
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="stale-bookkeeping-1", organization_id="org-a",
+        owner_user_id="owner-a", engagement_id="eng-a", task_id="task-a",
+        request_key="bookkeeping:payables_aging:stale-1",
+        input_sha256="a" * 64, status="PROCESSING",
+        created_at=time, updated_at=time,
+    ))
+    db.commit()
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        finance.recover_stale_bookkeeping(
+            db, org="org-a", owner="owner-b", job_id="stale-bookkeeping-1",
+        )
+    recovered = finance.recover_stale_bookkeeping(
+        db, org="org-a", owner="owner-a", job_id="stale-bookkeeping-1",
+    )
+    assert recovered == {
+        "job_id": "stale-bookkeeping-1", "status": "FAILED",
+        "delivered": False, "requires_new_request_key": True,
+        "automatic_retry": False,
+    }
+    with pytest.raises(finance.BookkeepingJobBlocked):
+        finance.recover_stale_bookkeeping(
+            db, org="org-a", owner="owner-a", job_id="stale-bookkeeping-1",
+        )
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        finance.download_bookkeeping(
+            db, org="org-a", owner="owner-a", job_id="stale-bookkeeping-1",
+        )
+
+
+def test_recent_bookkeeping_job_not_recoverable(state):
+    db, _ = state
+    now = jobs._utc()
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="recent-bookkeeping-1", organization_id="org-a",
+        owner_user_id="owner-a", engagement_id="eng-a", task_id="task-a",
+        request_key="bookkeeping:receivables_aging:recent-1",
+        input_sha256="b" * 64, status="PROCESSING",
+        created_at=now, updated_at=now,
+    ))
+    db.commit()
+    with pytest.raises(finance.BookkeepingJobBlocked, match="not eligible"):
+        finance.recover_stale_bookkeeping(
+            db, org="org-a", owner="owner-a", job_id="recent-bookkeeping-1",
+        )
+    assert finance.bookkeeping_status(
+        db, org="org-a", owner="owner-a", job_id="recent-bookkeeping-1",
+    )["status"] == "PROCESSING"
