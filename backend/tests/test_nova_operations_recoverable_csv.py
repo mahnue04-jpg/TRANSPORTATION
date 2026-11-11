@@ -9,6 +9,7 @@ from app.core.nova.work_revenue import operations_recoverable_csv as recovery
 from app.core.nova.work_revenue.operations_customer_csv_jobs import CustomerCSVBlocked
 
 ORIGINAL_RUNTIME_GATE = recovery.require_runtime
+ORIGINAL_STORAGE_GATE = recovery._assert_staging_cleanup_storage
 
 
 class MemoryStore:
@@ -422,3 +423,30 @@ def test_cleanup_retry_never_deletes_another_tenants_referenced_object(harness):
     assert result["protected_refs"] == 1
     assert result["deleted"] == 0
     assert foreign_ref in store.objects
+
+
+def test_cleanup_execution_refuses_unverified_private_bucket(harness, monkeypatch):
+    from app.core.nova.work_revenue import operations_staging_preflight
+    db, store = harness
+    job_id = submit(db, key="cleanup-bucket-gate")["job_id"]
+    orphan_ref = "org-a/unverified-private-object.bin"
+    store.objects[orphan_ref] = b"fictional data"
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=job_id,
+        storage_ref=orphan_ref, failure_code="OUTPUT_DELETE_FAILED",
+    )
+    monkeypatch.setattr(recovery, "_assert_staging_cleanup_storage", ORIGINAL_STORAGE_GATE)
+    monkeypatch.setattr(
+        operations_staging_preflight, "_check_bucket",
+        lambda: (_ for _ in ()).throw(CustomerCSVBlocked("Unsafe staging bucket", 503)),
+    )
+    with pytest.raises(CustomerCSVBlocked, match="Unsafe staging bucket"):
+        recovery.retry_private_cleanup(
+            db, org="org-a", owner="owner-a", dry_run=False,
+            approval="owner-approved-staging-cleanup",
+            now=datetime.now(timezone.utc) + timedelta(minutes=16),
+        )
+    assert orphan_ref in store.objects
+    assert recovery.cleanup_debt_summary(
+        db, org="org-a", owner="owner-a",
+    )["unresolved_cleanup_failures"] == 1
