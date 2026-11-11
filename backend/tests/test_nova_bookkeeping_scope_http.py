@@ -95,6 +95,7 @@ def test_accounting_routes_exist_under_owner_router():
     assert f"{base}/jobs/{{job_id}}" in paths
     assert f"{base}/jobs/{{job_id}}/review" in paths
     assert f"{base}/jobs/{{job_id}}/download" in paths
+    assert f"{base}/jobs/{{job_id}}/recover" in paths
 
 
 def test_legacy_csv_task_label_does_not_authorize_bookkeeping():
