@@ -410,3 +410,55 @@ def test_postgres_owner_cannot_approve_corrupted_private_artifact(pg):
             job_id=job_id, approve=True,
         )
         assert approved["status"] == "APPROVED_FOR_DOWNLOAD"
+
+
+def test_locked_postgres_consent_serializes_revocation(pg):
+    """Revocation cannot commit between locked approval-check and its commit."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    engine, _, owner = pg
+    locked = Event()
+    release = Event()
+    revoked = Event()
+
+    def authorize_with_lock():
+        with Session(engine) as db:
+            scope.resolve_bookkeeping_assignment(
+                db, owner=owner, engagement_id="synthetic-engagement",
+                task_id="synthetic-task", work_type="receivables_aging",
+                lock_consent=True,
+            )
+            locked.set()
+            assert release.wait(timeout=10)
+            db.commit()
+        return "checked"
+
+    def revoke():
+        assert locked.wait(timeout=10)
+        with Session(engine) as db:
+            db.execute(sa.update(scope.consents).where(
+                scope.consents.c.authorization_id == "synthetic-consent-1",
+            ).values(status="REVOKED", revoked_at=datetime.now(timezone.utc)))
+            db.commit()
+        revoked.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        check = pool.submit(authorize_with_lock)
+        mutation = pool.submit(revoke)
+        try:
+            assert locked.wait(timeout=10)
+            # The test intentionally holds a PostgreSQL FOR UPDATE lock while
+            # the other session tries to change the same consent row.
+            assert not revoked.wait(timeout=0.25)
+        finally:
+            release.set()
+        assert check.result(timeout=15) == "checked"
+        mutation.result(timeout=15)
+    assert revoked.is_set()
+    with Session(engine) as db:
+        with pytest.raises(scope.ConsentNotVerified):
+            scope.resolve_bookkeeping_assignment(
+                db, owner=owner, engagement_id="synthetic-engagement",
+                task_id="synthetic-task", work_type="receivables_aging",
+            )
