@@ -110,3 +110,16 @@ financial work.
 ## Render verification boundary
 
 Render connector requires explicit workspace selection before resource inspection. No workspace selected, database queried, deploy triggered, or environment changed during this work.
+
+## Render read-only inventory and synthetic HTTP regression (2026-11-11)
+
+- Read-only inventory of Saye's Render workspace identified `amicor-prod` (production PostgreSQL) and `amicor-casting-staging-db` (separate casting staging PostgreSQL). Neither is an approved accounting staging database.
+- Service inventory included `amicor health isf PR #483` preview but no PR #484 bookkeeping integration service in the returned results. A PR #483 preview cannot prove PR #484 integration is deployed.
+- Existing Render backend diagnostic workflow for earlier PR #484 commit failed in a Creative Studio scene timeout/rendering test while the operations CSV jobs passed. This is a separate concern, not proof of bookkeeping deployment.
+- Added synthetic FastAPI `test_nova_bookkeeping_synthetic_http_flow.py`: submit invented invoice CSV, duplicate request replay, status, cross-owner access denial, consent revocation denial of submit/status/review/download/recovery, then simulated owner approval and protected download.
+- CI run 43063656323 passed 32 pytest and 6 unittest authorization checks; three-task synthetic operator job completed again. It validates a mocked signed-in user and mocked consent resolver, not an actual identity provider or signed agreement.
+- No customer processing, production modification, Render resource creation, migration or deployment occurred.
+
+## Next release gate
+
+Require separately approved dedicated accounting staging PostgreSQL and private storage, verified contract consent records, real login sessions, staged migration, retention controls, and approval before changes to live services.
