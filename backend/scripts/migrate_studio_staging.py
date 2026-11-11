@@ -92,6 +92,26 @@ def _backup(source_path: Path, directory: Path) -> Path:
     return path
 
 
+def _dependency_order(names, target_tables):
+    """Copy parents before children so PostgreSQL foreign keys remain valid."""
+    selected = set(names)
+    dependencies = {name: set() for name in names}
+    for name in names:
+        for key in target_tables[name].foreign_keys:
+            parent = key.column.table.name
+            if parent in selected and parent != name:
+                dependencies[name].add(parent)
+    ordered = []
+    remaining = set(names)
+    while remaining:
+        ready = sorted(name for name in remaining if not (dependencies[name] & remaining))
+        if not ready:
+            raise TransferBlocked("CYCLIC_STUDIO_FOREIGN_KEYS")
+        ordered.extend(ready)
+        remaining.difference_update(ready)
+    return ordered
+
+
 def transfer(source_path: Path, target_engine, *, apply=False, backup_directory: Path | None = None):
     source_path = source_path.resolve()
     if not source_path.is_file():
@@ -131,6 +151,7 @@ def transfer(source_path: Path, target_engine, *, apply=False, backup_directory:
                 if target.execute(select(func.count()).select_from(dst)).scalar_one():
                     raise TransferBlocked("TARGET_NOT_EMPTY")
                 plan.append({"table": name, "rows": source.execute(select(func.count()).select_from(src)).scalar_one()})
+            copy_order = _dependency_order(names, target_tables)
             report = {"mode": "apply" if apply else "dry_run", "tables": plan,
                       "scope": "Studio records and platform_users; refresh tokens and other modules excluded"}
             if not apply:
@@ -138,8 +159,9 @@ def transfer(source_path: Path, target_engine, *, apply=False, backup_directory:
             if backup_directory is None:
                 raise TransferBlocked("BACKUP_DIRECTORY_REQUIRED")
             report["backup"] = str(_backup(source_path, backup_directory))
-            for item in plan:
-                name = item["table"]
+            planned = {item["table"]: item for item in plan}
+            for name in copy_order:
+                item = planned[name]
                 src, dst = source_tables[name], target_tables[name]
                 rows = source.execute(select(src).order_by(*src.primary_key.columns)).mappings()
                 expected = hashlib.sha256()
