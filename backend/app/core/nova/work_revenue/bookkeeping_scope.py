@@ -70,7 +70,7 @@ def _trusted_eligible_task(
 
 def resolve_bookkeeping_assignment(
     db: Session, *, owner, engagement_id: str, task_id: str, work_type: str,
-    now: datetime | None = None,
+    now: datetime | None = None, lock_consent: bool = False,
 ) -> BookkeepingAssignment:
     """Require active saved task plus independently verified contract records.
 
@@ -91,7 +91,7 @@ def resolve_bookkeeping_assignment(
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ConsentNotVerified("Timezone-aware validation required")
-    records = db.execute(sa.select(consents).where(
+    query = sa.select(consents).where(
         consents.c.organization_id == org,
         consents.c.owner_user_id == owner_id,
         consents.c.engagement_id == engagement_id,
@@ -99,7 +99,12 @@ def resolve_bookkeeping_assignment(
         consents.c.work_type == work_type,
         consents.c.status == "APPROVED",
         consents.c.revoked_at.is_(None),
-    )).mappings().all()
+    )
+    if lock_consent:
+        # Only an exclusive PostgreSQL row lock serializes verification with
+        # a concurrent revocation update. Caller MUST commit/rollback promptly.
+        query = query.with_for_update()
+    records = db.execute(query).mappings().all()
     if len(records) != 1:
         raise ConsentNotVerified("Current verified contract authorization missing")
     record = records[0]
