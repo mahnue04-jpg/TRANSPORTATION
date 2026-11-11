@@ -115,6 +115,79 @@ def cleanup_debt_summary(db: Session, *, org: str, owner: str) -> dict:
     return {"unresolved_cleanup_failures": count, "delivered": False}
 
 
+
+def retry_private_cleanup(
+    db: Session, *, org: str, owner: str, dry_run: bool = True,
+    approval: str | None = None, limit: int = 5,
+    now: datetime | None = None,
+) -> dict:
+    """Safely examine or explicitly retry stale, recorded deletion failures.
+
+    Never discover/delete arbitrary bucket objects. Only previously recorded
+    cleanup debt may be retried, after 15 minutes, in an owner-scoped staging
+    context. An object referenced by *any* saved recovery job is protected,
+    even when that job belongs to another tenant.
+    """
+    require_runtime(db)
+    if not org or not owner or org.strip().lower() == "global":
+        raise CustomerCSVBlocked("Specific cleanup owner scope required", 403)
+    if type(dry_run) is not bool:
+        raise CustomerCSVBlocked("Boolean dry_run required", 400)
+    if type(limit) is not int or not 1 <= limit <= 10:
+        raise CustomerCSVBlocked("Cleanup retry limit must be between 1 and 10", 400)
+    if not dry_run and approval != "owner-approved-staging-cleanup":
+        raise CustomerCSVBlocked("Explicit owner cleanup approval required", 403)
+    stamp = now or _now()
+    safe_before = stamp - timedelta(minutes=15)
+    events = db.execute(sa.select(cleanup_events).where(
+        cleanup_events.c.organization_id == org,
+        cleanup_events.c.owner_user_id == owner,
+        cleanup_events.c.resolved_at.is_(None),
+        cleanup_events.c.created_at <= safe_before,
+    ).order_by(cleanup_events.c.created_at.asc(), cleanup_events.c.id.asc())
+    .limit(limit).with_for_update(skip_locked=True)).mappings().all()
+    reviewed = deleted = protected = failed = 0
+    try:
+        for event in events:
+            reviewed += 1
+            attached = db.execute(sa.select(recovery_jobs.c.id).where(sa.or_(
+                recovery_jobs.c.input_ref == event["storage_ref"],
+                recovery_jobs.c.output_ref == event["storage_ref"],
+            )).limit(1)).first()
+            if attached:
+                protected += 1
+                continue
+            if dry_run:
+                continue
+            try:
+                _store().delete(storage_ref=event["storage_ref"])
+            except Exception:
+                failed += 1
+                continue
+            updated = db.execute(sa.update(cleanup_events).where(
+                cleanup_events.c.id == event["id"],
+                cleanup_events.c.organization_id == org,
+                cleanup_events.c.owner_user_id == owner,
+                cleanup_events.c.resolved_at.is_(None),
+            ).values(resolved_at=stamp))
+            if updated.rowcount != 1:
+                raise CustomerCSVBlocked("Cleanup audit status changed", 409)
+            deleted += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "reviewed": reviewed,
+        "eligible_unattached": reviewed - protected,
+        "protected_refs": protected,
+        "deleted": deleted,
+        "failed_deletions": failed,
+        "dry_run": dry_run,
+        "delivered": False,
+    }
+
+
 def _owned(db: Session, *, org: str, owner: str, job_id: str):
     row = db.execute(sa.select(recovery_jobs).where(
         recovery_jobs.c.id == job_id,
