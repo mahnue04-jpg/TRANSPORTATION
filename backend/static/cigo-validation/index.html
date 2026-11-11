@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>AMICOR Nova idea intake</title>
+  <link rel="stylesheet" href="/dev/cigo-validation/demo.css" />
+</head>
+<body>
+  <main>
+    <p class="banner">Fictional demonstration. This page does not email anyone, does not call a paid provider, and does not submit anything to CIGO.</p>
+    <h1>See the work, then send your idea</h1>
+    <p class="lede">Watch the approved one-minute presenter, then save a product idea with a budget and currency. Email is optional unless you ask for follow-up.</p>
+
+    <section aria-label="Approved presenter">
+      <h2>Approved presenter</h2>
+      <video id="presenter" controls playsinline preload="metadata" aria-label="Approved 60 second vertical presenter with burned-in captions">
+        <source src="/dev/cigo-validation/approved.mp4" type="video/mp4" />
+      </video>
+      <p class="hint">Captions are burned into the picture. The file has no separate subtitle track. <a href="https://v3b.fal.media/files/b/0aae5147/n7o5OtUWOjW2VvYEWJr9f_output.mp4">Open the approved file</a></p>
+    </section>
+
+    <form id="intake">
+      <label for="idea">Idea</label>
+      <textarea id="idea" name="idea" maxlength="500" placeholder="What should Nova draft, and who approves it?"></textarea>
+      <p class="field-error" id="error-idea"></p>
+
+      <div class="split">
+        <div>
+          <label for="budget">Budget</label>
+          <input id="budget" name="budget" inputmode="decimal" placeholder="1500.00" />
+          <p class="field-error" id="error-budget"></p>
+        </div>
+        <div>
+          <label for="currency">Currency</label>
+          <select id="currency" name="currency">
+            <option value="">Choose</option>
+            <option>USD</option>
+            <option>EUR</option>
+            <option>GBP</option>
+            <option>CAD</option>
+          </select>
+          <p class="field-error" id="error-currency"></p>
+        </div>
+      </div>
+
+      <label for="email">Email (optional)</label>
+      <input id="email" name="email" type="text" autocomplete="email" placeholder="name@example.com" />
+      <p class="field-error" id="error-email"></p>
+
+      <fieldset>
+        <legend>Follow-up</legend>
+        <label class="choice"><input type="radio" name="follow_up" value="none" checked /> No follow-up</label>
+        <label class="choice"><input type="radio" name="follow_up" value="email" /> Email follow-up</label>
+        <p class="field-error" id="error-follow_up"></p>
+      </fieldset>
+
+      <label class="choice"><input id="consent" name="consent" type="checkbox" /> I agree this demonstration record can be stored.</label>
+      <p class="field-error" id="error-consent"></p>
+
+      <label class="choice"><input id="force-failure" type="checkbox" /> Simulate a storage failure</label>
+
+      <button type="submit">Save idea</button>
+    </form>
+
+    <section id="result" aria-live="polite"></section>
+
+    <section>
+      <div class="row">
+        <h2>Records</h2>
+        <div class="actions">
+          <a href="/dev/cigo-validation/export.json">Export JSON</a>
+          <a href="/dev/cigo-validation/export.csv">Export CSV</a>
+          <a href="/dev/cigo-validation/workflow.json">Workflow</a>
+          <button type="button" id="seed">Restore fictional examples</button>
+          <button type="button" id="reset">Clear records</button>
+        </div>
+      </div>
+      <div id="records"></div>
+    </section>
+    <section>
+      <h2>Notifications</h2>
+      <p class="hint">Follow-up notices are saved here with status suppressed_no_outbound. Nothing is emailed.</p>
+      <div id="alerts"></div>
+    </section>
+    <section>
+      <h2>Failures</h2>
+      <div id="failures"></div>
+    </section>
+  </main>
+  <script src="/dev/cigo-validation/demo.js"></script>
+</body>
+</html>
