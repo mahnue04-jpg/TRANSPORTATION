@@ -92,7 +92,7 @@ def _export(rows: list[dict[str, Any]]) -> str:
     writer = csv.DictWriter(output, fieldnames=OUTPUT_FIELDS, lineterminator="\n")
     writer.writeheader()
     for row in rows:
-        writer.writerow({field: _safe_cell(row.get(field, "")) for field in OUTPUT_FIELDS})
+        writer.writerow({field: (str(row.get(field, "")) if field in ("row", "amount") else _safe_cell(row.get(field, ""))) for field in OUTPUT_FIELDS})
     return output.getvalue()
 
 
@@ -107,6 +107,10 @@ def build_bookkeeping_workpaper(transactions_csv: str, bank_csv: str | None = No
     bank = _read_csv(bank_csv, "bank") if bank_csv is not None else None
     seen = Counter((r["date"], r["description"], r["amount"], r["reference"]) for r in transactions)
     bank_index: dict[tuple[str, Decimal, str], list[int]] = defaultdict(list)
+    transaction_match_counts = Counter(
+        (r["date"], r["amount"], r["reference"])
+        for r in transactions if r["reference"]
+    )
     if bank is not None:
         for bank_row in bank:
             if bank_row["reference"]:
@@ -129,7 +133,7 @@ def build_bookkeeping_workpaper(transactions_csv: str, bank_csv: str | None = No
         if bank is not None:
             key = (transaction["date"], amount, transaction["reference"])
             possible = bank_index.get(key, []) if transaction["reference"] else []
-            if len(possible) != 1:
+            if len(possible) != 1 or transaction_match_counts[key] != 1:
                 issues.append("bank_match_missing_or_ambiguous")
             else:
                 matched_bank_rows.append(possible[0])
@@ -157,6 +161,8 @@ def build_bookkeeping_workpaper(transactions_csv: str, bank_csv: str | None = No
         "net_total": f"{totals['incoming'] - totals['outgoing']:.2f}",
         "issue_counts": dict(counts),
         "unmatched_bank_rows": unmatched_bank,
+        "matched_bank_row_count": len(set(matched_bank_rows)),
+        "all_bank_rows_accounted_for": bank is not None and not unmatched_bank and len(matched_bank_rows) == len(transactions),
         "workpaper_csv": _export(output_rows),
         "limitations": [
             "Categories are keyword hints, not approved accounting classifications.",
