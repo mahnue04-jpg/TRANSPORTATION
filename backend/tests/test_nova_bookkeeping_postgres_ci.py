@@ -378,3 +378,35 @@ def test_postgres_concurrent_accounting_idempotency_preserves_one_workpaper(pg):
             job_id=outcomes[0]["job_id"],
         )
         assert scoped["status"] == "AWAITING_REVIEW"
+
+
+def test_postgres_owner_cannot_approve_corrupted_private_artifact(pg):
+    engine, store, owner = pg
+    with Session(engine) as db:
+        assignment = scope.resolve_bookkeeping_assignment(
+            db, owner=owner, engagement_id="synthetic-engagement",
+            task_id="synthetic-task", work_type="receivables_aging",
+        )
+        created = finance.submit_bookkeeping_review(
+            db, assignment=assignment, request_id="pg-integrity-review-1",
+            primary=SOURCE, as_of="2026-11-11",
+        )
+        job_id = created["job_id"]
+        ref = next(iter(store.objects))
+        saved_bytes = store.objects[ref]
+        store.objects[ref] = b"fake,changed,balance,99999.99"
+        with pytest.raises(finance.BookkeepingJobBlocked, match="integrity"):
+            finance.review_bookkeeping(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=job_id, approve=True,
+            )
+        assert finance.bookkeeping_status(
+            db, org="synthetic-org", owner="synthetic-owner",
+            job_id=job_id,
+        )["status"] == "AWAITING_REVIEW"
+        store.objects[ref] = saved_bytes
+        approved = finance.review_bookkeeping(
+            db, org="synthetic-org", owner="synthetic-owner",
+            job_id=job_id, approve=True,
+        )
+        assert approved["status"] == "APPROVED_FOR_DOWNLOAD"
