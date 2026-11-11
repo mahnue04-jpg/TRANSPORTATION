@@ -167,3 +167,21 @@ def test_full_synthetic_http_workflow(demo):
     assert approved.json()["status"] == "APPROVED_FOR_DOWNLOAD"
     assert approved.json()["delivered"] is False
     assert client.get(f"{BASE}/jobs/{job_id}/download").content == review_file.content
+
+
+def test_consent_revoked_during_upload_is_denied_before_job_creation(demo, monkeypatch):
+    client, access, user, store = demo
+    original = api.resolve_bookkeeping_assignment
+    calls = {"count": 0}
+
+    def permission_flips_after_first_check(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            access["active"] = False
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(api, "resolve_bookkeeping_assignment", permission_flips_after_first_check)
+    denied = client.post(SUBMIT, content=CSV, headers=HEADERS)
+    assert denied.status_code == 403
+    assert calls["count"] == 2
+    assert store.objects == {}
