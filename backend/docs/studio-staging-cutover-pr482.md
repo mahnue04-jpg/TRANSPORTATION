@@ -57,6 +57,27 @@ Do not confuse database asset references with physically retrievable MP4 files. 
 - Confirm private backup permissions, disk capacity, SQLite `PRAGMA integrity_check`, source table row counts, and a restore procedure. Do not delete or overwrite the source.
 - Document backup retention and access without storing private locations, tokens, or account details in public logs.
 
+## Private object-storage proof (staging, separate owner approval)
+
+The real-video worker already refuses paid provider submission when protected storage is disabled or bucket HEAD fails. HEAD alone proves **neither** PUT authorization nor byte-perfect playback. A separate operator-only, randomized canary is available without needing to buy a video generation:
+
+1. Enter an **authorized staging shell** where only the staging S3 endpoint/bucket/credentials are configured. The connected Render management API does not provide such shell access. Never paste bucket credentials in chat, GitHub, URLs or CI.
+2. Verify `APP_ENV=staging`, `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE=true`, and the intended private staging-only bucket. First run the read-only default:
+   ```sh
+   python backend/scripts/verify_studio_staging_storage_canary.py
+   ```
+   It prints `dry_run` and makes **no S3 request**.
+3. Only with separate authorization for this **staging-only test object**, run:
+   ```sh
+   python backend/scripts/verify_studio_staging_storage_canary.py \
+     --apply --acknowledge-staging-test-object
+   ```
+   This creates one random 4 KiB object under `studio-readiness-canary/`, uses a conditional no-overwrite PUT, verifies size and hash metadata by HEAD, downloads and hashes the full bytes, then deletes the exact random object and confirms absence. It never touches customer media, generates video, alters databases, or invokes billable providers.
+4. If any check fails, **do not enable paid Kling**. If cleanup cannot be confirmed, inspect the staging bucket for the isolated test object before retrying. A successful canary is *storage-only* evidence, not proof of owner-scoped MP4 routing or film generation.
+5. After a successful canary, perform a separately approved real-owner-scoped MP4 archive/download and then one explicitly budget-approved five-second provider shot, validating signed-in playback, object persistence, owner isolation, media decoding and movement quality. Capture only sanitized outcomes.
+
+The script's networked `--apply` mode is **never run in CI**; GitHub CI uses in-memory mock S3 only.
+
 ## Transfer acceptance
 
 1. Prepare the reviewed target schema from the exact application revision intended to run after cutover.
