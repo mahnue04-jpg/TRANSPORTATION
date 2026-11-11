@@ -82,6 +82,9 @@ def test_completed_task_handoff_preserves_job_and_recovers_without_new_render(mo
     monkeypatch.setattr(store, 'DbCreativeStudioStore', Store)
     monkeypatch.setattr(readiness, 'first_shot_readiness', lambda **kw: {'status': 'READY_TO_REQUEST', 'reference_image_asset_id': 'image-1'})
     monkeypatch.setattr(archive.storage, 'enabled', lambda: True)
+    # This test models a previously submitted task: S3 HEAD succeeds, and
+    # the provider must only resume its existing task (no new billable POST).
+    monkeypatch.setattr(archive.storage, 'verify_bucket_ready', lambda: None)
     def generate(*, brief):
         assert brief['resume_task_id'] == 'same-task'
         return {'status': 'GENERATED', 'task_id': 'same-task', 'url': '/saved.mp4',
