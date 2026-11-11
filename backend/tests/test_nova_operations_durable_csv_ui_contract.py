@@ -80,3 +80,18 @@ def test_staging_cleanup_audit_shows_counts_without_object_references():
     assert '"/cleanup-debt"' in js
     assert "unresolved_cleanup_failures" in js
     assert "no file references exposed" in js
+
+
+def test_staging_cleanup_retry_requires_explicit_owner_confirmation():
+    html = (UI / "recovery-preview.html").read_text(encoding="utf-8")
+    js = (UI / "recovery-preview.js").read_text(encoding="utf-8")
+    for identifier in (
+        "recovery-cleanup-dry-run",
+        "recovery-cleanup-execute",
+        "recovery-cleanup-confirm",
+    ):
+        assert f'id="{identifier}"' in html
+    assert 'APPROVE STAGING CLEANUP' in js
+    assert '"owner-approved-staging-cleanup"' in js
+    assert '"/cleanup-retry"' in js
+    assert "No customer delivery" in js
