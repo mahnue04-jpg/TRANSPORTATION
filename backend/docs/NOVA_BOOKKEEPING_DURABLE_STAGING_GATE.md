@@ -20,15 +20,15 @@
 
 ## Known critical gaps — not authorized to deploy
 
-1. **No HTTP endpoint registered.** No client can access accounting jobs today.
+1. **HTTP endpoints now committed, but default-OFF.** The registered owner-only router exposes bookkeeping submit, status, review and private download. Actual processing requires both disabled-by-default feature flags, reviewed PostgreSQL schema, verified contract/AI-consent records and an active owner task. No production permission is granted.
 2. **No trusted consent-record integration.** The structured assignment object
    must be assembled from an authenticated, server-verified contract/engagement
    record, not client headers or a browser checkbox. Current app task labels
    are not sufficient proof of AI authorization.
-3. **No source authorization version persisted.** The source/assignment hashes
+3. **No immutable source authorization version persisted on job row.** The source/assignment hashes
    bind identity and input but do not prove consent or current contract scope.
    Contract changes and revocation handling remain to implement.
-4. **No actual staging with PostgreSQL/private S3.** Current tests use
+4. **No actual staging with PostgreSQL/private S3.** Added staging-only Alembic revision `20261111_nova_bk_consent`, gated by `NOVA_BOOKKEEPING_CONSENT_SCHEMA_APPROVED=staging-only` and consistent staging environment variables; no migration was applied. Current tests use
    synthetic SQLite + fake storage; do not confuse these with production.
 5. **Synchronous processing.** A crashed request may remain PROCESSING; there
    is no restart-resumable worker, reliable storage cleanup or source re-upload.
@@ -65,3 +65,37 @@ Before using Nova on any BELAY client record, obtain written permission for
 AI usage, subcontracting/business participation if applicable, and processing
 outside BELAY-provided systems. Never submit personal screening work as an
 AI-agent substitution or claim unsupervised accounting competence.
+
+
+## Owner-only API (development branch, disabled by default)
+
+- POST `/operations/durable/bookkeeping/engagements/{engagement_id}/tasks/{task_id}/{work_type}/jobs` accepts bounded UTF-8 CSV body, safe CSV filename, an idempotency key and, where required, as-of date; calls server-side contract scope resolver.
+- GET `/operations/durable/bookkeeping/jobs/{job_id}` checks current consent before returning scoped status.
+- POST `/operations/durable/bookkeeping/jobs/{job_id}/review` requires a boolean owner decision and rechecks consent.
+- GET `/operations/durable/bookkeeping/jobs/{job_id}/download` rechecks consent, hashes the private artifact and returns a review-only download with no-store headers.
+
+Both `NOVA_BOOKKEEPING_DURABLE_ENABLED` and the inherited
+`NOVA_OPERATIONS_DURABLE_CSV_ENABLED` must be enabled for successful
+processing, alongside actual PostgreSQL and S3-private configuration.
+**Neither is being enabled in this development pass.** There is no
+application UI workflow yet. No customer deliverables are automatically sent.
+
+The new resolver uses a separately verified consent table as the exact
+task/work-type binding for existing saved tasks that do not yet have a
+structured finance work-type column. A contradictory structured task type
+is rejected. The legacy text-label CSV task gate alone cannot authorize
+financial work.
+
+## Remaining staging acceptance evidence
+
+- Use a disposable PostgreSQL instance and execute the real Alembic upgrade.
+- Verify expired, revoked, missing, cross-owner, altered task ID and
+  changed agreement permissions at the *HTTP* layer.
+- Ensure the consent-record provisioning process validates actual signed
+  documents, records reviewer identity and revocation, and is auditable.
+- Verify authenticated browser sessions, CSRF controls, private encrypted
+  S3 retrieval, retention and erasure, interruption and orphan cleanup.
+- Compare actual financial workpaper outputs against independently reviewed
+  expected results, including edge cases and rounding.
+- Resolve the upstream PR #477 draft dependency. No deploy or merge without
+  explicit owner approval.
