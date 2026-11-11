@@ -262,3 +262,54 @@ def test_recovery_after_first_process_disappears(harness):
     assert scoped(db, recovery.status, job_id)["attempts"] == 2
     assert scoped(db, recovery.review_download, job_id) == b"Name\nAda\n"
     assert len(store.objects) == 2
+
+
+def test_output_delete_failure_is_durably_visible_without_private_keys(harness, monkeypatch):
+    db, store = harness
+    job_id = submit(db, key="cleanup-debt")["job_id"]
+    checked = [0]
+
+    def authorization(eng, task):
+        checked[0] += 1
+        if checked[0] == 2:
+            raise CustomerCSVBlocked("Assignment revoked during processing", 409)
+
+    def deny_delete(*, storage_ref):
+        raise OSError("synthetic storage delete outage")
+
+    monkeypatch.setattr(store, "delete", deny_delete)
+    with pytest.raises(CustomerCSVBlocked, match="revoked"):
+        scoped(db, recovery.process_job, job_id,
+               authorization_check=authorization)
+    debt = recovery.cleanup_debt_summary(db, org="org-a", owner="owner-a")
+    assert debt == {"unresolved_cleanup_failures": 1, "delivered": False}
+    assert recovery.cleanup_debt_summary(
+        db, org="different", owner="owner-a"
+    )["unresolved_cleanup_failures"] == 0
+    event = db.execute(sa.select(recovery.cleanup_events)).mappings().one()
+    assert event["failure_code"] == "OUTPUT_DELETE_FAILED"
+    assert event["job_id"] == job_id
+    assert event["storage_ref"] in store.objects
+    assert event["resolved_at"] is None
+
+
+def test_input_delete_failure_is_recorded_after_failed_upload(harness, monkeypatch):
+    db, store = harness
+    original = store.store
+
+    def inaccurate_store(**kwargs):
+        backend, ref, size = original(**kwargs)
+        return backend, ref, size + 1
+
+    monkeypatch.setattr(store, "store", inaccurate_store)
+    monkeypatch.setattr(
+        store, "delete",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("synthetic delete outage")),
+    )
+    with pytest.raises(CustomerCSVBlocked, match="size mismatch"):
+        submit(db, key="failed-input")
+    debt = recovery.cleanup_debt_summary(db, org="org-a", owner="owner-a")
+    assert debt["unresolved_cleanup_failures"] == 1
+    event = db.execute(sa.select(recovery.cleanup_events)).mappings().one()
+    assert event["failure_code"] == "INPUT_DELETE_FAILED"
+    assert event["storage_ref"] in store.objects
