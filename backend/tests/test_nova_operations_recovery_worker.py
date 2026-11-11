@@ -91,6 +91,7 @@ def test_worker_uses_active_owner_and_assignment_checks(config, monkeypatch):
     outcome = worker.run_once(factory, owner_email="owner@example.invalid")
     assert outcome["awaiting_review"] == [job["job_id"]]
     assert outcome["delivered"] is False
+    assert outcome["cleanup_debt"]["unresolved_cleanup_failures"] == 0
     assert calls == [("owner-a", "eng-a", "task-a")] * 2
     with Session(engine) as db:
         assert recovery.status(db, org="org-a", owner="owner-a",
