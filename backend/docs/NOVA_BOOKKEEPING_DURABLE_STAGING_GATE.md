@@ -133,3 +133,11 @@ Require separately approved dedicated accounting staging PostgreSQL and private 
 - The existing synthetic suite and three invented operator tasks also passed in CI run 43091269711.
 - Important separation: this is actual PostgreSQL behavior in GitHub Actions, but storage remains a fake in-memory object store, Work & Revenue saved engagement reads are mocked, and the records are invented. It is not Render staging, real client authorization, or production readiness.
 - Outstanding release blockers remain real Render-isolated accounting DB, encrypted S3 storage, real login/session, signed-consent provisioning and revocation race tests, private retention/orphan cleanup, and an approved deployment plan.
+
+
+## Expanded PostgreSQL HTTP and concurrency verification (2026-11-11)
+
+- New integration test exercises actual FastAPI bookkeeping routes backed by disposable PostgreSQL consent and job metadata, while only the signed-in identity, Work & Revenue engagement lookup and object store are synthetic doubles.
+- Test performs create/replay/status/download/approve; revokes the consent row directly in PostgreSQL, then verifies that submit/status/download/review/recover all fail closed. It tests missing evidence fingerprints and conflicting task accounting work types.
+- Added a separate two-connection concurrent request test for exactly one accounting workpaper and a single persisted job on the PostgreSQL unique constraint.
+- Distinguish these test findings from actual Render staging, customer identity provider, signed client permissions and encrypted persistent object storage, which remain unverified. No release enablement or migrations on Render.
