@@ -54,7 +54,17 @@ def postgres(monkeypatch):
         ctx = MigrationContext.configure(connection)
         monkeypatch.setattr(migration, "op", Operations(ctx))
         migration.upgrade()
+        cleanup_file = (
+            Path(__file__).resolve().parents[1] / "migrations" / "versions"
+            / "20261110_nova_csv_cleanup_events.py"
+        )
+        cleanup_spec = spec_from_file_location("nova_cleanup_migration_ci", cleanup_file)
+        cleanup_migration = module_from_spec(cleanup_spec)
+        cleanup_spec.loader.exec_module(cleanup_migration)
+        monkeypatch.setattr(cleanup_migration, "op", Operations(ctx))
+        cleanup_migration.upgrade()
     assert recovery.recovery_jobs.name in sa.inspect(engine).get_table_names()
+    assert recovery.cleanup_events.name in sa.inspect(engine).get_table_names()
     monkeypatch.setenv("NOVA_OPERATIONS_RECOVERABLE_CSV_ENABLED", "true")
     monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE", "s3_private")
     store = FakePrivateStore()
