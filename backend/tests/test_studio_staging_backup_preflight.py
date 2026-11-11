@@ -210,6 +210,9 @@ def test_main_successful_backup_keeps_path_private(source, tmp_path, monkeypatch
     result = __import__("json").loads(message)
     assert result["backup_created"] is True
     assert result["backup_integrity"] == "ok"
+    assert len(result["backup_sha256"]) == 64
+    assert result["backup_bytes"] > 0
+    assert module.backup_digest(next(private.glob("*.sqlite"))) == result["backup_sha256"]
     assert result["tables"]["platform_users"] == 1
     assert str(private) not in message
     assert len(list(private.glob("*.sqlite"))) == 1
@@ -232,3 +235,9 @@ def test_backup_accepts_sufficient_disk_headroom(source, tmp_path, monkeypatch):
     backup = module.snapshot(source, tmp_path / "private")
     with sqlite3.connect(backup) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_sha256_changes_if_snapshot_bytes_change(source, tmp_path):
+    import hashlib
+    path = module.snapshot(source, tmp_path / "private")
+    assert module.backup_digest(path) == hashlib.sha256(path.read_bytes()).hexdigest()
