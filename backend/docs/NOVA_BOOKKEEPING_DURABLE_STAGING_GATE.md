@@ -141,3 +141,11 @@ Require separately approved dedicated accounting staging PostgreSQL and private 
 - Test performs create/replay/status/download/approve; revokes the consent row directly in PostgreSQL, then verifies that submit/status/download/review/recover all fail closed. It tests missing evidence fingerprints and conflicting task accounting work types.
 - Added a separate two-connection concurrent request test for exactly one accounting workpaper and a single persisted job on the PostgreSQL unique constraint.
 - Distinguish these test findings from actual Render staging, customer identity provider, signed client permissions and encrypted persistent object storage, which remain unverified. No release enablement or migrations on Render.
+
+
+## Accounting approval integrity and permission revalidation (2026-11-11)
+
+- Owner approval now verifies that the private workpaper is retrievable and its SHA-256 digest equals the recorded artifact digest before changing a job to APPROVED_FOR_DOWNLOAD. Missing or altered artifacts fail closed and leave the job awaiting review.
+- The bookkeeping intake route re-resolves server-side scope after the CSV body has streamed and immediately before job insertion, preventing stale permission from an upload-length delay. A simulated revocation between checks must prevent any stored job or workpaper.
+- Added synthetic and PostgreSQL regressions for tampered artifact approval, plus an HTTP synthetic revocation-during-upload regression. They do not replace signed consent validation, real object storage, or a concurrency-safe consent transaction model in Render staging.
+- Existing current-consent checks remain mandatory on status/review/download/recovery. Approval does not deliver a client file or move money.
