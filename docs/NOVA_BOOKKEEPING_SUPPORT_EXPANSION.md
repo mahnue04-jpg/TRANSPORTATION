@@ -109,3 +109,26 @@ expense categorization, invoice-index preparation, aging drafts and exception
 reports. A named individual bookkeeper role with mandatory experience,
 undisclosed AI usage, or unsupported full-cycle duties is **not** qualified
 merely because the capability catalog contains a bookkeeping keyword.
+
+
+## Third development block: payables and audit provenance (2026-11-11)
+- Added `bookkeeping_payables.build_payables_workpaper` for invoice/bill
+  source records, due-date bands, balances and duplicate / payment issues.
+  No vendor verification, payment execution, approval, or tax treatment.
+- Added `payables_aging` as an explicit, authorized work type in
+  `bookkeeping_assignment`. It is never inferred from job-title text alone.
+- Added deterministic SHA-256 provenance for the primary/secondary source CSV,
+  output CSV, and canonical owner/organization/engagement/task/work-type scope.
+  This provides integrity fingerprints for a future durable storage adapter;
+  it is **not** a signature, legal consent record or complete audit trail.
+- Dedicated CI now tests transaction workpapers, receivables, payables,
+  contract qualification, and assignment authorization. Confirm the final
+  commit's test run before recording a passing result.
+- PR #477 remains independently draft, with a different base; its PostgreSQL
+  and private-storage integration has **not** been wired to these workpapers.
+
+### Customer release decision — blocked
+Do not merge, deploy, accept a finance contract, submit an application on
+behalf of a professional bookkeeper, or ingest customer financial information
+until actual staging API auth, tenant isolation, private storage, idempotency,
+recovery, validation, and customer AI-permission controls are verified.
