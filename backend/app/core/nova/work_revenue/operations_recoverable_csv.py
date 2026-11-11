@@ -82,8 +82,9 @@ def require_runtime(db: Session) -> None:
         raise CustomerCSVBlocked("Recoverable CSV preview is staging-only", 503)
     if db.get_bind().dialect.name != "postgresql":
         raise CustomerCSVBlocked("Isolated PostgreSQL required", 503)
-    if not sa.inspect(db.get_bind()).has_table(recovery_jobs.name):
-        raise CustomerCSVBlocked("Recoverable CSV schema unavailable", 503)
+    inspector = sa.inspect(db.get_bind())
+    if not inspector.has_table(recovery_jobs.name) or not inspector.has_table(cleanup_events.name):
+        raise CustomerCSVBlocked("Recoverable CSV and cleanup audit schema unavailable", 503)
     if os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", "").lower() != "s3_private":
         raise CustomerCSVBlocked("Private object storage required", 503)
 
