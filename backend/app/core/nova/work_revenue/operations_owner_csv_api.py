@@ -488,6 +488,30 @@ async def create_recovery_preview_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+@router.post("/recovery-preview/cleanup-retry")
+async def recovery_preview_cleanup_retry(
+    request: Request,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-controlled staging-only cleanup review; requires explicit retry approval."""
+    try:
+        recovery_csv.require_runtime(db)
+        body = await request.json()
+        if not isinstance(body, dict) or type(body.get("dry_run")) is not bool:
+            raise HTTPException(400, "Explicit boolean dry_run required")
+        dry_run = body["dry_run"]
+        approval = body.get("approval")
+        if not dry_run and approval != "owner-approved-staging-cleanup":
+            raise HTTPException(403, "Explicit owner cleanup approval required")
+        return recovery_csv.retry_private_cleanup(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            dry_run=dry_run, approval=approval, limit=5,
+        )
+    except recovery_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/recovery-preview/cleanup-debt")
 def recovery_preview_cleanup_debt(
     owner: UserContext = Depends(require_work_revenue_owner),
