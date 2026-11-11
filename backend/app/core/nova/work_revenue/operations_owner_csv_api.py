@@ -405,3 +405,130 @@ def eligible_csv_tasks(
             break
     return {"tasks": eligible, "count": len(eligible), "owner_only": True,
             "execution_authorized": False, "handoff_created": False}
+
+
+# Bookkeeping endpoints: separate from CSV cleanup. STRICT default-OFF and
+# fail-closed unless the server independently verifies current signed contract,
+# client AI-use approval, owner scope and a structured eligible Work task.
+# Header/checkbox assertions are NOT substitutes for those records.
+from . import bookkeeping_durable_jobs as bk_jobs
+from .bookkeeping_scope import resolve_bookkeeping_assignment, ConsentNotVerified
+
+
+def _accounting_unavailable(exc: Exception):
+    if isinstance(exc, ConsentNotVerified):
+        raise HTTPException(403, "Verified client consent and accounting task scope required") from exc
+    if isinstance(exc, bk_jobs.base.CustomerCSVBlocked):
+        raise HTTPException(exc.code, str(exc)) from exc
+    raise exc
+
+
+def _require_accounting_job_scope(
+    db: Session, *, owner: UserContext, job_id: str,
+) -> dict:
+    # Always revalidate consent on each read, review or download. Revoke
+    # permission -> block all access; no previously issued download token.
+    info = bk_jobs.bookkeeping_status(
+        db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+    )
+    resolve_bookkeeping_assignment(
+        db, owner=owner, engagement_id=info["engagement_id"],
+        task_id=info["task_id"], work_type=info["work_type"],
+    )
+    return info
+
+
+@router.post(
+    "/durable/bookkeeping/engagements/{engagement_id}/tasks/{task_id}/{work_type}/jobs",
+    status_code=202,
+)
+async def create_bookkeeping_review_job(
+    engagement_id: str, task_id: str, work_type: str, request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    as_of: str | None = Header(default=None, alias="X-Nova-As-Of"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        bk_jobs.require_bookkeeping_runtime(db)
+        # Strict single-source CSV transport. Bank-match secondary file needs
+        # separately verified private storage and explicit contract scope.
+        if not isinstance(filename, str) or not filename.lower().endswith(".csv") or len(filename) > 180 or any(
+            ord(c) < 32 or ord(c) == 127 or c in "/\\"
+            for c in filename
+        ):
+            raise HTTPException(400, "Safe CSV filename required")
+        mime = (request.headers.get("content-type") or "").split(";")[0].lower().strip()
+        if mime not in CSV_MIME_TYPES:
+            raise HTTPException(415, "CSV input required")
+        assignment = resolve_bookkeeping_assignment(
+            db, owner=owner, engagement_id=engagement_id, task_id=task_id, work_type=work_type,
+        )
+        content = bytearray()
+        async for part in request.stream():
+            if len(content) + len(part) > LIMIT_BYTES:
+                raise HTTPException(413, "Bookkeeping CSV exceeds 1 MB")
+            content.extend(part)
+        result = bk_jobs.submit_bookkeeping_review(
+            db, assignment=assignment, request_id=request_key or "",
+            primary=bytes(content), as_of=as_of,
+        )
+        return {**result, "delivery_allowed": False}
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/jobs/{job_id}")
+def bookkeeping_review_job_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        return _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.post("/durable/bookkeeping/jobs/{job_id}/review")
+async def bookkeeping_owner_review(
+    job_id: str, request: Request,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+        payload = await request.json()
+        if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
+            raise HTTPException(400, "Explicit Boolean review decision required")
+        return bk_jobs.review_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id, approve=payload["approve"],
+        )
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/jobs/{job_id}/download")
+def bookkeeping_private_review_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+        output = bk_jobs.download_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id,
+        )
+        return Response(content=output, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-bookkeeping-review.csv"',
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+            "X-Nova-Owner-Review-Required": "true",
+        })
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
