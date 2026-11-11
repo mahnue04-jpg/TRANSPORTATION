@@ -470,6 +470,13 @@ async def create_bookkeeping_review_job(
             if len(content) + len(part) > LIMIT_BYTES:
                 raise HTTPException(413, "Bookkeeping CSV exceeds 1 MB")
             content.extend(part)
+        # Uploads can be slow: consent may expire or be revoked while the
+        # request body is streamed. Recheck trusted server scope immediately
+        # before creating any job or private artifact.
+        assignment = resolve_bookkeeping_assignment(
+            db, owner=owner, engagement_id=engagement_id,
+            task_id=task_id, work_type=work_type,
+        )
         result = bk_jobs.submit_bookkeeping_review(
             db, assignment=assignment, request_id=request_key or "",
             primary=bytes(content), as_of=as_of,
