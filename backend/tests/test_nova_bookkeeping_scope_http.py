@@ -24,6 +24,8 @@ def task(**kwargs):
 
 def test_structured_task_fails_closed_on_labels():
     assert scope._trusted_eligible_task(task(), set(), "receivables_aging")
+    assert scope._trusted_eligible_task(task(bookkeeping_work_type=None), set(), "receivables_aging", verified_contract_scope=True)
+    assert not scope._trusted_eligible_task(task(bookkeeping_work_type="payables_aging"), set(), "receivables_aging", verified_contract_scope=True)
     assert not scope._trusted_eligible_task(
         task(bookkeeping_work_type=None, title="Receivables aging CSV workpaper"),
         set(), "receivables_aging",
