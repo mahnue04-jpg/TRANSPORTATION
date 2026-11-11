@@ -13,6 +13,7 @@ import os
 import secrets
 from datetime import timedelta
 from io import BytesIO
+from typing import Callable
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -66,6 +67,7 @@ def submit_bookkeeping_review(
     db: Session, *, assignment: BookkeepingAssignment,
     request_id: str, primary: bytes, secondary: bytes | None = None,
     as_of: str | None = None,
+    final_authorization: Callable[[Session], None] | None = None,
 ) -> dict:
     """Persist private review CSV under an idempotent, tenant/assignment-bound job.
 
@@ -140,6 +142,12 @@ def submit_bookkeeping_review(
         if saved[2] != len(output):
             raise BookkeepingJobBlocked("Private storage size mismatch", 503)
         digest = hashlib.sha256(output).hexdigest()
+        # HTTP callers provide a trusted scope recheck. It locks the consent
+        # row in the same transaction as the final job status update so that
+        # an intervening client revocation cannot race approval of the result.
+        # No user-supplied callback, contract bool or browser flag is accepted.
+        if final_authorization is not None:
+            final_authorization(db)
         changed = db.execute(sa.update(base.jobs).where(
             base.jobs.c.id == job_id,
             base.jobs.c.organization_id == assignment.organization_id,
