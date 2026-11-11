@@ -190,12 +190,19 @@ def review_bookkeeping(db: Session, *, org: str, owner: str, job_id: str, approv
     found = _row(db, org=org, owner=owner, job_id=job_id, lock=True)
     if found["status"] != "AWAITING_REVIEW":
         raise BookkeepingJobBlocked("Job is not awaiting owner review", 409)
+    # Approval cannot bless a missing or modified financial workpaper. A
+    # rejection does not need to retrieve confidential content.
+    if approve:
+        download_bookkeeping(db, org=org, owner=owner, job_id=job_id)
     status = "APPROVED_FOR_DOWNLOAD" if approve else "REJECTED"
-    db.execute(sa.update(base.jobs).where(
+    changed = db.execute(sa.update(base.jobs).where(
         base.jobs.c.id == job_id, base.jobs.c.organization_id == org,
         base.jobs.c.owner_user_id == owner,
         base.jobs.c.status == "AWAITING_REVIEW",
     ).values(status=status, reviewer_user_id=owner, updated_at=base._utc()))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise BookkeepingJobBlocked("Job changed during review", 409)
     db.commit()
     return {"job_id": job_id, "status": status, "delivered": False}
 
