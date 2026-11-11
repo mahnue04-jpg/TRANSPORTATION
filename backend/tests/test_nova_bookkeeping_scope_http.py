@@ -4,6 +4,11 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from app.core.nova.router import require_nova_access
+from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
+from app.db.session import get_db
 
 from app.core.nova.work_revenue import bookkeeping_scope as scope
 from app.core.nova.work_revenue import bookkeeping_durable_jobs as finance
@@ -96,3 +101,26 @@ def test_legacy_csv_task_label_does_not_authorize_bookkeeping():
     # Ordinary CSV cleanup authorization must not authorize finance work.
     task_value = task(bookkeeping_work_type=None, title="CSV cleanup")
     assert not scope._trusted_eligible_task(task_value, set(), "receivables_aging")
+
+
+def test_real_http_endpoint_defaults_off_and_refuses_unverified_consent(monkeypatch):
+    app = FastAPI()
+    app.include_router(api.router)
+    user = SimpleNamespace(organization_id="org-a", user_id="owner-a")
+    engine = sa.create_engine("sqlite:///:memory:")
+    with Session(engine) as db:
+        app.dependency_overrides[require_nova_access] = lambda: user
+        app.dependency_overrides[require_work_revenue_owner] = lambda: user
+        app.dependency_overrides[get_db] = lambda: db
+        url = "/operations/durable/bookkeeping/engagements/eng-a/tasks/task-a/receivables_aging/jobs"
+        with TestClient(app) as client:
+            payload = b"invoice_id,customer,invoice_date,due_date,amount,paid\\nA1,Client,2026-11-01,2026-11-10,20,0\\n"
+            headers = {"Content-Type": "text/csv", "Idempotency-Key": "test-a",
+                       "X-Nova-File-Name": "invoices.csv", "X-Nova-As-Of": "2026-11-11"}
+            monkeypatch.delenv("NOVA_BOOKKEEPING_DURABLE_ENABLED", raising=False)
+            disabled = client.post(url, content=payload, headers=headers)
+            assert disabled.status_code == 503
+            monkeypatch.setattr(api.bk_jobs, "require_bookkeeping_runtime", lambda session: None)
+            missing = client.post(url, content=payload, headers=headers)
+            assert missing.status_code == 403
+    engine.dispose()
