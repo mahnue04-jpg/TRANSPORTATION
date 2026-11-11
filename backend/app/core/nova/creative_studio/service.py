@@ -1139,6 +1139,16 @@ class CreativeStudioService(ShortDramaMixin):
                     "A shared database is required before a paid provider post.",
                     http_status=503,
                 )
+            # Check bucket accessibility BEFORE marking a SQL claim
+            # POST_ATTEMPTED or submitting a potentially billable task.
+            try:
+                private_store.verify_bucket_ready()
+            except Exception as exc:
+                raise CreativeStudioError(
+                    "PRIVATE_STORAGE_UNAVAILABLE",
+                    "Protected shot storage is unavailable. No provider request was sent.",
+                    http_status=503,
+                ) from exc
             fresh = self.store.get_project(project_id, owner_id)
             previous = dict(fresh.metadata or {})
             claim = dict(previous.get("first_shot_paid_claim") or {})
