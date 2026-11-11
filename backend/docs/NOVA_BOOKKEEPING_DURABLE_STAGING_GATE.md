@@ -158,3 +158,11 @@ Require separately approved dedicated accounting staging PostgreSQL and private 
 - Added a two-session disposable PostgreSQL test where concurrent consent revocation waits until the authorization lock commits, then blocks subsequent processing. Also added a synthetic revocation-during-storage test and updated the test consent resolver to accept the locking interface.
 - Limitation: this ensures row-level serialization in tested PostgreSQL transactions; it does not replace actual signed consent verification, complete job audit/permission versioning, durable private storage deletion, or an approved isolated Render staging acceptance run.
 
+
+
+## In-process private S3 adapter verification (2026-11-11)
+
+- Added synthetic S3-compatible tests using Moto + boto3 with the production `S3PrivateDocumentStorage` adapter (not merely an in-memory replacement for its interface).
+- Test requires S3 object `ServerSideEncryption=AES256`, private metadata, bucket public-access blocking, strict object retrieval, owner-review workpaper round-trip and deletion. No real cloud credentials or customer information are used.
+- Added failure-path test: consent is denied after private S3 write but before review finalization. It must mark the job FAILED and delete the newly created object.
+- Actual Render staging S3 credentials, bucket policy, encryption-at-rest enforcement, versioned deletes, retention and lifecycle remain UNVERIFIED. This new Moto test must not be presented as a real S3 deployment or client-readiness certification.
