@@ -7,6 +7,7 @@ Actual file-media bytes must be separately backed up before a database cutover.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,15 @@ def snapshot(source: Path, destination: Path):
     except BaseException:
         backup_path.unlink(missing_ok=True)
         raise
+
+
+def backup_digest(path: Path) -> str:
+    """Hash the verified SQLite snapshot for later off-disk restore comparisons."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def inventory(path: Path) -> dict:
@@ -131,6 +141,8 @@ def main() -> int:
                 file.unlink(missing_ok=True)
                 raise
             result["backup_integrity"] = "ok"
+            result["backup_sha256"] = backup_digest(file)
+            result["backup_bytes"] = file.stat().st_size
             result["backup_created"] = True
             # The backup location is deliberately not logged.
         print(json.dumps(result, sort_keys=True))
