@@ -394,3 +394,30 @@ def test_cleanup_retry_failed_delete_remains_unresolved(harness, monkeypatch):
     assert recovery.cleanup_debt_summary(
         db, org="org-a", owner="owner-a",
     )["unresolved_cleanup_failures"] == 1
+
+
+def test_cleanup_retry_never_deletes_another_tenants_referenced_object(harness):
+    db, store = harness
+    first = submit(db, key="cleanup-owner-a")["job_id"]
+    other = recovery.enqueue(
+        db, org="org-b", owner="owner-b", engagement_id="eng-b",
+        task_id="task-b", request_key="cleanup-owner-b",
+        raw=b"Name\nBea\n",
+    )["job_id"]
+    foreign_ref = db.execute(
+        sa.select(recovery.recovery_jobs.c.input_ref).where(
+            recovery.recovery_jobs.c.id == other,
+        )
+    ).scalar_one()
+    recovery.record_cleanup_failure(
+        db, org="org-a", owner="owner-a", job_id=first,
+        storage_ref=foreign_ref, failure_code="INPUT_DELETE_FAILED",
+    )
+    result = recovery.retry_private_cleanup(
+        db, org="org-a", owner="owner-a", dry_run=False,
+        approval="owner-approved-staging-cleanup",
+        now=datetime.now(timezone.utc) + timedelta(minutes=16),
+    )
+    assert result["protected_refs"] == 1
+    assert result["deleted"] == 0
+    assert foreign_ref in store.objects
