@@ -111,7 +111,10 @@ def run_once(session_factory, *, owner_email: str, limit: int = 5) -> dict:
         reconciliation = recovery.reconcile_stale_jobs(
             db, org=str(owner.organization_id), owner=str(owner.user_id),
         )
-        return {**result, "reconciled": reconciliation}
+        cleanup = recovery.cleanup_debt_summary(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+        )
+        return {**result, "reconciled": reconciliation, "cleanup_debt": cleanup}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,9 +139,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise CustomerCSVBlocked("Recovery worker configuration changed; restart required", 503)
             outcome = run_once(sessions, owner_email=owner_email)
             LOG.info(
-                "Recovery staging pass: attempted=%s reviewed=%s failed=%s skipped=%s",
+                "Recovery staging pass: attempted=%s reviewed=%s failed=%s skipped=%s cleanup_debt=%s",
                 outcome["attempted"], len(outcome["awaiting_review"]),
                 len(outcome["failed_attempts"]), len(outcome["skipped_claims"]),
+                outcome["cleanup_debt"]["unresolved_cleanup_failures"],
             )
             if args.once:
                 return 0
