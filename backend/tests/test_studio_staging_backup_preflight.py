@@ -196,3 +196,20 @@ def test_snapshot_does_not_modify_source_content(source, tmp_path):
     original = source.read_bytes()
     module.snapshot(source, tmp_path / "private_copy")
     assert source.read_bytes() == original
+
+
+def test_main_successful_backup_keeps_path_private(source, tmp_path, monkeypatch, capsys):
+    private = tmp_path / "private_backups"
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--source", str(source), "--backup", "--backup-directory", str(private)],
+    )
+    assert module.main() == 0
+    message = capsys.readouterr().out
+    result = __import__("json").loads(message)
+    assert result["backup_created"] is True
+    assert result["backup_integrity"] == "ok"
+    assert result["tables"]["platform_users"] == 1
+    assert str(private) not in message
+    assert len(list(private.glob("*.sqlite"))) == 1
