@@ -85,6 +85,8 @@ Do not confuse database asset references with physically retrievable MP4 files. 
 ## Protected storage and sign-in validation
 
 - Confirm private storage credentials, tenant/owner isolation and persisted original video objects independently. SQL asset records are **not** proof that MP4 bytes exist.
+- Before approving a billable five-second Kling request, require `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE=true` and a successful owner-scoped storage preflight. The first-shot worker now performs a read-only S3 `HeadBucket` check **before** marking a SQL claim `POST_ATTEMPTED` or calling the provider. An inaccessible bucket blocks the shot with `PRIVATE_STORAGE_UNAVAILABLE`.
+- A successful `HeadBucket` confirms only existence/read access, **not** upload permissions or playback. An operator must additionally verify an authorized, private test object upload, HEAD metadata, protected read, exact hash, and cleanup within the approved staging bucket before permitting paid generation; do not perform that test on production data.
 - Only after successful transfer, bind the staging application to the reviewed pooled DB endpoint plus private storage configuration. Review the exact deployed commit and deploy intentionally; automatic deployment is off for the validation service.
 - Sign in as an existing test owner (refresh tokens are intentionally excluded, so a new sign-in is expected). Confirm old project and imported asset metadata are present.
 - Verify **Play saved five-second shot** and **Download** with authenticated access to a real MP4, including playable audio/video and correct MIME/status.
