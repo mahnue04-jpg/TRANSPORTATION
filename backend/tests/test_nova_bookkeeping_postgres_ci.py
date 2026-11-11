@@ -224,3 +224,117 @@ def test_postgres_other_owner_and_wrong_work_type_blocked(pg):
                     db, owner=visitor, engagement_id="synthetic-engagement",
                     task_id="synthetic-task", work_type=kind,
                 )
+
+
+def test_postgres_http_lifecycle_uses_real_consent_db(pg):
+    """Real FastAPI route + real consent queries + disposable PostgreSQL.
+
+    The authenticated user is synthetic, the saved Work engagement is mocked
+    by pg fixture, and private storage is fake: never real client readiness.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.db.session import get_db
+
+    engine, store, owner = pg
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[require_work_revenue_owner] = lambda: owner
+
+    def postgres_db():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = postgres_db
+    prefix = "/operations/durable/bookkeeping"
+    route = prefix + "/engagements/synthetic-engagement/tasks/synthetic-task/receivables_aging/jobs"
+    headers = {
+        "Idempotency-Key": "pg-http-1", "X-Nova-File-Name": "synthetic.csv",
+        "X-Nova-As-Of": "2026-11-11", "Content-Type": "text/csv",
+    }
+    with TestClient(app) as client:
+        created = client.post(route, content=SOURCE, headers=headers)
+        assert created.status_code == 202, created.text
+        job_id = created.json()["job_id"]
+        assert created.json()["status"] == "AWAITING_REVIEW"
+        assert created.json()["delivered"] is False
+        assert store.writes == 1
+
+        repeated = client.post(route, content=SOURCE, headers=headers)
+        assert repeated.status_code == 202
+        assert repeated.json()["replayed"] is True
+        assert repeated.json()["job_id"] == job_id
+        assert store.writes == 1
+
+        status = client.get(f"{prefix}/jobs/{job_id}")
+        assert status.status_code == 200, status.text
+        original = client.get(f"{prefix}/jobs/{job_id}/download")
+        assert original.status_code == 200, original.text
+        assert b"75.00" in original.content
+        assert original.headers["cache-control"] == "private, no-store"
+        approval = client.post(f"{prefix}/jobs/{job_id}/review", json={"approve": True})
+        assert approval.status_code == 200, approval.text
+        assert approval.json()["delivered"] is False
+
+        # Change the same PostgreSQL consent row independently of the route.
+        with Session(engine) as db:
+            db.execute(sa.update(scope.consents).where(
+                scope.consents.c.authorization_id == "synthetic-consent-1",
+            ).values(status="REVOKED", revoked_at=datetime.now(timezone.utc)))
+            db.commit()
+        for method, suffix, kwargs in (
+            ("get", f"/jobs/{job_id}", {}),
+            ("get", f"/jobs/{job_id}/download", {}),
+            ("post", f"/jobs/{job_id}/review", {"json": {"approve": True}}),
+            ("post", f"/jobs/{job_id}/recover", {}),
+        ):
+            response = getattr(client, method)(prefix + suffix, **kwargs)
+            assert response.status_code == 403, (method, suffix, response.text)
+        denied_new = client.post(
+            route, content=SOURCE,
+            headers={**headers, "Idempotency-Key": "pg-http-2"},
+        )
+        assert denied_new.status_code == 403, denied_new.text
+        assert store.writes == 1
+
+
+def test_postgres_consent_evidence_and_task_disagreement_fail_closed(pg, monkeypatch):
+    engine, _, owner = pg
+    with Session(engine) as db:
+        db.execute(sa.update(scope.consents).where(
+            scope.consents.c.authorization_id == "synthetic-consent-1",
+        ).values(client_ai_consent_ref_sha256="0" * 64))
+        db.commit()
+        with pytest.raises(scope.ConsentNotVerified, match="evidence"):
+            scope.resolve_bookkeeping_assignment(
+                db, owner=owner, engagement_id="synthetic-engagement",
+                task_id="synthetic-task", work_type="receivables_aging",
+            )
+    # Even fully formed consent evidence cannot authorize a task that
+    # explicitly declares a contradictory bookkeeping work type.
+    monkeypatch.setattr(service, "get_engagement", lambda db, engagement_id, **kw: {
+        "engagement_id": "synthetic-engagement",
+        "organization_id": owner.organization_id,
+        "owner_user_id": owner.user_id,
+        "status": "ACTIVE",
+        "blockers": "",
+        "tasks": [{
+            "task_id": "synthetic-task", "bookkeeping_work_type": "payables_aging",
+            "classification": "NOVA", "responsible_party": "NOVA",
+            "review_required": True, "status": "READY",
+        }],
+    })
+    with Session(engine) as db:
+        db.execute(sa.update(scope.consents).where(
+            scope.consents.c.authorization_id == "synthetic-consent-1",
+        ).values(client_ai_consent_ref_sha256="a" * 64))
+        db.commit()
+        with pytest.raises(scope.ConsentNotVerified, match="eligible"):
+            scope.resolve_bookkeeping_assignment(
+                db, owner=owner, engagement_id="synthetic-engagement",
+                task_id="synthetic-task", work_type="receivables_aging",
+            )
