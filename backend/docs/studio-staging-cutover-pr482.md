@@ -11,6 +11,37 @@
 - PR #482 SHA `1b891ab8954ae9b02870a7fd6fd9797db89513a5`: SQLite-to-PostgreSQL transfer and backend diagnostic workflows passed.
 - **No staging transfer or production change has been performed.**
 
+## Latest confirmed staging source and read-only preflight (2026-11-10)
+
+- Live GET `/api/health/detail` reports `db.backend=sqlite`, `db.ok=true`, and `db.db_path=/data/chat.db`. Its startup environment validator reports no missing required settings.
+- The separate legacy `app.core.runtime_config` validator requires `DATABASE_URL` and logged critical warnings despite the healthy active SQLite service. **Do not switch database endpoints just to quiet that warning.**
+- Render service `nova-studio-validation-350` reports a 10 GB mounted `/data` disk. Its currently live deployed commit is `ba7c5482a945255c46cb5195433a4d9047a46af0`, not this PR branch.
+- A standalone inventory/backup utility is provided at `backend/scripts/studio_staging_backup_preflight.py`. It runs in a trusted shell with access to the actual mounted disk; the Render management connector does not grant shell or file access.
+
+### Operator procedure from authorized staging shell
+
+Review and run against the actual staging service, **not** a disposable CI checkout or a production instance:
+
+```sh
+APP_ENV=staging python backend/scripts/studio_staging_backup_preflight.py \
+  --source /data/chat.db
+```
+
+The default mode is read-only, returns Studio/account table counts, active job count, and counts of local-present, local-missing, empty, and remote asset references. It does **not** print owner IDs, account content, file paths, or credentials.
+
+After confirming `active_jobs=0`, selecting an owner-only private backup directory outside public/static content, and obtaining approval for the staging backup:
+
+```sh
+APP_ENV=staging python backend/scripts/studio_staging_backup_preflight.py \
+  --source /data/chat.db \
+  --backup-directory /data/private-studio-backups \
+  --backup
+```
+
+This creates an integrity-checked SQLite snapshot with owner-only file permissions; it does **not** export or preserve media bytes. An on-disk backup on the same Render disk is **not sufficient disaster recovery**: separately copy the verified database snapshot and private media to authorized external storage, confirm byte/hash integrity and test restoration in isolation. A restart or disk loss must not destroy the only backup. Never log or upload personal customer records to CI.
+
+Do not confuse database asset references with physically retrievable MP4 files. For remote references, confirm authorized access to the bucket and persisted bytes in a separate owner-scoped procedure. For local file references, enumerate and copy the real referenced bytes through a trusted service shell; the inventory output intentionally contains counts only. Keep provider billing off.
+
 ## Access and change gate
 
 1. Identify the existing SQLite database file on the actual Render staging `/data` disk using an authenticated administration channel. The Render management connector can inspect service metadata, but does **not** provide disk-level file access. Do not infer the file path.
