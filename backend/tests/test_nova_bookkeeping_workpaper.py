@@ -43,8 +43,8 @@ class BookkeepingWorkpaperTests(unittest.TestCase):
         self.assertEqual(report["issue_counts"]["bank_match_missing_or_ambiguous"], 2)
 
     def test_duplicate_transactions_never_claim_a_unique_bank_match(self):
-        transactions = HEAD + "2026-11-01,Software subscription,-25.00,A1\\n" * 2
-        bank = HEAD + "2026-11-01,Bank charge,-25.00,A1\\n"
+        transactions = HEAD + "2026-11-01,Software subscription,-25.00,A1\n" * 2
+        bank = HEAD + "2026-11-01,Bank charge,-25.00,A1\n"
         report = build_bookkeeping_workpaper(transactions, bank)
         self.assertEqual(report["issue_counts"]["bank_match_missing_or_ambiguous"], 2)
         self.assertEqual(report["matched_bank_row_count"], 0)
