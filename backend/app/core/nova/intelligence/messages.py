@@ -1,0 +1,12 @@
+"""Fixed copy for the synthetic media slice. No model claims."""
+
+SPEAKERS_UNKNOWN = "Speakers are unknown. This slice does not identify a person."
+SUMMARY_IS_FIXTURE = "The summary is fixture text, not a model claim."
+DIARIZATION_NOT_PERFORMED = "Speaker diarization was not performed."
+NOTHING_INVENTED = "No observations were produced. Nothing was invented."
+NOT_PRODUCTION = "This is not a production analysis."
+SOURCE_REJECTED = "Source is not allowed"
+MEDIA_TYPE_REJECTED = "Media type is not allowed"
+SIZE_REJECTED = "Declared size exceeds quota"
+NOT_FOUND = "Not found"
+TENANT_REQUIRED = "Tenant context required"
