@@ -1,10 +1,15 @@
 """No real customer records used in bookkeeping workpaper tests."""
 import unittest
 
-from app.core.nova.work_revenue.bookkeeping_workpaper import (
-    BookkeepingInputError,
-    build_bookkeeping_workpaper,
-)
+import importlib.util
+from pathlib import Path
+
+_MODULE = Path(__file__).resolve().parents[1] / "app/core/nova/work_revenue/bookkeeping_workpaper.py"
+_SPEC = importlib.util.spec_from_file_location("nova_bookkeeping_workpaper_isolated", _MODULE)
+_MODULE_OBJ = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE_OBJ)
+BookkeepingInputError = _MODULE_OBJ.BookkeepingInputError
+build_bookkeeping_workpaper = _MODULE_OBJ.build_bookkeeping_workpaper
 
 HEAD = "date,description,amount,reference\n"
 
