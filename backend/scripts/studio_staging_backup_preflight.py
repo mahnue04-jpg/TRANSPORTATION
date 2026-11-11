@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import sqlite3
 import stat
 
@@ -38,6 +39,12 @@ def snapshot(source: Path, destination: Path):
     destination.mkdir(parents=True, mode=0o700, exist_ok=True)
     if stat.S_IMODE(destination.stat().st_mode) & 0o077:
         raise PreflightBlocked("BACKUP_DIRECTORY_NOT_PRIVATE")
+    # Protect the running staging disk from a backup that fills the volume.
+    # SQLite backup() captures committed WAL changes as well as the main file.
+    # Allow additional headroom for WAL growth and concurrent application writes.
+    minimum_free = max(source.stat().st_size * 2, 64 * 1024 * 1024)
+    if shutil.disk_usage(destination).free < minimum_free:
+        raise PreflightBlocked("INSUFFICIENT_DISK_SPACE_FOR_BACKUP")
     backup_path = destination / ("studio_staging_" + secrets.token_hex(12) + ".sqlite")
     fd = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
