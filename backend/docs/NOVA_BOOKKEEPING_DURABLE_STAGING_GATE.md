@@ -243,3 +243,27 @@ inventory. No Render configuration or customer records were used.
 - The queue remains gated by default-off bookkeeping processing and has
   not been enabled in Render or for customer financial data. A production
   operator UI has not been delivered.
+
+
+## Work & Revenue bookkeeping owner console — November 11, 2026
+
+- Extended existing `/nova/work` page (backend/static/nova-work/index.html)
+  with a bookkeeping console and new `bookkeeping.js` controller. The panel
+  supports owner queue refresh, current status, guarded owner review/rejection,
+  stale-job failure recovery, private review download, and new draft submission.
+  It makes no payment, journal entry, account posting, client delivery or contract acceptance.
+- Added owner-only `/operations/durable/bookkeeping/eligible-tasks` listing,
+  based on exact active, nonrevoked, separately verified consent records and
+  current saved engagement/task authorization. The UI selects an exact
+  verified assignment rather than trusting typed engagement/task identifiers.
+  Task selection does not substitute for server checks during submission.
+- The console uses the existing signed-in session header provider, same-origin
+  requests, no-store caching, bounded 1-MB CSV input, a browser-generated
+  idempotency key, and only JSON/textContent assignment for server messages.
+- Static Node tests verify that the console markup, script, routes and controls
+  match. Synthetic HTTP tests verify missing consent fails closed; disposable
+  PostgreSQL tests verify eligible-task selection hides cross-owner and revoked
+  permission records.
+- The feature is **development only** and disabled by the server's existing
+  feature flags. No customer-facing browser has been run in isolated Render
+  staging and no actual signed customer consent was provisioned.
