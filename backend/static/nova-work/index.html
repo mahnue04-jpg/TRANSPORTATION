@@ -95,6 +95,57 @@
       </div>
     </section>
 
+    <section class="command-card" id="nova-bookkeeping-console" aria-label="Owner bookkeeping workpaper review">
+      <h2>Nova Bookkeeping — Owner Review Console</h2>
+      <p class="hint">Development feature, disabled until independently approved staging and verified client permissions. Supervised transaction, receivables, and payables workpapers only. No bookkeeping license, prior client experience, posting, payments, or customer delivery is represented by this console.</p>
+      <div class="command-actions">
+        <button type="button" class="secondary" id="bookkeeping-load-queue">Load authorized accounting review jobs</button>
+      </div>
+      <p id="bookkeeping-message" class="hint" aria-live="polite">Sign in as the Work &amp; Revenue owner. This feature remains off until verified staging activation.</p>
+      <label for="bookkeeping-job-select">Saved bookkeeping job
+        <select id="bookkeeping-job-select"><option value="">Load your authorized review queue</option></select>
+      </label>
+      <p id="bookkeeping-next-action" class="hint">No saved accounting job selected.</p>
+      <div class="command-actions">
+        <button type="button" class="secondary" id="bookkeeping-status" disabled>Check status</button>
+        <button type="button" class="secondary" id="bookkeeping-download" disabled>Download private review</button>
+        <button type="button" class="secondary" id="bookkeeping-approve" disabled>Approve for owner download</button>
+        <button type="button" class="secondary" id="bookkeeping-reject" disabled>Reject workpaper</button>
+        <button type="button" class="secondary" id="bookkeeping-recover" disabled>Mark stale processing job failed</button>
+      </div>
+      <details>
+        <summary>Prepare a new authorized bookkeeping workpaper</summary>
+        <p class="hint">Use only an existing unblocked Work &amp; Revenue assignment and client-signed, independently verified consent permitting AI processing. The server verifies scope; entering identifiers or checking a box cannot grant permission.</p>
+        <div class="command-actions"><button type="button" id="bookkeeping-load-tasks" class="secondary">Load my authorized bookkeeping assignments</button></div>
+        <label for="bookkeeping-eligible-tasks">Choose verified saved assignment
+          <select id="bookkeeping-eligible-tasks"><option value="">Load authorized tasks first</option></select>
+        </label>
+        <form id="bookkeeping-submit-form">
+          <label for="bookkeeping-engagement">Saved engagement ID (selected above)
+            <input id="bookkeeping-engagement" type="text" maxlength="120" autocomplete="off" readonly required />
+          </label>
+          <label for="bookkeeping-task">Saved task ID (selected above)
+            <input id="bookkeeping-task" type="text" maxlength="120" autocomplete="off" readonly required />
+          </label>
+          <label for="bookkeeping-kind">Contract-authorized work type
+            <select id="bookkeeping-kind">
+              <option value="transaction_workpaper">Transaction review workpaper</option>
+              <option value="receivables_aging">Accounts receivable aging</option>
+              <option value="payables_aging">Accounts payable aging</option>
+            </select>
+          </label>
+          <label for="bookkeeping-as-of">As-of date (required for payables/receivables)
+            <input id="bookkeeping-as-of" type="date" />
+          </label>
+          <label for="bookkeeping-file">Invented or expressly authorized CSV, at most 1 MB
+            <input id="bookkeeping-file" type="file" accept=".csv,text/csv" required />
+          </label>
+          <button type="submit" id="bookkeeping-submit-button">Prepare private draft for my review</button>
+        </form>
+      </details>
+      <p class="hint">This console never sends work to a client, accepts a contract, posts journal entries, executes payments, or confirms revenue. Approval means owner-download authorization only.</p>
+    </section>
+
     <section class="command-card" aria-label="Creative image generation">
       <h2>Nova Creative Image Generator</h2>
       <p class="hint">Work &amp; Revenue uses the same owner-controlled Nova Creative Studio image engine. Generate branded proposal graphics, social creatives, client-support visuals, and other supported work assets without duplicating providers or credentials.</p>
@@ -441,5 +492,6 @@
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-work/work.js"></script>
   <script src="/static/nova-work/operations-csv.js"></script>
+  <script src="/static/nova-work/bookkeeping.js"></script>
 </body>
 </html>

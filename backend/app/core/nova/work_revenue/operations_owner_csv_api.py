@@ -405,3 +405,250 @@ def eligible_csv_tasks(
             break
     return {"tasks": eligible, "count": len(eligible), "owner_only": True,
             "execution_authorized": False, "handoff_created": False}
+
+
+# Bookkeeping endpoints: separate from CSV cleanup. STRICT default-OFF and
+# fail-closed unless the server independently verifies current signed contract,
+# client AI-use approval, owner scope and a structured eligible Work task.
+# Header/checkbox assertions are NOT substitutes for those records.
+from . import bookkeeping_durable_jobs as bk_jobs
+from .bookkeeping_scope import resolve_bookkeeping_assignment, ConsentNotVerified
+
+
+def _accounting_unavailable(exc: Exception):
+    if isinstance(exc, ConsentNotVerified):
+        raise HTTPException(403, "Verified client consent and accounting task scope required") from exc
+    if isinstance(exc, bk_jobs.base.CustomerCSVBlocked):
+        raise HTTPException(exc.code, str(exc)) from exc
+    raise exc
+
+
+def _require_accounting_job_scope(
+    db: Session, *, owner: UserContext, job_id: str,
+    lock_consent: bool = False,
+) -> dict:
+    # Always revalidate consent on each read, review or download. Revoke
+    # permission -> block all access; no previously issued download token.
+    info = bk_jobs.bookkeeping_status(
+        db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+    )
+    resolve_bookkeeping_assignment(
+        db, owner=owner, engagement_id=info["engagement_id"],
+        task_id=info["task_id"], work_type=info["work_type"],
+        lock_consent=lock_consent,
+    )
+    return info
+
+
+@router.post(
+    "/durable/bookkeeping/engagements/{engagement_id}/tasks/{task_id}/{work_type}/jobs",
+    status_code=202,
+)
+async def create_bookkeeping_review_job(
+    engagement_id: str, task_id: str, work_type: str, request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    as_of: str | None = Header(default=None, alias="X-Nova-As-Of"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        bk_jobs.require_bookkeeping_runtime(db)
+        # Strict single-source CSV transport. Bank-match secondary file needs
+        # separately verified private storage and explicit contract scope.
+        if not isinstance(filename, str) or not filename.lower().endswith(".csv") or len(filename) > 180 or any(
+            ord(c) < 32 or ord(c) == 127 or c in "/\\"
+            for c in filename
+        ):
+            raise HTTPException(400, "Safe CSV filename required")
+        mime = (request.headers.get("content-type") or "").split(";")[0].lower().strip()
+        if mime not in CSV_MIME_TYPES:
+            raise HTTPException(415, "CSV input required")
+        assignment = resolve_bookkeeping_assignment(
+            db, owner=owner, engagement_id=engagement_id, task_id=task_id, work_type=work_type,
+        )
+        content = bytearray()
+        async for part in request.stream():
+            if len(content) + len(part) > LIMIT_BYTES:
+                raise HTTPException(413, "Bookkeeping CSV exceeds 1 MB")
+            content.extend(part)
+        # Uploads can be slow: consent may expire or be revoked while the
+        # request body is streamed. Recheck trusted server scope immediately
+        # before creating any job or private artifact.
+        assignment = resolve_bookkeeping_assignment(
+            db, owner=owner, engagement_id=engagement_id,
+            task_id=task_id, work_type=work_type,
+        )
+        def final_authorization(session: Session) -> None:
+            resolve_bookkeeping_assignment(
+                session, owner=owner, engagement_id=engagement_id,
+                task_id=task_id, work_type=work_type, lock_consent=True,
+            )
+
+        result = bk_jobs.submit_bookkeeping_review(
+            db, assignment=assignment, request_id=request_key or "",
+            primary=bytes(content), as_of=as_of,
+            final_authorization=final_authorization,
+        )
+        return {**result, "delivery_allowed": False}
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/jobs/{job_id}")
+def bookkeeping_review_job_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        return _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.post("/durable/bookkeeping/jobs/{job_id}/review")
+async def bookkeeping_owner_review(
+    job_id: str, request: Request,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
+            raise HTTPException(400, "Explicit Boolean review decision required")
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id, lock_consent=True)
+        return bk_jobs.review_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id, approve=payload["approve"],
+        )
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/jobs/{job_id}/download")
+def bookkeeping_private_review_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    try:
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id, lock_consent=True)
+        output = bk_jobs.download_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id,
+        )
+        return Response(content=output, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-bookkeeping-review.csv"',
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+            "X-Nova-Owner-Review-Required": "true",
+        })
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.post("/durable/bookkeeping/jobs/{job_id}/recover")
+def bookkeeping_owner_recover_stale_job(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit owner recovery only; no reprocessing, payment or client send."""
+    try:
+        _require_accounting_job_scope(db, owner=owner, job_id=job_id)
+        return bk_jobs.recover_stale_bookkeeping(
+            db, org=str(owner.organization_id), owner=str(owner.user_id),
+            job_id=job_id,
+        )
+    except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/review-queue")
+def bookkeeping_owner_review_queue(
+    limit: int = 25,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """List only permitted owner jobs, without any private artifact metadata.
+
+    A historical job is not proof its consent is current. No unverified job
+    may appear in the active owner review queue.
+    """
+    try:
+        entries = bk_jobs.list_owner_bookkeeping_reviews(
+            db, org=str(owner.organization_id),
+            owner=str(owner.user_id), limit=limit,
+        )
+        allowed = []
+        for entry in entries:
+            try:
+                resolve_bookkeeping_assignment(
+                    db, owner=owner, engagement_id=entry["engagement_id"],
+                    task_id=entry["task_id"], work_type=entry["work_type"],
+                )
+            except ConsentNotVerified:
+                continue
+            allowed.append(entry)
+        return {
+            "jobs": allowed, "count": len(allowed),
+            "review_only": True, "customer_delivery_enabled": False,
+            "historical_job_access_authorized": False,
+        }
+    except bk_jobs.base.CustomerCSVBlocked as exc:
+        _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/eligible-tasks")
+def bookkeeping_owner_eligible_tasks(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Present only exact current, independently verified saved assignments.
+
+    The listing is not itself consent, does not create jobs, and contains no
+    documents, source hashes, invoice figures, or customer file metadata.
+    """
+    try:
+        bk_jobs.require_bookkeeping_runtime(db)
+        from .bookkeeping_scope import consents
+        import sqlalchemy as sa
+        org = str(getattr(owner, "organization_id", "") or "")
+        user_id = str(getattr(owner, "user_id", "") or "")
+        if not org or not user_id or org.lower() == "global":
+            raise HTTPException(403, "Specific owner organization required")
+        if db.get_bind().dialect.name != "postgresql" or not sa.inspect(db.get_bind()).has_table(consents.name):
+            raise HTTPException(503, "Verified bookkeeping consent schema unavailable")
+        candidates = db.execute(sa.select(
+            consents.c.engagement_id, consents.c.task_id, consents.c.work_type,
+        ).where(
+            consents.c.organization_id == org,
+            consents.c.owner_user_id == user_id,
+            consents.c.status == "APPROVED",
+            consents.c.revoked_at.is_(None),
+        ).order_by(consents.c.engagement_id, consents.c.task_id).limit(101)).mappings().all()
+        if len(candidates) > 100:
+            raise HTTPException(409, "Too many authorized assignments; narrow review scope")
+        allowed = []
+        for entry in candidates:
+            try:
+                resolve_bookkeeping_assignment(
+                    db, owner=owner, engagement_id=entry["engagement_id"],
+                    task_id=entry["task_id"], work_type=entry["work_type"],
+                )
+            except ConsentNotVerified:
+                continue
+            allowed.append({
+                "engagement_id": entry["engagement_id"],
+                "task_id": entry["task_id"], "work_type": entry["work_type"],
+                "review_required": True, "execution_authorized": False,
+            })
+        return {
+            "tasks": allowed, "count": len(allowed), "owner_only": True,
+            "execution_authorized": False, "customer_delivery_enabled": False,
+        }
+    except bk_jobs.base.CustomerCSVBlocked as exc:
+        _accounting_unavailable(exc)

@@ -72,7 +72,7 @@ def _utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _owned(db: Session, job_id: str, org: str, owner: str, *, lock: bool = False):
+def _owned(db: Session, job_id: str, org: str, owner: str, *, lock: bool = False, bookkeeping: bool = False):
     stmt = sa.select(jobs).where(
         jobs.c.id == job_id,
         jobs.c.organization_id == org,
@@ -82,6 +82,9 @@ def _owned(db: Session, job_id: str, org: str, owner: str, *, lock: bool = False
         stmt = stmt.with_for_update()
     row = db.execute(stmt).mappings().first()
     if row is None:
+        raise CustomerCSVBlocked("CSV job not found", 404)
+    is_bookkeeping = str(row["request_key"]).startswith("bookkeeping:")
+    if is_bookkeeping != bookkeeping:
         raise CustomerCSVBlocked("CSV job not found", 404)
     return row
 
@@ -103,6 +106,8 @@ def submit_review_job(
         raise CustomerCSVBlocked("Valid Idempotency-Key required", 400)
     if not isinstance(raw, bytes) or not 0 < len(raw) <= 1_000_000:
         raise CustomerCSVBlocked("CSV must be between 1 byte and 1 MB", 413)
+    if request_key.startswith("bookkeeping:"):
+        raise CustomerCSVBlocked("Reserved accounting job namespace", 400)
     fingerprint = hashlib.sha256(raw).hexdigest()
     now = _utc()
     job_id = secrets.token_hex(16)
@@ -187,6 +192,8 @@ def recover_stale_job(
     require separate orphan-cleanup reconciliation before production release.
     """
     require_runtime(db)
+    # CSV recovery must not mutate bookkeeping jobs sharing this table.
+    _owned(db, job_id, org, owner)
     cutoff = _utc() - timedelta(minutes=15)
     try:
         changed = db.execute(sa.update(jobs).where(
