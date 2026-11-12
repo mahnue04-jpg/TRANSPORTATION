@@ -62,6 +62,19 @@ html, body {
 
 .disclaimer { color: var(--nova-muted); line-height: 1.45; }
 
+.funnel-stage {
+  margin-top: 6px;
+  font-weight: 700;
+}
+
+.funnel-stage[data-external-send="false"] {
+  color: var(--nova-accent);
+}
+
+.funnel-stage[data-external-send="true"] {
+  color: var(--nova-warn);
+}
+
 .language-support-label {
   display: inline-block;
   margin-top: 6px;
