@@ -1,5 +1,5 @@
 {
-  "label": "SYNTHETIC DEMO — not live customers",
+  "label": "SYNTHETIC DEMO \u2014 not live customers",
   "business": "Cedar Ridge Home Services (SYNTHETIC DEMO)",
   "chat": {
     "grounded": true,
@@ -8,7 +8,7 @@
   },
   "crm_edit": {
     "lead_state": "qualified",
-    "notes": "Synthetic demo — qualified after FAQ chat"
+    "notes": "Synthetic demo \u2014 qualified after FAQ chat"
   },
   "booking_idempotent_replay": true,
   "cancel_rebook": {
@@ -37,7 +37,7 @@
     "live_delivery": false,
     "pending_jobs": 0,
     "sent_mock": 3,
-    "ui_flag_strip": "live_delivery=false · mock_worker=on · retention_schedule=on · retention_mode=dry_run · retention_delete=off"
+    "ui_flag_strip": "live_delivery=false \u00b7 mock_worker=on \u00b7 retention_schedule=on \u00b7 retention_mode=dry_run \u00b7 retention_delete=off"
   },
   "retention_preview": {
     "dry_run": true,
@@ -112,6 +112,8 @@
     "disposable_postgres_suite": "6 passed",
     "focused_regressions": "69 passed",
     "staging_verified": false,
-    "ci_postgres_job": "added in nova-growth-agent.yml (verified after push)"
+    "ci_postgres_job": "passed on 5e78296f (growth-agent-tests + growth-agent-postgres-dispos)",
+    "ci_verified": true,
+    "ci_run_url": "https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824"
   }
 }

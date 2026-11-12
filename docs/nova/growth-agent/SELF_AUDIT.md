@@ -30,6 +30,7 @@ Verification pass date: **2026-11-12** (America/Chicago). Branch tip after sched
 | Stripe subscriptions | IMPLEMENTED (catalog) / BLOCKED live | `launched=False` |
 | Voice receptionist stretch | BLOCKED | `REAL_VOICE=False` |
 | Staging verification | BLOCKED | Executable proposal only — `STAGING_PROPOSAL.md` |
+| CI (Growth Agent sqlite + disposable Postgres) | **CI VERIFIED** | Run https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824 on `5e78296f` — growth-agent-tests + growth-agent-postgres-dispos pass |
 | Live/production verification | BLOCKED | Explicitly not authorized |
 | Ops Agent #475/#477 untouched | IMPLEMENTED (isolation) | Change map; regressions green |
 | Creative Studio #478 untouched | IMPLEMENTED (isolation) | Change map |
@@ -68,6 +69,6 @@ Evidence: `docs/nova/growth-agent/DEMO_EVIDENCE.json`, `docs/nova/growth-agent/s
 2. Live email/SMS/calendar/AI/Stripe remain hard-off.
 3. Mock worker, retention schedule, and retention delete remain **default-off** env flags (delete separately gated).
 4. Staging/live verification not performed (executable proposal drafted only).
-5. CI disposable Postgres job added in workflow; GitHub Actions run status is CI-verified only after PR checks execute on push.
+5. ~~CI disposable Postgres job pending~~ **CI verified** on tip `5e78296f` (growth-agent-tests + growth-agent-postgres-dispos passed). Staging still not verified.
 
 **Do not label this draft functionality live.**
