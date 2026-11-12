@@ -32,12 +32,13 @@ function harness() {
   let token = "Bearer synthetic-owner-a";
   const replies = [];
   const windowEvents = {};
+  let downloads = 0;
   const context = {
     document: {
       getElementById(id) { return nodes.get(id) || null; },
       addEventListener() {},
       body: {appendChild() {}},
-      createElement() { return {click() {}, remove() {}}; }
+      createElement() { return {click() {downloads++;}, remove() {}}; }
     },
     window: {
       AmiCorSession: {getAuthHeaders() {
@@ -58,7 +59,7 @@ function harness() {
     }
   };
   vm.runInNewContext(script, context, {filename: "bookkeeping.js"});
-  return {nodes, replies, windowEvents, setToken(value) {token = value;}};
+  return {nodes, replies, windowEvents, getDownloadCount() {return downloads;}, setToken(value) {token = value;}};
 }
 async function settle() {
   for (let n = 0; n < 12; n++) await Promise.resolve();
@@ -109,4 +110,32 @@ test("no bookkeeping fetch is sent without a signed-in owner", async () => {
   await settle();
   assert.equal(h.replies.length, 0);
   assert.match(h.nodes.get("bookkeeping-message").textContent, /sign-in required/i);
+});
+
+
+test("download response from previous owner never creates a local financial file", async () => {
+  const h = harness();
+  h.nodes.get("bookkeeping-load-queue").listeners.click();
+  h.replies[0].entry.resolve({
+    ok: true, json: async () => ({jobs: [{
+      job_id: "sensitive-owner-a-job", task_id: "task-a",
+      work_type: "payables_aging", status: "AWAITING_REVIEW"
+    }]})
+  });
+  await settle();
+  const chooser = h.nodes.get("bookkeeping-job-select");
+  chooser.value = "0";
+  chooser.listeners.change();
+  h.nodes.get("bookkeeping-download").listeners.click();
+  assert.equal(h.replies.length, 2);
+  const body = deferred();
+  h.replies[1].entry.resolve({ok: true, blob: () => body.promise});
+  await settle();
+  h.setToken("Bearer synthetic-owner-b");
+  h.windowEvents.focus();
+  body.resolve({size: 20});
+  await settle();
+  assert.equal(h.getDownloadCount(), 0);
+  assert.equal(h.nodes.get("bookkeeping-job-select").options.length, 1);
+  assert.match(h.nodes.get("bookkeeping-message").textContent, /session changed/i);
 });
