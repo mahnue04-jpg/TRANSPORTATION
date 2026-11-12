@@ -1642,7 +1642,19 @@
         previewStatus("Video ready: " + (isFinite(video.duration) ? Math.round(video.duration) + " seconds" : "duration unknown") + ". Press Play.");
       });
       video.addEventListener("error", function () {
-        previewStatus("Chrome could not play this saved MP4. Download still works; verify the browser supports its video codec.");
+        var mediaError = video.error;
+        var mediaCode = mediaError && mediaError.code;
+        var descriptions = {
+          1: "playback was aborted",
+          2: "a network error interrupted media loading",
+          3: "the browser failed to decode the video",
+          4: "the media format or source is unsupported"
+        };
+        var cause = descriptions[mediaCode] || "an unknown media error occurred";
+        previewStatus("Saved MP4 playback failed: " + cause + " (media code " +
+          (mediaCode || "none") + ", network state " + video.networkState +
+          ", ready state " + video.readyState +
+          "). Your original remains saved; Download AI video is still available.");
       });
       async function loadPrivatePreview(startPlayback) {
         if (loading) return;
