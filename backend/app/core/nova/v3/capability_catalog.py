@@ -221,6 +221,16 @@ _REGULATED_PATTERNS = (
     "security clearance",
 )
 
+# Financial duties outside the current tested bookkeeping-support workpaper.
+# These are capability limits, not statements that each duty legally requires a license.
+_UNSUPPORTED_FINANCIAL_PATTERNS = (
+    "full cycle bookkeeping", "full-cycle bookkeeping", "process payroll",
+    "payroll processing", "payroll tax", "tax return preparation",
+    "prepare tax returns", "general ledger posting", "post journal entries",
+    "complete bank reconciliation", "month-end close", "month end close",
+    "1099 filing", "prepare 1099",
+)
+
 # Single generic tokens that must never qualify a capability alone.
 _WEAK_KEYWORD_TOKENS = frozenset(
     {
@@ -325,6 +335,7 @@ def capability_fit(text: str, *, title: str | None = None) -> dict[str, Any]:
     blob = _normalize(text)
     human_only = [p for p in _HUMAN_ONLY_PATTERNS if p in blob]
     regulated = [p for p in _REGULATED_PATTERNS if p in blob]
+    unsupported_financial = [p for p in _UNSUPPORTED_FINANCIAL_PATTERNS if p in blob]
     matches = capability_matches(blob, title=title)
 
     if human_only:
@@ -342,6 +353,14 @@ def capability_fit(text: str, *, title: str | None = None) -> dict[str, Any]:
             "capabilities": matches,
             "blockers": ["regulated_or_credentialed_work"],
             "reason": "Work requires regulated or credentialed professional activity.",
+        }
+    if unsupported_financial and any(m["capability_id"] == "bookkeeping_support" for m in matches):
+        return {
+            "fit": False,
+            "score": 0,
+            "capabilities": matches,
+            "blockers": ["unsupported_financial_scope"],
+            "reason": "Financial duties exceed the currently verified Nova bookkeeping-support scope.",
         }
     if title and _SPECIALIST_TITLE_RE.search(_normalize(title)) and not matches:
         return {
