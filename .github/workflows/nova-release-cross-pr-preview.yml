@@ -86,6 +86,7 @@ jobs:
           PY
           echo "Combined draft-PR synthetic regressions passed in ephemeral CI tree; NOT real Render staging." >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize release gate
+        if: always()
         run: |
           python3 - <<'PY'
           import json, os
@@ -95,14 +96,15 @@ jobs:
           assert data["github_prs_merged"] is False
           assert data["render_deployed"] is False
           assert data["release_approved"] is False
-          assert data["integration_tests_passed"] is True
+          assert data["integration_tests_passed"] in (True, False)
           assert data["human_merge_resolution_reviewed"] is False
           lines = [
               "## Nova Work & Revenue / Operations cross-PR release preview",
               "- Integration only uses temporary local git commits",
               "- No GitHub pull requests merged; no Render deploy or migration",
               f"- Textual merge conflict-free: {data['merge_conflict_free']}",
-              "- Combined synthetic functional tests: PASS; real authenticated staging remains outstanding",
+              f"- Combined synthetic functional tests: {'PASS' if data['integration_tests_passed'] else 'BLOCKED - failed or incomplete'}",
+              "- Real authenticated staging remains outstanding",
           ]
           for step in data["steps"]:
               paths = ", ".join(step.get("conflicting_paths", [])[:15])
@@ -111,6 +113,7 @@ jobs:
           print("\n".join(lines))
           PY
       - name: Upload non-sensitive integration blockers
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nova-release-cross-pr-merge-evidence
