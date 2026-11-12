@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.auth import UserContext
 from app.core.nova.v3.autopilot_cycle import run_autopilot_cycle
 from app.db.models import User
+from app.core.nova.work_revenue.models import NovaWorkSchedulerJob
+from app.helpers import now, uuid4
 
 TZ = ZoneInfo("America/Chicago")
 FORBIDDEN_DATABASES = {"amicor-prod", "amicor-casting-staging-db"}
@@ -116,15 +118,64 @@ def run_staging_cycle(
                     organization_id=org,
                     organization_name=saved.organization_name,
                 )
-                result = cycle(
-                    db, organization_id=org, user=user,
-                    query_limit=3, per_query_limit=5, save_limit=8,
-                    prepare_limit=3, min_relevance_score=85,
+                # Persist an exact owner/day marker BEFORE network discovery.
+                # The existing database-enforced unique period index prevents
+                # another invocation from running after a worker restart.
+                # An interrupted run remains RUNNING for manual investigation
+                # instead of silently rerunning possibly committed work.
+                period_key = "AUTO_DISCOVERY:" + plan["local_period"]
+                existing = db.query(NovaWorkSchedulerJob).filter(
+                    NovaWorkSchedulerJob.organization_id == org,
+                    NovaWorkSchedulerJob.owner_user_id == owner_id,
+                    NovaWorkSchedulerJob.job_kind == "AUTO_DISCOVERY",
+                    NovaWorkSchedulerJob.period_key == period_key,
+                ).one_or_none()
+                if existing is not None:
+                    return {
+                        "status": "ALREADY_RECORDED",
+                        "period": plan["local_period"],
+                        "previous_status": existing.status,
+                        "external_submission": False,
+                        "production_release_authorized": False,
+                    }
+                marker = NovaWorkSchedulerJob(
+                    id=uuid4(), job_id="NWJ-" + uuid4().replace("-", "")[:20],
+                    organization_id=org, owner_user_id=owner_id,
+                    job_kind="AUTO_DISCOVERY", period_key=period_key,
+                    status="RUNNING", timezone="America/Chicago",
+                    title="Staging Work & Revenue discovery — owner review only",
+                    notes="No external send, client contact, contract or financial action",
                 )
-                if result.get("external_action_taken") or result.get("external_submission") or result.get("financial_execution"):
-                    db.rollback()
-                    raise AutopilotGuardError("Cycle returned forbidden external action")
+                db.add(marker)
                 db.commit()
+                try:
+                    result = cycle(
+                        db, organization_id=org, user=user,
+                        query_limit=3, per_query_limit=5, save_limit=8,
+                        prepare_limit=3, min_relevance_score=85,
+                    )
+                    if (
+                        result.get("external_action_taken")
+                        or result.get("external_submission")
+                        or result.get("financial_execution")
+                        or result.get("contract_acceptance")
+                        or result.get("agency_contact")
+                    ):
+                        raise AutopilotGuardError("Cycle returned forbidden external action")
+                    marker.status = "PREPARED"
+                    marker.notes = "Discovery completed; owner review required. No external action."
+                    marker.updated_at = now()
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    marker = db.query(NovaWorkSchedulerJob).filter(
+                        NovaWorkSchedulerJob.id == marker.id
+                    ).one()
+                    marker.status = "FAILED"
+                    marker.notes = "Discovery failed; operator review before any retry."
+                    marker.updated_at = now()
+                    db.commit()
+                    raise
                 return {
                     "status": "STAGING_CYCLE_COMPLETED",
                     "period": plan["local_period"],
