@@ -501,6 +501,38 @@
     }
   });
 
+  $("refresh-diagnostics").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/diagnostics");
+      $("diagnostics-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("diagnostics-out").textContent = err.message;
+    }
+  });
+  $("retention-preview").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/retention/preview", {
+        method: "POST",
+        body: JSON.stringify({ batch_limit: 100 }),
+      });
+      $("diagnostics-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("diagnostics-out").textContent = err.message;
+    }
+  });
+  $("worker-tick").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/workflows/worker/tick", {
+        method: "POST",
+        body: JSON.stringify({ limit: 10 }),
+      });
+      $("diagnostics-out").textContent = JSON.stringify(data, null, 2);
+      await refreshMetrics();
+    } catch (err) {
+      $("diagnostics-out").textContent = err.message;
+    }
+  });
+
   // Default booking day hint
   $("book-day").value = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
 

@@ -377,7 +377,26 @@ async def lifespan(app: FastAPI):
     deferred_startup_status()["scheduled"] = True
     deferred_task = asyncio.create_task(_deferred_startup_runner())
 
+    # Optional Nova Growth Agent mock delivery worker (default-off env flag).
+    try:
+        from app.core.nova.growth_agent.flags import background_worker_enabled
+        from app.core.nova.growth_agent.worker import start_runtime_worker, stop_runtime_worker
+        from app.db.session import SessionLocal
+
+        if background_worker_enabled():
+            start_runtime_worker(SessionLocal, poll_seconds=2.0)
+            logger.info("Nova Growth Agent mock delivery worker scheduled (live sends remain off).")
+    except Exception as ga_worker_exc:
+        logger.error("Nova Growth Agent mock worker start skipped: %s", ga_worker_exc)
+
     yield  # ── APPLICATION RUNNING ──────────────────────────────────────────
+
+    try:
+        from app.core.nova.growth_agent.worker import stop_runtime_worker
+
+        stop_runtime_worker(timeout=5.0)
+    except Exception as ga_worker_stop_exc:
+        logger.error("Nova Growth Agent mock worker shutdown error: %s", ga_worker_stop_exc)
 
     deferred_task.cancel()
     try:

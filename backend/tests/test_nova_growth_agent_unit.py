@@ -37,7 +37,10 @@ def test_live_flags_hard_off():
     assert flags["REAL_CALENDAR_WRITE"] is False
     assert flags["REAL_STRIPE_CHARGES"] is False
     assert flags["BULK_COLD_OUTREACH"] is False
+    assert flags["BACKGROUND_WORKER_ENABLED"] is False  # live worker hard-off
     assert flags["MOCK_TRANSPORT_ONLY"] is True
+    assert "BACKGROUND_WORKER_MOCK" in flags
+    assert "RETENTION_DELETE_ENABLED" in flags
 
 
 def test_faq_grounded_and_unknown():

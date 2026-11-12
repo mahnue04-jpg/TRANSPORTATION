@@ -13,19 +13,15 @@ export NOVA_GROWTH_AGENT_ENABLED=true
 export NOVA_GROWTH_AGENT_DEMO_MODE=true
 export NOVA_GROWTH_AGENT_WIDGET_ENABLED=true
 export NOVA_GROWTH_AGENT_WIDGET_SECRET=local-dev-only
+# Optional mock worker (still never live-sends):
+# export NOVA_GROWTH_AGENT_BACKGROUND_WORKER=true
+# Retention delete stays off unless explicitly testing gated delete:
+# export NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED=false
 export SECRET_KEY=local
 export JWT_SECRET=local
 export DATABASE_URL=sqlite:///./growth_agent_demo.db
 export APP_ENV=test
 export AMICOR_ENVIRONMENT=test
-```
-
-## Pytest synthetic scenario
-
-```bash
-cd backend
-TESTING=true NOVA_GROWTH_AGENT_ENABLED=true NOVA_GROWTH_AGENT_DEMO_MODE=true \
-  python -m pytest -q tests/test_nova_growth_agent_integration.py::test_synthetic_demo_end_to_end
 ```
 
 ## Full Growth Agent suite
@@ -44,26 +40,18 @@ TESTING=true NOVA_GROWTH_AGENT_ENABLED=true \
   python -m pytest -q tests/test_nova_growth_agent_*.py
 ```
 
-Expected (this verification pass): **35 passed**.
+Expected (this verification pass): **42 passed**.
+
+Worker/retention/rate-limit focused module: `tests/test_nova_growth_agent_worker_retention.py`.
 
 ## Owner UI
 
-1. Start backend as usual (uvicorn via existing docs).  
+1. Start backend (uvicorn via existing docs).  
 2. Open `/nova/growth`  
 3. Sign in with an approved Nova seed/owner account  
 4. Click **Run synthetic demo** (requires `NOVA_GROWTH_AGENT_DEMO_MODE=true`)  
-5. Confirm inbox/CRM/analytics show **Synthetic** labels  
-6. Optional: cancel / reschedule / marketing opt-out / recover pending deliveries from Booking panel  
-
-## Widget snippet (after installation create)
-
-```html
-<script src="/static/nova-growth/widget.js"
-  data-amicor-growth-token="PASTE_TOKEN"
-  async></script>
-```
-
-Widget posts include `X-Amicor-Growth-Origin` so domain checks fail closed even when the browser omits `Origin`.
+5. Use Diagnostics: refresh diagnostics, retention dry-run, mock worker tick (worker flag required)  
+6. Optional booking: cancel / reschedule / marketing opt-out / recover pending  
 
 ## What the demo proves
 
@@ -74,17 +62,15 @@ Widget posts include `X-Amicor-Growth-Origin` so domain checks fail closed even 
 5. Appointment booking + idempotent replay  
 6. Cancel → rebook same slot + reschedule  
 7. Double-book blocked  
-8. Reminder workflow dry-run mock delivery  
-9. Restart recovery reclaim of queued mock delivery  
+8. Reminder workflow mock delivery (inline or deferred to mock worker)  
+9. Restart recovery / stale lease reclaim  
 10. Human handoff  
-11. Channel-correct marketing opt-out suppression (no blanket DNC for owner opt-out)  
-12. Audit + analytics with explicit denominators (includes rescheduled bookings)  
-13. Owner export includes appointments, consent, and conversation messages  
+11. Channel-correct marketing opt-out suppression  
+12. Shared atomic rate limiting (multi-worker safe)  
+13. Retention dry-run with consent retained; delete gated off by default  
+14. Diagnostics distinguish mock processing from real delivery  
+15. Audit + analytics with explicit denominators  
 
 ## Evidence artifact
 
-Sanitized JSON from the last local synthetic run: `DEMO_EVIDENCE.json` in this folder.
-
-## Screenshots
-
-Capture sanitized UI screenshots locally if needed; do not upload real customer data. Fixtures live under tests only.
+`DEMO_EVIDENCE.json` in this folder. Staging proposal: `STAGING_PROPOSAL.md`.

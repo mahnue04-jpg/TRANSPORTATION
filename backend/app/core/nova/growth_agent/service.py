@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+# threading retained for in-process booking mutex (DB unique constraint is source of truth).
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,8 +59,6 @@ from app.core.nova.growth_agent.widget_crypto import (
     verify_installation_token,
 )
 
-_RATE: dict[str, list[float]] = {}
-_RATE_LOCK = threading.Lock()
 _BOOK_LOCK = threading.Lock()
 
 
@@ -465,34 +465,28 @@ class GrowthAgentService:
         }
 
     def _check_rate(self, *, org_id: str, installation_id: str, limit: int) -> None:
-        """Durable per-install rate limit based on recent visitor messages (survives restart)."""
-        since = _now() - timedelta(seconds=60)
-        recent = (
-            self.db.query(GaConversationMessage)
-            .join(
-                GaConversation,
-                GaConversation.id == GaConversationMessage.conversation_id,
+        """Atomic shared rate limit suitable for multiple workers (survives restart).
+
+        Uses a short-lived session + commit so concurrent workers observe increments
+        immediately without committing the caller's broader unit of work.
+        """
+        from sqlalchemy.orm import sessionmaker
+
+        from app.core.nova.growth_agent.rate_limit import check_and_increment
+
+        Session = sessionmaker(bind=self.db.get_bind())
+        rl_db = Session()
+        try:
+            check_and_increment(
+                rl_db,
+                organization_id=org_id,
+                bucket_key=f"widget:{installation_id}",
+                limit=limit,
+                window_seconds=60,
+                commit=True,
             )
-            .filter(
-                GaConversationMessage.organization_id == org_id,
-                GaConversation.organization_id == org_id,
-                GaConversation.widget_installation_id == installation_id,
-                GaConversationMessage.role == "visitor",
-                GaConversationMessage.created_at >= since,
-            )
-            .count()
-        )
-        if recent >= limit:
-            raise GrowthAgentError("RATE_LIMITED", "Too many requests", http_status=429)
-        # Keep a process-local guard as a secondary burst brake for same-worker floods.
-        key = f"widget:{installation_id}"
-        now_ts = datetime.now(timezone.utc).timestamp()
-        with _RATE_LOCK:
-            bucket = [t for t in _RATE.get(key, []) if now_ts - t < 60]
-            if len(bucket) >= limit:
-                raise GrowthAgentError("RATE_LIMITED", "Too many requests", http_status=429)
-            bucket.append(now_ts)
-            _RATE[key] = bucket
+        finally:
+            rl_db.close()
 
     def widget_chat(
         self,
@@ -1181,7 +1175,7 @@ class GrowthAgentService:
                 continue
 
             # Persist queued row first so a crash mid-send can be recovered on restart.
-            if existing_attempt and existing_attempt.status in {"queued", "retrying"}:
+            if existing_attempt and existing_attempt.status in {"queued", "retrying", "running"}:
                 attempt = existing_attempt
             else:
                 attempt = GaDeliveryAttempt(
@@ -1194,9 +1188,26 @@ class GrowthAgentService:
                     idempotency_key=delivery_key,
                     cost_estimate_usd=float(msg.get("cost_estimate_usd") or 0),
                     payload_redacted_json={"body_preview": "[REDACTED]"},
+                    available_at=_now(),
+                    max_attempts=5,
                 )
                 self.db.add(attempt)
                 self.db.flush()
+
+            from app.core.nova.growth_agent.flags import background_worker_enabled
+
+            if background_worker_enabled() and attempt.status in {"queued", "retrying"}:
+                # Defer to durable mock worker — do not send inline.
+                attempts.append(
+                    {
+                        "status": attempt.status,
+                        "id": attempt.id,
+                        "provider": "mock",
+                        "queued_for_worker": True,
+                        "live_send": False,
+                    }
+                )
+                continue
 
             processed = self._process_delivery_attempt(
                 org_id,
@@ -1209,7 +1220,10 @@ class GrowthAgentService:
             attempts.append(processed)
 
         if run.status != "suppressed":
-            run.status = "completed" if attempts else "failed"
+            if any(a.get("queued_for_worker") for a in attempts):
+                run.status = "approved"
+            else:
+                run.status = "completed" if attempts else "failed"
         run.dry_run = dry_run
         response = {
             "run_id": run.id,
@@ -1218,6 +1232,7 @@ class GrowthAgentService:
             "attempts": attempts,
             "stop_reason": run.stop_reason,
             "live_send": False,
+            "mock_worker_deferred": any(a.get("queued_for_worker") for a in attempts),
         }
         self._idempotent_put(org_id, "workflow_execute", key, response)
         self.audit(
@@ -1321,13 +1336,107 @@ class GrowthAgentService:
             payload={"recovered_count": len(recovered)},
         )
         self.db.commit()
+        from app.core.nova.growth_agent.flags import background_worker_enabled
+
         return {
             "recovered_count": len(recovered),
             "attempts": recovered,
             "live_send": False,
-            "background_worker_enabled": False,
-            "note": "Manual/test reclaim path; BACKGROUND_WORKER_ENABLED remains hard-off.",
+            "background_worker_mock": background_worker_enabled(),
+            "note": "Manual reclaim path for mock deliveries. Live transports remain hard-off.",
         }
+
+    def diagnostics(self, org_id: str) -> dict[str, Any]:
+        """Owner diagnostics: worker status, pending/failed jobs, retention preview."""
+        from app.core.nova.growth_agent.flags import background_worker_enabled, retention_delete_enabled
+        from app.core.nova.growth_agent.models import GaWorkerHeartbeat
+        from app.core.nova.growth_agent.retention import preview_retention
+        from app.core.nova.growth_agent.worker import get_runtime_worker
+
+        pending = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status.in_(["queued", "retrying", "running"]))
+            .count()
+        )
+        failed = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status == "failed")
+            .count()
+        )
+        sent_mock = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status == "sent_mock")
+            .count()
+        )
+        suppressed = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status == "suppressed")
+            .count()
+        )
+        heartbeats = (
+            self.db.query(GaWorkerHeartbeat)
+            .order_by(GaWorkerHeartbeat.last_beat_at.desc())
+            .limit(10)
+            .all()
+        )
+        runtime = get_runtime_worker()
+        retention_preview = preview_retention(self.db, org_id, batch_limit=100)
+        return {
+            "organization_id": org_id,
+            "mock_processing_only": True,
+            "live_delivery": False,
+            "worker": {
+                "mock_worker_flag": background_worker_enabled(),
+                "live_worker": False,
+                "runtime_worker_id": runtime.worker_id if runtime else None,
+                "runtime_stats": dict(runtime.stats) if runtime else None,
+                "heartbeats": [
+                    {
+                        "worker_id": h.worker_id,
+                        "status": h.status,
+                        "jobs_claimed": h.jobs_claimed,
+                        "jobs_completed": h.jobs_completed,
+                        "jobs_failed": h.jobs_failed,
+                        "last_beat_at": h.last_beat_at.isoformat() + "Z" if h.last_beat_at else None,
+                        "meta": h.meta_json,
+                    }
+                    for h in heartbeats
+                ],
+            },
+            "jobs": {
+                "pending_queued_retrying_running": pending,
+                "failed": failed,
+                "sent_mock": sent_mock,
+                "suppressed": suppressed,
+            },
+            "retention_preview": retention_preview,
+            "retention_delete_enabled": retention_delete_enabled(),
+            "distinction": {
+                "mock": "Worker/recover paths only mark sent_mock via mock adapters.",
+                "real": "REAL_EMAIL_SEND/REAL_SMS_SEND remain hard-coded False.",
+            },
+        }
+
+    def retention_preview(self, org_id: str, *, batch_limit: int = 500) -> dict[str, Any]:
+        from app.core.nova.growth_agent.retention import preview_retention
+
+        return preview_retention(self.db, org_id, batch_limit=batch_limit)
+
+    def retention_execute(
+        self,
+        org_id: str,
+        *,
+        batch_limit: int = 500,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        from app.core.nova.growth_agent.retention import execute_retention
+
+        return execute_retention(
+            self.db,
+            org_id,
+            batch_limit=batch_limit,
+            actor_user_id=actor_user_id,
+        )
 
     # ── appointments ─────────────────────────────────────────────────────────
 
@@ -1763,9 +1872,22 @@ class GrowthAgentService:
                 "audit_events": 730,
                 "usage_events": 365,
                 "delivery_attempts": 365,
+                "lead_events": 365,
+                "rate_limit_counters": 7,
                 "consent_records": "retain while account active + legal minimum",
             },
-            "deletion": "Owner can request org wipe via support; soft-delete MVP records flagged for purge job (not auto-run).",
+            "retain_always": [
+                "consent_records",
+                "business_profiles",
+                "contacts",
+                "contact_identities",
+                "appointments",
+            ],
+            "deletion": (
+                "Dry-run preview via POST /retention/preview. "
+                "Destructive cleanup requires NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED=true "
+                "and POST /retention/execute (bounded batches). Automatic deletion remains off by default."
+            ),
             "export": "GET /api/nova/growth-agent/export returns org-scoped JSON with PII included only for the owning org.",
         }
 

@@ -22,6 +22,10 @@ Gate: `NOVA_GROWTH_AGENT_ENABLED=true` (else 404). Live send flags hard-off.
 | POST | `/workflows/preview` | owner | Dry-run preview + cost estimate |
 | POST | `/workflows/execute` | owner | Approve mock delivery (default dry_run; queues then sends mock) |
 | POST | `/workflows/recover` | owner | Reclaim queued/retrying mock deliveries after restart |
+| POST | `/workflows/worker/tick` | owner | One mock-worker batch (requires `NOVA_GROWTH_AGENT_BACKGROUND_WORKER=true`; never live) |
+| GET | `/diagnostics` | owner | Worker status, pending/failed jobs, retention preview; mock vs live labeled |
+| POST | `/retention/preview` | owner | Dry-run retention counts (no delete) |
+| POST | `/retention/execute` | owner | Bounded delete when `NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED=true` |
 | GET | `/availability` | owner | Slots for day/service |
 | GET | `/appointments` | owner | List appointments |
 | POST | `/appointments` | owner | Book (idempotent; reuses cancelled slot) |

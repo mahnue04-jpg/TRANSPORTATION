@@ -91,3 +91,11 @@ class BookIn(OrgScoped):
 class RescheduleIn(OrgScoped):
     starts_at_utc: str
     idempotency_key: str
+
+
+class RetentionIn(OrgScoped):
+    batch_limit: int = 500
+
+
+class WorkerTickIn(OrgScoped):
+    limit: int = 10

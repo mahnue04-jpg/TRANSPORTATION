@@ -19,8 +19,10 @@ from app.core.nova.growth_agent.schemas import (
     LeadUpdateIn,
     ProfileUpsertIn,
     RescheduleIn,
+    RetentionIn,
     WidgetChatIn,
     WidgetCreateIn,
+    WorkerTickIn,
     WorkflowExecuteIn,
     WorkflowPreviewIn,
 )
@@ -318,6 +320,72 @@ def workflow_recover(
             _org(user, organization_id),
             actor_user_id=user.user_id,
             limit=limit,
+        )
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
+@router.post("/workflows/worker/tick")
+def workflow_worker_tick(
+    body: WorkerTickIn,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Run one mock-worker batch for this tenant (never live delivery)."""
+    from app.core.nova.growth_agent.flags import background_worker_enabled, growth_agent_enabled
+    from app.core.nova.growth_agent.worker import MockDeliveryWorker
+    from sqlalchemy.orm import sessionmaker
+
+    if not growth_agent_enabled():
+        raise HTTPException(status_code=404, detail="Growth Agent disabled")
+    if not background_worker_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="Mock background worker disabled (set NOVA_GROWTH_AGENT_BACKGROUND_WORKER=true)",
+        )
+    org = _org(user, body.organization_id)
+    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+    worker = MockDeliveryWorker(factory, organization_id=org, worker_id=f"tick-{user.user_id[:8]}")
+    result = worker.run_once(limit=body.limit)
+    result["distinction"] = "mock_only"
+    result["live_send"] = False
+    return result
+
+
+@router.get("/diagnostics")
+def diagnostics(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    return svc.diagnostics(_org(user, organization_id))
+
+
+@router.post("/retention/preview")
+def retention_preview(
+    body: RetentionIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    try:
+        return svc.retention_preview(_org(user, body.organization_id), batch_limit=body.batch_limit)
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
+@router.post("/retention/execute")
+def retention_execute(
+    body: RetentionIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    try:
+        return svc.retention_execute(
+            _org(user, body.organization_id),
+            batch_limit=body.batch_limit,
+            actor_user_id=user.user_id,
         )
     except GrowthAgentError as exc:
         _handle(exc)

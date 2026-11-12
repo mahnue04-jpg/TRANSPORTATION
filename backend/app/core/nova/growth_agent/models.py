@@ -215,6 +215,7 @@ class GaDeliveryAttempt(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "idempotency_key", name="uq_nova_ga_delivery_idem"),
         Index("ix_nova_ga_delivery_run", "organization_id", "workflow_run_id"),
+        Index("ix_nova_ga_delivery_claim", "status", "available_at", "claimed_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -223,14 +224,57 @@ class GaDeliveryAttempt(Base):
     channel: Mapped[str] = mapped_column(String(40), nullable=False)
     provider: Mapped[str] = mapped_column(String(40), nullable=False, default="mock")
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued")
-    # queued|sent_mock|failed|suppressed|retrying
+    # queued|running|sent_mock|failed|suppressed|retrying
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     cost_estimate_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     payload_redacted_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    claimed_by: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaRateLimitCounter(Base):
+    """Atomic shared rate-limit windows suitable for multi-worker enforcement."""
+
+    __tablename__ = "nova_ga_rate_limit_counters"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "bucket_key",
+            "window_start",
+            name="uq_nova_ga_rate_org_bucket_window",
+        ),
+        Index("ix_nova_ga_rate_org_bucket", "organization_id", "bucket_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    bucket_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    window_start: Mapped[int] = mapped_column(Integer, nullable=False)  # epoch seconds floor
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaWorkerHeartbeat(Base):
+    """Process heartbeats for mock worker diagnostics (no PII)."""
+
+    __tablename__ = "nova_ga_worker_heartbeats"
+
+    worker_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="stopped")
+    # running|stopping|stopped
+    jobs_claimed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_beat_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    meta_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
 class GaAppointmentService(Base):
@@ -372,6 +416,8 @@ GROWTH_AGENT_TABLES = (
     GaUsageEvent.__table__,
     GaAuditEvent.__table__,
     GaIdempotencyKey.__table__,
+    GaRateLimitCounter.__table__,
+    GaWorkerHeartbeat.__table__,
 )
 
 LEAD_STATES = ("new", "contacted", "qualified", "booked", "closed")

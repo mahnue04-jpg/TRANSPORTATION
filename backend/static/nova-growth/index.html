@@ -89,6 +89,17 @@
       </div>
     </section>
 
+    <section class="panel" aria-label="Diagnostics">
+      <h2>Diagnostics</h2>
+      <p class="hint">Mock worker status, pending/failed jobs, retention preview. Clearly mock — not real delivery.</p>
+      <div class="actions">
+        <button type="button" id="refresh-diagnostics" class="secondary">Refresh diagnostics</button>
+        <button type="button" id="retention-preview" class="secondary">Retention dry-run</button>
+        <button type="button" id="worker-tick" class="secondary">Mock worker tick</button>
+      </div>
+      <pre id="diagnostics-out" class="hint" aria-live="polite"></pre>
+    </section>
+
     <section class="panel" aria-label="Inbox">
       <h2>Inbox</h2>
       <p class="hint">Conversations tagged AI or human. Review, hand off, or pause.</p>

@@ -13,18 +13,42 @@
   "booking_idempotent_replay": true,
   "cancel_rebook": {
     "cancelled_status": "cancelled",
-    "rebooked_id": "3bc135e35e854aa89850289db62c26d6",
+    "rebooked_id": "4a079ce801fa4906bbc9e9ad22f08beb",
     "reused_same_row": true
   },
   "reschedule": {
     "status": "rescheduled",
     "starts_at_utc": "2026-11-16T15:30:00Z"
   },
-  "reminder_status": "completed",
+  "reminder_status": "approved",
   "reminder_live_send": false,
   "restart_recovery": {
-    "recovered_count": 1,
+    "recovered_count": 2,
     "live_send": false
+  },
+  "mock_worker": {
+    "deferred_queue": true,
+    "tick_processed": 1,
+    "tick_live_send": false,
+    "tick_mock_only": true
+  },
+  "diagnostics": {
+    "mock_processing_only": true,
+    "live_delivery": false,
+    "pending_jobs": 0,
+    "sent_mock": 3
+  },
+  "retention_preview": {
+    "dry_run": true,
+    "delete_enabled": false,
+    "retain_always": [
+      "consent_records",
+      "business_profiles",
+      "contacts",
+      "contact_identities",
+      "appointments"
+    ],
+    "total_would_delete": 0
   },
   "handoff": {
     "status": "handed_off",
@@ -57,23 +81,8 @@
     "stripe": false,
     "voice": false
   },
-  "audit_actions": [
-    "workflow.execute",
-    "workflow.preview",
-    "consent.record",
-    "conversation.handoff",
-    "workflow.recover",
-    "workflow.preview",
-    "workflow.execute",
-    "workflow.preview",
-    "appointment.reschedule",
-    "appointment.rebook",
-    "appointment.cancel",
-    "appointment.book",
-    "lead.update",
-    "widget.chat",
-    "widget.chat",
-    "widget.create",
-    "profile.upsert"
-  ]
+  "test_results": {
+    "growth_agent_suite": "42 passed",
+    "focused_regressions": "69 passed"
+  }
 }

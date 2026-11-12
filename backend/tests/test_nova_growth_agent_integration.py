@@ -153,41 +153,49 @@ def test_workflow_dry_run_mock_delivery_and_opt_out(db):
     )
 
 
-def test_booking_concurrency_no_double_book(db):
-    svc = GrowthAgentService(db)
-    org = "org-int-3"
-    _activate(svc, org)
-    contact = svc._upsert_contact(
-        org,
-        name="Sam",
-        email="sam@example.com",
-        consent_transactional=True,
-        channel="email",
-        source="test",
+def test_booking_concurrency_no_double_book(tmp_path):
+    # File-backed SQLite so concurrent sessions are serialized safely (StaticPool is not).
+    db_path = tmp_path / "booking_concurrency.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
-    db.commit()
-    # Pick next weekday slot
-    day = None
-    for offset in range(1, 10):
-        candidate = datetime.now(timezone.utc) + timedelta(days=offset)
-        if candidate.weekday() < 5:
-            day = candidate.strftime("%Y-%m-%d")
-            break
-    availability = svc.list_availability(org, service_code="consult", day=day)
-    assert availability["slots"]
-    slot = availability["slots"][0]["starts_at_utc"]
-
-    engine = db.get_bind()
-    SessionFactory = sessionmaker(bind=engine)
+    ensure_growth_agent_schema(bind=engine)
+    SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
+    db = SessionFactory()
+    try:
+        svc = GrowthAgentService(db)
+        org = "org-int-3"
+        _activate(svc, org)
+        contact = svc._upsert_contact(
+            org,
+            name="Sam",
+            email="sam@example.com",
+            consent_transactional=True,
+            channel="email",
+            source="test",
+        )
+        db.commit()
+        day = None
+        for offset in range(1, 10):
+            candidate = datetime.now(timezone.utc) + timedelta(days=offset)
+            if candidate.weekday() < 5:
+                day = candidate.strftime("%Y-%m-%d")
+                break
+        availability = svc.list_availability(org, service_code="consult", day=day)
+        assert availability["slots"]
+        slot = availability["slots"][0]["starts_at_utc"]
+        contact_id = contact.id
+    finally:
+        db.close()
 
     def attempt(i: int):
-        # Separate sessions on the shared StaticPool DB exercise unique-slot enforcement.
         local_db = SessionFactory()
         try:
             local = GrowthAgentService(local_db)
             out = local.book_appointment(
                 org,
-                contact_id=contact.id,
+                contact_id=contact_id,
                 service_code="consult",
                 starts_at_utc=slot,
                 idempotency_key=f"concurrent-{i}",
@@ -214,22 +222,27 @@ def test_booking_concurrency_no_double_book(db):
     assert len(doubles) == 1, results
 
     winner_id, winner_key = oks[0][1], oks[0][2]
-    again = svc.book_appointment(
-        org,
-        contact_id=contact.id,
-        service_code="consult",
-        starts_at_utc=slot,
-        idempotency_key=winner_key,
-    )
-    assert again["id"] == winner_id
-    with pytest.raises(DoubleBookError):
-        svc.book_appointment(
+    verify = SessionFactory()
+    try:
+        svc = GrowthAgentService(verify)
+        again = svc.book_appointment(
             org,
-            contact_id=contact.id,
+            contact_id=contact_id,
             service_code="consult",
             starts_at_utc=slot,
-            idempotency_key="concurrent-fresh-key",
+            idempotency_key=winner_key,
         )
+        assert again["id"] == winner_id
+        with pytest.raises(DoubleBookError):
+            svc.book_appointment(
+                org,
+                contact_id=contact_id,
+                service_code="consult",
+                starts_at_utc=slot,
+                idempotency_key="concurrent-fresh-key",
+            )
+    finally:
+        verify.close()
 
 
 def test_cancel_rebook_and_reschedule(db):

@@ -34,15 +34,30 @@ def widget_public_enabled() -> bool:
     return _env_enabled("NOVA_GROWTH_AGENT_WIDGET_ENABLED")
 
 
+def background_worker_enabled() -> bool:
+    """Mock delivery worker only. Default off. Never enables live transports."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_BACKGROUND_WORKER")
+
+
+def retention_delete_enabled() -> bool:
+    """Explicit opt-in for destructive retention cleanup. Default off."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED")
+
+
 # Hard-off live capabilities — cannot be enabled via headers or UI alone.
 REAL_EMAIL_SEND = False
 REAL_SMS_SEND = False
 REAL_CALENDAR_WRITE = False
 REAL_VOICE = False
 REAL_STRIPE_CHARGES = False
-BACKGROUND_WORKER_ENABLED = False
 BULK_COLD_OUTREACH = False
 HEADER_CAN_ENABLE_LIVE = False
+# Backward-compatible alias: always False for live; use background_worker_enabled() for mock worker.
+BACKGROUND_WORKER_ENABLED = False
 
 
 def live_flags() -> dict[str, bool]:
@@ -50,12 +65,14 @@ def live_flags() -> dict[str, bool]:
         "GROWTH_AGENT_ENABLED": growth_agent_enabled(),
         "DEMO_MODE": demo_mode_enabled(),
         "WIDGET_PUBLIC_ENABLED": widget_public_enabled(),
+        "BACKGROUND_WORKER_MOCK": background_worker_enabled(),
+        "RETENTION_DELETE_ENABLED": retention_delete_enabled(),
         "REAL_EMAIL_SEND": REAL_EMAIL_SEND,
         "REAL_SMS_SEND": REAL_SMS_SEND,
         "REAL_CALENDAR_WRITE": REAL_CALENDAR_WRITE,
         "REAL_VOICE": REAL_VOICE,
         "REAL_STRIPE_CHARGES": REAL_STRIPE_CHARGES,
-        "BACKGROUND_WORKER_ENABLED": BACKGROUND_WORKER_ENABLED,
+        "BACKGROUND_WORKER_ENABLED": False,  # live worker hard-off; mock uses BACKGROUND_WORKER_MOCK
         "BULK_COLD_OUTREACH": BULK_COLD_OUTREACH,
         "HEADER_CAN_ENABLE_LIVE": HEADER_CAN_ENABLE_LIVE,
         "MOCK_TRANSPORT_ONLY": True,
