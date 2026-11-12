@@ -84,6 +84,7 @@
   function setupPayload(extra = {}) {
     return {
       business_name: $("biz-name").value.trim(),
+      is_synthetic_demo: $("biz-synthetic").checked,
       website: $("biz-web").value.trim() || null,
       timezone: $("biz-tz").value,
       plan_code: $("biz-plan").value,
