@@ -120,8 +120,13 @@ def run_staging_cycle(
                         or result.get("agency_contact")
                     ):
                         raise AutopilotGuardError("Cycle returned forbidden external action")
-                    marker.status = "PREPARED"
-                    marker.notes = "Discovery completed; owner review required. No external action."
+                    source_status = str(result.get("live_search_status") or "unavailable")
+                    marker.status = "SKIPPED" if source_status == "unavailable" else "PREPARED"
+                    marker.notes = (
+                        "Sources unavailable; operator review before retry."
+                        if marker.status == "SKIPPED" else
+                        "Discovery checked; owner review required. No external action."
+                    )
                     marker.updated_at = now()
                     db.commit()
                 except Exception:
@@ -135,7 +140,10 @@ def run_staging_cycle(
                     db.commit()
                     raise
                 return {
-                    "status": "STAGING_CYCLE_COMPLETED",
+                    "status": (
+                        "SOURCE_UNAVAILABLE" if result.get("live_search_status") == "unavailable"
+                        else "STAGING_CYCLE_COMPLETED"
+                    ),
                     "period": plan["local_period"],
                     "selected_count": int(result.get("selected_count") or 0),
                     "ready_for_owner_review_count": int(result.get("ready_for_owner_review_count") or 0),
