@@ -78,7 +78,7 @@ jobs:
           report["integration_test_environment"] = "SYNTHETIC_CI_NOT_RENDER"
           report["release_approved"] = False
           report["human_merge_resolution_reviewed"] = False
-          path.write_text(json.dumps(report, indent=2) + "\\n")
+          path.write_text(json.dumps(report, indent=2) + "\n")
           PY
           echo "Combined draft-PR synthetic regressions passed in ephemeral CI tree; NOT real Render staging." >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize release gate
