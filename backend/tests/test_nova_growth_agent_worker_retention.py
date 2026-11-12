@@ -260,6 +260,11 @@ def test_worker_respects_opt_out_and_pause(Session, db):
         collection_source="owner_opt_out",
         actor_user_id="owner-1",
     )
+    # The follow-up is scheduled for tomorrow. Make only this synthetic
+    # attempt due so the test exercises the consent recheck at delivery time.
+    attempt = db.query(GaDeliveryAttempt).filter_by(organization_id="org-gate").one()
+    attempt.available_at = datetime.utcnow() - timedelta(seconds=1)
+    db.commit()
     worker = MockDeliveryWorker(Session, organization_id="org-gate", worker_id="gate-w")
     out = worker.run_once()
     assert out["processed"] == 1
@@ -468,3 +473,28 @@ def test_graceful_shutdown_releases_unprocessed(Session, db):
         .count()
     )
     assert queued >= 1
+
+
+def test_worker_waits_for_reminder_preview_due_time(Session, db):
+    svc = GrowthAgentService(db)
+    org = "org-reminder-due"
+    _activate(svc, org)
+    contact = svc._upsert_contact(
+        org, name="Synthetic Due Test", email="due@example.invalid",
+        consent_transactional=True, channel="email", source="test",
+    )
+    db.commit()
+    preview = svc.preview_workflow(org, workflow_code="appointment_reminder", contact_id=contact.id)
+    svc.approve_and_execute_workflow(org, run_id=preview["run_id"], dry_run=True)
+    attempt = db.query(GaDeliveryAttempt).filter_by(organization_id=org).one()
+    assert attempt.available_at > datetime.utcnow() + timedelta(minutes=59)
+    worker = MockDeliveryWorker(Session, organization_id=org)
+    assert worker.run_once()["processed"] == 0
+    db.refresh(attempt)
+    assert attempt.status == "queued"
+    # Advance only the synthetic due time; no wall-clock waiting.
+    attempt.available_at = datetime.utcnow() - timedelta(seconds=1)
+    db.commit()
+    assert worker.run_once()["processed"] == 1
+    db.refresh(attempt)
+    assert attempt.status == "sent_mock"

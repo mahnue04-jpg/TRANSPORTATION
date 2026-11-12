@@ -218,3 +218,18 @@ def test_export_and_audit_scoped(db):
     assert all(e.get("organization_id", "org-b") for e in [])  # structural
     exported_a = svc.export_org("org-a")
     assert len(exported_a["leads"]) == 1
+
+
+@pytest.mark.parametrize("environment_key", ["APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT"])
+def test_generic_startup_create_all_cannot_create_growth_tables_in_production(monkeypatch, environment_key):
+    from sqlalchemy import inspect
+    from app.core.nova.growth_agent.models import GaBusinessProfile
+
+    monkeypatch.setenv(environment_key, "production")
+    engine = create_engine("sqlite://")
+    try:
+        Base.metadata.create_all(bind=engine, tables=[GaBusinessProfile.__table__])
+        assert "nova_ga_business_profiles" not in inspect(engine).get_table_names()
+        assert ensure_growth_agent_schema(bind=engine)["skipped"] is True
+    finally:
+        engine.dispose()
