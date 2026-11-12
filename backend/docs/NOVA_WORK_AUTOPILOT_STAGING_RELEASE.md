@@ -164,3 +164,32 @@ Human review is required for the shared HTML resolution, dependency/route
 ordering, full PostgreSQL/private S3 behavior, authenticated Render staging,
 consent controls, missed-run alerting and rollback. Keep all production and
 paid-processing flags disabled. Do not merge/deploy automatically.
+
+
+## HARD BLOCKER — combined API route registration (2026-11-12)
+
+New isolated cross-PR tests validated the *actual* FastAPI application
+route table, not just source imports or standalone calculation functions.
+The temporary integration tree from PR #477 + PR #484 + PR #338 passes
+31 existing synthetic tests and the unified UI contract, but fails the
+expanded server integration acceptance test: the expected
+`POST /api/nova/work/operations/durable/engagements/{engagement_id}/tasks/{task_id}/jobs`
+endpoint is missing from the app.
+
+Further diagnostics in Actions run `43282715050`: the Operations/Accounting
+child router contains **15 routes**; all 15 are missing from the app at
+post-import reconciliation time, yet a temporary startup include registers
+only one route. Multiple preliminary CI-only reconciliation attempts did
+not solve the discrepancy. Do not treat a source import or green standalone
+accounting tests as evidence that the customer-facing API is available.
+
+**Release decision: BLOCKED.** The route registration/import lifecycle must
+be refactored and an authenticated FastAPI HTTP test must demonstrate the
+entire integration, including all protected endpoints and their owner
+dependencies. Avoid bypassing the test by loosening authorization or
+dropping endpoint checks.
+
+The CI workflow now preserves a blocker report even when combined acceptance
+fails. These changes are in an ephemeral GitHub Actions preview only;
+none of the three draft PRs is merged into production or approved for
+billing, real-customer financial processing, or real scheduled outreach.
