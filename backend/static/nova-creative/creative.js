@@ -1582,11 +1582,14 @@
         var videoSourceAttr = isPrivateImportedVideo
           ? ("data-private-video-url=\"" + escapeHtml(filePath) + "\"")
           : ("src=\"" + escapeHtml(row.url) + "\"");
+        var privatePreviewStatus = isPrivateImportedVideo
+          ? "<p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected MP4 preview…</p>"
+          : "";
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" " + videoSourceAttr +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + licenseNote + downloadControl + captionControl;
+          privatePreviewStatus + "</figure>" + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
@@ -1631,6 +1634,22 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]"), function (video) {
       var projectId = activeProjectId;
+      var status = video.parentElement && video.parentElement.querySelector(".private-video-status");
+      function previewStatus(message) {
+        if (status) status.textContent = message;
+      }
+      video.addEventListener("loadedmetadata", function () {
+        var seconds = video.duration;
+        previewStatus(Number.isFinite(seconds) && seconds > 0
+          ? "Protected MP4 ready (" + Math.round(seconds) + " seconds). Select Play to preview."
+          : "MP4 metadata loaded, but duration is unavailable. Download the MP4 if playback is disabled.");
+      });
+      video.addEventListener("error", function () {
+        var code = video.error && video.error.code;
+        previewStatus(code === 4 || code === 3
+          ? "Chrome cannot decode this MP4 preview. The saved video is still available through Download AI video."
+          : "Chrome could not load the protected MP4 preview (media error " + (code || "unknown") + "). Download remains available.");
+      });
       (async function () {
         try {
           var path = video.getAttribute("data-private-video-url");
@@ -1642,7 +1661,7 @@
             ? await shared.authFetch(path, {method: "GET", headers: headers})
             : await fetch(path, {method: "GET", headers: headers});
           if (!response.ok || !(response.headers.get("content-type") || "").startsWith("video/")) {
-            throw new Error("Private video preview unavailable");
+            throw new Error("Private video preview unavailable (HTTP " + response.status + ")");
           }
           var blob = await response.blob();
           if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
@@ -1653,10 +1672,10 @@
           privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;
           video.load();
-          // The video element may need further reads for seeking and replay.
-          // Do not revoke here; refreshAssets owns cleanup on rerender.
+          // Keep the private blob URL alive for seeking/replay; asset refresh owns cleanup.
         } catch (err) {
           video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
+          previewStatus("Protected MP4 preview unavailable: " + String(err && err.message || "unknown error") + ". Download AI video remains available.");
         }
       })();
     });
