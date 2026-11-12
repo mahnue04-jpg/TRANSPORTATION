@@ -1,0 +1,407 @@
+(() => {
+  const state = {
+    token: localStorage.getItem("amicor_growth_token") || "",
+    conversationId: null,
+    workflowRunId: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const banner = $("status-banner");
+  const sessionMeta = $("session-meta");
+
+  function setBanner(text, kind = "warn") {
+    banner.className = `banner ${kind}`;
+    banner.textContent = text;
+  }
+
+  function authHeaders() {
+    const headers = { "Content-Type": "application/json" };
+    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+    return headers;
+  }
+
+  async function api(path, options = {}) {
+    const res = await fetch(path, {
+      ...options,
+      headers: { ...authHeaders(), ...(options.headers || {}) },
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+    if (!res.ok) {
+      const detail = data.detail || data.message || data.error || res.statusText;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  async function login(email, password) {
+    const data = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    state.token = data.access_token || data.token || "";
+    if (!state.token) throw new Error("No access token returned");
+    localStorage.setItem("amicor_growth_token", state.token);
+    sessionMeta.textContent = `Signed in as ${email}`;
+    setBanner("Signed in. Growth Agent APIs require NOVA_GROWTH_AGENT_ENABLED=true.", "ok");
+    await refreshAll();
+  }
+
+  function signOut() {
+    state.token = "";
+    localStorage.removeItem("amicor_growth_token");
+    sessionMeta.textContent = "Signed out.";
+    setBanner("Sign in required.", "warn");
+  }
+
+  function parseJsonField(id, label) {
+    const raw = $(id).value.trim() || (id.includes("faqs") || id.includes("services") ? "[]" : "{}");
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error(`${label} must be valid JSON`);
+    }
+  }
+
+  function setupPayload(extra = {}) {
+    return {
+      business_name: $("biz-name").value.trim(),
+      website: $("biz-web").value.trim() || null,
+      timezone: $("biz-tz").value,
+      plan_code: $("biz-plan").value,
+      contact_email: $("biz-email").value.trim() || null,
+      handoff_phone: $("biz-phone").value.trim() || null,
+      operating_hours: parseJsonField("biz-hours", "Operating hours"),
+      services: parseJsonField("biz-services", "Services"),
+      faqs: parseJsonField("biz-faqs", "FAQs"),
+      escalation_settings: { handoff_on_unknown: true },
+      quiet_hours: { enabled: true, start: "21:00", end: "08:00" },
+      ...extra,
+    };
+  }
+
+  async function refreshMetrics() {
+    const box = $("metrics");
+    box.innerHTML = `<div class="loading">Loading metrics…</div>`;
+    try {
+      const data = await api("/api/nova/growth-agent/analytics?days=30");
+      box.innerHTML = [
+        ["Inquiries", data.inquiries],
+        ["Consented leads", data.consented_leads],
+        ["Booked", data.booked_appointments],
+        ["Delivery ok", data.delivery_success],
+        ["Delivery fail/suppress", data.delivery_failure_or_suppressed],
+        ["Opt-outs", data.opt_outs],
+        ["Cost est. USD", data.usage_cost_estimate_usd],
+      ]
+        .map(
+          ([label, value]) =>
+            `<div class="metric"><strong>${value ?? "—"}</strong><span>${label}</span></div>`
+        )
+        .join("");
+      box.insertAdjacentHTML(
+        "beforeend",
+        `<p class="hint" style="grid-column:1/-1">${data.denominator_note || ""} Billed: ${data.billed}</p>`
+      );
+    } catch (err) {
+      box.innerHTML = `<div class="error">${err.message}</div>`;
+    }
+  }
+
+  async function refreshInbox() {
+    const box = $("inbox");
+    try {
+      const data = await api("/api/nova/growth-agent/conversations");
+      const rows = data.conversations || [];
+      if (!rows.length) {
+        box.className = "empty";
+        box.textContent = "No conversations yet.";
+        return;
+      }
+      box.className = "";
+      box.innerHTML = `<table class="table"><thead><tr><th>Subject</th><th>Handler</th><th>Status</th><th></th></tr></thead><tbody>${rows
+        .map(
+          (c) => `<tr>
+            <td>${escapeHtml(c.subject || c.id)}${c.is_synthetic_demo ? ' <span class="tag demo">Synthetic</span>' : ""}</td>
+            <td><span class="tag ${c.handler}">${c.handler}</span></td>
+            <td>${escapeHtml(c.status)}</td>
+            <td><button type="button" data-handoff="${c.id}" class="secondary">Handoff</button></td>
+          </tr>`
+        )
+        .join("")}</tbody></table>`;
+      box.querySelectorAll("[data-handoff]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          await api(`/api/nova/growth-agent/conversations/${btn.dataset.handoff}/handoff`, {
+            method: "POST",
+            body: "{}",
+          });
+          await refreshInbox();
+        });
+      });
+    } catch (err) {
+      box.className = "error";
+      box.textContent = err.message;
+    }
+  }
+
+  async function refreshLeads() {
+    const box = $("leads");
+    const q = $("lead-search").value.trim();
+    try {
+      const data = await api(`/api/nova/growth-agent/leads${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+      const rows = data.leads || [];
+      if (!rows.length) {
+        box.className = "empty";
+        box.textContent = "No leads yet.";
+        return;
+      }
+      box.className = "";
+      box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>State</th><th>Notes</th><th>Demo</th></tr></thead><tbody>${rows
+        .map(
+          (l) => `<tr>
+            <td>${escapeHtml(l.display_name || l.id)}</td>
+            <td>${escapeHtml(l.lead_state)}</td>
+            <td>${escapeHtml(l.notes || "")}</td>
+            <td>${l.is_synthetic_demo ? '<span class="tag demo">Synthetic</span>' : ""}</td>
+          </tr>`
+        )
+        .join("")}</tbody></table>`;
+    } catch (err) {
+      box.className = "error";
+      box.textContent = err.message;
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function refreshAll() {
+    await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads()]);
+  }
+
+  $("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await login($("login-email").value.trim(), $("login-password").value);
+    } catch (err) {
+      setBanner(err.message, "warn");
+    }
+  });
+  $("sign-out").addEventListener("click", signOut);
+
+  $("preview-setup").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/profile", {
+        method: "POST",
+        body: JSON.stringify(setupPayload({ preview_only: true })),
+      });
+      $("setup-preview").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("setup-preview").textContent = err.message;
+    }
+  });
+  $("save-setup").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/profile", {
+        method: "POST",
+        body: JSON.stringify(setupPayload({ activate: false })),
+      });
+      $("setup-preview").textContent = JSON.stringify(data, null, 2);
+      setBanner("Profile saved (not necessarily activated).", "ok");
+    } catch (err) {
+      setBanner(err.message, "warn");
+    }
+  });
+  $("activate-setup").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/profile", {
+        method: "POST",
+        body: JSON.stringify(setupPayload({ activate: true })),
+      });
+      $("setup-preview").textContent = JSON.stringify(data, null, 2);
+      setBanner("Profile activated for this org (mock transports only).", "ok");
+      await refreshAll();
+    } catch (err) {
+      setBanner(err.message, "warn");
+    }
+  });
+
+  async function setAgent(paused, disabled) {
+    await api("/api/nova/growth-agent/agent", {
+      method: "POST",
+      body: JSON.stringify({ paused, disabled }),
+    });
+    setBanner(`Agent state updated paused=${paused} disabled=${disabled}`, "ok");
+  }
+  $("pause-agent").addEventListener("click", () => setAgent(true, null).catch((e) => setBanner(e.message)));
+  $("disable-agent").addEventListener("click", () => setAgent(null, true).catch((e) => setBanner(e.message)));
+  $("resume-agent").addEventListener("click", () => setAgent(false, false).catch((e) => setBanner(e.message)));
+
+  $("refresh-inbox").addEventListener("click", refreshInbox);
+  $("refresh-leads").addEventListener("click", refreshLeads);
+  $("lead-search").addEventListener("change", refreshLeads);
+
+  $("create-widget").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/widget/installations", {
+        method: "POST",
+        body: JSON.stringify({ domain: $("widget-domain").value.trim() }),
+      });
+      $("widget-token").value = data.token || "";
+      $("widget-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("widget-out").textContent = err.message;
+    }
+  });
+
+  $("widget-chat-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const log = $("widget-chat-log");
+    const message = $("widget-message").value.trim();
+    log.insertAdjacentHTML("beforeend", `<div class="bubble">${escapeHtml(message)}</div>`);
+    try {
+      const data = await api("/api/nova/growth-agent/widget/chat", {
+        method: "POST",
+        headers: { Origin: `https://${$("widget-domain").value.trim() || "demo.example.com"}` },
+        body: JSON.stringify({
+          token: $("widget-token").value.trim(),
+          message,
+          conversation_id: state.conversationId,
+          visitor_name: $("widget-name").value.trim() || null,
+          visitor_email: $("widget-email").value.trim() || null,
+          consent_transactional: $("consent-tx").checked,
+          consent_marketing: $("consent-mkt").checked,
+        }),
+      });
+      state.conversationId = data.conversation_id;
+      if (data.contact_id) $("wf-contact").value = data.contact_id;
+      log.insertAdjacentHTML(
+        "beforeend",
+        `<div class="bubble assistant">${escapeHtml(data.reply)} <span class="tag ${data.handler}">${data.handler}</span></div>`
+      );
+      $("widget-message").value = "";
+      await refreshAll();
+    } catch (err) {
+      log.insertAdjacentHTML("beforeend", `<div class="error">${escapeHtml(err.message)}</div>`);
+    }
+  });
+
+  $("load-slots").addEventListener("click", async () => {
+    try {
+      const day = $("book-day").value || new Date().toISOString().slice(0, 10);
+      const data = await api(
+        `/api/nova/growth-agent/availability?service_code=${encodeURIComponent($("book-service").value)}&day=${encodeURIComponent(day)}`
+      );
+      if (data.slots && data.slots[0]) $("book-start").value = data.slots[0].starts_at_utc;
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("book-slot").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/appointments", {
+        method: "POST",
+        body: JSON.stringify({
+          contact_id: $("wf-contact").value.trim(),
+          service_code: $("book-service").value.trim(),
+          starts_at_utc: $("book-start").value.trim(),
+          idempotency_key: `ui-${Date.now()}`,
+        }),
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      await refreshAll();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("preview-reminder").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/workflows/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_code: "appointment_reminder",
+          contact_id: $("wf-contact").value.trim(),
+        }),
+      });
+      state.workflowRunId = data.run_id;
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("exec-reminder").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/workflows/execute", {
+        method: "POST",
+        body: JSON.stringify({
+          run_id: state.workflowRunId,
+          dry_run: true,
+          idempotency_key: `ui-exec-${state.workflowRunId}`,
+        }),
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      await refreshMetrics();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("run-demo").addEventListener("click", async () => {
+    $("demo-out").textContent = "Running synthetic demo…";
+    try {
+      const data = await api("/api/nova/growth-agent/demo/synthetic", {
+        method: "POST",
+        body: "{}",
+      });
+      $("demo-out").textContent = JSON.stringify(data, null, 2);
+      if (data.chat && data.chat.first) {
+        $("wf-contact").value = data.chat.first.contact_id || "";
+      }
+      await refreshAll();
+      setBanner("Synthetic demo complete. Records labeled Synthetic.", "ok");
+    } catch (err) {
+      $("demo-out").textContent = err.message;
+      setBanner(err.message, "warn");
+    }
+  });
+
+  $("refresh-audit").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/audit?limit=30");
+      $("demo-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("demo-out").textContent = err.message;
+    }
+  });
+
+  $("refresh-health").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/health");
+      $("demo-out").textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      $("demo-out").textContent = err.message;
+    }
+  });
+
+  // Default booking day hint
+  $("book-day").value = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+
+  if (state.token) {
+    sessionMeta.textContent = "Restored session token from local storage.";
+    refreshAll().catch((err) => setBanner(err.message, "warn"));
+  }
+})();

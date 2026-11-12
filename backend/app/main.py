@@ -97,6 +97,7 @@ from app.core.nova.marketplace.router import router as nova_marketplace_router  
 from app.core.nova.creative_studio.router import router as nova_creative_router  # type: ignore
 from app.core.nova.creative_studio.router import webhook_router as nova_creative_webhook_router  # type: ignore
 from app.core.nova.creative_studio.casting_router_draft import router as nova_casting_router  # type: ignore
+from app.core.nova.growth_agent.router import router as nova_growth_agent_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -503,6 +504,7 @@ app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
 app.include_router(nova_casting_router)
+app.include_router(nova_growth_agent_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -4076,6 +4078,16 @@ def serve_nova_v3_lab() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Nova V3 lab page not found"}, status_code=404)
+
+
+@app.get("/nova/growth")
+@app.get("/nova/growth-agent")
+def serve_nova_growth_agent() -> Response:
+    """Owner dashboard for Nova AI Business Growth Agent (default-off APIs)."""
+    page = os.path.join(_static_dir, "nova-growth", "index.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html")
+    return JSONResponse({"error": "Nova Growth Agent page not found"}, status_code=404)
 
 
 @app.get("/nova/voice")
