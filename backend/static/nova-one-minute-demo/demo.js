@@ -104,14 +104,43 @@
     applyScene(sceneFor(t));
   }
 
+  function playbackError(media, err) {
+    var code = media.error && media.error.code;
+    var label = media === audio ? "Narration" : "Presenter video";
+    var reason = code === 4 ? "unsupported or unavailable file" :
+      code === 3 ? "decoding error" :
+      code === 2 ? "network error" :
+      code === 1 ? "loading was interrupted" :
+      (err && err.name === "NotAllowedError") ? "browser blocked playback" :
+      "media could not play";
+    return label + ": " + reason + ". Check the saved media file on this server.";
+  }
+
+  function showPlaybackError(message) {
+    if (shareStatus) shareStatus.textContent = message;
+  }
+
+  audio.addEventListener("error", function () {
+    showPlaybackError(playbackError(audio));
+    startBtn.textContent = "Audio unavailable";
+    startBtn.disabled = false;
+  });
+  video.addEventListener("error", function () {
+    showPlaybackError(playbackError(video) + " Narration may still play.");
+  });
+
   function play() {
     audio.play().then(function () {
-      video.play().catch(function () {});
+      video.play().catch(function (err) {
+        showPlaybackError(playbackError(video, err) + " Narration continues.");
+      });
       startBtn.textContent = "Playing";
       startBtn.disabled = true;
       pauseBtn.disabled = false;
-    }).catch(function () {
-      startBtn.textContent = "Tap again to play";
+    }).catch(function (err) {
+      startBtn.textContent = "Audio unavailable";
+      pauseBtn.disabled = true;
+      showPlaybackError(playbackError(audio, err));
     });
   }
 
