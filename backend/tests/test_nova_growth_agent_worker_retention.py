@@ -319,7 +319,119 @@ def test_diagnostics_distinguishes_mock(db):
     assert diag["live_delivery"] is False
     assert diag["worker"]["live_worker"] is False
     assert "retention_preview" in diag
+    assert "retention_schedule" in diag
+    assert diag["retention_schedule"]["dry_run_default"] is True
+    assert diag["retention_schedule"]["mode"] == "dry_run"
     assert diag["distinction"]["real"]
+
+
+def test_scheduled_retention_dry_run_default_and_duplicate_guard(Session, db, monkeypatch):
+    from app.core.nova.growth_agent.models import GaRetentionScheduleRun
+    from app.core.nova.growth_agent.retention_schedule import RetentionScheduler, current_window_key
+
+    monkeypatch.delenv("NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED", raising=False)
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED", "true")
+    svc = GrowthAgentService(db)
+    _activate(svc, "org-sched")
+    old = datetime.utcnow() - timedelta(days=400)
+    db.add(
+        GaConversationMessage(
+            id="sched-old-msg",
+            organization_id="org-sched",
+            conversation_id="conv-sched",
+            role="visitor",
+            content="old",
+            created_at=old,
+        )
+    )
+    db.commit()
+
+    scheduler = RetentionScheduler(Session, organization_id="org-sched", scheduler_id="sched-test")
+    window = current_window_key()
+    first = scheduler.run_once(window_key=window)
+    assert first["mode"] == "dry_run"
+    assert first["delete_enabled"] is False
+    assert first["processed"] == 1
+    assert first["results"][0]["status"] == "completed"
+    assert first["results"][0]["mode"] == "dry_run"
+    # Dry-run must not delete
+    assert db.query(GaConversationMessage).filter_by(id="sched-old-msg").count() == 1
+
+    # Duplicate protection: same window cannot create a second durable run
+    again = scheduler.run_once(window_key=window)
+    assert again["claimed"] == 0
+    assert (
+        db.query(GaRetentionScheduleRun)
+        .filter_by(organization_id="org-sched", window_key=window)
+        .count()
+        == 1
+    )
+
+
+def test_scheduled_retention_reclaims_expired_lease(Session, db, monkeypatch):
+    from app.core.nova.growth_agent.models import GaRetentionScheduleRun
+    from app.core.nova.growth_agent.retention_schedule import RetentionScheduler, current_window_key
+
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED", "true")
+    monkeypatch.delenv("NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED", raising=False)
+    svc = GrowthAgentService(db)
+    _activate(svc, "org-lease-ret")
+    window = current_window_key()
+    row = GaRetentionScheduleRun(
+        id="lease-ret-1",
+        organization_id="org-lease-ret",
+        window_key=window,
+        status="running",
+        mode="dry_run",
+        claimed_by="dead-scheduler",
+        claimed_at=datetime.utcnow() - timedelta(minutes=10),
+        lease_expires_at=datetime.utcnow() - timedelta(minutes=5),
+        available_at=datetime.utcnow() - timedelta(minutes=5),
+        attempt_number=1,
+        max_attempts=5,
+        batch_limit=50,
+        result_json={},
+    )
+    db.add(row)
+    db.commit()
+
+    scheduler = RetentionScheduler(
+        Session, organization_id="org-lease-ret", scheduler_id="reclaimer-ret"
+    )
+    out = scheduler.run_once(window_key=window, ensure=False)
+    assert out["processed"] == 1
+    assert out["results"][0]["status"] == "completed"
+    db.refresh(row)
+    assert row.status == "completed"
+    assert row.claimed_by is None
+
+
+def test_scheduled_retention_delete_requires_separate_flag(Session, db, monkeypatch):
+    from app.core.nova.growth_agent.retention_schedule import RetentionScheduler, current_window_key
+
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED", "true")
+    svc = GrowthAgentService(db)
+    _activate(svc, "org-del-sched")
+    old = datetime.utcnow() - timedelta(days=400)
+    db.add(
+        GaConversationMessage(
+            id="del-sched-msg",
+            organization_id="org-del-sched",
+            conversation_id="conv-del",
+            role="visitor",
+            content="old",
+            created_at=old,
+        )
+    )
+    db.commit()
+    scheduler = RetentionScheduler(
+        Session, organization_id="org-del-sched", scheduler_id="del-sched"
+    )
+    out = scheduler.run_once(window_key=current_window_key())
+    assert out["mode"] == "delete"
+    assert out["processed"] == 1
+    assert db.query(GaConversationMessage).filter_by(id="del-sched-msg").count() == 0
 
 
 def test_graceful_shutdown_releases_unprocessed(Session, db):

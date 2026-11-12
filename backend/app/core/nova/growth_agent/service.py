@@ -1348,9 +1348,19 @@ class GrowthAgentService:
 
     def diagnostics(self, org_id: str) -> dict[str, Any]:
         """Owner diagnostics: worker status, pending/failed jobs, retention preview."""
-        from app.core.nova.growth_agent.flags import background_worker_enabled, retention_delete_enabled
-        from app.core.nova.growth_agent.models import GaWorkerHeartbeat
+        from app.core.nova.growth_agent.flags import (
+            background_worker_enabled,
+            retention_delete_enabled,
+            retention_schedule_enabled,
+        )
+        from app.core.nova.growth_agent.models import GaRetentionScheduleRun, GaWorkerHeartbeat
         from app.core.nova.growth_agent.retention import preview_retention
+        from app.core.nova.growth_agent.retention_schedule import (
+            current_window_key,
+            effective_mode,
+            get_runtime_scheduler,
+            recent_runs_for_org,
+        )
         from app.core.nova.growth_agent.worker import get_runtime_worker
 
         pending = (
@@ -1380,7 +1390,16 @@ class GrowthAgentService:
             .all()
         )
         runtime = get_runtime_worker()
+        scheduler = get_runtime_scheduler()
         retention_preview = preview_retention(self.db, org_id, batch_limit=100)
+        schedule_pending = (
+            self.db.query(GaRetentionScheduleRun)
+            .filter(
+                GaRetentionScheduleRun.organization_id == org_id,
+                GaRetentionScheduleRun.status.in_(["pending", "running", "failed"]),
+            )
+            .count()
+        )
         return {
             "organization_id": org_id,
             "mock_processing_only": True,
@@ -1410,6 +1429,21 @@ class GrowthAgentService:
                 "suppressed": suppressed,
             },
             "retention_preview": retention_preview,
+            "retention_schedule": {
+                "schedule_enabled": retention_schedule_enabled(),
+                "delete_enabled": retention_delete_enabled(),
+                "mode": effective_mode(),
+                "dry_run_default": True,
+                "current_window_key": current_window_key(),
+                "pending_or_retryable_runs": schedule_pending,
+                "runtime_scheduler_id": scheduler.scheduler_id if scheduler else None,
+                "runtime_stats": dict(scheduler.stats) if scheduler else None,
+                "recent_runs": recent_runs_for_org(self.db, org_id, limit=5),
+                "note": (
+                    "Scheduled retention is default-off. When enabled it dry-runs unless "
+                    "NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED is separately set."
+                ),
+            },
             "retention_delete_enabled": retention_delete_enabled(),
             "distinction": {
                 "mock": "Worker/recover paths only mark sent_mock via mock adapters.",
@@ -1885,8 +1919,10 @@ class GrowthAgentService:
             ],
             "deletion": (
                 "Dry-run preview via POST /retention/preview. "
-                "Destructive cleanup requires NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED=true "
-                "and POST /retention/execute (bounded batches). Automatic deletion remains off by default."
+                "Scheduled processor (NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED) is default-off "
+                "and dry-runs by default. Destructive cleanup requires separate "
+                "NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED=true plus POST /retention/execute "
+                "or a scheduled delete-mode run (bounded batches)."
             ),
             "export": "GET /api/nova/growth-agent/export returns org-scoped JSON with PII included only for the owning org.",
         }

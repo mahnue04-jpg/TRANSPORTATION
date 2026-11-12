@@ -48,6 +48,13 @@ def retention_delete_enabled() -> bool:
     return _env_enabled("NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED")
 
 
+def retention_schedule_enabled() -> bool:
+    """Scheduled retention processor. Default off. Dry-run unless delete also enabled."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED")
+
+
 # Hard-off live capabilities — cannot be enabled via headers or UI alone.
 REAL_EMAIL_SEND = False
 REAL_SMS_SEND = False
@@ -66,6 +73,7 @@ def live_flags() -> dict[str, bool]:
         "DEMO_MODE": demo_mode_enabled(),
         "WIDGET_PUBLIC_ENABLED": widget_public_enabled(),
         "BACKGROUND_WORKER_MOCK": background_worker_enabled(),
+        "RETENTION_SCHEDULE_ENABLED": retention_schedule_enabled(),
         "RETENTION_DELETE_ENABLED": retention_delete_enabled(),
         "REAL_EMAIL_SEND": REAL_EMAIL_SEND,
         "REAL_SMS_SEND": REAL_SMS_SEND,

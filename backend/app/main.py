@@ -377,26 +377,41 @@ async def lifespan(app: FastAPI):
     deferred_startup_status()["scheduled"] = True
     deferred_task = asyncio.create_task(_deferred_startup_runner())
 
-    # Optional Nova Growth Agent mock delivery worker (default-off env flag).
+    # Optional Nova Growth Agent mock delivery worker / retention scheduler (default-off).
     try:
-        from app.core.nova.growth_agent.flags import background_worker_enabled
+        from app.core.nova.growth_agent.flags import (
+            background_worker_enabled,
+            retention_schedule_enabled,
+        )
+        from app.core.nova.growth_agent.retention_schedule import (
+            start_runtime_scheduler,
+            stop_runtime_scheduler,
+        )
         from app.core.nova.growth_agent.worker import start_runtime_worker, stop_runtime_worker
         from app.db.session import SessionLocal
 
         if background_worker_enabled():
             start_runtime_worker(SessionLocal, poll_seconds=2.0)
             logger.info("Nova Growth Agent mock delivery worker scheduled (live sends remain off).")
+        if retention_schedule_enabled():
+            start_runtime_scheduler(SessionLocal, poll_seconds=30.0)
+            logger.info(
+                "Nova Growth Agent retention scheduler started "
+                "(dry-run unless RETENTION_DELETE_ENABLED)."
+            )
     except Exception as ga_worker_exc:
-        logger.error("Nova Growth Agent mock worker start skipped: %s", ga_worker_exc)
+        logger.error("Nova Growth Agent background start skipped: %s", ga_worker_exc)
 
     yield  # ── APPLICATION RUNNING ──────────────────────────────────────────
 
     try:
+        from app.core.nova.growth_agent.retention_schedule import stop_runtime_scheduler
         from app.core.nova.growth_agent.worker import stop_runtime_worker
 
+        stop_runtime_scheduler(timeout=5.0)
         stop_runtime_worker(timeout=5.0)
     except Exception as ga_worker_stop_exc:
-        logger.error("Nova Growth Agent mock worker shutdown error: %s", ga_worker_stop_exc)
+        logger.error("Nova Growth Agent background shutdown error: %s", ga_worker_stop_exc)
 
     deferred_task.cancel()
     try:

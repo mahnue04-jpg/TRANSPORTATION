@@ -20,6 +20,7 @@ from app.core.nova.growth_agent.schemas import (
     ProfileUpsertIn,
     RescheduleIn,
     RetentionIn,
+    RetentionScheduleTickIn,
     WidgetChatIn,
     WidgetCreateIn,
     WorkerTickIn,
@@ -390,6 +391,45 @@ def retention_execute(
     except GrowthAgentError as exc:
         _handle(exc)
         raise
+
+
+@router.post("/retention/schedule/tick")
+def retention_schedule_tick(
+    body: RetentionScheduleTickIn,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Run one scheduled-retention batch for this tenant (dry-run unless delete enabled)."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.nova.growth_agent.flags import growth_agent_enabled, retention_schedule_enabled
+    from app.core.nova.growth_agent.retention_schedule import RetentionScheduler
+
+    if not growth_agent_enabled():
+        raise HTTPException(status_code=404, detail="Growth Agent disabled")
+    if not retention_schedule_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Retention schedule disabled "
+                "(set NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED=true)"
+            ),
+        )
+    org = _org(user, body.organization_id)
+    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+    scheduler = RetentionScheduler(
+        factory,
+        organization_id=org,
+        scheduler_id=f"tick-ret-{user.user_id[:8]}",
+    )
+    result = scheduler.run_once(
+        limit=body.limit,
+        window_key=body.window_key,
+        ensure=body.ensure,
+    )
+    result["distinction"] = "scheduled_retention"
+    result["owner_triggered"] = True
+    return result
 
 
 @router.get("/appointments")

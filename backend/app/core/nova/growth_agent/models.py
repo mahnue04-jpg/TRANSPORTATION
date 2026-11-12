@@ -277,6 +277,44 @@ class GaWorkerHeartbeat(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
+class GaRetentionScheduleRun(Base):
+    """Durable scheduled retention runs — duplicate-protected per org+window.
+
+    Default processing is dry-run. Destructive mode requires a separate delete flag.
+    """
+
+    __tablename__ = "nova_ga_retention_schedule_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "window_key",
+            name="uq_nova_ga_retention_org_window",
+        ),
+        Index("ix_nova_ga_retention_claim", "status", "available_at", "lease_expires_at"),
+        Index("ix_nova_ga_retention_org", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    window_key: Mapped[str] = mapped_column(String(40), nullable=False)  # e.g. 2026-11-12
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    # pending|running|completed|failed|skipped
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="dry_run")
+    # dry_run|delete
+    claimed_by: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    batch_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class GaAppointmentService(Base):
     __tablename__ = "nova_ga_appointment_services"
     __table_args__ = (
@@ -418,6 +456,7 @@ GROWTH_AGENT_TABLES = (
     GaIdempotencyKey.__table__,
     GaRateLimitCounter.__table__,
     GaWorkerHeartbeat.__table__,
+    GaRetentionScheduleRun.__table__,
 )
 
 LEAD_STATES = ("new", "contacted", "qualified", "booked", "closed")

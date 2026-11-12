@@ -99,3 +99,9 @@ class RetentionIn(OrgScoped):
 
 class WorkerTickIn(OrgScoped):
     limit: int = 10
+
+
+class RetentionScheduleTickIn(OrgScoped):
+    limit: int = 10
+    window_key: str | None = None
+    ensure: bool = True

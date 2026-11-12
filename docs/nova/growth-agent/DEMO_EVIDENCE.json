@@ -1,5 +1,5 @@
 {
-  "label": "SYNTHETIC DEMO \u2014 not live customers",
+  "label": "SYNTHETIC DEMO — not live customers",
   "business": "Cedar Ridge Home Services (SYNTHETIC DEMO)",
   "chat": {
     "grounded": true,
@@ -8,7 +8,7 @@
   },
   "crm_edit": {
     "lead_state": "qualified",
-    "notes": "Synthetic demo \u2014 qualified after FAQ chat"
+    "notes": "Synthetic demo — qualified after FAQ chat"
   },
   "booking_idempotent_replay": true,
   "cancel_rebook": {
@@ -36,7 +36,8 @@
     "mock_processing_only": true,
     "live_delivery": false,
     "pending_jobs": 0,
-    "sent_mock": 3
+    "sent_mock": 3,
+    "ui_flag_strip": "live_delivery=false · mock_worker=on · retention_schedule=on · retention_mode=dry_run · retention_delete=off"
   },
   "retention_preview": {
     "dry_run": true,
@@ -49,6 +50,31 @@
       "appointments"
     ],
     "total_would_delete": 0
+  },
+  "retention_schedule": {
+    "schedule_enabled_default": false,
+    "dry_run_default": true,
+    "delete_separately_gated": true,
+    "duplicate_window_protected": true,
+    "lease_reclaim_tested": true,
+    "ui_schedule_tick": "dry_run / already_completed_window or processed"
+  },
+  "owner_ui_screenshots": [
+    "docs/nova/growth-agent/screenshots/01-login-or-landing.jpg",
+    "docs/nova/growth-agent/screenshots/02-setup-activated.jpg",
+    "docs/nova/growth-agent/screenshots/03-synthetic-demo.jpg",
+    "docs/nova/growth-agent/screenshots/04-crm-leads.jpg",
+    "docs/nova/growth-agent/screenshots/05-booking-appointments.jpg",
+    "docs/nova/growth-agent/screenshots/06-diagnostics-flags.jpg",
+    "docs/nova/growth-agent/screenshots/07-retention-preview.jpg",
+    "docs/nova/growth-agent/screenshots/08-worker-tick.jpg",
+    "docs/nova/growth-agent/screenshots/09-retention-schedule-tick.jpg",
+    "docs/nova/growth-agent/screenshots/10-kill-switch.jpg",
+    "docs/nova/growth-agent/screenshots/WALKTHROUGH_NOTES.json"
+  ],
+  "disposable_postgres": {
+    "alembic_upgrade": "20261112_nova_ga_retention ALEMBIC_OK on nova_ga_dispos_mig",
+    "suite": "6 passed on nova_ga_dispos_test"
   },
   "handoff": {
     "status": "handed_off",
@@ -82,7 +108,10 @@
     "voice": false
   },
   "test_results": {
-    "growth_agent_suite": "42 passed",
-    "focused_regressions": "69 passed"
+    "growth_agent_suite": "45 passed",
+    "disposable_postgres_suite": "6 passed",
+    "focused_regressions": "69 passed",
+    "staging_verified": false,
+    "ci_postgres_job": "added in nova-growth-agent.yml (verified after push)"
   }
 }

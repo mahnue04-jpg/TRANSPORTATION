@@ -56,7 +56,20 @@
     state.token = "";
     localStorage.removeItem("amicor_growth_token");
     sessionMeta.textContent = "Signed out.";
-    setBanner("Sign in required.", "warn");
+    setBanner("Sign in required. Metrics, diagnostics, CRM, and booking need an owner session.", "warn");
+    $("metrics").innerHTML = `<div class="hint">Sign in to load metrics. Live delivery remains off.</div>`;
+    $("inbox").textContent = "Sign in to load conversations.";
+    $("inbox").className = "empty";
+    $("leads").textContent = "Sign in to load leads.";
+    $("leads").className = "empty";
+    $("diagnostics-out").textContent = "";
+    if ($("diagnostics-flags")) $("diagnostics-flags").textContent = "";
+  }
+
+  function requireSession() {
+    if (!state.token) {
+      throw new Error("Sign in required before using owner controls.");
+    }
   }
 
   function parseJsonField(id, label) {
@@ -87,6 +100,10 @@
 
   async function refreshMetrics() {
     const box = $("metrics");
+    if (!state.token) {
+      box.innerHTML = `<div class="hint">Sign in to load metrics. Live delivery remains off.</div>`;
+      return;
+    }
     box.innerHTML = `<div class="loading">Loading metrics…</div>`;
     try {
       const data = await api("/api/nova/growth-agent/analytics?days=30");
@@ -501,16 +518,34 @@
     }
   });
 
+  function renderDiagnosticsFlags(data) {
+    const flagsEl = $("diagnostics-flags");
+    if (!flagsEl) return;
+    const sched = (data && data.retention_schedule) || {};
+    const worker = (data && data.worker) || {};
+    flagsEl.textContent = [
+      `live_delivery=${data && data.live_delivery === true ? "true" : "false"}`,
+      `mock_worker=${worker.mock_worker_flag ? "on" : "off"}`,
+      `retention_schedule=${sched.schedule_enabled ? "on" : "off"}`,
+      `retention_mode=${sched.mode || "dry_run"}`,
+      `retention_delete=${sched.delete_enabled || (data && data.retention_delete_enabled) ? "on" : "off"}`,
+    ].join(" · ");
+  }
+
   $("refresh-diagnostics").addEventListener("click", async () => {
     try {
+      requireSession();
       const data = await api("/api/nova/growth-agent/diagnostics");
+      renderDiagnosticsFlags(data);
       $("diagnostics-out").textContent = JSON.stringify(data, null, 2);
     } catch (err) {
       $("diagnostics-out").textContent = err.message;
+      if ($("diagnostics-flags")) $("diagnostics-flags").textContent = "Sign in required for diagnostics.";
     }
   });
   $("retention-preview").addEventListener("click", async () => {
     try {
+      requireSession();
       const data = await api("/api/nova/growth-agent/retention/preview", {
         method: "POST",
         body: JSON.stringify({ batch_limit: 100 }),
@@ -520,8 +555,23 @@
       $("diagnostics-out").textContent = err.message;
     }
   });
+  $("retention-schedule-tick").addEventListener("click", async () => {
+    try {
+      requireSession();
+      const data = await api("/api/nova/growth-agent/retention/schedule/tick", {
+        method: "POST",
+        body: JSON.stringify({ limit: 10, ensure: true }),
+      });
+      $("diagnostics-out").textContent = JSON.stringify(data, null, 2);
+      const diag = await api("/api/nova/growth-agent/diagnostics");
+      renderDiagnosticsFlags(diag);
+    } catch (err) {
+      $("diagnostics-out").textContent = err.message;
+    }
+  });
   $("worker-tick").addEventListener("click", async () => {
     try {
+      requireSession();
       const data = await api("/api/nova/growth-agent/workflows/worker/tick", {
         method: "POST",
         body: JSON.stringify({ limit: 10 }),
@@ -538,6 +588,14 @@
 
   if (state.token) {
     sessionMeta.textContent = "Restored session token from local storage.";
-    refreshAll().catch((err) => setBanner(err.message, "warn"));
+    refreshAll().catch((err) => {
+      setBanner(`Session restore failed: ${err.message}. Sign in again.`, "warn");
+      signOut();
+    });
+  } else {
+    setBanner(
+      "Sign in required. Set NOVA_GROWTH_AGENT_ENABLED=true in local/staging. Live providers remain off.",
+      "warn"
+    );
   }
 })();

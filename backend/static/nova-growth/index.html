@@ -85,18 +85,20 @@
       <h2>Analytics</h2>
       <p class="hint">Explicit denominators only. No invented attribution.</p>
       <div id="metrics" class="metrics" aria-live="polite">
-        <div class="loading">Loading metrics…</div>
+        <div class="hint">Sign in to load metrics. Live delivery remains off.</div>
       </div>
     </section>
 
     <section class="panel" aria-label="Diagnostics">
       <h2>Diagnostics</h2>
-      <p class="hint">Mock worker status, pending/failed jobs, retention preview. Clearly mock — not real delivery.</p>
+      <p class="hint">Mock worker status, pending/failed jobs, retention preview/schedule. Clearly mock — not real delivery. Scheduled retention is default-off and dry-runs unless delete is separately enabled.</p>
       <div class="actions">
         <button type="button" id="refresh-diagnostics" class="secondary">Refresh diagnostics</button>
         <button type="button" id="retention-preview" class="secondary">Retention dry-run</button>
+        <button type="button" id="retention-schedule-tick" class="secondary">Retention schedule tick</button>
         <button type="button" id="worker-tick" class="secondary">Mock worker tick</button>
       </div>
+      <p id="diagnostics-flags" class="hint" aria-live="polite"></p>
       <pre id="diagnostics-out" class="hint" aria-live="polite"></pre>
     </section>
 
