@@ -116,12 +116,16 @@
       <details>
         <summary>Prepare a new authorized bookkeeping workpaper</summary>
         <p class="hint">Use only an existing unblocked Work &amp; Revenue assignment and client-signed, independently verified consent permitting AI processing. The server verifies scope; entering identifiers or checking a box cannot grant permission.</p>
+        <div class="command-actions"><button type="button" id="bookkeeping-load-tasks" class="secondary">Load my authorized bookkeeping assignments</button></div>
+        <label for="bookkeeping-eligible-tasks">Choose verified saved assignment
+          <select id="bookkeeping-eligible-tasks"><option value="">Load authorized tasks first</option></select>
+        </label>
         <form id="bookkeeping-submit-form">
-          <label for="bookkeeping-engagement">Saved engagement ID
-            <input id="bookkeeping-engagement" type="text" maxlength="120" autocomplete="off" required />
+          <label for="bookkeeping-engagement">Saved engagement ID (selected above)
+            <input id="bookkeeping-engagement" type="text" maxlength="120" autocomplete="off" readonly required />
           </label>
-          <label for="bookkeeping-task">Saved task ID
-            <input id="bookkeeping-task" type="text" maxlength="120" autocomplete="off" required />
+          <label for="bookkeeping-task">Saved task ID (selected above)
+            <input id="bookkeeping-task" type="text" maxlength="120" autocomplete="off" readonly required />
           </label>
           <label for="bookkeeping-kind">Contract-authorized work type
             <select id="bookkeeping-kind">
