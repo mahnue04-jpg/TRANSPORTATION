@@ -525,3 +525,51 @@ def test_postgres_scoped_retention_plan_never_deletes(pg):
         assert ("synthetic-retention-old-1", "REJECTED") in statuses
         assert ("synthetic-retention-other-owner-1", "FAILED") in statuses
         assert store.writes == 0
+
+
+def test_postgres_http_review_queue_excludes_revoked_jobs(pg):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.db.session import get_db
+
+    engine, store, owner = pg
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[require_work_revenue_owner] = lambda: owner
+
+    def db_session():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = db_session
+    prefix = "/operations/durable/bookkeeping"
+    submission = prefix + "/engagements/synthetic-engagement/tasks/synthetic-task/receivables_aging/jobs"
+    with TestClient(app) as client:
+        result = client.post(
+            submission, content=SOURCE, headers={
+                "Idempotency-Key": "postgres-queue-1",
+                "X-Nova-File-Name": "invented.csv",
+                "X-Nova-As-Of": "2026-11-11",
+                "Content-Type": "text/csv",
+            },
+        )
+        assert result.status_code == 202, result.text
+        job_id = result.json()["job_id"]
+        queue = client.get(prefix + "/review-queue")
+        assert queue.status_code == 200, queue.text
+        assert queue.json()["count"] == 1
+        assert queue.json()["jobs"][0]["job_id"] == job_id
+        assert "output_ref" not in str(queue.json())
+        with Session(engine) as db:
+            db.execute(sa.update(scope.consents).where(
+                scope.consents.c.authorization_id == "synthetic-consent-1"
+            ).values(status="REVOKED", revoked_at=datetime.now(timezone.utc)))
+            db.commit()
+        blocked = client.get(prefix + "/review-queue")
+        assert blocked.status_code == 200
+        assert blocked.json()["count"] == 0
+        assert store.writes == 1
