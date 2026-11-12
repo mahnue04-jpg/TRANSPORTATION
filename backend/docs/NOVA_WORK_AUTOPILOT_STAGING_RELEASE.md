@@ -132,3 +132,35 @@ specific approval: create a dedicated billable isolated database, web
 staging and cron service, provision secure private storage, apply reviewed
 staging migrations, establish test users and real permission records.
 Only then should an actual deployed run and missed-run alarm be accepted.
+
+
+## Draft PR integration reconciliation (2026-11-12)
+
+Added read-only GitHub Actions `Nova Release Cross-PR Integration Preview`.
+It checks PR #477 (durable Operations processing), PR #484 (accounting
+integration), then PR #338 (Work & Revenue) in a temporary CI checkout.
+Nothing is pushed, merged into GitHub, or deployed to Render.
+
+The first run found one genuine shared dashboard conflict:
+`backend/static/nova-work/index.html`. PR #477 + #484 merged without a
+textual conflict; PR #338 also inserts the first-client board in the same
+area as Operations/Accounting panels.
+
+An intentionally strict CI-only reconciler now preserves all three panels,
+the first-client stylesheet and the four feature scripts, without
+modifying any draft PR head. It refuses unknown conflicts and checks for
+missing/duplicate DOM controls. A separate combined synthetic regression
+step exercises work discovery, CSV job processing, accounting HTTP review and
+the staging preflight together.
+
+**Verified prior ephemeral CI run 43278967342:** dashboard reconciliation
+succeeded, all static UI checks passed, and **31 combined synthetic
+functional tests passed**. A later CI revision additionally records explicit
+test-success evidence in the downloadable integration report; its separate
+verification must complete before release credit is given.
+
+A conflict-free temporary tree is NOT a reviewed integrated release branch.
+Human review is required for the shared HTML resolution, dependency/route
+ordering, full PostgreSQL/private S3 behavior, authenticated Render staging,
+consent controls, missed-run alerting and rollback. Keep all production and
+paid-processing flags disabled. Do not merge/deploy automatically.
