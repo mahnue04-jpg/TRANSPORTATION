@@ -232,6 +232,111 @@ def _missing_comp_unclear_source() -> dict:
     }
 
 
+def test_gym_membership_benefit_is_not_an_application_fee():
+    """A benefits line must not be read as pay-to-apply."""
+    from app.core.nova.v3.multi_source_discovery import _query_relevant
+    from app.core.nova.work_revenue.capability_first_discovery import (
+        unverified_experience_required,
+        upfront_fee_required,
+    )
+
+    employee = {
+        "provider_id": "remotive",
+        "provider_identifier": "benefit-office",
+        "title": "Remote Office Assistant",
+        "company_name": "Fictional Benefits Co",
+        "description": (
+            "Full-time staff position. Profit share paid to full-time employees. "
+            "Competitive paid time off. Subsidized gym memberships. Medical, dental, "
+            "and vision insurance."
+        ),
+        "source_url": "https://example.com/remote-office-assistant",
+        "geography": "USA",
+        "remote_status": "remote",
+        "compensation_text": "$35,000 - $52,000",
+        "job_type": "full_time",
+        "source_attribution": "Remotive",
+    }
+    contractor = {
+        "provider_id": "remotive",
+        "provider_identifier": "benefit-va",
+        "title": "Virtual Assistant",
+        "company_name": "Fictional Remote Ops",
+        "description": (
+            "Remote virtual assistant contractor for administrative support, scheduling, "
+            "and data entry. Competitive pay. A subsidized gym membership is available. "
+            "No application fee. No certification required."
+        ),
+        "source_url": "https://example.com/virtual-assistant",
+        "geography": "United States",
+        "remote_status": "remote",
+        "compensation_text": "$30/hr",
+        "job_type": "contract",
+        "source_attribution": "Remotive",
+    }
+    membership_wall = {
+        "provider_id": "remotive",
+        "provider_identifier": "membership-wall",
+        "title": "Virtual Assistant",
+        "company_name": "Fictional Access Club",
+        "description": (
+            "Remote contractor administrative support. You must pay for a membership "
+            "before you can view assignments."
+        ),
+        "source_url": "https://example.com/membership-wall",
+        "geography": "Worldwide",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "source_attribution": "Remotive",
+    }
+    payroll = {
+        "provider_id": "remoteok",
+        "provider_identifier": "payroll-range",
+        "title": "Virtual Assistant",
+        "company_name": "Fictional Payroll",
+        "description": (
+            "Must-have experience. Minimum 1\u00e2\u0080\u00932 years of hands-on UK payroll "
+            "processing experience."
+        ),
+        "source_url": "https://example.com/payroll-assistant",
+        "geography": "Remote",
+        "remote_status": "remote",
+        "job_type": "contract",
+        "source_attribution": "RemoteOK",
+    }
+
+    employee_qual = qualify_live_job(employee)
+    assert employee_qual["fee_required"] == "no"
+    assert "upfront_fee_or_paid_membership" not in employee_qual["blockers"]
+    assert employee_qual["qualification_status"] == OUTCOME_NOT_QUALIFIED
+    assert "employee_w2_staff_role" in employee_qual["blockers"]
+    assert upfront_fee_required(employee) is False
+    assert _query_relevant(employee, "virtual assistant") is False
+
+    contractor_qual = qualify_live_job(contractor)
+    assert contractor_qual["fee_required"] == "no"
+    assert "upfront_fee_or_paid_membership" not in contractor_qual["blockers"]
+    assert upfront_fee_required(contractor) is False
+    assert unverified_experience_required(contractor) is False
+    assert _query_relevant(contractor, "virtual assistant") is True
+    assert contractor_qual["external_submission"] is False
+    assert contractor_qual["financial_execution"] is False
+
+    wall_qual = qualify_live_job(membership_wall)
+    assert wall_qual["fee_required"] == "yes"
+    assert "upfront_fee_or_paid_membership" in wall_qual["blockers"]
+    assert upfront_fee_required(membership_wall) is True
+    assert _query_relevant(membership_wall, "virtual assistant") is False
+    assert wall_qual["auto_prepare_allowed"] is False
+
+    assert unverified_experience_required(payroll) is True
+    assert _query_relevant(payroll, "virtual assistant") is False
+    payroll_qual = qualify_and_rank_live_jobs("virtual assistant", [payroll])[0]["live_qualification"]
+    assert "unverified_experience_required" in payroll_qual["blockers"]
+    assert payroll_qual["auto_prepare_allowed"] is False
+    assert payroll_qual["external_submission"] is False
+
+
 def test_coalition_style_employee_job_not_qualified():
     qual = qualify_live_job(_coalition_office_assistant())
     assert qual["qualification_status"] == OUTCOME_NOT_QUALIFIED

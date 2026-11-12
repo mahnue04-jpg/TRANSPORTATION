@@ -1121,6 +1121,17 @@ def _upsert_owner_actions(
         )
 
 
+_PERSISTED_SOURCE_KEYS = (
+    "fetched_at",
+    "source_url",
+    "provenance_provider",
+    "source_provider_id",
+    "source_eligibility_reasons",
+    "eligibility_decision",
+    "eligibility_explanations",
+)
+
+
 def qualify(
     db: Session,
     opportunity_id: str,
@@ -1129,7 +1140,17 @@ def qualify(
     user: UserContext,
 ) -> tuple[NovaWorkOpportunity, dict[str, Any]]:
     row = get_opportunity(db, opportunity_id, organization_id=organization_id, user=user)
+    previous: dict[str, Any] = {}
+    try:
+        parsed = json.loads(row.qualification_json or "{}")
+    except json.JSONDecodeError:
+        parsed = {}
+    if isinstance(parsed, dict):
+        previous = parsed
     result = qualify_opportunity(_opportunity_payload(row))
+    for key in _PERSISTED_SOURCE_KEYS:
+        if previous.get(key) and not result.get(key):
+            result[key] = previous[key]
     result["qualified_at"] = now().isoformat()
     row.qualification_outcome = result["outcome"]
     row.qualification_json = json.dumps(result)

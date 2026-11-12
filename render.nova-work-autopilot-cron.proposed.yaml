@@ -1,0 +1,53 @@
+# PROPOSAL ONLY - DO NOT BLUEPRINT SYNC WITHOUT EXPLICIT OWNER APPROVAL.
+# This would CREATE a billable Render cron service (minimum monthly charge).
+# The referenced DB is only proposed in PR #484 and does not exist yet.
+# PR #338, #477 and #484 must be integrated and reviewed in staging first.
+# Keep root render.yaml and existing live production resources UNCHANGED.
+services:
+  - type: cron
+    name: amicor-nova-work-revenue-discovery-staging
+    runtime: python
+    region: virginia
+    plan: 0.5c-512mb
+    branch: cursor/wr-first-client-pipeline-931c
+    rootDir: backend
+    autoDeployTrigger: "off"
+    # Render evaluates this UTC expression TWICE daily: 10:00 + 11:00.
+    # The code runs only when one of those equals 05:00 America/Chicago.
+    # The durable owner/day lock suppresses repeats and restart replay.
+    schedule: "0 10,11 * * *"
+    buildCommand: pip install --upgrade -r requirements.txt
+    startCommand: PYTHONPATH=. python scripts/nova_work_autopilot_staging.py
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: AMICOR_ENVIRONMENT
+        value: staging
+      - key: NOVA_WORK_AUTOPILOT_STAGING_ENABLED
+        value: "false"
+      - key: NOVA_WORK_AUTOPILOT_APPROVED_DATABASE
+        value: nova_accounting_staging
+      - key: NOVA_WORK_AUTOPILOT_OWNER_ORG_ID
+        sync: false
+      - key: NOVA_WORK_AUTOPILOT_OWNER_USER_ID
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: amicor-nova-accounting-staging-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NOVA_BOOKKEEPING_DURABLE_ENABLED
+        value: "false"
+      - key: NOVA_OPERATIONS_DURABLE_CSV_ENABLED
+        value: "false"
+      - key: HEALTH_ISF_STRIPE_ENABLED
+        value: "false"
+      - key: NOVA_STRIPE_LIVE_ENABLED
+        value: "false"
+      # Provider keys must never be stored in source. Obtain any necessary
+      # permits and environment secret approval separately in Render.
+      - key: SAM_GOV_API_KEY
+        sync: false

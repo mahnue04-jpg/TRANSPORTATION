@@ -34,7 +34,11 @@ class JobRun:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
-def next_run(frequency: str, timezone_name: str, now: datetime) -> datetime:
+CADENCES = ("manual", "hourly", "every_two_hours", "daily", "weekly", "monthly")
+
+
+def next_run(frequency: str, timezone_name: str, now: datetime) -> datetime | None:
+    """Return the next wake time. Manual cadence does not schedule a wake."""
     token = str(timezone_name or "").strip()
     if not token:
         raise V3Error("TIMEZONE_REQUIRED", "explicit IANA timezone is required", http_status=400)
@@ -42,7 +46,15 @@ def next_run(frequency: str, timezone_name: str, now: datetime) -> datetime:
         zone = ZoneInfo(token)
     except ZoneInfoNotFoundError as exc:
         raise V3Error("TIMEZONE_INVALID", "timezone must be an explicit IANA name", http_status=400) from exc
+    if frequency not in CADENCES:
+        raise V3Error("INVALID_CADENCE", "cadence must be manual, hourly, every_two_hours, daily, weekly, or monthly", http_status=400)
     local = now.astimezone(zone)
+    if frequency == "manual":
+        return None
+    if frequency == "hourly":
+        return (local + timedelta(hours=1)).astimezone(now.tzinfo)
+    if frequency == "every_two_hours":
+        return (local + timedelta(hours=2)).astimezone(now.tzinfo)
     if frequency == "weekly":
         return (local + timedelta(days=7)).astimezone(now.tzinfo)
     if frequency == "monthly":

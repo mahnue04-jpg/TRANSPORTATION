@@ -71,6 +71,10 @@ MATERIAL_KINDS = (
     "experience_narrative",
     "pricing_placeholder",
     "scope_of_work",
+    "evidence_checklist",
+    "paid_pilot_options",
+    "cost_scope_check",
+    "eligibility_assessment",
 )
 
 OWNER_ACTION_TYPES = (

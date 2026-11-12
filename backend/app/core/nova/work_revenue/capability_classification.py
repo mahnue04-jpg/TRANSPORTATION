@@ -18,6 +18,10 @@ INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"
 _WS = re.compile(r"\s+")
 
 _DIGITAL: tuple[tuple[str, str, str], ...] = (
+    (r"\b(?:workflow automation|process automation|business process automation|ai automation|n8n|zapier|make\.com|dify)\b", "ai_assisted_analysis", "AI and workflow automation"),
+    (r"\b(?:api integration|fastapi|webhook integration)\b", "web_software_support", "API integration"),
+    (r"\b(?:administrative support|virtual assistant|operations support|operational support|business process)\b", "administrative_support", "administrative and operations support"),
+    (r"\bcrm\b", "data_organization", "CRM organization"),
     (r"\bresearch\b", "research", "research"),
     (r"\bspreadsheet\b|\bexcel\b|\bgoogle sheets\b", "spreadsheet_analysis", "spreadsheet cleanup and analysis"),
     (r"\breport(?:ing|s)?\b|\bdata analysis\b", "reporting", "reporting"),
@@ -128,7 +132,16 @@ def classify_opportunity_capability(opportunity: dict[str, Any]) -> dict[str, An
     physical_hit = _affirmed(_PHYSICAL, duties) or physical_flag == "true"
     nursing_hit = _affirmed(_NURSING, duties)
     licensed_hit = _affirmed(_LICENSED_PRO, duties) or nursing_hit
-    w2_hit = _affirmed(_W2, duties) or engagement in {"w2", "w-2", "employee", "full_time", "full-time"}
+    # A full-time hour count is not W-2 employment when the listing is an
+    # explicit 1099/contractor engagement and does not claim staff employment.
+    explicit_contractor = bool(re.search(
+        r"\b(1099|independent contractor|freelance|freelancer|contractor)\b",
+        duties,
+        re.I,
+    ))
+    explicit_w2 = _affirmed(_W2, duties) or engagement in {"w2", "w-2", "employee"}
+    full_time_engagement = engagement in {"full_time", "full-time"} and not explicit_contractor
+    w2_hit = explicit_w2 or full_time_engagement
     identity_hit = _affirmed(_IDENTITY, duties)
     ai_unclear = bool(_AI_UNCLEAR.search(duties))
     ai_banned = _affirmed(_AI_PROHIBITED, duties)

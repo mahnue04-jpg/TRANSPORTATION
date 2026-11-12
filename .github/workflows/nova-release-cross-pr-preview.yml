@@ -1,0 +1,121 @@
+name: Nova Release Cross-PR Integration Preview
+
+# Read-only integration evidence for PR 477 + PR 484 + PR 338.
+# Does not deploy, push, merge GitHub PRs, provision, or activate cron.
+on:
+  pull_request:
+    paths:
+      - "backend/scripts/nova_release_merge_preview.sh"
+      - "backend/scripts/nova_release_dashboard_reconcile.py"
+      - "backend/scripts/nova_release_router_reconcile.py"
+      - "backend/scripts/nova_release_main_router_reconcile.py"
+      - "backend/scripts/nova_release_combined_ui_contract.py"
+      - "backend/tests/test_nova_release_combined_route_contract.py"
+      - ".github/workflows/nova-release-cross-pr-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-merge-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Inspect draft PR integration conflicts without writes
+        run: |
+          set -euo pipefail
+          bash backend/scripts/nova_release_merge_preview.sh /tmp/nova-release-merge-report.json
+          cp /tmp/nova-release-merge-report.json nova-release-merge-report.json
+      - name: Check combined Work & Revenue + Operations + Bookkeeping UI
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("nova-release-merge-report.json").read_text())
+          if not report["merge_conflict_free"]:
+              raise SystemExit("Combined UI test blocked: unresolved draft PR conflicts")
+          PY
+          python3 backend/scripts/nova_release_combined_ui_contract.py
+      - name: Configure isolated Python regression environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run combined revenue, operations and accounting regressions
+        working-directory: backend
+        env:
+          TESTING: "true"
+          CI: "true"
+          APP_ENV: testing
+          AMICOR_ENVIRONMENT: testing
+          HEALTH_ISF_STRIPE_ENABLED: "false"
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          NOVA_BOOKKEEPING_DURABLE_ENABLED: "false"
+          NOVA_OPERATIONS_DURABLE_CSV_ENABLED: "false"
+          SECRET_KEY: ci-only-integration
+          JWT_SECRET: ci-only-integration
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q -rs \
+            tests/test_nova_work_autopilot_cycle.py \
+            tests/test_nova_operations_customer_csv_jobs.py \
+            tests/test_nova_bookkeeping_synthetic_http_flow.py \
+            tests/test_nova_bookkeeping_staging_preflight.py \
+            tests/test_nova_release_combined_route_contract.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("../nova-release-merge-report.json")
+          report = json.loads(path.read_text())
+          assert report["merge_conflict_free"] is True
+          report["integration_tests_passed"] = True
+          report["combined_test_suites"] = [
+              "discovery", "operations_csv", "bookkeeping_http", "staging_preflight"
+          ]
+          report["integration_test_environment"] = "SYNTHETIC_CI_NOT_RENDER"
+          report["release_approved"] = False
+          report["human_merge_resolution_reviewed"] = False
+          path.write_text(json.dumps(report, indent=2) + "\n")
+          PY
+          echo "Combined draft-PR synthetic regressions passed in ephemeral CI tree; NOT real Render staging." >> "$GITHUB_STEP_SUMMARY"
+      - name: Summarize release gate
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path("nova-release-merge-report.json").read_text())
+          assert data["production_merged"] is False
+          assert data["github_prs_merged"] is False
+          assert data["render_deployed"] is False
+          assert data["release_approved"] is False
+          assert data["integration_tests_passed"] in (True, False)
+          assert data["human_merge_resolution_reviewed"] is False
+          lines = [
+              "## Nova Work & Revenue / Operations cross-PR release preview",
+              "- Integration only uses temporary local git commits",
+              "- No GitHub pull requests merged; no Render deploy or migration",
+              f"- Textual merge conflict-free: {data['merge_conflict_free']}",
+              f"- Combined synthetic functional tests: {'PASS' if data['integration_tests_passed'] else 'BLOCKED - failed or incomplete'}",
+              "- Real authenticated staging remains outstanding",
+          ]
+          for step in data["steps"]:
+              paths = ", ".join(step.get("conflicting_paths", [])[:15])
+              lines.append(f"- PR #{step['pr']}: {step['status']} " + paths)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text("\n".join(lines)+"\n")
+          print("\n".join(lines))
+          PY
+      - name: Upload non-sensitive integration blockers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-release-cross-pr-merge-evidence
+          path: nova-release-merge-report.json
+          retention-days: 5

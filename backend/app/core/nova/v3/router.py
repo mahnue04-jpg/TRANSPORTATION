@@ -29,7 +29,9 @@ from app.core.nova.v3.capability_proof import build_capability_proof
 from app.core.nova.v3.flags import live_flags
 from app.core.nova.v3.kernel import get_kernel, reset_kernel
 from app.core.nova.v3.multi_source_discovery import (
+    classify_live_search,
     dedupe_opportunities,
+    merge_search_funnels,
     provider_catalog,
     provider_health_snapshot,
     search_multi_source_jobs,
@@ -43,6 +45,7 @@ from app.core.nova.v3.live_qualification import (
 )
 from app.core.nova.v3.growth.kernel import get_growth_kernel
 from app.core.nova.v3.work_revenue_bridge import persist_ranked_jobs, reset_live_discovery_opportunities
+from app.core.nova.work_revenue import first_client_pipeline
 from app.core.nova.work_revenue import service as work_service
 from app.db.session import get_db
 
@@ -393,6 +396,10 @@ def v3_live_job_search(
             "source": "multi_source",
             "sources": multi.get("providers_queried") or [],
             "provider_result_counts": multi.get("provider_result_counts") or {},
+            "provider_screened_counts": multi.get("provider_screened_counts") or {},
+            "exclusion_reason_counts": multi.get("exclusion_reason_counts") or {},
+            "exclusion_samples": multi.get("exclusion_samples") or [],
+            "funnel": multi.get("funnel") or {},
             "provider_errors": multi.get("provider_errors") or [],
             "provider_health": multi.get("provider_health") or [],
             "read_only": True,
@@ -400,6 +407,7 @@ def v3_live_job_search(
             "external_submission": False,
             "financial_execution": False,
             "jobs": ranked,
+            **classify_live_search({**multi, "jobs": ranked}),
         }
     except V3Error as exc:
         _raise(exc)
@@ -454,6 +462,12 @@ def v3_live_job_discover(
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": multi.get("providers_queried") or [],
+                "provider_result_counts": multi.get("provider_result_counts") or {},
+                "provider_errors": multi.get("provider_errors") or [],
+                "jobs": ranked,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
@@ -462,6 +476,11 @@ def v3_live_job_discover(
                 OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
                 OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
             },
+            "qualification_reconciled": (
+                len(buckets[OUTCOME_QUALIFIED])
+                + len(buckets[OUTCOME_NEEDS_OWNER_REVIEW])
+                + len(buckets[OUTCOME_NOT_QUALIFIED])
+            ) == len(ranked),
             "ranked_jobs": visible_ranked,
             "saved": saved,
             "persistent_results": persistent_results,
@@ -492,8 +511,10 @@ def v3_live_job_prepare(
         provider_counts: dict[str, int] = {}
         provider_errors: list[dict[str, Any]] = []
         provider_health: list[dict[str, Any]] = []
+        funnel_parts: list[dict[str, Any]] = []
         for planned in search_plan:
             multi_part = search_multi_source_jobs(planned["query"], limit=payload.limit)
+            funnel_parts.append(multi_part)
             for job in multi_part["jobs"]:
                 item = dict(job)
                 item["search_family"] = planned.get("search_family")
@@ -512,6 +533,49 @@ def v3_live_job_prepare(
         # Collapse the combined set once more before qualification so the owner
         # sees one canonical opportunity, not one copy per search variant.
         collected = dedupe_opportunities(collected)
+        search_health = classify_live_search({
+            "providers_queried": sources,
+            "provider_result_counts": provider_counts,
+            "provider_errors": provider_errors,
+            "jobs": collected,
+        })
+        if not search_health["live_search_claimed"]:
+            # A failed provider run must not archive previously saved leads.
+            # No persistence, in-memory ingest, or proposal creation occurs.
+            return {
+                "query": payload.query,
+                "source": "multi_source",
+                "sources": sources,
+                "provider_result_counts": provider_counts,
+                "provider_errors": provider_errors,
+                "provider_health": provider_health,
+                "funnel": merge_search_funnels(funnel_parts),
+                "search_plan": search_plan,
+                "reset_result": {"archived_count": 0, "skipped_reason": "source_unavailable"},
+                "external_action_taken": False,
+                "external_submission": False,
+                "financial_execution": False,
+                **search_health,
+                "ranked_count": 0,
+                "raw_ranked_count": 0,
+                "selected_count": 0,
+                "prepared_count": 0,
+                "prepared": [],
+                "duplicates": [],
+                "saved": {"created": [], "duplicates": []},
+                "qualification_counts": {
+                    OUTCOME_QUALIFIED: 0,
+                    OUTCOME_NEEDS_OWNER_REVIEW: 0,
+                    OUTCOME_NOT_QUALIFIED: 0,
+                },
+                "qualification_reconciled": True,
+                "auto_prepared_only_qualified": True,
+                "held_for_owner_review": [],
+                "skipped_not_qualified": [],
+                "rejected_from_live_results": 0,
+                "ranked_jobs": [],
+                "persistent_results": [],
+            }
         ranked = qualify_and_rank_live_jobs(payload.query, collected)
         visible_ranked = [
             job for job in ranked
@@ -528,17 +592,9 @@ def v3_live_job_prepare(
             and bool((job.get("live_qualification") or {}).get("revenue_ready", job.get("revenue_ready")))
         ][: payload.save_limit]
 
-        reset_result = reset_live_discovery_opportunities(
-            db,
-            organization_id=org_id,
-            user=user,
-        )
-        # Persist only revenue-ready QUALIFIED matches for this search session.
-        saved = get_kernel().ingest_live_jobs(
-            selected,
-            organization_id=org_id,
-            owner_user_id=user.user_id,
-        )
+        # Save genuine qualified replacements *before* archiving old leads.
+        # Failed persistence or no saveable rows must never erase a prior
+        # first-client board. A repeated source URL may reuse an existing ID.
         persistent_results = persist_ranked_jobs(
             db,
             selected,
@@ -547,6 +603,24 @@ def v3_live_job_prepare(
             prepare_applications=True,
             prepare_limit=payload.prepare_limit,
         )
+        retained_ids = {
+            str(item["work_opportunity_id"])
+            for item in persistent_results
+            if item.get("persisted") and item.get("work_opportunity_id")
+        }
+        saved = get_kernel().ingest_live_jobs(
+            selected,
+            organization_id=org_id,
+            owner_user_id=user.user_id,
+        )
+        # First-client discovery is additive: a fresh search is not owner
+        # authorization to discard previous paying opportunities. Existing
+        # URLs are deduplicated by the persistent store; only an explicit
+        # owner lifecycle action should archive a previously saved lead.
+        reset_result = {
+            "archived_count": 0,
+            "skipped_reason": "additive_first_client_discovery",
+        }
 
         prepared = []
         skipped_not_qualified = []
@@ -599,6 +673,19 @@ def v3_live_job_prepare(
             elif live_status == OUTCOME_NEEDS_OWNER_REVIEW and work_id not in held_for_owner_review:
                 held_for_owner_review.append(work_id)
 
+        # Report actual owner-board visibility, distinct from durable storage.
+        # The board displays a capped top-ten list and may filter records that
+        # lack adequate provenance or fail its separate qualification rules.
+        board_snapshot = first_client_pipeline.build_board(
+            db, organization_id=org_id, user=user,
+        )
+        visible_ids = {
+            str(card.get("opportunity_id"))
+            for card in (board_snapshot.get("top_matches") or [])
+            if card.get("opportunity_id")
+        }
+        saved_visible_ids = retained_ids & visible_ids
+
         # Diagnostics must describe the full ranked set. The selected set is
         # intentionally QUALIFIED-only, so counting only selected rows hides why
         # a live search returned zero saveable opportunities.
@@ -610,11 +697,18 @@ def v3_live_job_prepare(
             "provider_result_counts": provider_counts,
             "provider_errors": provider_errors,
             "provider_health": provider_health,
+            "funnel": merge_search_funnels(funnel_parts),
             "search_plan": search_plan,
             "reset_result": reset_result,
             "external_action_taken": False,
             "external_submission": False,
             "financial_execution": False,
+            **classify_live_search({
+                "providers_queried": sources,
+                "provider_result_counts": provider_counts,
+                "provider_errors": provider_errors,
+                "jobs": collected,
+            }),
             "ranked_count": len(visible_ranked),
             "raw_ranked_count": len(ranked),
             "selected_count": len(selected),
@@ -627,12 +721,22 @@ def v3_live_job_prepare(
                 OUTCOME_NEEDS_OWNER_REVIEW: len(buckets[OUTCOME_NEEDS_OWNER_REVIEW]),
                 OUTCOME_NOT_QUALIFIED: len(buckets[OUTCOME_NOT_QUALIFIED]),
             },
+            "qualification_reconciled": (
+                len(buckets[OUTCOME_QUALIFIED])
+                + len(buckets[OUTCOME_NEEDS_OWNER_REVIEW])
+                + len(buckets[OUTCOME_NOT_QUALIFIED])
+            ) == len(ranked),
             "auto_prepared_only_qualified": True,
             "held_for_owner_review": held_for_owner_review,
             "skipped_not_qualified": skipped_not_qualified,
             "rejected_from_live_results": len(ranked) - len(visible_ranked),
             "ranked_jobs": visible_ranked,
             "persistent_results": persistent_results,
+            "durably_saved_count": len(retained_ids),
+            "durably_saved_ids": sorted(retained_ids),
+            "saved_visible_on_board_count": len(saved_visible_ids),
+            "saved_visible_on_board_ids": sorted(saved_visible_ids),
+            "owner_board_top_matches_count": len(visible_ids),
         }
     except work_service.NovaWorkError as exc:
         _raise_work(exc)

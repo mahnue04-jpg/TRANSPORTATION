@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-work/work.css" />
+  <link rel="stylesheet" href="/static/nova-work/first-client.css" />
 </head>
 <body>
   <header class="work-header">
@@ -68,7 +69,7 @@
       <form id="live-job-form" class="compose-grid">
         <label class="wide">What should Nova look for?
           <input id="live-job-query" maxlength="500" placeholder="Example: remote 1099 AI operations, admin support, research, CRM, reporting, virtual assistance" required />
-          <div class="hint">Be specific about the work Nova should perform. Remote digital searches drop roles that need a professional license, certification, upfront fee, or a years-of-experience history. Each new search replaces the prior live-search opportunity list; protected submitted/approved/won work is preserved.</div>
+          <div class="hint">Be specific about the work Nova should perform. Remote digital searches drop roles that need a professional license, certification, upfront fee, or a years-of-experience history. Each new search adds qualified leads to your first-client board without removing previously saved opportunities. Nothing is submitted externally.</div>
         </label>
         <label>Search limit
           <select id="live-job-limit">
@@ -87,6 +88,15 @@
       </form>
       <p id="live-job-status" class="hint">Sign in to check live-discovery readiness.</p>
       <div id="live-job-results">No live discovery run yet.</div>
+      <p class="hint"><a href="#first-client-board">View saved first-client opportunities</a> — a saved lead is not an application submission.</p>
+    </section>
+
+    <section class="command-card" id="first-client-board" aria-label="First client board">
+      <h2>First client board</h2>
+      <p class="hint">Saved matches for this signed-in owner. Sent means a confirmed external submission already exists. A draft, an approval, a blocked handoff, or a consented mock receipt is not a send. Refresh reloads the saved board. This board does not search or contact anyone.</p>
+      <button type="button" id="first-client-refresh">Refresh board</button>
+      <div id="first-client-counts" class="first-client-counts">Sign in to load the board.</div>
+      <div id="first-client-list"></div>
     </section>
 
     <section class="counts" aria-label="Work counts">
@@ -415,5 +425,6 @@
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-language/preference.js?v=20261022.2"></script>
   <script src="/static/nova-work/work.js"></script>
+  <script src="/static/nova-work/first-client.js"></script>
 </body>
 </html>
