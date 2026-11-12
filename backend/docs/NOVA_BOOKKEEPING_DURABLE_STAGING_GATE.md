@@ -267,3 +267,22 @@ inventory. No Render configuration or customer records were used.
 - The feature is **development only** and disabled by the server's existing
   feature flags. No customer-facing browser has been run in isolated Render
   staging and no actual signed customer consent was provisioned.
+
+
+## Owner-session switch protection (November 11, 2026)
+
+- The Work & Revenue bookkeeping controller now observes its current
+  authenticated session in memory, resets its selected jobs, verified
+  task list and selected file whenever the owner signs out or switches
+  accounts, and ignores in-flight results belonging to the previous session.
+- Queue and eligible task fetches check the captured session epoch after
+  asynchronous body parsing. Approval, rejection, status, recovery,
+  download and draft submission also guard their asynchronous responses
+  before updating owner-visible state or creating a local file.
+- Added self-contained Node VM tests for a delayed job queue response
+  after owner switching, delayed task-list response after logout, and
+  refusal to fetch when no authenticated owner is present.
+- These browser simulations do not establish real cookie/token expiry,
+  identity provider behavior, multi-tab revocation, CSRF configuration,
+  or an authenticated Render browser acceptance. All require later
+  isolated staging verification. No customer data or production flags used.
