@@ -155,3 +155,75 @@ def run_staging_cycle(
                 }
         finally:
             guard.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": key})
+
+
+def inspect_staging_schedule_health(
+    engine: Engine,
+    *,
+    config: Mapping[str, str],
+    at: datetime | None = None,
+) -> dict:
+    """Read-only last-due-run check; never presents a disabled runner as live.
+
+    This checks saved evidence, not whether a Render cron service exists.
+    A staging operator must separately verify the actual scheduler's status.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/Chicago")
+    local = (at or datetime.now(tz)).astimezone(tz)
+    labels = [
+        str(config.get(key) or "").strip().lower()
+        for key in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
+        if str(config.get(key) or "").strip()
+    ]
+    db_name = str(config.get("NOVA_WORK_AUTOPILOT_APPROVED_DATABASE") or "").strip()
+    org = str(config.get("NOVA_WORK_AUTOPILOT_OWNER_ORG_ID") or "").strip()
+    owner = str(config.get("NOVA_WORK_AUTOPILOT_OWNER_USER_ID") or "").strip()
+    base = {
+        "scope": "ISOLATED_STAGING_ONLY",
+        "deployed_scheduler_verified": False,
+        "production_autopilot_enabled": False,
+        "external_submission": False,
+        "owner_review_required": True,
+    }
+    if (
+        not labels or any(v != "staging" for v in labels)
+        or str(config.get("NOVA_WORK_AUTOPILOT_STAGING_ENABLED") or "").lower() != "true"
+        or not db_name or db_name.lower() in FORBIDDEN_DATABASES
+        or not org or not owner or org.lower() == "global" or owner.lower() == "global"
+    ):
+        return {**base, "status": "BLOCKED", "reason": "staging_configuration_not_authorized"}
+    if engine.dialect.name != "postgresql":
+        return {**base, "status": "BLOCKED", "reason": "isolated_postgresql_required"}
+
+    due_date = local.date() if local.hour >= 5 else (local - timedelta(days=1)).date()
+    period = "AUTO_DISCOVERY:" + due_date.isoformat()
+    with engine.connect() as connection:
+        actual = connection.execute(text("SELECT current_database()")).scalar_one()
+        if actual != db_name:
+            return {**base, "status": "BLOCKED", "reason": "approved_database_identity_mismatch"}
+    with Session(engine) as db:
+        latest = db.query(NovaWorkSchedulerJob).filter(
+            NovaWorkSchedulerJob.organization_id == org,
+            NovaWorkSchedulerJob.owner_user_id == owner,
+            NovaWorkSchedulerJob.job_kind == "AUTO_DISCOVERY",
+            NovaWorkSchedulerJob.period_key == period,
+        ).one_or_none()
+        state = latest.status if latest else None
+
+    outcome = {
+        None: ("MISSING_EXPECTED_RUN", "no_run_record_for_last_due_period"),
+        "PREPARED": ("RECORDED_FOR_OWNER_REVIEW", "run_recorded_not_scheduler_certification"),
+        "RUNNING": ("NEEDS_OPERATOR_REVIEW", "unresolved_run_or_restart"),
+        "FAILED": ("NEEDS_OPERATOR_REVIEW", "last_run_failed"),
+        "SKIPPED": ("SOURCE_UNAVAILABLE", "source_check_incomplete"),
+    }
+    status, reason = outcome.get(state, ("NEEDS_OPERATOR_REVIEW", "unexpected_run_state"))
+    return {
+        **base, "status": status, "reason": reason,
+        "last_due_period": due_date.isoformat(),
+        "recorded_status": state,
+        "complete_customer_workflow_verified": False,
+    }
