@@ -204,8 +204,11 @@
   });
   status.addEventListener("click", () => perform(async () => {
     if (!selected) return;
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const id = selected.job_id;
     const result = await (await request("/jobs/" + encodeURIComponent(id))).json();
+    assertSameSession(marker, epoch);
     message.textContent = "Status: " + result.status + ". Not delivered or paid.";
     await refreshQueue(id);
   }));
@@ -233,23 +236,31 @@
   }));
   async function review(decision) {
     if (!selected) return;
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const id = selected.job_id;
     const response = await request("/jobs/" + encodeURIComponent(id) + "/review", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({approve: decision})
     });
     const result = await response.json();
+    assertSameSession(marker, epoch);
     await refreshQueue(id);
+    assertSameSession(marker, epoch);
     message.textContent = "Owner decision: " + result.status + ". No customer delivery or payment.";
   }
   approve.addEventListener("click", () => perform(() => review(true)));
   reject.addEventListener("click", () => perform(() => review(false)));
   recover.addEventListener("click", () => perform(async () => {
     if (!selected) return;
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const id = selected.job_id;
     const response = await request("/jobs/" + encodeURIComponent(id) + "/recover", {method: "POST"});
     const result = await response.json();
+    assertSameSession(marker, epoch);
     await refreshQueue(id);
+    assertSameSession(marker, epoch);
     message.textContent = result.status + ". No automatic retry. Owner review required.";
   }));
   function synchronizeAsOf() {
@@ -260,6 +271,8 @@
   submit.addEventListener("submit", event => {
     event.preventDefault();
     perform(async () => {
+      const marker = observeSession();
+      const epoch = sessionEpoch;
       const engagement = byId("bookkeeping-engagement").value.trim();
       const task = byId("bookkeeping-task").value.trim();
       const file = byId("bookkeeping-file").files[0];
@@ -292,6 +305,7 @@
       if (date && type !== "transaction_workpaper") headers["X-Nova-As-Of"] = date;
       const response = await request(path, {method: "POST", body: file, headers});
       const result = await response.json();
+      assertSameSession(marker, epoch);
       lastSubmission = null;
       message.textContent = "Review-only draft: " + result.status +
         (result.replayed ? " (saved request)" : "") + ". Nothing delivered.";
