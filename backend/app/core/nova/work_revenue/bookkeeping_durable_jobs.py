@@ -262,3 +262,40 @@ def recover_stale_bookkeeping(
         raise
     return {"job_id": job_id, "status": "FAILED", "delivered": False,
             "requires_new_request_key": True, "automatic_retry": False}
+
+
+def list_owner_bookkeeping_reviews(
+    db: Session, *, org: str, owner: str, limit: int = 25,
+) -> list[dict]:
+    """Private bounded review queue; caller must validate active consent.
+
+    No object refs, filenames, hashes, request keys, customer records, or
+    financial figures are returned. Never authorize work from the job alone.
+    """
+    require_bookkeeping_runtime(db)
+    if not all(isinstance(v, str) and v.strip() and v.lower() != "global"
+               for v in (org, owner)):
+        raise BookkeepingJobBlocked("Specific owner scope required", 403)
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise BookkeepingJobBlocked("Review queue limit must be 1 to 50", 400)
+    rows = db.execute(sa.select(
+        base.jobs.c.id, base.jobs.c.engagement_id, base.jobs.c.task_id,
+        base.jobs.c.status, base.jobs.c.request_key, base.jobs.c.updated_at,
+    ).where(
+        base.jobs.c.organization_id == org,
+        base.jobs.c.owner_user_id == owner,
+        base.jobs.c.request_key.like("bookkeeping:%"),
+    ).order_by(base.jobs.c.updated_at.desc(), base.jobs.c.id.desc())
+     .limit(limit)).mappings().all()
+    results = []
+    for row in rows:
+        parts = str(row["request_key"]).split(":", 2)
+        if len(parts) != 3 or parts[1] not in BOOKKEEPING_TYPES:
+            continue
+        results.append({
+            "job_id": row["id"], "engagement_id": row["engagement_id"],
+            "task_id": row["task_id"], "work_type": parts[1],
+            "status": row["status"], "review_required": True,
+            "delivered": False,
+        })
+    return results
