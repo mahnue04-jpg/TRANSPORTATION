@@ -65,6 +65,21 @@ jobs:
             tests/test_nova_operations_customer_csv_jobs.py \
             tests/test_nova_bookkeeping_synthetic_http_flow.py \
             tests/test_nova_bookkeeping_staging_preflight.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("../nova-release-merge-report.json")
+          report = json.loads(path.read_text())
+          assert report["merge_conflict_free"] is True
+          report["integration_tests_passed"] = True
+          report["combined_test_suites"] = [
+              "discovery", "operations_csv", "bookkeeping_http", "staging_preflight"
+          ]
+          report["integration_test_environment"] = "SYNTHETIC_CI_NOT_RENDER"
+          report["release_approved"] = False
+          report["human_merge_resolution_reviewed"] = False
+          path.write_text(json.dumps(report, indent=2) + "\\n")
+          PY
           echo "Combined draft-PR synthetic regressions passed in ephemeral CI tree; NOT real Render staging." >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize release gate
         run: |
@@ -76,14 +91,14 @@ jobs:
           assert data["github_prs_merged"] is False
           assert data["render_deployed"] is False
           assert data["release_approved"] is False
-          assert data["integration_tests_passed"] is False
+          assert data["integration_tests_passed"] is True
           assert data["human_merge_resolution_reviewed"] is False
           lines = [
               "## Nova Work & Revenue / Operations cross-PR release preview",
               "- Integration only uses temporary local git commits",
               "- No GitHub pull requests merged; no Render deploy or migration",
               f"- Textual merge conflict-free: {data['merge_conflict_free']}",
-              "- Static UI contract is checked separately; combined functional tests and staging acceptance remain outstanding",
+              "- Combined synthetic functional tests: PASS; real authenticated staging remains outstanding",
           ]
           for step in data["steps"]:
               paths = ", ".join(step.get("conflicting_paths", [])[:15])
