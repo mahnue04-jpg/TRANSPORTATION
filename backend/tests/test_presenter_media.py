@@ -118,6 +118,52 @@ def test_presenter_voice_preserves_original_audio_when_normalization_hits_memory
     assert " ".join(cue["text"] for cue in result["caption_cues"]) == "Hello Genova."
 
 
+def test_full_body_demo_saves_looped_video_with_audio_and_captions(tmp_path, monkeypatch):
+    from PIL import Image
+    from app.core.nova.creative_studio import presenter_media as media
+    from app.core.nova.creative_studio.full_body_demo import assemble_full_body_demo, demo_cues
+
+    config = tmp_path / "empty-fontconfig.xml"
+    config.write_text('<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig></fontconfig>')
+    monkeypatch.setenv("FONTCONFIG_FILE", str(config))
+    presenter = tmp_path / "presenter.mp4"
+    narration = tmp_path / "narration.mp3"
+    media._encode([
+        "-f", "lavfi", "-i", "color=c=black:s=320x180:d=1",
+        "-an", "-t", "1", "-c:v", "libx264", "-threads", "1", str(presenter),
+    ])
+    media._encode([
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-t", "2", "-c:a", "libmp3lame", str(narration),
+    ])
+    js = (Path(__file__).resolve().parents[1] / "static" / "nova-one-minute-demo" / "demo.js").read_text(encoding="utf-8")
+    cues = demo_cues(js)
+    assert cues[0]["text"].startswith("Meet AMICOR Nova")
+    assert cues[-1]["text"] == "Start with AMICOR Nova today."
+    output = tmp_path / "saved.mp4"
+    saved = assemble_full_body_demo(presenter, narration, [{"start": 0.2, "end": 1.6, "text": "Hello Genova."}], output)
+    assert saved["presenter_mode"] == "full_body"
+    assert saved["captions_burned_in"] is True
+    assert output.is_file() and output.with_suffix(".vtt").is_file() and output.with_suffix(".srt").is_file()
+    assert "Hello Genova." in output.with_suffix(".vtt").read_text(encoding="utf-8")
+    import imageio_ffmpeg
+    from app.core.nova.creative_studio.media_runtime import run_encoder
+    detail = run_encoder(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(output)],
+        timeout=30,
+        required_headroom=64 * 1024 * 1024,
+    )
+    assert "Audio:" in detail.stderr
+    assert "Video:" in detail.stderr
+    frame = tmp_path / "caption.png"
+    media._encode(["-ss", "0.8", "-i", str(output), "-frames:v", "1", str(frame)])
+    image = Image.open(frame).convert("RGB")
+    band = image.crop((0, image.height - 96, image.width, image.height))
+    assert sum(1 for pixel in band.getdata() if min(pixel) > 220) > 100
+    assert image.size[0] == 320
+    assert image.size[1] == 180 + 96
+
+
 def test_captions_are_visible_without_system_fonts(tmp_path, monkeypatch):
     from PIL import Image
     from app.core.nova.creative_studio import presenter_media as media

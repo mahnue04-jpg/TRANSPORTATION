@@ -65,6 +65,10 @@ def test_one_minute_demo_mutes_embedded_nova_voice() -> None:
 def test_one_minute_demo_has_public_website_cta_and_search_metadata() -> None:
     html = (ROOT / "static" / "nova-one-minute-demo" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "static" / "nova-one-minute-demo" / "demo.js").read_text(encoding="utf-8")
+    assert 'id="saved-full-body"' in html
+    assert "/static/nova-one-minute-demo/amicor-nova-60-second-full-body.mp4" in html
+    assert "/static/nova-one-minute-demo/amicor-nova-60-second-full-body.vtt" in html
+    assert "does not claim lip-sync" in html
     assert "https://getamicor.com" in html
     assert "Visit getamicor.com" in html
     assert 'id="demo-end-cta"' in html
