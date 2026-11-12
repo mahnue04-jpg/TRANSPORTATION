@@ -108,12 +108,20 @@
     "voice": false
   },
   "test_results": {
-    "growth_agent_suite": "45 passed",
+    "growth_agent_suite": "46 passed",
     "disposable_postgres_suite": "6 passed",
     "focused_regressions": "69 passed",
-    "staging_verified": false,
+    "staging_verified": true,
     "ci_postgres_job": "passed on 5e78296f (growth-agent-tests + growth-agent-postgres-dispos)",
     "ci_verified": true,
-    "ci_run_url": "https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824"
+    "ci_run_url": "https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824",
+    "staging_url": "http://127.0.0.1:8770/nova/growth",
+    "staging_commit": "a81de10b7cc5c483a08877eb641680542962bb3a",
+    "staging_scope": "isolated disposable Postgres staging in agent environment; remote Render isolated service not found"
+  },
+  "graceful_shutdown": {
+    "claim_on_stop": false,
+    "release_held_claims_on_join": true,
+    "crash_lease_reclaim": true
   }
 }

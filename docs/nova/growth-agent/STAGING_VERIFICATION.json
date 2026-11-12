@@ -1,0 +1,179 @@
+{
+  "base": "http://127.0.0.1:8770",
+  "steps": [
+    {
+      "step": "owner_login",
+      "ok": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    {
+      "step": "flags_hard_off_live",
+      "ok": true,
+      "detail": {
+        "GROWTH_AGENT_ENABLED": true,
+        "BACKGROUND_WORKER_MOCK": true,
+        "RETENTION_SCHEDULE_ENABLED": true,
+        "RETENTION_DELETE_ENABLED": false,
+        "REAL_EMAIL_SEND": false,
+        "REAL_SMS_SEND": false
+      }
+    },
+    {
+      "step": "setup_activate",
+      "ok": true,
+      "detail": {
+        "business_name": "Cedar Ridge Staging Synthetic"
+      }
+    },
+    {
+      "step": "widget_install",
+      "ok": true,
+      "detail": {
+        "installation_id": "40c6191a7d694a4785ac6af7f88da895"
+      }
+    },
+    {
+      "step": "website_chat",
+      "ok": true,
+      "detail": {
+        "keys": [
+          "conversation_id",
+          "handler",
+          "status",
+          "reply",
+          "grounded",
+          "contact_id",
+          "ai_disclosed"
+        ],
+        "grounded": true
+      }
+    },
+    {
+      "step": "crm_list",
+      "ok": true,
+      "detail": {
+        "count": 1
+      }
+    },
+    {
+      "step": "crm_edit",
+      "ok": true,
+      "detail": {
+        "lead_state": "qualified"
+      }
+    },
+    {
+      "step": "availability",
+      "ok": true,
+      "detail": {
+        "day": "2026-11-16",
+        "slot_count": 16
+      }
+    },
+    {
+      "step": "owner_assisted_booking",
+      "ok": true,
+      "detail": {
+        "status": "confirmed",
+        "id": "48fde40ec71140f0bb18f30c9b8c7ad4"
+      }
+    },
+    {
+      "step": "reminder_preview",
+      "ok": true,
+      "detail": {
+        "run_id": "54292da3344042848bae5fd11a9becc4"
+      }
+    },
+    {
+      "step": "mock_reminder_queue_or_send",
+      "ok": true,
+      "detail": {
+        "status": "approved",
+        "mock_worker_deferred": true,
+        "attempts": [
+          {
+            "status": "queued",
+            "id": "41880219eb634b47bcce405a3c6490d0",
+            "provider": "mock",
+            "queued_for_worker": true,
+            "live_send": false
+          }
+        ]
+      }
+    },
+    {
+      "step": "mock_worker_tick",
+      "ok": true,
+      "detail": {
+        "claimed": 1,
+        "processed": 1
+      }
+    },
+    {
+      "step": "retention_dry_run",
+      "ok": true,
+      "detail": {
+        "total_would_delete": 0,
+        "delete_enabled": false
+      }
+    },
+    {
+      "step": "diagnostics_mock_only",
+      "ok": true,
+      "detail": {
+        "live_delivery": false,
+        "retention_mode": "dry_run",
+        "delete_enabled": false
+      }
+    },
+    {
+      "step": "process_crash_recovery",
+      "ok": true,
+      "detail": {
+        "tick_processed": 1,
+        "tick_claimed": 1,
+        "recover": {
+          "recovered_count": 0,
+          "attempts": [],
+          "live_send": false,
+          "background_worker_mock": true,
+          "note": "Manual reclaim path for mock deliveries. Live transports remain hard-off."
+        },
+        "stale_id": "41880219eb634b47bcce405a3c6490d0"
+      }
+    },
+    {
+      "step": "graceful_termination_surface",
+      "ok": true,
+      "detail": {
+        "runtime_worker_id": "ga-worker-68732bc07948",
+        "mock_worker_flag": true,
+        "note": "Graceful claim-skip + lease release covered by unit tests; staging worker remains mock-only."
+      }
+    }
+  ],
+  "pass": true,
+  "deployed_commit_expected": "a81de10b7cc5c483a08877eb641680542962bb3a",
+  "retention_delete_enabled": false,
+  "live_messaging": false,
+  "finished_at_utc": "2026-11-12T18:19:13.534678Z",
+  "staging_url": "http://127.0.0.1:8770/nova/growth",
+  "staging_database": "nova_ga_staging_dispos (dedicated disposable Postgres)",
+  "deployed_commit": "a81de10b7cc5c483a08877eb641680542962bb3a",
+  "remote_render_isolated_service": "NOT_FOUND \u2014 no Render credentials; production amicor-health-isf not used",
+  "overall": "PASS (isolated disposable staging)",
+  "graceful_shutdown_fix": "skip claim-on-stop + release_held_claims on join (worker + retention scheduler)",
+  "tests": {
+    "worker_retention": "11 passed",
+    "integration_crm_booking_reminder": "8 passed",
+    "unit_security_http": "27 passed",
+    "postgres_dispos": "6 passed",
+    "focused_regressions": "69 passed",
+    "growth_agent_total": "46 passed"
+  },
+  "owner_checklist": "docs/nova/growth-agent/OWNER_STAGING_CHECKLIST.md",
+  "finished_at_america_chicago": "2026-11-12 12:20 CT approx"
+}

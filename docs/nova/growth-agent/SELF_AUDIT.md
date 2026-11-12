@@ -29,7 +29,8 @@ Verification pass date: **2026-11-12** (America/Chicago). Branch tip after sched
 | Email/SMS live | IMPLEMENTED (mock) / BLOCKED live | hard-off flags |
 | Stripe subscriptions | IMPLEMENTED (catalog) / BLOCKED live | `launched=False` |
 | Voice receptionist stretch | BLOCKED | `REAL_VOICE=False` |
-| Staging verification | BLOCKED | Executable proposal only — `STAGING_PROPOSAL.md` |
+| Staging verification | **VERIFIED ISOLATED DISPOSABLE STAGING** | `http://127.0.0.1:8770/nova/growth` on commit `a81de10b`; dedicated DB `nova_ga_staging_dispos`. Remote Render isolated service NOT FOUND (not prod). |
+| Graceful shutdown hardening | IMPLEMENTED + TESTED SYNTHETICALLY + STAGING JOURNEY | skip claim-on-stop; `release_held_claims` on join; crash lease reclaim |
 | CI (Growth Agent sqlite + disposable Postgres) | **CI VERIFIED** | Run https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824 on `5e78296f` — growth-agent-tests + growth-agent-postgres-dispos pass |
 | Live/production verification | BLOCKED | Explicitly not authorized |
 | Ops Agent #475/#477 untouched | IMPLEMENTED (isolation) | Change map; regressions green |
@@ -69,6 +70,6 @@ Evidence: `docs/nova/growth-agent/DEMO_EVIDENCE.json`, `docs/nova/growth-agent/s
 2. Live email/SMS/calendar/AI/Stripe remain hard-off.
 3. Mock worker, retention schedule, and retention delete remain **default-off** env flags (delete separately gated).
 4. Staging/live verification not performed (executable proposal drafted only).
-5. ~~CI disposable Postgres job pending~~ **CI verified** on tip `5e78296f` (growth-agent-tests + growth-agent-postgres-dispos passed). Staging still not verified.
+5. CI verified on tip `5e78296f` / follow-ups. Isolated disposable staging **PASS** on `a81de10b`. Remote Render isolated Growth Agent service still not provisioned.
 
 **Do not label this draft functionality live.**
