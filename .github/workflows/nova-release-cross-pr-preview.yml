@@ -7,6 +7,7 @@ on:
     paths:
       - "backend/scripts/nova_release_merge_preview.sh"
       - "backend/scripts/nova_release_dashboard_reconcile.py"
+      - "backend/scripts/nova_release_router_reconcile.py"
       - "backend/scripts/nova_release_combined_ui_contract.py"
       - "backend/tests/test_nova_release_combined_route_contract.py"
       - ".github/workflows/nova-release-cross-pr-preview.yml"
