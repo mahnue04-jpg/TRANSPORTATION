@@ -213,3 +213,43 @@ def test_consent_revoked_during_private_write_never_publishes_review_job(demo, m
     assert retry.status_code == 202
     assert retry.json()["status"] == "FAILED"
     assert retry.json()["delivered"] is False
+
+
+def test_review_queue_is_owner_scoped_consent_filtered_and_data_minimized(demo):
+    client, access, user, store = demo
+    created = client.post(
+        SUBMIT, content=CSV,
+        headers={**HEADERS, "Idempotency-Key": "queue-demo-1"},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["job_id"]
+    ready = client.get(f"{BASE}/review-queue")
+    assert ready.status_code == 200, ready.text
+    body = ready.json()
+    assert body["count"] == 1
+    assert body["jobs"][0]["job_id"] == job_id
+    assert body["jobs"][0]["status"] == "AWAITING_REVIEW"
+    assert body["review_only"] is True
+    assert body["customer_delivery_enabled"] is False
+    for forbidden in ("output_ref", "output_sha256", "input_sha256",
+                      "request_key", "customer", "workpaper_csv"):
+        assert forbidden not in str(body).lower()
+    user.user_id = "other-test-owner"
+    other = client.get(f"{BASE}/review-queue")
+    assert other.status_code == 200
+    assert other.json()["count"] == 0
+    user.user_id = "test-owner"
+    access["active"] = False
+    revoked = client.get(f"{BASE}/review-queue")
+    assert revoked.status_code == 200
+    assert revoked.json()["count"] == 0
+    assert len(store.objects) == 1  # a queue read never deletes a file
+
+
+def test_review_queue_rejects_unbounded_and_non_integer_limit(demo):
+    client, _, _, _ = demo
+    for limit in ("0", "51", "-1"):
+        response = client.get(f"{BASE}/review-queue", params={"limit": limit})
+        assert response.status_code == 400
+    response = client.get(f"{BASE}/review-queue", params={"limit": "abc"})
+    assert response.status_code == 422
