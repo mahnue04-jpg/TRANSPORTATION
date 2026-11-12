@@ -3,6 +3,8 @@ name: Creative Studio integrated release gates
 on:
   pull_request:
     paths:
+      - 'backend/app/core/runtime_config.py'
+      - 'backend/tests/test_phase7_infra_stabilization.py'
       - 'backend/scripts/check_studio_staging_release.py'
       - 'backend/tests/test_studio_staging_release_gate.py'
       - 'backend/scripts/studio_staging_backup_preflight.py'
@@ -50,6 +52,7 @@ jobs:
       - name: Run integrated no-provider release checks
         run: |
           python -m pytest -q \
+            backend/tests/test_phase7_infra_stabilization.py \
             backend/tests/test_studio_staging_release_gate.py \
             backend/tests/test_studio_staging_backup_preflight.py \
             backend/tests/test_nova_creative_first_shot_storage.py \
