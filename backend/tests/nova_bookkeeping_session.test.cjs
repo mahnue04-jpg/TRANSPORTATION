@@ -33,6 +33,7 @@ function harness() {
   const replies = [];
   const windowEvents = {};
   let downloads = 0;
+  let aborts = 0;
   const context = {
     document: {
       getElementById(id) { return nodes.get(id) || null; },
@@ -48,18 +49,22 @@ function harness() {
       crypto: {randomUUID() {return "synthetic-id";}},
       setTimeout() {}
     },
+    AbortController: class AbortController {
+      constructor() { this.signal = {aborted: false}; }
+      abort() { this.signal.aborted = true; aborts++; }
+    },
     Option: class Option {
       constructor(text, value) { this.text = text; this.value = value; }
     },
     URL: {createObjectURL() {return "blob:synthetic";}, revokeObjectURL() {}},
-    fetch(url) {
+    fetch(url, options) {
       const entry = deferred();
-      replies.push({url, entry});
+      replies.push({url, entry, options});
       return entry.promise;
     }
   };
   vm.runInNewContext(script, context, {filename: "bookkeeping.js"});
-  return {nodes, replies, windowEvents, getDownloadCount() {return downloads;}, setToken(value) {token = value;}};
+  return {nodes, replies, windowEvents, getDownloadCount() {return downloads;}, getAbortCount() {return aborts;}, setToken(value) {token = value;}};
 }
 async function settle() {
   for (let n = 0; n < 12; n++) await Promise.resolve();
@@ -138,4 +143,31 @@ test("download response from previous owner never creates a local financial file
   assert.equal(h.getDownloadCount(), 0);
   assert.equal(h.nodes.get("bookkeeping-job-select").options.length, 1);
   assert.match(h.nodes.get("bookkeeping-message").textContent, /session changed/i);
+});
+
+
+test("owner account switch aborts pending bookkeeping request", async () => {
+  const h = harness();
+  h.nodes.get("bookkeeping-load-queue").listeners.click();
+  assert.equal(h.replies.length, 1);
+  assert.equal(h.replies[0].options.signal.aborted, false);
+  h.setToken("Bearer synthetic-owner-b");
+  h.windowEvents.focus();
+  assert.equal(h.replies[0].options.signal.aborted, true);
+  assert.equal(h.getAbortCount(), 1);
+  h.replies[0].entry.resolve({ok: true, json: async () => ({jobs: [{job_id: "stale"}]})});
+  await settle();
+  assert.equal(h.nodes.get("bookkeeping-job-select").options.length, 1);
+});
+
+test("session-invalid event clears sensitive selections and cancels pending fetch", async () => {
+  const h = harness();
+  h.nodes.get("bookkeeping-load-tasks").listeners.click();
+  assert.equal(h.replies.length, 1);
+  h.windowEvents["amicor:session-invalid"]();
+  assert.equal(h.getAbortCount(), 1);
+  assert.equal(h.replies[0].options.signal.aborted, true);
+  assert.equal(h.nodes.get("bookkeeping-task").value, "");
+  assert.equal(h.nodes.get("bookkeeping-eligible-tasks").options.length, 1);
+  assert.match(h.nodes.get("bookkeeping-message").textContent, /session expired/i);
 });
