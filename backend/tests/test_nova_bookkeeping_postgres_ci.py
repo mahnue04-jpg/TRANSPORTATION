@@ -573,3 +573,44 @@ def test_postgres_http_review_queue_excludes_revoked_jobs(pg):
         assert blocked.status_code == 200
         assert blocked.json()["count"] == 0
         assert store.writes == 1
+
+
+def test_postgres_eligible_assignment_picker_filters_revoked_or_other_owner(pg):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.db.session import get_db
+
+    engine, _, owner = pg
+    app = FastAPI()
+    app.include_router(api.router)
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[require_work_revenue_owner] = lambda: owner
+
+    def db_session():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = db_session
+    with TestClient(app) as client:
+        listed = client.get("/operations/durable/bookkeeping/eligible-tasks")
+        assert listed.status_code == 200, listed.text
+        body = listed.json()
+        assert body["count"] == 1
+        assert body["execution_authorized"] is False
+        assert body["tasks"][0]["engagement_id"] == "synthetic-engagement"
+        assert body["tasks"][0]["work_type"] == "receivables_aging"
+        assert "client_ai_consent_ref_sha256" not in str(body)
+        owner.user_id = "another-synthetic-owner"
+        assert client.get("/operations/durable/bookkeeping/eligible-tasks").json()["count"] == 0
+        owner.user_id = "synthetic-owner"
+        with Session(engine) as db:
+            db.execute(sa.update(scope.consents).where(
+                scope.consents.c.authorization_id == "synthetic-consent-1",
+            ).values(status="REVOKED", revoked_at=datetime.now(timezone.utc)))
+            db.commit()
+        denied = client.get("/operations/durable/bookkeeping/eligible-tasks")
+        assert denied.status_code == 200
+        assert denied.json()["count"] == 0
