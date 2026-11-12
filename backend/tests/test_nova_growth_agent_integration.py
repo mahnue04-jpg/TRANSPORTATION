@@ -548,3 +548,28 @@ def test_booking_inherits_synthetic_label_from_contact_even_if_caller_omits_flag
     assert booking["is_synthetic_demo"] is True
     listed = svc.list_appointments(org)
     assert any(a["id"] == booking["id"] and a["is_synthetic_demo"] for a in listed)
+
+
+def test_synthetic_preview_discloses_flag_without_saving_profile(db):
+    """The owner must see synthetic classification before committing a profile."""
+    svc = GrowthAgentService(db)
+    org = "org-synthetic-preview"
+    preview = svc.upsert_profile(
+        org,
+        "owner-synthetic",
+        {
+            "business_name": "Cedar Ridge Preview",
+            "website": "https://preview.example",
+            "timezone": "America/Chicago",
+            "operating_hours": {"mon_fri": "09:00-17:00"},
+            "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+            "faqs": [{"id": "hours", "question": "Hours?", "answer": "9 to 5"}],
+            "contact_email": "owner@preview.example",
+            "escalation_settings": {"handoff_on_unknown": True},
+            "is_synthetic_demo": True,
+        },
+        preview_only=True,
+    )
+    assert preview["ready_to_activate"] is True
+    assert preview["is_synthetic_demo"] is True
+    assert svc.get_profile(org)["configured"] is False
