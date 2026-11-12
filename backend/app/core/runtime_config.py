@@ -17,10 +17,11 @@ from typing import Any
 
 logger = logging.getLogger("amicor.runtime_config")
 
-# Database configuration is either PostgreSQL (DATABASE_URL) or an explicit
-# readable SQLite database file (DB_FILENAME). Do not demand PostgreSQL for a
-# deliberately SQLite-backed staging service.
+# Database configuration is either PostgreSQL (DATABASE_URL) or a readable
+# SQLite database file (DB_FILENAME or the same app-default path as session.py).
+# Never demand PostgreSQL for an intentionally SQLite-backed staging service.
 _REQUIRED_VARS: tuple[str, ...] = ("DATABASE_URL",)
+_DEFAULT_SQLITE_PATH = Path(__file__).resolve().parents[2] / "data" / "chat.db"
 
 # Optional; absence = degraded but non-fatal
 _OPTIONAL_VARS: tuple[str, ...] = (
@@ -36,12 +37,10 @@ _SECRET_VARS: frozenset[str] = frozenset({"OPENAI_API_KEY", "DATABASE_URL"})
 
 
 def _explicit_sqlite_is_readable() -> bool:
-    """Check a configured SQLite file read-only, without creating a database."""
+    """Check the configured or app-default SQLite file without creating it."""
     filename = os.environ.get("DB_FILENAME", "").strip()
-    if not filename:
-        return False
     try:
-        path = Path(filename)
+        path = Path(filename) if filename else _DEFAULT_SQLITE_PATH
         if not path.is_file():
             return False
         # SQLite read-only URI prevents accidentally creating an empty file.
