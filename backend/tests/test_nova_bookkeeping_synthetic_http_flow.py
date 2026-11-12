@@ -255,3 +255,12 @@ def test_review_queue_rejects_unbounded_and_non_integer_limit(demo):
         assert response.status_code == 400
     response = client.get(f"{BASE}/review-queue", params={"limit": "abc"})
     assert response.status_code == 422
+
+
+def test_eligible_bookkeeping_task_picker_rejects_missing_real_authorization(demo):
+    client, access, user, _ = demo
+    # Synthetic SQLite has no consent table; no saved task may be advertised
+    # even though the test HTTP stub can authorize a separate fake job.
+    response = client.get(f"{BASE}/eligible-tasks")
+    assert response.status_code in (403, 503)
+    assert "tasks" not in response.text
