@@ -1,0 +1,78 @@
+# Isolated Nova Growth Agent STAGING blueprint (PR #490 / #485)
+#
+# OWNER APPROVAL REQUIRED before applying in the Render Dashboard.
+# Do NOT point this at production amicor-health-isf-db.
+# Do NOT enable live messaging, AI, Stripe charges, or retention deletion.
+#
+# Suggested apply path (owner):
+#   Render → New → Blueprint → this file from branch tip
+#   Confirm free plan availability; if free slots are exhausted, STOP and approve paid cost explicitly.
+#
+# Expected public URL after provision (Render assigns exact host):
+#   https://amicor-nova-growth-staging.onrender.com/nova/growth
+
+databases:
+  - name: amicor-nova-growth-staging-db
+    plan: free
+    databaseName: nova_ga_staging
+    user: nova_ga_staging
+
+services:
+  - type: web
+    name: amicor-nova-growth-staging
+    runtime: python
+    plan: free
+    rootDir: backend
+    branch: cursor/nova-growth-agent-mvp-1565
+    buildCommand: pip install --upgrade -r requirements.txt
+    # Growth Agent migrations only through retention schedule revision.
+    # Does not rename or touch production amicor-health-isf hostname/service.
+    releaseCommand: alembic upgrade 20261112_nova_ga_retention
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health/readiness
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: amicor-nova-growth-staging-db
+          property: connectionString
+      - key: APP_ENV
+        value: staging
+      - key: AMICOR_ENVIRONMENT
+        value: staging
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: AMICOR_SEED_PASSWORD
+        sync: false
+      - key: AMICOR_DEPLOYMENT_SYNC_KEY
+        sync: false
+      - key: AMICOR_PUBLIC_URL
+        value: https://amicor-nova-growth-staging.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://amicor-nova-growth-staging.onrender.com
+      - key: NOVA_GROWTH_AGENT_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_DEMO_MODE
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_WIDGET_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_WIDGET_SECRET
+        sync: false
+      - key: NOVA_GROWTH_AGENT_BACKGROUND_WORKER
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED
+        value: "false"
+      - key: NOVA_STRIPE_LIVE_ENABLED
+        value: "false"
+      # Explicitly leave live provider secrets unset on this service.
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"

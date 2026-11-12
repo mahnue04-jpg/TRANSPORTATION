@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AMICOR Nova Growth Agent</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-growth/growth.css" />
+</head>
+<body>
+  <header class="ga-header">
+    <div class="ga-brand">
+      <p class="kicker">AMICOR Nova</p>
+      <h1>Growth Agent</h1>
+      <p class="hint" style="margin:0">Consent-first customer engagement MVP — draft / synthetic. Not live messaging.</p>
+    </div>
+    <nav class="ga-nav" aria-label="Nova destinations">
+      <a href="/nova">Home</a>
+      <a href="/nova/today">Today</a>
+      <a href="/nova/work">Work</a>
+      <a href="/nova/creative">Creative</a>
+      <a href="/nova/growth" aria-current="page">Growth</a>
+    </nav>
+  </header>
+
+  <main class="ga-main">
+    <div id="status-banner" class="banner warn" role="status">
+      Sign in required. Set <code>NOVA_GROWTH_AGENT_ENABLED=true</code> in local/staging. Live providers remain off.
+    </div>
+
+    <section class="panel" aria-label="Sign in">
+      <h2>Owner sign-in</h2>
+      <p class="hint">Authenticated business-owner dashboard. Demo mode uses synthetic records only.</p>
+      <form id="login-form" class="grid-2">
+        <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <div class="actions">
+          <button type="submit">Sign in</button>
+          <button type="button" id="sign-out" class="secondary">Sign out</button>
+        </div>
+      </form>
+      <p id="session-meta" class="hint"></p>
+    </section>
+
+    <section class="panel" aria-label="Setup wizard">
+      <h2>Setup wizard</h2>
+      <p class="hint">Validate and preview before activation. AI answers only from approved FAQs.</p>
+      <form id="setup-form" class="grid-2">
+        <label>Business name<input id="biz-name" required placeholder="Cedar Ridge Home Services" /></label>
+        <label>Website<input id="biz-web" type="url" placeholder="https://example.com" /></label>
+        <label>Timezone
+          <select id="biz-tz">
+            <option>America/Chicago</option>
+            <option>America/New_York</option>
+            <option>America/Denver</option>
+            <option>America/Los_Angeles</option>
+          </select>
+        </label>
+        <label>Plan
+          <select id="biz-plan">
+            <option value="starter">Starter (unlaunched)</option>
+            <option value="growth">Growth (unlaunched)</option>
+            <option value="pro">Pro (unlaunched)</option>
+          </select>
+        </label>
+        <label>Contact email<input id="biz-email" type="email" /></label>
+        <label>Handoff phone<input id="biz-phone" /></label>
+        <label class="full">Operating hours (JSON)<textarea id="biz-hours">{"mon_fri":"09:00-17:00"}</textarea></label>
+        <label class="full">Services (JSON)<textarea id="biz-services">[{"code":"consult","name":"Consultation","duration_minutes":30}]</textarea></label>
+        <label class="full">FAQs (JSON)<textarea id="biz-faqs">[{"id":"faq_hours","question":"What are your hours?","keywords":["hours"],"answer":"Mon–Fri 9–5 local time."}]</textarea></label>
+      </form>
+      <div class="actions">
+        <button type="button" id="preview-setup">Preview</button>
+        <button type="button" id="save-setup">Save</button>
+        <button type="button" id="activate-setup">Save &amp; activate</button>
+        <button type="button" id="pause-agent" class="secondary">Pause agent</button>
+        <button type="button" id="disable-agent" class="secondary">Disable / kill switch</button>
+        <button type="button" id="resume-agent" class="secondary">Resume</button>
+      </div>
+      <pre id="setup-preview" class="hint" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel" aria-label="Analytics">
+      <h2>Analytics</h2>
+      <p class="hint">Explicit denominators only. No invented attribution.</p>
+      <div id="metrics" class="metrics" aria-live="polite">
+        <div class="hint">Sign in to load metrics. Live delivery remains off.</div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Diagnostics">
+      <h2>Diagnostics</h2>
+      <p class="hint">Mock worker status, pending/failed jobs, retention preview/schedule. Clearly mock — not real delivery. Scheduled retention is default-off and dry-runs unless delete is separately enabled.</p>
+      <div class="actions">
+        <button type="button" id="refresh-diagnostics" class="secondary">Refresh diagnostics</button>
+        <button type="button" id="retention-preview" class="secondary">Retention dry-run</button>
+        <button type="button" id="retention-schedule-tick" class="secondary">Retention schedule tick</button>
+        <button type="button" id="worker-tick" class="secondary">Mock worker tick</button>
+      </div>
+      <p id="diagnostics-flags" class="hint" aria-live="polite"></p>
+      <pre id="diagnostics-out" class="hint" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel" aria-label="Inbox">
+      <h2>Inbox</h2>
+      <p class="hint">Conversations tagged AI or human. Review, hand off, or pause.</p>
+      <div class="actions">
+        <button type="button" id="refresh-inbox" class="secondary">Refresh</button>
+      </div>
+      <div id="inbox" class="empty">No conversations yet.</div>
+    </section>
+
+    <section class="panel" aria-label="CRM">
+      <h2>CRM leads</h2>
+      <p class="hint">States: new / contacted / qualified / booked / closed. Edit state/notes and Save — no fabricated outcomes.</p>
+      <div class="actions">
+        <label>Search<input id="lead-search" type="search" placeholder="Name or notes" /></label>
+        <button type="button" id="refresh-leads" class="secondary">Refresh</button>
+      </div>
+      <div id="leads" class="empty">No leads yet.</div>
+    </section>
+
+    <section class="panel" aria-label="Widget">
+      <h2>Website chat widget</h2>
+      <p class="hint">Signed installation token scoped to domain. Consent required before storing contact details.</p>
+      <div class="grid-2">
+        <label>Allowed domain<input id="widget-domain" placeholder="demo.example.com" /></label>
+      </div>
+      <div class="actions">
+        <button type="button" id="create-widget">Create installation</button>
+      </div>
+      <pre id="widget-out" class="hint"></pre>
+      <div class="chat-log" id="widget-chat-log" aria-live="polite"></div>
+      <form id="widget-chat-form" class="grid-2">
+        <label>Token<input id="widget-token" required /></label>
+        <label>Message<input id="widget-message" required placeholder="What are your hours?" /></label>
+        <label>Visitor name<input id="widget-name" /></label>
+        <label>Visitor email<input id="widget-email" type="email" /></label>
+        <label><input id="consent-tx" type="checkbox" /> Transactional consent</label>
+        <label><input id="consent-mkt" type="checkbox" /> Marketing consent</label>
+        <div class="actions"><button type="submit">Send chat</button></div>
+      </form>
+    </section>
+
+    <section class="panel" aria-label="Booking and workflows">
+      <h2>Booking &amp; workflows</h2>
+      <p class="hint">First-party scheduling + consent-gated mock delivery. Dry-run by default. Cancel / rebook / reschedule supported.</p>
+      <div class="grid-2">
+        <label>Contact id<input id="wf-contact" /></label>
+        <label>Service code<input id="book-service" value="consult" /></label>
+        <label>Day (YYYY-MM-DD)<input id="book-day" /></label>
+        <label>Starts at UTC<input id="book-start" placeholder="ISO" /></label>
+        <label>Appointment id<input id="book-appt-id" placeholder="After booking" /></label>
+        <label>Reschedule to UTC<input id="book-reschedule" placeholder="ISO" /></label>
+      </div>
+      <div class="actions">
+        <button type="button" id="load-slots">Load slots</button>
+        <button type="button" id="book-slot">Book selected/start</button>
+        <button type="button" id="cancel-appt" class="secondary">Cancel appointment</button>
+        <button type="button" id="reschedule-appt" class="secondary">Reschedule</button>
+        <button type="button" id="preview-reminder" class="secondary">Preview reminder workflow</button>
+        <button type="button" id="exec-reminder" class="secondary">Approve dry-run</button>
+        <button type="button" id="recover-deliveries" class="secondary">Recover pending deliveries</button>
+        <button type="button" id="opt-out-email" class="secondary">Marketing email opt-out</button>
+      </div>
+      <pre id="book-out" class="hint"></pre>
+    </section>
+
+    <section class="panel" aria-label="Synthetic demo">
+      <h2>Synthetic business demo</h2>
+      <p class="hint">Fictitious Cedar Ridge scenario — clearly labeled. No prospect outreach.</p>
+      <div class="actions">
+        <button type="button" id="run-demo">Run synthetic demo</button>
+        <button type="button" id="refresh-audit" class="secondary">Refresh audit</button>
+        <button type="button" id="refresh-health" class="secondary">Health</button>
+      </div>
+      <pre id="demo-out" class="hint" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <script src="/static/nova-growth/growth.js"></script>
+</body>
+</html>

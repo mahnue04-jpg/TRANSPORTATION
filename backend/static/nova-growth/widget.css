@@ -1,0 +1,69 @@
+.amicor-ga-root {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 99999;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #14241c;
+}
+.amicor-ga-toggle {
+  border: 0;
+  background: #1f4b3a;
+  color: #fff;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(20, 36, 28, 0.2);
+}
+.amicor-ga-panel {
+  width: min(360px, calc(100vw - 24px));
+  margin-bottom: 0.6rem;
+  background: #f7faf7;
+  border: 1px solid rgba(20, 36, 28, 0.14);
+  display: none;
+  flex-direction: column;
+  max-height: 70vh;
+}
+.amicor-ga-panel.open { display: flex; }
+.amicor-ga-header {
+  padding: 0.75rem;
+  background: #1f4b3a;
+  color: #fff;
+}
+.amicor-ga-header p { margin: 0.2rem 0 0; font-size: 0.8rem; opacity: 0.9; }
+.amicor-ga-log {
+  overflow: auto;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+  min-height: 160px;
+}
+.amicor-ga-msg {
+  padding: 0.5rem 0.6rem;
+  background: #e7efe8;
+  font-size: 0.92rem;
+}
+.amicor-ga-msg.bot { background: #e8f2ec; }
+.amicor-ga-form {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border-top: 1px solid rgba(20, 36, 28, 0.14);
+}
+.amicor-ga-form input[type="text"],
+.amicor-ga-form input[type="email"] {
+  width: 100%;
+  padding: 0.45rem;
+  border: 1px solid rgba(20, 36, 28, 0.2);
+}
+.amicor-ga-form button {
+  background: #1f4b3a;
+  color: #fff;
+  border: 0;
+  padding: 0.55rem;
+  cursor: pointer;
+}
+.amicor-ga-consent {
+  font-size: 0.78rem;
+  display: grid;
+  gap: 0.25rem;
+}
