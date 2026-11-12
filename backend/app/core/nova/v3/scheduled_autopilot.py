@@ -1,0 +1,140 @@
+"""Staging-only scheduled Work & Revenue discovery entrypoint.
+
+Performs one bounded cycle for a VERIFIED saved owner in an independently
+approved isolated staging database. Never runs against production, SQLite,
+casting, or a default/seed owner. Does not submit, contact, charge or accept.
+Deployment and scheduler configuration require separate owner approval.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Callable, Mapping
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from app.auth import UserContext
+from app.core.nova.v3.autopilot_cycle import run_autopilot_cycle
+from app.db.models import User
+
+TZ = ZoneInfo("America/Chicago")
+FORBIDDEN_DATABASES = {"amicor-prod", "amicor-casting-staging-db"}
+LOCK_NAMESPACE = "amicor:nova:work-revenue:scheduled-discovery"
+
+
+class AutopilotGuardError(RuntimeError):
+    """Configuration or authorization is insufficient for a scheduled run."""
+
+
+def inspect_configuration(config: Mapping[str, str], *, at: datetime | None = None) -> dict:
+    """Fail-closed plan. Never use user-supplied job identity or live secrets."""
+    labels = [
+        str(config.get(key) or "").strip().lower()
+        for key in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
+        if str(config.get(key) or "").strip()
+    ]
+    expected_db = str(config.get("NOVA_WORK_AUTOPILOT_APPROVED_DATABASE") or "").strip()
+    org = str(config.get("NOVA_WORK_AUTOPILOT_OWNER_ORG_ID") or "").strip()
+    owner = str(config.get("NOVA_WORK_AUTOPILOT_OWNER_USER_ID") or "").strip()
+    staging = bool(labels) and all(label == "staging" for label in labels)
+    enabled = str(config.get("NOVA_WORK_AUTOPILOT_STAGING_ENABLED") or "").lower() == "true"
+    identity_ok = bool(org and owner and org.lower() != "global" and owner.lower() != "global")
+    db_ok = bool(expected_db and expected_db.lower() not in FORBIDDEN_DATABASES)
+    local_time = (at or datetime.now(TZ)).astimezone(TZ)
+    # A scheduled invocation at 10/11 UTC covers daylight/standard time.
+    # Only 5 AM America/Chicago may execute automatically, preventing duplicates.
+    hour_ok = local_time.hour == 5
+    blockers = []
+    for code, ok in (
+        ("not_isolated_staging", staging),
+        ("staging_autopilot_not_enabled", enabled),
+        ("owner_identity_not_approved", identity_ok),
+        ("database_identity_not_approved", db_ok),
+        ("outside_owner_5am_central_window", hour_ok),
+    ):
+        if not ok:
+            blockers.append(code)
+    return {
+        "status": "READY_TO_ATTEMPT_STAGING_CYCLE" if not blockers else "BLOCKED",
+        "blockers": blockers,
+        "production_release_authorized": False,
+        "external_submission_allowed": False,
+        "customer_contact_allowed": False,
+        "paid_processing_allowed": False,
+        "owner_approval_required": True,
+        "local_period": local_time.date().isoformat(),
+    }
+
+
+def run_staging_cycle(
+    engine: Engine,
+    *,
+    config: Mapping[str, str],
+    at: datetime | None = None,
+    cycle: Callable = run_autopilot_cycle,
+) -> dict:
+    """Run once with a PostgreSQL advisory lock held on a dedicated connection.
+
+    An external daily trigger may invoke twice at 10/11 UTC for DST but the
+    5AM Central gate selects exactly one invocation. A crash may cause a
+    later retry; saved opportunity idempotency still applies.
+    """
+    plan = inspect_configuration(config, at=at)
+    if plan["status"] != "READY_TO_ATTEMPT_STAGING_CYCLE":
+        return plan
+    if engine.dialect.name != "postgresql":
+        raise AutopilotGuardError("Dedicated PostgreSQL is required")
+    expected_db = str(config["NOVA_WORK_AUTOPILOT_APPROVED_DATABASE"]).strip()
+    org = str(config["NOVA_WORK_AUTOPILOT_OWNER_ORG_ID"]).strip()
+    owner_id = str(config["NOVA_WORK_AUTOPILOT_OWNER_USER_ID"]).strip()
+    with engine.connect() as guard:
+        actual_db = guard.execute(text("SELECT current_database()")).scalar_one()
+        if actual_db != expected_db or actual_db.lower() in FORBIDDEN_DATABASES:
+            raise AutopilotGuardError("Database identity did not match approved isolated staging")
+        key = f"{LOCK_NAMESPACE}:{org}:{owner_id}:{plan['local_period']}"
+        locked = bool(guard.execute(
+            text("SELECT pg_try_advisory_lock(hashtext(:key))"), {"key": key},
+        ).scalar_one())
+        if not locked:
+            return {**plan, "status": "ALREADY_RUNNING", "external_submission": False}
+        try:
+            with Session(engine) as db:
+                saved = db.query(User).filter(
+                    User.id == owner_id,
+                    User.organization_id == org,
+                    User.is_active.is_(True),
+                    User.is_verified.is_(True),
+                ).one_or_none()
+                if saved is None:
+                    raise AutopilotGuardError("No matching active verified owner in approved staging")
+                user = UserContext(
+                    user_id=saved.id,
+                    email=saved.email,
+                    role=saved.role,
+                    organization_id=org,
+                    organization_name=saved.organization_name,
+                )
+                result = cycle(
+                    db, organization_id=org, user=user,
+                    query_limit=3, per_query_limit=5, save_limit=8,
+                    prepare_limit=3, min_relevance_score=85,
+                )
+                if result.get("external_action_taken") or result.get("external_submission") or result.get("financial_execution"):
+                    db.rollback()
+                    raise AutopilotGuardError("Cycle returned forbidden external action")
+                db.commit()
+                return {
+                    "status": "STAGING_CYCLE_COMPLETED",
+                    "period": plan["local_period"],
+                    "selected_count": int(result.get("selected_count") or 0),
+                    "ready_for_owner_review_count": int(result.get("ready_for_owner_review_count") or 0),
+                    "live_search_status": str(result.get("live_search_status") or "unavailable"),
+                    "source_unavailable": result.get("live_search_status") == "unavailable",
+                    "external_submission": False,
+                    "production_release_authorized": False,
+                    "continuous_worker": False,
+                }
+        finally:
+            guard.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": key})
