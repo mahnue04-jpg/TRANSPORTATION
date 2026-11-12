@@ -6,6 +6,7 @@ No real databases, providers, contacts, or customer records are used.
 """
 from fastapi.routing import APIRoute
 
+from app.main import app as integrated_app
 from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.core.nova.work_revenue.router import router as work_router
@@ -32,7 +33,7 @@ def _dependencies(route):
 
 
 def test_all_three_workflows_are_registered_in_combined_router():
-    work = _methods(work_router)
+    work = _methods(integrated_app)
     v3 = _methods(v3_router)
     required = (
         ("POST", "/api/nova/work/operations/durable/engagements/{engagement_id}/tasks/{task_id}/jobs"),
@@ -52,7 +53,8 @@ def test_all_three_workflows_are_registered_in_combined_router():
             f"{sorted(k for k in work if '/operations/' in k[1])[:35]}; "
             f"owner_router_registered={hasattr(work_router_module, 'owner_csv_router')}; "
             f"owner_route_count={len(owner_api_module.router.routes)}; "
-            f"work_router_route_count={len(work_router.routes)}"
+            f"work_router_route_count={len(work_router.routes)}; "
+            f"app_route_count={len(integrated_app.routes)}"
         )
     assert ("POST", "/api/nova/v3/live/jobs/autopilot-cycle") in v3
 
