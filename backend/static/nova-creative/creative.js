@@ -1660,7 +1660,7 @@
         if (loading) return;
         // A normal click can start playback without refetching an already-loaded blob.
         if (startPlayback && video.src && video.readyState >= 1) {
-          try { await video.play(); } catch (err) { previewStatus("Playback was blocked or unsupported by this browser."); }
+          try { await video.play(); } catch (err) { if (!video.error) previewStatus("Playback request failed (" + (err && err.name || "unknown") + "). Your saved original remains available for download."); }
           return;
         }
         loading = true;
@@ -1691,7 +1691,7 @@
           previewStatus("MP4 received (" + Math.round(blob.size / 1024) + " KB). Loading video metadata…");
           if (startPlayback) {
             try { await video.play(); } catch (err) {
-              previewStatus("MP4 downloaded, but Chrome could not start playback. Check the browser's supported codec.");
+              if (!video.error) previewStatus("MP4 received, but playback request failed (" + (err && err.name || "unknown") + "). Your saved original remains available for download.");
             }
           }
         } catch (err) {
