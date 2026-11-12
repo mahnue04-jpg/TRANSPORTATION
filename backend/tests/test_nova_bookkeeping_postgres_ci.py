@@ -483,3 +483,45 @@ def test_staging_preflight_on_disposable_postgres(pg):
     assert checks["s3_public_access_block"] is False
     assert checks["signed_client_ai_consent_workflow_reviewed"] is False
     assert report["production_release_authorized"] is False
+
+
+def test_postgres_scoped_retention_plan_never_deletes(pg):
+    """Actual disposable PostgreSQL retention query is read-only and scoped."""
+    from app.core.nova.work_revenue.bookkeeping_retention import plan_bookkeeping_retention
+    engine, store, owner = pg
+    with Session(engine) as db:
+        old = datetime.now(timezone.utc) - timedelta(days=95)
+        db.execute(sa.insert(csvjobs.jobs).values(
+            id="synthetic-retention-old-1",
+            organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-engagement", task_id="synthetic-task",
+            request_key="bookkeeping:payables_aging:retention-old-1",
+            input_sha256="f"*64, status="REJECTED",
+            output_ref="synthetic-only/not-a-real-s3-key",
+            output_sha256="d"*64, created_at=old, updated_at=old,
+        ))
+        db.execute(sa.insert(csvjobs.jobs).values(
+            id="synthetic-retention-other-owner-1",
+            organization_id="synthetic-org", owner_user_id="other-owner",
+            engagement_id="synthetic-engagement", task_id="synthetic-task",
+            request_key="bookkeeping:payables_aging:other-owner-old",
+            input_sha256="e"*64, status="FAILED",
+            created_at=old, updated_at=old,
+        ))
+        db.commit()
+        result = plan_bookkeeping_retention(
+            db, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            older_than_days=90,
+        )
+        assert result["examined_count"] == 1
+        assert result["counts"]["terminal_review"] == 1
+        assert result["deletion_authorized"] is False
+        assert result["objects_deleted"] == 0
+        assert result["database_rows_changed"] == 0
+        assert "not-a-real-s3-key" not in str(result)
+        statuses = db.execute(sa.select(
+            csvjobs.jobs.c.id, csvjobs.jobs.c.status,
+        )).all()
+        assert ("synthetic-retention-old-1", "REJECTED") in statuses
+        assert ("synthetic-retention-other-owner-1", "FAILED") in statuses
+        assert store.writes == 0
