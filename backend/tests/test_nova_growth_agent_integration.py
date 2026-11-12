@@ -581,7 +581,7 @@ def test_setup_refresh_does_not_clobber_unsaved_owner_edits():
     ui_path = Path(__file__).resolve().parents[1] / "static" / "nova-growth" / "growth.js"
     script = ui_path.read_text(encoding="utf-8")
     refresh_start = script.index("  async function refreshAll() {")
-    refresh_end = script.index("\\n  }", refresh_start) if False else script.index("\n  }", refresh_start)
+    refresh_end = script.index("\n  }", refresh_start)
     refresh_body = script[refresh_start:refresh_end]
     assert "refreshMetrics()" in refresh_body
     assert "refreshInbox()" in refresh_body
