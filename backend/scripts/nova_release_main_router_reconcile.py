@@ -64,10 +64,13 @@ def reconcile():
         if any((method, prefix + route.path) not in already
                for method in getattr(route, "methods", ()))
     ]
+    print("CI_FINANCE_ROUTE_DIAGNOSTIC", "child", len(child.routes),
+          "missing", len(missing), "before", len(app.routes))
     if missing:
         rest = APIRouter()
         rest.routes.extend(missing)
         app.include_router(rest, prefix=prefix)
+    print("CI_FINANCE_ROUTE_DIAGNOSTIC", "after", len(app.routes))
 
 
 '''
