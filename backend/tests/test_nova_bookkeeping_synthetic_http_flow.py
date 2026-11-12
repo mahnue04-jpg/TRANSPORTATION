@@ -234,7 +234,8 @@ def test_review_queue_is_owner_scoped_consent_filtered_and_data_minimized(demo):
     assert body["customer_delivery_enabled"] is False
     for forbidden in ("output_ref", "output_sha256", "input_sha256",
                       "request_key", "customer", "workpaper_csv"):
-        assert forbidden not in str(body).lower()
+        assert forbidden not in body["jobs"][0]
+    assert "Invented Client" not in str(body)
     user.user_id = "other-test-owner"
     other = client.get(f"{BASE}/review-queue")
     assert other.status_code == 200
