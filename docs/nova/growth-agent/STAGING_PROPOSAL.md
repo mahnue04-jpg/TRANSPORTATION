@@ -7,7 +7,7 @@
 | Item | Value |
 |------|-------|
 | Branch | `cursor/nova-growth-agent-mvp-1565` |
-| Candidate commit | Record SHA of the tip that lands this release-prep package (scheduled retention + disposable PG verification + owner UI evidence). At authoring time the prior tip was `311aa842`; replace with the pushed tip of this pass before any owner approval. |
+| Candidate commit | `8bf12e657c84ba519431468892bafab7085e3f15` (scheduled retention + disposable PG verification + owner UI evidence) |
 | PR | https://github.com/mahnue04-jpg/TRANSPORTATION/pull/490 (**Draft** — keep Draft) |
 | Issue | #485 |
 
