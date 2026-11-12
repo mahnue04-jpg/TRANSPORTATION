@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
-          python -m pytest -v -rs tests/test_nova_bookkeeping_durable_jobs.py tests/test_nova_bookkeeping_scope_http.py tests/test_nova_bookkeeping_restart_recovery.py tests/test_nova_bookkeeping_synthetic_http_flow.py tests/test_nova_bookkeeping_staging_preflight.py tests/test_nova_operations_customer_csv_jobs.py
+          python -m pytest -v -rs tests/test_nova_bookkeeping_durable_jobs.py tests/test_nova_bookkeeping_scope_http.py tests/test_nova_bookkeeping_restart_recovery.py tests/test_nova_bookkeeping_synthetic_http_flow.py tests/test_nova_bookkeeping_staging_preflight.py tests/test_nova_bookkeeping_retention.py tests/test_nova_operations_customer_csv_jobs.py
           python -m unittest discover -s tests -p 'test_nova_bookkeeping_assignment.py' -v
           echo "Synthetic SQLite and simulated private-storage tests only. Dedicated Postgres CI and Moto S3 tests are separate. Render staging and real S3 remain UNVERIFIED." >> "$GITHUB_STEP_SUMMARY"
       - name: Verify actual S3 adapter using isolated simulated S3
