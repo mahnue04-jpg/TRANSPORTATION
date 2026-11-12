@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from app.core.nova.v3.scheduled_autopilot import inspect_configuration, run_staging_cycle
+from app.core.nova.v3.autopilot_staging_guard import inspect_configuration
 
 
 def main() -> int:
@@ -27,6 +27,7 @@ def main() -> int:
         return 0
     # This import is intentionally AFTER the staging-only fail-closed guard.
     from app.db.session import engine
+    from app.core.nova.v3.scheduled_autopilot import run_staging_cycle
     result = run_staging_cycle(engine, config=config)
     print(json.dumps(result, sort_keys=True))
     return 0
