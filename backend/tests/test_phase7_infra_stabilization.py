@@ -231,3 +231,29 @@ def test_postgres_database_url_remains_supported(monkeypatch):
     assert result["has_database_url"] is True
     assert result["has_sqlite_database"] is False
     assert result["validation_status"] != "critical"
+
+
+def test_default_sqlite_path_supported_without_db_filename(monkeypatch, tmp_path):
+    import sqlite3
+    from app.core import runtime_config as rc
+    default = tmp_path / "data" / "chat.db"
+    default.parent.mkdir(parents=True)
+    with sqlite3.connect(default) as conn:
+        conn.execute("CREATE TABLE synthetic(id INTEGER PRIMARY KEY)")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_FILENAME", raising=False)
+    monkeypatch.setattr(rc, "_DEFAULT_SQLITE_PATH", default)
+    result = rc.validate_runtime_config()
+    assert result["has_sqlite_database"] is True
+    assert result["validation_status"] != "critical"
+
+
+def test_missing_default_sqlite_does_not_create_empty_file(monkeypatch, tmp_path):
+    from app.core import runtime_config as rc
+    missing = tmp_path / "absent" / "chat.db"
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_FILENAME", raising=False)
+    monkeypatch.setattr(rc, "_DEFAULT_SQLITE_PATH", missing)
+    result = rc.validate_runtime_config()
+    assert result["validation_status"] == "critical"
+    assert not missing.exists()
