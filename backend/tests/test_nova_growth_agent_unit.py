@@ -148,3 +148,31 @@ def test_workflow_preview_includes_cost():
     assert preview["dry_run"] is True
     assert preview["messages"][0]["recipient_contact_id"] == "c1"
     assert "total_cost_estimate_usd" in preview
+    assert preview["messages"][0]["quiet_hours_adjusted"] is False
+
+
+def test_workflow_preview_quiet_hours_flag_not_confused_with_delay():
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 12, 10, 0, tzinfo=ZoneInfo("America/Chicago"))
+    preview = build_preview(
+        workflow={
+            "code": "appointment_reminder",
+            "purpose": "transactional",
+            "steps": [
+                {
+                    "id": "reminder",
+                    "channel": "sms",
+                    "template": "Reminder from {business_name}",
+                    "delay_minutes": 60,
+                }
+            ],
+        },
+        business_name="Demo",
+        contact_id="c1",
+        quiet_hours={"enabled": True, "start": "21:00", "end": "08:00"},
+        tz_name="America/Chicago",
+        now=now,
+    )
+    # 11:00 local after delay is outside quiet hours — flag must stay false.
+    assert preview["messages"][0]["quiet_hours_adjusted"] is False

@@ -80,6 +80,15 @@ def _fingerprint(*parts: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _hash_identity(channel: str, external_id: str) -> str:
+    """Store contact identities as digests — never plaintext email/phone in identity rows."""
+    normalized = (external_id or "").strip().lower()
+    return hashlib.sha256(f"{channel}:{normalized}".encode("utf-8")).hexdigest()
+
+
+_ACTIVE_BOOKING_STATUSES = ("confirmed", "rescheduled")
+
+
 class GrowthAgentService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -455,13 +464,34 @@ class GrowthAgentService:
             "rotated": bool(existing),
         }
 
-    def _check_rate(self, key: str, limit: int) -> None:
-        now = datetime.utcnow().timestamp()
+    def _check_rate(self, *, org_id: str, installation_id: str, limit: int) -> None:
+        """Durable per-install rate limit based on recent visitor messages (survives restart)."""
+        since = _now() - timedelta(seconds=60)
+        recent = (
+            self.db.query(GaConversationMessage)
+            .join(
+                GaConversation,
+                GaConversation.id == GaConversationMessage.conversation_id,
+            )
+            .filter(
+                GaConversationMessage.organization_id == org_id,
+                GaConversation.organization_id == org_id,
+                GaConversation.widget_installation_id == installation_id,
+                GaConversationMessage.role == "visitor",
+                GaConversationMessage.created_at >= since,
+            )
+            .count()
+        )
+        if recent >= limit:
+            raise GrowthAgentError("RATE_LIMITED", "Too many requests", http_status=429)
+        # Keep a process-local guard as a secondary burst brake for same-worker floods.
+        key = f"widget:{installation_id}"
+        now_ts = datetime.now(timezone.utc).timestamp()
         with _RATE_LOCK:
-            bucket = [t for t in _RATE.get(key, []) if now - t < 60]
+            bucket = [t for t in _RATE.get(key, []) if now_ts - t < 60]
             if len(bucket) >= limit:
                 raise GrowthAgentError("RATE_LIMITED", "Too many requests", http_status=429)
-            bucket.append(now)
+            bucket.append(now_ts)
             _RATE[key] = bucket
 
     def widget_chat(
@@ -487,12 +517,28 @@ class GrowthAgentService:
             raise GrowthAgentError("INVALID_WIDGET_TOKEN", "Installation inactive", http_status=401)
         if hash_token(token) != installation.token_hash:
             raise GrowthAgentError("INVALID_WIDGET_TOKEN", "Token mismatch", http_status=401)
-        if origin and not domain_allowed(installation.domain, origin):
-            # Allow missing Origin in same-origin first-party demos; block forged cross-origin.
+        # Fail closed: Origin/Referer (or explicit embed origin) is required.
+        if not (origin or "").strip():
+            raise GrowthAgentError(
+                "ORIGIN_REQUIRED",
+                "Origin or Referer required for widget chat",
+                http_status=403,
+            )
+        if not domain_allowed(installation.domain, origin):
             raise GrowthAgentError("ORIGIN_DENIED", "Origin not allowed for this installation", http_status=403)
-        self._check_rate(f"widget:{installation.id}", installation.rate_limit_per_minute)
+        self._check_rate(
+            org_id=org_id,
+            installation_id=installation.id,
+            limit=installation.rate_limit_per_minute,
+        )
 
         profile = self._require_profile(org_id)
+        if not profile.activated:
+            raise GrowthAgentError(
+                "NOT_ACTIVATED",
+                "Business profile must be activated before public chat",
+                http_status=403,
+            )
         if profile.agent_disabled:
             raise GrowthAgentError("AGENT_DISABLED", "Agent disabled", http_status=403)
 
@@ -655,17 +701,19 @@ class GrowthAgentService:
         fp = _fingerprint(email_n, phone_n, name or "")
         existing = None
         if email_n:
+            email_hash = _hash_identity("email", email_n)
             ident = (
                 self.db.query(GaContactIdentity)
-                .filter_by(organization_id=org_id, channel="email", external_id=email_n)
+                .filter_by(organization_id=org_id, channel="email", external_id=email_hash)
                 .one_or_none()
             )
             if ident:
                 existing = self._org_query(GaContact, org_id).filter_by(id=ident.contact_id).one_or_none()
         if existing is None and phone_n:
+            phone_hash = _hash_identity("phone", phone_n)
             ident = (
                 self.db.query(GaContactIdentity)
-                .filter_by(organization_id=org_id, channel="phone", external_id=phone_n)
+                .filter_by(organization_id=org_id, channel="phone", external_id=phone_hash)
                 .one_or_none()
             )
             if ident:
@@ -727,9 +775,10 @@ class GrowthAgentService:
         return contact
 
     def _ensure_identity(self, org_id: str, contact_id: str, channel: str, external_id: str) -> None:
+        digest = _hash_identity(channel, external_id)
         exists = (
             self.db.query(GaContactIdentity)
-            .filter_by(organization_id=org_id, channel=channel, external_id=external_id)
+            .filter_by(organization_id=org_id, channel=channel, external_id=digest)
             .one_or_none()
         )
         if exists:
@@ -740,7 +789,7 @@ class GrowthAgentService:
                 organization_id=org_id,
                 contact_id=contact_id,
                 channel=channel,
-                external_id=external_id,
+                external_id=digest,
                 verified=False,
             )
         )
@@ -773,7 +822,12 @@ class GrowthAgentService:
             "do_not_contact": row.do_not_contact,
             "is_synthetic_demo": row.is_synthetic_demo,
             "identities": [
-                {"channel": i.channel, "external_id_redacted": "[REDACTED]", "external_id_hint": (i.external_id[:2] + "***") if i.external_id else ""}
+                {
+                    "channel": i.channel,
+                    "external_id_redacted": "[REDACTED]",
+                    "external_id_hashed": True,
+                    "external_id_hint": "",
+                }
                 for i in idents
             ],
             "updated_at": row.updated_at.isoformat() + "Z" if row.updated_at else None,
@@ -847,8 +901,14 @@ class GrowthAgentService:
         if status == "opted_out":
             contact = self._org_query(GaContact, org_id).filter_by(id=contact_id).one_or_none()
             if contact and purpose == "marketing":
-                # Marketing opt-out does not auto DNC transactional, but STOP sets do_not_contact when channel-wide.
-                if collection_source.endswith("stop"):
+                # Channel-specific marketing opt-out must not blanket DNC transactional paths.
+                # Only explicit STOP keyword sources mark the contact do-not-contact.
+                if collection_source in {
+                    "widget_stop",
+                    "sms_stop",
+                    "email_stop",
+                    "owner_global_stop",
+                }:
                     contact.do_not_contact = True
         return row
 
@@ -1064,6 +1124,12 @@ class GrowthAgentService:
         attempts = []
         for msg in (run.preview_json or {}).get("messages") or []:
             channel = msg["channel"]
+            delivery_key = f"{run.id}:{msg.get('step_id')}:{channel}"
+            existing_attempt = (
+                self.db.query(GaDeliveryAttempt)
+                .filter_by(organization_id=org_id, idempotency_key=delivery_key)
+                .one_or_none()
+            )
             try:
                 wf_mod.validate_send_allowed(
                     purpose=wf.purpose,
@@ -1074,67 +1140,73 @@ class GrowthAgentService:
                     agent_disabled=profile.agent_disabled,
                 )
             except (ConsentRequiredError, GrowthAgentError) as exc:
+                if existing_attempt and existing_attempt.status == "suppressed":
+                    attempts.append(
+                        {
+                            "status": "suppressed",
+                            "id": existing_attempt.id,
+                            "error": getattr(exc, "code", "SUPPRESSED"),
+                            "deduped": True,
+                        }
+                    )
+                else:
+                    attempt = existing_attempt or GaDeliveryAttempt(
+                        id=_id(),
+                        organization_id=org_id,
+                        workflow_run_id=run.id,
+                        channel=channel,
+                        provider="mock",
+                        status="suppressed",
+                        idempotency_key=delivery_key,
+                        cost_estimate_usd=0.0,
+                        error_code=getattr(exc, "code", "SUPPRESSED"),
+                        payload_redacted_json={"reason": redact_text(str(exc))},
+                    )
+                    if existing_attempt:
+                        attempt.status = "suppressed"
+                        attempt.error_code = getattr(exc, "code", "SUPPRESSED")
+                    else:
+                        self.db.add(attempt)
+                    attempts.append(
+                        {"status": "suppressed", "id": attempt.id, "error": getattr(exc, "code", "SUPPRESSED")}
+                    )
+                run.status = "suppressed"
+                run.stop_reason = getattr(exc, "code", "SUPPRESSED")
+                continue
+
+            if existing_attempt and existing_attempt.status in {"sent_mock", "suppressed"}:
+                attempts.append(
+                    {"status": existing_attempt.status, "id": existing_attempt.id, "deduped": True}
+                )
+                continue
+
+            # Persist queued row first so a crash mid-send can be recovered on restart.
+            if existing_attempt and existing_attempt.status in {"queued", "retrying"}:
+                attempt = existing_attempt
+            else:
                 attempt = GaDeliveryAttempt(
                     id=_id(),
                     organization_id=org_id,
                     workflow_run_id=run.id,
                     channel=channel,
                     provider="mock",
-                    status="suppressed",
-                    idempotency_key=f"{run.id}:{msg.get('step_id')}:{channel}",
-                    cost_estimate_usd=0.0,
-                    error_code=getattr(exc, "code", "SUPPRESSED"),
-                    payload_redacted_json={"reason": redact_text(str(exc))},
+                    status="queued",
+                    idempotency_key=delivery_key,
+                    cost_estimate_usd=float(msg.get("cost_estimate_usd") or 0),
+                    payload_redacted_json={"body_preview": "[REDACTED]"},
                 )
                 self.db.add(attempt)
-                attempts.append({"status": "suppressed", "error": getattr(exc, "code", "SUPPRESSED")})
-                run.status = "suppressed"
-                run.stop_reason = getattr(exc, "code", "SUPPRESSED")
-                continue
+                self.db.flush()
 
-            delivery_key = f"{run.id}:{msg.get('step_id')}:{channel}"
-            existing_attempt = (
-                self.db.query(GaDeliveryAttempt)
-                .filter_by(organization_id=org_id, idempotency_key=delivery_key)
-                .one_or_none()
-            )
-            if existing_attempt:
-                attempts.append({"status": existing_attempt.status, "id": existing_attempt.id, "deduped": True})
-                continue
-
-            adapter = self.sms if channel == "sms" else self.email
-            result = adapter.send(
-                channel=channel,
-                payload={
-                    "body": msg.get("body_preview"),
-                    "subject": f"{profile.business_name} update",
-                    "live": False,
-                },
-            )
-            status = "sent_mock" if dry_run or result.status == "sent_mock" else result.status
-            if not dry_run and result.status == "sent_mock":
-                # Still mock — live flags hard off.
-                status = "sent_mock"
-            attempt = GaDeliveryAttempt(
-                id=_id(),
-                organization_id=org_id,
-                workflow_run_id=run.id,
-                channel=channel,
-                provider=result.provider,
-                status=status,
-                idempotency_key=delivery_key,
-                cost_estimate_usd=float(result.cost_estimate_usd or msg.get("cost_estimate_usd") or 0),
-                payload_redacted_json=redact_mapping(result.meta),
-            )
-            self.db.add(attempt)
-            self.record_usage(
+            processed = self._process_delivery_attempt(
                 org_id,
-                meter=channel,
-                quantity=1,
-                unit_cost_usd=attempt.cost_estimate_usd,
-                provider=result.provider,
+                attempt,
+                profile=profile,
+                channel=channel,
+                body=msg.get("body_preview"),
+                dry_run=dry_run,
             )
-            attempts.append({"status": status, "id": attempt.id, "provider": result.provider})
+            attempts.append(processed)
 
         if run.status != "suppressed":
             run.status = "completed" if attempts else "failed"
@@ -1158,6 +1230,104 @@ class GrowthAgentService:
         )
         self.db.commit()
         return response
+
+    def _process_delivery_attempt(
+        self,
+        org_id: str,
+        attempt: GaDeliveryAttempt,
+        *,
+        profile: GaBusinessProfile,
+        channel: str,
+        body: str | None,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        adapter = self.sms if channel == "sms" else self.email
+        result = adapter.send(
+            channel=channel,
+            payload={
+                "body": body,
+                "subject": f"{profile.business_name} update",
+                "live": False,
+            },
+        )
+        # Live flags are hard-off; dry-run and "live" execute both stay mock.
+        status = "sent_mock"
+        attempt.status = status
+        attempt.provider = result.provider
+        attempt.cost_estimate_usd = float(result.cost_estimate_usd or attempt.cost_estimate_usd or 0)
+        attempt.payload_redacted_json = redact_mapping(result.meta)
+        attempt.attempt_number = int(attempt.attempt_number or 1)
+        attempt.error_code = None
+        self.record_usage(
+            org_id,
+            meter=channel,
+            quantity=1,
+            unit_cost_usd=attempt.cost_estimate_usd,
+            provider=result.provider,
+        )
+        return {
+            "status": status,
+            "id": attempt.id,
+            "provider": result.provider,
+            "recovered": attempt.attempt_number > 1,
+            "dry_run": dry_run,
+        }
+
+    def recover_pending_deliveries(
+        self,
+        org_id: str,
+        *,
+        actor_user_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Reclaim queued/retrying delivery attempts after process restart (mock transport only)."""
+        profile = self._require_profile(org_id)
+        pending = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status.in_(["queued", "retrying"]))
+            .order_by(GaDeliveryAttempt.created_at.asc())
+            .limit(max(1, min(limit, 200)))
+            .all()
+        )
+        recovered = []
+        for attempt in pending:
+            run = self._org_query(GaWorkflowRun, org_id).filter_by(id=attempt.workflow_run_id).one_or_none()
+            body = None
+            if run and isinstance(run.preview_json, dict):
+                for msg in run.preview_json.get("messages") or []:
+                    key = f"{run.id}:{msg.get('step_id')}:{msg.get('channel')}"
+                    if key == attempt.idempotency_key:
+                        body = msg.get("body_preview")
+                        break
+            attempt.attempt_number = int(attempt.attempt_number or 1) + 1
+            processed = self._process_delivery_attempt(
+                org_id,
+                attempt,
+                profile=profile,
+                channel=attempt.channel,
+                body=body,
+                dry_run=True,
+            )
+            if run and run.status in {"preview", "awaiting_approval", "approved", "running", "failed"}:
+                run.status = "completed"
+            recovered.append(processed)
+
+        self.audit(
+            org_id,
+            action="workflow.recover",
+            entity_type="delivery_attempt",
+            actor_user_id=actor_user_id,
+            summary=f"Recovered {len(recovered)} pending mock deliveries after restart",
+            payload={"recovered_count": len(recovered)},
+        )
+        self.db.commit()
+        return {
+            "recovered_count": len(recovered),
+            "attempts": recovered,
+            "live_send": False,
+            "background_worker_enabled": False,
+            "note": "Manual/test reclaim path; BACKGROUND_WORKER_ENABLED remains hard-off.",
+        }
 
     # ── appointments ─────────────────────────────────────────────────────────
 
@@ -1187,7 +1357,11 @@ class GrowthAgentService:
             }
             for r in self._org_query(GaAvailabilityRule, org_id).all()
         ]
-        existing_rows = self._org_query(GaAppointment, org_id).all()
+        existing_rows = (
+            self._org_query(GaAppointment, org_id)
+            .filter(GaAppointment.status.in_(_ACTIVE_BOOKING_STATUSES))
+            .all()
+        )
         existing = [
             {"starts_at_utc": a.starts_at_utc, "ends_at_utc": a.ends_at_utc, "status": a.status}
             for a in existing_rows
@@ -1234,7 +1408,7 @@ class GrowthAgentService:
         with _BOOK_LOCK:
             existing_rows = (
                 self._org_query(GaAppointment, org_id)
-                .filter(GaAppointment.status != "cancelled")
+                .filter(GaAppointment.status.in_(_ACTIVE_BOOKING_STATUSES))
                 .all()
             )
             existing = [
@@ -1291,9 +1465,10 @@ class GrowthAgentService:
                 audit_action = "appointment.book"
                 summary = "Appointment confirmed"
             try:
-                self.db.flush()
+                # Nested savepoint avoids wiping sibling uncommitted work on conflict.
+                with self.db.begin_nested():
+                    self.db.flush()
             except IntegrityError as exc:
-                self.db.rollback()
                 raise DoubleBookError() from exc
 
             contact.lead_state = "booked"
@@ -1392,7 +1567,10 @@ class GrowthAgentService:
         with _BOOK_LOCK:
             existing_rows = (
                 self._org_query(GaAppointment, org_id)
-                .filter(GaAppointment.status != "cancelled", GaAppointment.id != appt.id)
+                .filter(
+                    GaAppointment.status.in_(_ACTIVE_BOOKING_STATUSES),
+                    GaAppointment.id != appt.id,
+                )
                 .all()
             )
             existing = [
@@ -1427,9 +1605,9 @@ class GrowthAgentService:
             appt.idempotency_key = idempotency_key
             appt.timezone = profile.timezone
             try:
-                self.db.flush()
+                with self.db.begin_nested():
+                    self.db.flush()
             except IntegrityError as exc:
-                self.db.rollback()
                 raise DoubleBookError() from exc
 
             self.db.add(
@@ -1486,7 +1664,10 @@ class GrowthAgentService:
         )
         booked = (
             self._org_query(GaAppointment, org_id)
-            .filter(GaAppointment.created_at >= since, GaAppointment.status == "confirmed")
+            .filter(
+                GaAppointment.created_at >= since,
+                GaAppointment.status.in_(_ACTIVE_BOOKING_STATUSES),
+            )
             .count()
         )
         deliveries = self._org_query(GaDeliveryAttempt, org_id).filter(GaDeliveryAttempt.created_at >= since).all()
@@ -1515,11 +1696,18 @@ class GrowthAgentService:
             .filter(GaDeliveryAttempt.status.in_(["failed", "retrying"]))
             .count()
         )
+        queued = (
+            self._org_query(GaDeliveryAttempt, org_id)
+            .filter(GaDeliveryAttempt.status.in_(["queued", "retrying"]))
+            .count()
+        )
         return {
             "status": "ok" if profile and not profile.agent_disabled else "disabled_or_unconfigured",
             "agent_paused": bool(profile.agent_paused) if profile else None,
             "agent_disabled": bool(profile.agent_disabled) if profile else None,
             "delivery_failure_queue": failed,
+            "pending_delivery_reclaim": queued,
+            "restart_recovery": "POST /api/nova/growth-agent/workflows/recover",
             "live_flags": {
                 "email": False,
                 "sms": False,
@@ -1581,14 +1769,78 @@ class GrowthAgentService:
             "export": "GET /api/nova/growth-agent/export returns org-scoped JSON with PII included only for the owning org.",
         }
 
+    def list_appointments(self, org_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        rows = (
+            self._org_query(GaAppointment, org_id)
+            .order_by(GaAppointment.starts_at_utc.desc())
+            .limit(max(1, min(limit, 200)))
+            .all()
+        )
+        services = {
+            s.id: s.code
+            for s in self._org_query(GaAppointmentService, org_id).all()
+        }
+        return [
+            {
+                "id": a.id,
+                "contact_id": a.contact_id,
+                "service_code": services.get(a.service_id),
+                "starts_at_utc": a.starts_at_utc.isoformat() + "Z" if a.starts_at_utc else None,
+                "ends_at_utc": a.ends_at_utc.isoformat() + "Z" if a.ends_at_utc else None,
+                "status": a.status,
+                "is_synthetic_demo": bool(a.is_synthetic_demo),
+            }
+            for a in rows
+        ]
+
+    def list_consent_records(self, org_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        rows = (
+            self._org_query(GaConsentRecord, org_id)
+            .order_by(GaConsentRecord.recorded_at.desc())
+            .limit(max(1, min(limit, 500)))
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "contact_id": r.contact_id,
+                "channel": r.channel,
+                "purpose": r.purpose,
+                "status": r.status,
+                "collection_source": r.collection_source,
+                "recorded_at": r.recorded_at.isoformat() + "Z" if r.recorded_at else None,
+            }
+            for r in rows
+        ]
+
     def export_org(self, org_id: str) -> dict[str, Any]:
+        conversations = self.list_conversations(org_id)
+        transcripts = []
+        for conv in conversations[:50]:
+            detail = self.get_conversation(org_id, conv["id"])
+            transcripts.append(
+                {
+                    "conversation_id": conv["id"],
+                    "messages": [
+                        {
+                            "role": m.get("role"),
+                            "content": m.get("content"),
+                            "grounded": m.get("grounded"),
+                        }
+                        for m in (detail.get("messages") or [])
+                    ],
+                }
+            )
         return {
             "organization_id": org_id,
             "profile": self.get_profile(org_id),
             "leads": self.list_leads(org_id),
-            "conversations": self.list_conversations(org_id),
+            "conversations": conversations,
+            "conversation_messages": transcripts,
+            "consent_records": self.list_consent_records(org_id),
+            "appointments": self.list_appointments(org_id),
             "analytics": self.analytics(org_id),
             "audit": self.audit_history(org_id, limit=500),
             "retention": self.retention_policy(),
-            "note": "Owner-only export. Handle as confidential.",
+            "note": "Owner-only export. Handle as confidential. Identity digests are hashed.",
         }

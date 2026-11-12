@@ -1,0 +1,79 @@
+{
+  "label": "SYNTHETIC DEMO \u2014 not live customers",
+  "business": "Cedar Ridge Home Services (SYNTHETIC DEMO)",
+  "chat": {
+    "grounded": true,
+    "ai_disclosed": true,
+    "duplicate_contact_reused": true
+  },
+  "crm_edit": {
+    "lead_state": "qualified",
+    "notes": "Synthetic demo \u2014 qualified after FAQ chat"
+  },
+  "booking_idempotent_replay": true,
+  "cancel_rebook": {
+    "cancelled_status": "cancelled",
+    "rebooked_id": "3bc135e35e854aa89850289db62c26d6",
+    "reused_same_row": true
+  },
+  "reschedule": {
+    "status": "rescheduled",
+    "starts_at_utc": "2026-11-16T15:30:00Z"
+  },
+  "reminder_status": "completed",
+  "reminder_live_send": false,
+  "restart_recovery": {
+    "recovered_count": 1,
+    "live_send": false
+  },
+  "handoff": {
+    "status": "handed_off",
+    "handler": "human"
+  },
+  "marketing_suppressed_status": "suppressed",
+  "double_book_blocked": "DOUBLE_BOOK",
+  "analytics": {
+    "window_days": 30,
+    "denominator_note": "Counts are org-scoped events created in the window; not attribution claims.",
+    "inquiries": 1,
+    "consented_leads": 4,
+    "booked_appointments": 1,
+    "delivery_success": 2,
+    "delivery_failure_or_suppressed": 1,
+    "opt_outs": 1,
+    "usage_cost_estimate_usd": 0.008126,
+    "billed": false,
+    "is_attribution": false
+  },
+  "export_includes": {
+    "appointments": 1,
+    "consent_records": 5,
+    "conversation_messages": 2
+  },
+  "health_live_flags": {
+    "email": false,
+    "sms": false,
+    "calendar": false,
+    "stripe": false,
+    "voice": false
+  },
+  "audit_actions": [
+    "workflow.execute",
+    "workflow.preview",
+    "consent.record",
+    "conversation.handoff",
+    "workflow.recover",
+    "workflow.preview",
+    "workflow.execute",
+    "workflow.preview",
+    "appointment.reschedule",
+    "appointment.rebook",
+    "appointment.cancel",
+    "appointment.book",
+    "lead.update",
+    "widget.chat",
+    "widget.chat",
+    "widget.create",
+    "profile.upsert"
+  ]
+}

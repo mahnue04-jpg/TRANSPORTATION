@@ -16,6 +16,7 @@ os.environ["NOVA_GROWTH_AGENT_DEMO_MODE"] = "true"
 
 from app.core.nova.growth_agent.demo import run_synthetic_demo
 from app.core.nova.growth_agent.errors import ConsentRequiredError, DoubleBookError
+from app.core.nova.growth_agent.models import GaContact, GaDeliveryAttempt
 from app.core.nova.growth_agent.schema_ensure import ensure_growth_agent_schema
 from app.core.nova.growth_agent.service import GrowthAgentService
 from app.db.session import Base
@@ -176,14 +177,14 @@ def test_booking_concurrency_no_double_book(db):
     assert availability["slots"]
     slot = availability["slots"][0]["starts_at_utc"]
 
-    errors = []
-    successes = []
+    engine = db.get_bind()
+    SessionFactory = sessionmaker(bind=engine)
 
     def attempt(i: int):
-        # Separate sessions/engines sharing same StaticPool memory DB is tricky;
-        # use the process lock path with sequential-ish threaded calls on one service carefully.
-        local = GrowthAgentService(db)
+        # Separate sessions on the shared StaticPool DB exercise unique-slot enforcement.
+        local_db = SessionFactory()
         try:
+            local = GrowthAgentService(local_db)
             out = local.book_appointment(
                 org,
                 contact_id=contact.id,
@@ -191,27 +192,44 @@ def test_booking_concurrency_no_double_book(db):
                 starts_at_utc=slot,
                 idempotency_key=f"concurrent-{i}",
             )
-            return ("ok", out["id"])
+            return ("ok", out["id"], f"concurrent-{i}")
         except DoubleBookError:
-            return ("double", None)
+            return ("double", None, f"concurrent-{i}")
         except Exception as exc:  # noqa: BLE001
-            return ("err", str(exc))
+            return ("err", str(exc), f"concurrent-{i}")
+        finally:
+            local_db.close()
 
-    # Run sequentially through lock — still validates second key fails after first commits
-    first = attempt(0)
-    second = attempt(1)
-    assert first[0] == "ok"
-    assert second[0] == "double"
+    results = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(attempt, i) for i in range(2)]
+        for fut in as_completed(futures):
+            results.append(fut.result())
 
-    # Idempotent same key succeeds
+    oks = [r for r in results if r[0] == "ok"]
+    doubles = [r for r in results if r[0] == "double"]
+    errs = [r for r in results if r[0] == "err"]
+    assert not errs, errs
+    assert len(oks) == 1, results
+    assert len(doubles) == 1, results
+
+    winner_id, winner_key = oks[0][1], oks[0][2]
     again = svc.book_appointment(
         org,
         contact_id=contact.id,
         service_code="consult",
         starts_at_utc=slot,
-        idempotency_key="concurrent-0",
+        idempotency_key=winner_key,
     )
-    assert again["id"] == first[1]
+    assert again["id"] == winner_id
+    with pytest.raises(DoubleBookError):
+        svc.book_appointment(
+            org,
+            contact_id=contact.id,
+            service_code="consult",
+            starts_at_utc=slot,
+            idempotency_key="concurrent-fresh-key",
+        )
 
 
 def test_cancel_rebook_and_reschedule(db):
@@ -282,10 +300,103 @@ def test_synthetic_demo_end_to_end(db):
     assert report["label"].startswith("SYNTHETIC")
     assert report["booking_idempotent_replay"] is True
     assert report["chat"]["duplicate_contact_reused"] is True
+    assert report["crm_edit"]["lead_state"] == "qualified"
+    assert report["cancel_rebook"]["cancelled_status"] == "cancelled"
+    assert report["cancel_rebook"]["reused_same_row"] is True
+    assert report["reschedule"]["status"] == "rescheduled"
+    assert report["restart_recovery"]["recovered_count"] >= 1
+    assert report["marketing_suppressed"]["status"] == "suppressed" or any(
+        a.get("status") == "suppressed" for a in report["marketing_suppressed"]["attempts"]
+    )
+    assert report["export_includes"]["appointments"] >= 1
+    assert report["export_includes"]["consent_records"] >= 1
     assert report["double_book_blocked"] in {"DOUBLE_BOOK", "IntegrityError"} or report["double_book_blocked"]
     assert report["handoff"]["handler"] == "human"
     assert report["analytics"]["is_attribution"] is False
+    assert report["analytics"]["booked_appointments"] >= 1
     assert report["health"]["live_flags"]["sms"] is False
+
+
+def test_restart_recovery_reclaims_queued_delivery(db):
+    svc = GrowthAgentService(db)
+    org = "org-recover"
+    _activate(svc, org)
+    contact = svc._upsert_contact(
+        org,
+        name="Riley",
+        email="riley@example.com",
+        consent_transactional=True,
+        consent_marketing=True,
+        channel="email",
+        source="test",
+    )
+    db.commit()
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    queued = GaDeliveryAttempt(
+        id="queued-attempt-1",
+        organization_id=org,
+        workflow_run_id=preview["run_id"],
+        channel="email",
+        provider="mock",
+        status="queued",
+        idempotency_key=f"{preview['run_id']}:ack:email",
+        cost_estimate_usd=0.0,
+        attempt_number=1,
+        payload_redacted_json={},
+    )
+    db.add(queued)
+    db.commit()
+    recovered = svc.recover_pending_deliveries(org, actor_user_id="owner-1")
+    assert recovered["recovered_count"] == 1
+    assert recovered["attempts"][0]["status"] == "sent_mock"
+    assert recovered["live_send"] is False
+
+
+def test_channel_opt_out_without_blanket_dnc(db):
+    svc = GrowthAgentService(db)
+    org = "org-optout"
+    _activate(svc, org)
+    contact = svc._upsert_contact(
+        org,
+        name="Casey",
+        email="casey@example.com",
+        consent_transactional=True,
+        consent_marketing=True,
+        channel="email",
+        source="test",
+    )
+    db.commit()
+    svc.record_consent(
+        org,
+        contact_id=contact.id,
+        channel="email",
+        purpose="marketing",
+        status="opted_out",
+        collection_source="owner_opt_out",
+        actor_user_id="owner-1",
+    )
+    refreshed = svc._org_query(GaContact, org).filter_by(id=contact.id).one()
+    assert refreshed.do_not_contact is False
+    mkt = svc.preview_workflow(org, workflow_code="post_service_followup", contact_id=contact.id)
+    suppressed = svc.approve_and_execute_workflow(
+        org,
+        run_id=mkt["run_id"],
+        dry_run=True,
+        idempotency_key="optout-mkt",
+    )
+    assert suppressed["status"] == "suppressed" or any(
+        a.get("status") == "suppressed" for a in suppressed["attempts"]
+    )
+    # Transactional ack still allowed after channel marketing opt-out
+    ack = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    executed = svc.approve_and_execute_workflow(
+        org,
+        run_id=ack["run_id"],
+        dry_run=True,
+        idempotency_key="optout-ack",
+    )
+    assert executed["status"] == "completed"
+    assert any(a.get("status") == "sent_mock" for a in executed["attempts"])
 
 
 def test_cross_tenant_query_isolation(db):

@@ -132,18 +132,24 @@
 
     <section class="panel" aria-label="Booking and workflows">
       <h2>Booking &amp; workflows</h2>
-      <p class="hint">First-party scheduling + consent-gated mock delivery. Dry-run by default.</p>
+      <p class="hint">First-party scheduling + consent-gated mock delivery. Dry-run by default. Cancel / rebook / reschedule supported.</p>
       <div class="grid-2">
         <label>Contact id<input id="wf-contact" /></label>
         <label>Service code<input id="book-service" value="consult" /></label>
         <label>Day (YYYY-MM-DD)<input id="book-day" /></label>
         <label>Starts at UTC<input id="book-start" placeholder="ISO" /></label>
+        <label>Appointment id<input id="book-appt-id" placeholder="After booking" /></label>
+        <label>Reschedule to UTC<input id="book-reschedule" placeholder="ISO" /></label>
       </div>
       <div class="actions">
         <button type="button" id="load-slots">Load slots</button>
         <button type="button" id="book-slot">Book selected/start</button>
+        <button type="button" id="cancel-appt" class="secondary">Cancel appointment</button>
+        <button type="button" id="reschedule-appt" class="secondary">Reschedule</button>
         <button type="button" id="preview-reminder" class="secondary">Preview reminder workflow</button>
         <button type="button" id="exec-reminder" class="secondary">Approve dry-run</button>
+        <button type="button" id="recover-deliveries" class="secondary">Recover pending deliveries</button>
+        <button type="button" id="opt-out-email" class="secondary">Marketing email opt-out</button>
       </div>
       <pre id="book-out" class="hint"></pre>
     </section>

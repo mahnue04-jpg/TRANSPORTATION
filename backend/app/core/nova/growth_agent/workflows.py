@@ -73,8 +73,11 @@ def build_preview(
             from datetime import timedelta
 
             scheduled = now + timedelta(minutes=delay)
+        pre_quiet = scheduled
+        quiet_adjusted = False
         if in_quiet_hours(scheduled, quiet_hours, tz_name=tz_name):
             scheduled = next_send_after_quiet_hours(scheduled, quiet_hours, tz_name=tz_name)
+            quiet_adjusted = scheduled != pre_quiet
         # Rough cost estimates — mock only.
         cost = 0.0 if channel in {"email", "web"} else 0.0075
         messages.append(
@@ -85,7 +88,7 @@ def build_preview(
                 "body_preview": body,
                 "scheduled_for_utc": scheduled.isoformat().replace("+00:00", "Z"),
                 "cost_estimate_usd": cost,
-                "quiet_hours_adjusted": scheduled != now,
+                "quiet_hours_adjusted": quiet_adjusted,
             }
         )
     return {

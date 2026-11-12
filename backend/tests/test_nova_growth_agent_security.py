@@ -87,6 +87,47 @@ def test_cross_origin_widget_blocked(db):
     assert exc.value.code == "ORIGIN_DENIED"
 
 
+def test_missing_origin_rejected(db):
+    svc = GrowthAgentService(db)
+    _ready(svc, "org-sec-origin")
+    widget = svc.create_widget_installation("org-sec-origin", domain="sec.example")
+    with pytest.raises(GrowthAgentError) as exc:
+        svc.widget_chat(
+            token=widget["token"],
+            origin=None,
+            message="hours?",
+        )
+    assert exc.value.code == "ORIGIN_REQUIRED"
+
+
+def test_inactive_profile_blocks_widget(db):
+    svc = GrowthAgentService(db)
+    svc.upsert_profile(
+        "org-sec-inactive",
+        "owner",
+        {
+            "business_name": "Draft Biz",
+            "website": "https://draft.example",
+            "timezone": "America/Chicago",
+            "operating_hours": {"mon_fri": "09:00-17:00"},
+            "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+            "faqs": [{"id": "f1", "question": "Hours?", "keywords": ["hours"], "answer": "9-5"}],
+            "contact_email": "o@draft.example",
+            "handoff_phone": "+15555550998",
+            "escalation_settings": {},
+        },
+        activate=False,
+    )
+    widget = svc.create_widget_installation("org-sec-inactive", domain="draft.example")
+    with pytest.raises(GrowthAgentError) as exc:
+        svc.widget_chat(
+            token=widget["token"],
+            origin="https://draft.example",
+            message="hours?",
+        )
+    assert exc.value.code == "NOT_ACTIVATED"
+
+
 def test_xss_stripped_from_messages(db):
     svc = GrowthAgentService(db)
     _ready(svc, "org-sec3")

@@ -12,7 +12,7 @@ Gate: `NOVA_GROWTH_AGENT_ENABLED=true` (else 404). Live send flags hard-off.
 | GET/POST | `/profile` | owner | Setup wizard get/upsert/activate |
 | POST | `/agent` | owner | Pause/disable kill switch |
 | POST | `/widget/installations` | owner | Mint signed install token |
-| POST | `/widget/chat` | token | Public chat (signed token + origin) |
+| POST | `/widget/chat` | token | Public chat (signed token + Origin/Referer/`X-Amicor-Growth-Origin`; profile must be activated; widget flag required) |
 | GET | `/leads` | owner | CRM list/search |
 | PATCH | `/leads/{id}` | owner | Lead state/notes |
 | POST | `/consent` | owner | Record opt-in/out |
@@ -20,15 +20,17 @@ Gate: `NOVA_GROWTH_AGENT_ENABLED=true` (else 404). Live send flags hard-off.
 | GET | `/conversations/{id}` | owner | Transcript |
 | POST | `/conversations/{id}/handoff` | owner | Human handoff |
 | POST | `/workflows/preview` | owner | Dry-run preview + cost estimate |
-| POST | `/workflows/execute` | owner | Approve mock delivery (default dry_run) |
+| POST | `/workflows/execute` | owner | Approve mock delivery (default dry_run; queues then sends mock) |
+| POST | `/workflows/recover` | owner | Reclaim queued/retrying mock deliveries after restart |
 | GET | `/availability` | owner | Slots for day/service |
+| GET | `/appointments` | owner | List appointments |
 | POST | `/appointments` | owner | Book (idempotent; reuses cancelled slot) |
 | POST | `/appointments/{id}/cancel` | owner | Cancel |
 | POST | `/appointments/{id}/reschedule` | owner | Reschedule (idempotent) |
-| GET | `/analytics` | owner | Metrics with window denominators |
+| GET | `/analytics` | owner | Metrics with window denominators (`confirmed`+`rescheduled`) |
 | GET | `/audit` | owner | Audit history |
-| GET | `/export` | owner | Org-scoped export |
-| POST | `/demo/synthetic` | owner | Full synthetic scenario |
+| GET | `/export` | owner | Org-scoped export (leads, conversations+messages, consent, appointments) |
+| POST | `/demo/synthetic` | owner | Full synthetic scenario (requires `NOVA_GROWTH_AGENT_DEMO_MODE=true`) |
 
 UI: `GET /nova/growth` → `backend/static/nova-growth/`  
 Widget assets: `/static/nova-growth/widget.js`, `widget.css`

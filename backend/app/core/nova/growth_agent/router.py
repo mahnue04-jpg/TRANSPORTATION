@@ -147,6 +147,7 @@ def widget_chat(
     body: WidgetChatIn,
     request: Request,
     origin: str | None = Header(default=None, alias="Origin"),
+    embed_origin: str | None = Header(default=None, alias="X-Amicor-Growth-Origin"),
     svc: GrowthAgentService = Depends(_svc),
 ) -> dict[str, Any]:
     # Public embed requires both master + widget flags. Signed token alone is
@@ -156,7 +157,7 @@ def widget_chat(
     try:
         return svc.widget_chat(
             token=body.token,
-            origin=origin or request.headers.get("Referer"),
+            origin=origin or embed_origin or request.headers.get("Referer"),
             message=body.message,
             conversation_id=body.conversation_id,
             visitor_name=body.visitor_name,
@@ -304,6 +305,35 @@ def workflow_execute(
         raise
 
 
+@router.post("/workflows/recover")
+def workflow_recover(
+    organization_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Reclaim queued/retrying mock deliveries after process restart."""
+    try:
+        return svc.recover_pending_deliveries(
+            _org(user, organization_id),
+            actor_user_id=user.user_id,
+            limit=limit,
+        )
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
+@router.get("/appointments")
+def list_appointments(
+    organization_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    return {"appointments": svc.list_appointments(_org(user, organization_id), limit=limit)}
+
+
 @router.get("/availability")
 def availability(
     service_code: str = Query(...),
@@ -424,12 +454,15 @@ def synthetic_demo(
 
     if not growth_agent_enabled():
         raise HTTPException(status_code=404, detail="Growth Agent disabled")
-    # Allow owner to run synthetic demo whenever the surface is enabled;
-    # DEMO_MODE is advisory for UI labeling.
+    if not demo_mode_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="Synthetic demo disabled (set NOVA_GROWTH_AGENT_DEMO_MODE=true)",
+        )
     org = _org(user, organization_id)
     try:
         result = run_synthetic_demo(db, organization_id=org, owner_user_id=user.user_id)
-        result["demo_mode_flag"] = demo_mode_enabled()
+        result["demo_mode_flag"] = True
         return result
     except GrowthAgentError as exc:
         _handle(exc)

@@ -55,7 +55,11 @@
     form.querySelector('[name="message"]').value = "";
     fetch((apiBase || "") + "/api/nova/growth-agent/widget/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Explicit embed origin so same-origin demos still fail closed on domain match.
+        "X-Amicor-Growth-Origin": window.location.origin,
+      },
       body: JSON.stringify({
         token: token,
         message: message,

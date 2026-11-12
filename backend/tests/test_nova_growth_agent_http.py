@@ -75,3 +75,77 @@ def test_widget_chat_requires_widget_flag(monkeypatch: pytest.MonkeyPatch, clien
     assert res.status_code == 404
     detail = res.json()["detail"]
     assert "widget" in (detail if isinstance(detail, str) else str(detail)).lower()
+
+
+def test_synthetic_demo_requires_demo_mode(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    from app.core.nova.growth_agent import flags as ga_flags
+
+    monkeypatch.setattr(ga_flags, "demo_mode_enabled", lambda: False)
+    headers = _headers(client)
+    res = client.post("/api/nova/growth-agent/demo/synthetic", headers=headers, json={})
+    assert res.status_code == 404
+    assert "demo" in str(res.json().get("detail", "")).lower()
+
+
+def test_http_journey_smoke_authenticated(client: TestClient) -> None:
+    headers = _headers(client)
+    profile = client.post(
+        "/api/nova/growth-agent/profile",
+        headers=headers,
+        json={
+            "business_name": "HTTP Journey Biz",
+            "website": "https://journey.example",
+            "timezone": "America/Chicago",
+            "operating_hours": {"mon_fri": "09:00-17:00"},
+            "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+            "faqs": [
+                {
+                    "id": "faq_hours",
+                    "question": "Hours?",
+                    "keywords": ["hours"],
+                    "answer": "Mon–Fri 9–5.",
+                }
+            ],
+            "contact_email": "owner@journey.example",
+            "handoff_phone": "+15555550111",
+            "escalation_settings": {"handoff_on_unknown": True},
+            "activate": True,
+        },
+    )
+    assert profile.status_code == 200, profile.text
+    widget = client.post(
+        "/api/nova/growth-agent/widget/installations",
+        headers=headers,
+        json={"domain": "journey.example"},
+    )
+    assert widget.status_code == 200, widget.text
+    token = widget.json()["token"]
+    chat = client.post(
+        "/api/nova/growth-agent/widget/chat",
+        headers={**headers, "Origin": "https://journey.example"},
+        json={
+            "token": token,
+            "message": "What are your hours?",
+            "visitor_name": "Pat Journey",
+            "visitor_email": "pat.journey@example.com",
+            "consent_transactional": True,
+            "consent_marketing": True,
+        },
+    )
+    assert chat.status_code == 200, chat.text
+    body = chat.json()
+    assert body["grounded"] is True
+    contact_id = body["contact_id"]
+    assert contact_id
+    lead = client.patch(
+        f"/api/nova/growth-agent/leads/{contact_id}",
+        headers=headers,
+        json={"lead_state": "contacted", "notes": "HTTP journey"},
+    )
+    assert lead.status_code == 200, lead.text
+    analytics = client.get("/api/nova/growth-agent/analytics?days=30", headers=headers)
+    assert analytics.status_code == 200
+    assert analytics.json()["inquiries"] >= 1
+    health = client.get("/api/nova/growth-agent/health", headers=headers)
+    assert health.status_code == 200
+    assert health.json()["live_flags"]["sms"] is False

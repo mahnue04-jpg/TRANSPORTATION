@@ -31,9 +31,14 @@ def resolve_org(
 
 
 def require_growth_owner(
-    user: UserContext = Depends(require_nova_access),
+    user: UserContext = Depends(get_current_user_context),
+    _role_gate=Depends(require_nova_access),
 ) -> UserContext:
-    """Authenticated Nova user; surface still gated by NOVA_GROWTH_AGENT_ENABLED."""
+    """Authenticated Nova user; surface still gated by NOVA_GROWTH_AGENT_ENABLED.
+
+    Role gate uses require_nova_access (returns ORM User). Identity for handlers
+    comes from get_current_user_context so callers get UserContext.user_id.
+    """
     if not growth_agent_enabled():
         raise HTTPException(status_code=404, detail="Growth Agent is disabled")
     if not user.organization_id and not user.user_id:

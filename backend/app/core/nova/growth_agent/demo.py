@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.nova.growth_agent.models import GaDeliveryAttempt
 from app.core.nova.growth_agent.service import GrowthAgentService
 
 SYNTHETIC_BUSINESS = {
@@ -96,18 +97,27 @@ def run_synthetic_demo(db: Session, *, organization_id: str, owner_user_id: str)
     alex_leads = [l for l in leads if l["id"] == chat1.get("contact_id")]
     assert chat1["contact_id"] == chat_dup["contact_id"]
 
+    # Owner CRM edit
+    crm_edit = svc.update_lead(
+        organization_id,
+        chat1["contact_id"],
+        lead_state="qualified",
+        notes="Synthetic demo — qualified after FAQ chat",
+        actor_user_id=owner_user_id,
+    )
+
     # Booking
     day = (datetime.now(timezone.utc) + timedelta(days=2)).astimezone().strftime("%Y-%m-%d")
-    # Prefer a weekday for availability
     for offset in range(2, 10):
-        candidate = (datetime.now(timezone.utc) + timedelta(days=offset))
+        candidate = datetime.now(timezone.utc) + timedelta(days=offset)
         if candidate.weekday() < 5:
             day = candidate.strftime("%Y-%m-%d")
             break
     availability = svc.list_availability(organization_id, service_code="inspect", day=day)
-    if not availability["slots"]:
-        raise RuntimeError("Synthetic demo expected availability slots")
+    if not availability["slots"] or len(availability["slots"]) < 2:
+        raise RuntimeError("Synthetic demo expected at least two availability slots")
     slot = availability["slots"][0]
+    slot_b = availability["slots"][1]
     booking = svc.book_appointment(
         organization_id,
         contact_id=chat1["contact_id"],
@@ -130,6 +140,30 @@ def run_synthetic_demo(db: Session, *, organization_id: str, owner_user_id: str)
         is_synthetic_demo=True,
     )
 
+    # Cancel → rebook same slot, then reschedule
+    cancelled = svc.cancel_appointment(
+        organization_id,
+        booking["id"],
+        actor_user_id=owner_user_id,
+    )
+    rebooked = svc.book_appointment(
+        organization_id,
+        contact_id=chat1["contact_id"],
+        service_code="inspect",
+        starts_at_utc=slot["starts_at_utc"],
+        idempotency_key=f"demo-rebook-{chat1['contact_id']}-{slot['starts_at_utc']}",
+        conversation_id=chat1["conversation_id"],
+        actor_user_id=owner_user_id,
+        is_synthetic_demo=True,
+    )
+    rescheduled = svc.reschedule_appointment(
+        organization_id,
+        rebooked["id"],
+        starts_at_utc=slot_b["starts_at_utc"],
+        idempotency_key=f"demo-resched-{rebooked['id']}",
+        actor_user_id=owner_user_id,
+    )
+
     # Consented reminder dry-run
     preview = svc.preview_workflow(
         organization_id,
@@ -145,6 +179,32 @@ def run_synthetic_demo(db: Session, *, organization_id: str, owner_user_id: str)
         idempotency_key=f"demo-reminder-{preview['run_id']}",
     )
 
+    # Restart recovery: leave a queued attempt, reclaim it
+    recovery_preview = svc.preview_workflow(
+        organization_id,
+        workflow_code="inquiry_ack",
+        contact_id=chat1["contact_id"],
+        conversation_id=chat1["conversation_id"],
+    )
+    queued = GaDeliveryAttempt(
+        id=f"demo-queued-{recovery_preview['run_id'][:16]}",
+        organization_id=organization_id,
+        workflow_run_id=recovery_preview["run_id"],
+        channel="email",
+        provider="mock",
+        status="queued",
+        idempotency_key=f"{recovery_preview['run_id']}:ack:email",
+        cost_estimate_usd=0.0,
+        payload_redacted_json={"note": "synthetic restart fixture"},
+        attempt_number=1,
+    )
+    db.add(queued)
+    db.commit()
+    recovered = svc.recover_pending_deliveries(
+        organization_id,
+        actor_user_id=owner_user_id,
+    )
+
     # Human handoff
     handoff = svc.handoff_conversation(
         organization_id,
@@ -152,14 +212,14 @@ def run_synthetic_demo(db: Session, *, organization_id: str, owner_user_id: str)
         actor_user_id=owner_user_id,
     )
 
-    # Opt-out suppression path
+    # Channel-correct marketing opt-out (email) — must not rely on blanket DNC
     opt = svc.record_consent(
         organization_id,
         contact_id=chat1["contact_id"],
-        channel="sms",
+        channel="email",
         purpose="marketing",
         status="opted_out",
-        collection_source="demo_stop",
+        collection_source="owner_opt_out",
         actor_user_id=owner_user_id,
     )
     marketing_preview = svc.preview_workflow(
@@ -177,34 +237,58 @@ def run_synthetic_demo(db: Session, *, organization_id: str, owner_user_id: str)
 
     # Duplicate slot attempt with different idempotency should fail
     double_book_error = None
-    if len(availability["slots"]) >= 1:
-        try:
-            svc.book_appointment(
-                organization_id,
-                contact_id=chat1["contact_id"],
-                service_code="inspect",
-                starts_at_utc=slot["starts_at_utc"],
-                idempotency_key=f"demo-double-{slot['starts_at_utc']}",
-                actor_user_id=owner_user_id,
-                is_synthetic_demo=True,
-            )
-        except Exception as exc:  # noqa: BLE001 — capture for demo report
-            double_book_error = getattr(exc, "code", type(exc).__name__)
+    try:
+        svc.book_appointment(
+            organization_id,
+            contact_id=chat1["contact_id"],
+            service_code="inspect",
+            starts_at_utc=slot_b["starts_at_utc"],
+            idempotency_key=f"demo-double-{slot_b['starts_at_utc']}",
+            actor_user_id=owner_user_id,
+            is_synthetic_demo=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — capture for demo report
+        double_book_error = getattr(exc, "code", type(exc).__name__)
+
+    analytics = svc.analytics(organization_id)
+    export = svc.export_org(organization_id)
 
     return {
         "label": "SYNTHETIC DEMO — not live customers",
         "profile": profile,
         "widget_installation_id": widget["installation_id"],
-        "chat": {"first": chat1, "duplicate_contact_reused": chat_dup["contact_id"] == chat1["contact_id"]},
+        "chat": {
+            "first": chat1,
+            "duplicate_contact_reused": chat_dup["contact_id"] == chat1["contact_id"],
+        },
+        "crm_edit": {
+            "lead_state": crm_edit["lead_state"],
+            "notes": crm_edit["notes"],
+        },
         "leads_matching_alex": len(alex_leads),
         "booking": booking,
         "booking_idempotent_replay": booking2["id"] == booking["id"],
+        "cancel_rebook": {
+            "cancelled_status": cancelled["status"],
+            "rebooked_id": rebooked["id"],
+            "reused_same_row": rebooked["id"] == booking["id"],
+        },
+        "reschedule": {
+            "status": rescheduled["status"],
+            "starts_at_utc": rescheduled["starts_at_utc"],
+        },
         "reminder_workflow": executed,
+        "restart_recovery": recovered,
         "handoff": {"status": handoff["status"], "handler": handoff["handler"]},
         "opt_out": opt,
         "marketing_suppressed": suppressed,
         "double_book_blocked": double_book_error,
-        "analytics": svc.analytics(organization_id),
+        "analytics": analytics,
+        "export_includes": {
+            "appointments": len(export.get("appointments") or []),
+            "consent_records": len(export.get("consent_records") or []),
+            "conversation_messages": len(export.get("conversation_messages") or []),
+        },
         "audit_tail": svc.audit_history(organization_id, limit=20),
         "health": svc.health(organization_id),
     }

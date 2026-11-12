@@ -349,8 +349,77 @@
           idempotency_key: `ui-${Date.now()}`,
         }),
       });
+      if (data.id) $("book-appt-id").value = data.id;
       $("book-out").textContent = JSON.stringify(data, null, 2);
       await refreshAll();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("cancel-appt").addEventListener("click", async () => {
+    try {
+      const id = $("book-appt-id").value.trim();
+      if (!id) throw new Error("Appointment id required");
+      const data = await api(`/api/nova/growth-agent/appointments/${encodeURIComponent(id)}/cancel`, {
+        method: "POST",
+        body: "{}",
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      await refreshAll();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("reschedule-appt").addEventListener("click", async () => {
+    try {
+      const id = $("book-appt-id").value.trim();
+      const starts = $("book-reschedule").value.trim() || $("book-start").value.trim();
+      if (!id || !starts) throw new Error("Appointment id and reschedule time required");
+      const data = await api(`/api/nova/growth-agent/appointments/${encodeURIComponent(id)}/reschedule`, {
+        method: "POST",
+        body: JSON.stringify({
+          starts_at_utc: starts,
+          idempotency_key: `ui-resched-${id}-${starts}`,
+        }),
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      await refreshAll();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("recover-deliveries").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/nova/growth-agent/workflows/recover", {
+        method: "POST",
+        body: "{}",
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      await refreshMetrics();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
+  $("opt-out-email").addEventListener("click", async () => {
+    try {
+      const contactId = $("wf-contact").value.trim();
+      if (!contactId) throw new Error("Contact id required");
+      const data = await api("/api/nova/growth-agent/consent", {
+        method: "POST",
+        body: JSON.stringify({
+          contact_id: contactId,
+          channel: "email",
+          purpose: "marketing",
+          status: "opted_out",
+          collection_source: "owner_opt_out",
+        }),
+      });
+      $("book-out").textContent = JSON.stringify(data, null, 2);
+      setBanner("Marketing email opt-out recorded (channel-specific).", "ok");
     } catch (err) {
       $("book-out").textContent = err.message;
     }
@@ -399,6 +468,12 @@
       $("demo-out").textContent = JSON.stringify(data, null, 2);
       if (data.chat && data.chat.first) {
         $("wf-contact").value = data.chat.first.contact_id || "";
+      }
+      if (data.reschedule && data.booking) {
+        $("book-appt-id").value = data.booking.id || "";
+      }
+      if (data.cancel_rebook && data.cancel_rebook.rebooked_id) {
+        $("book-appt-id").value = data.cancel_rebook.rebooked_id;
       }
       await refreshAll();
       setBanner("Synthetic demo complete. Records labeled Synthetic.", "ok");
