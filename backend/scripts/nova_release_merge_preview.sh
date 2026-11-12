@@ -16,7 +16,8 @@ report = {
     "render_deployed": False,
     "release_approved": False,
     "branches": ["refs/pull/477/head", "refs/pull/484/head", "refs/pull/338/head"],
-    "integration_ready": False,
+    "merge_conflict_free": False,
+    "integration_tests_passed": False,
     "steps": [],
 }
 cmd("git", "config", "user.name", "Nova CI integration preview")
@@ -36,15 +37,22 @@ for pr in ("484", "338"):
         })
         cmd("git", "merge", "--abort", check=False)
         break
-    cmd("git", "commit", "-m", f"CI ONLY: simulated integration of PR {pr}")
-    report["steps"].append({"pr": pr, "status": "EPHEMERAL_MERGE_OK"})
+    # Git may report an already-contained change without creating MERGE_HEAD.
+    # Do not fail or manufacture a merge commit for that case.
+    pending = cmd("git", "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False)
+    if pending.returncode == 0:
+        cmd("git", "commit", "-m", f"CI ONLY: simulated integration of PR {pr}")
+        outcome = "EPHEMERAL_MERGE_OK"
+    else:
+        outcome = "ALREADY_CONTAINED"
+    report["steps"].append({"pr": pr, "status": outcome})
 else:
-    report["integration_ready"] = True
+    report["merge_conflict_free"] = True
 report["next_action"] = (
     "Manually reconcile overlapping draft PR code and rerun combined functional tests "
     "before approval of isolated staging."
-    if not report["integration_ready"] else
-    "Run combined accounting, operations and revenue suites against this ephemeral tree."
+    if not report["merge_conflict_free"] else
+    "Merge preview has no textual conflicts. Combined functional tests are still required."
 )
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
