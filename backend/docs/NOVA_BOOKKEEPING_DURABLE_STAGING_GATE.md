@@ -198,3 +198,29 @@ Validation:
 - The real Render workspace's `amicor-prod` or casting DB must never be used
   for accounting staging. A dedicated staging database and approved private
   bucket are still prerequisites, not implicit permissions to create them.
+
+
+## Retention and orphan-risk inventory (2026-11-11)
+
+Implemented `bookkeeping_retention.plan_bookkeeping_retention` to support
+future human-reviewed data cleanup decisions without doing the cleanup.
+The operator must specify exact organization and owner scope, a finite
+retention age, and a known database session. The inventory is capped at
+500 older rows to prevent unbounded scans. It returns aggregated counts
+for terminal review, active-review holds, malformed reference/hash metadata,
+missing private references, and unknown statuses, without returning customer
+data or storage object keys.
+
+**All outputs are dry run**: `objects_deleted=0`,
+`database_rows_changed=0`, and `deletion_authorized=false`.
+Even terminal approved/rejected jobs are *not* automatically eligible for
+erasure. Actual retention decisions depend on client contract terms, signed
+consent, legal holds, and an approved S3 lifecycle/verification procedure.
+S3 orphan object detection is not inferred from metadata and remains a
+separately blocked release gate.
+
+Tests cover exact tenant/owner isolation, age cutoff, disabled deletion,
+malformed metadata, strict batch limit and missing scope. A separate
+disposable PostgreSQL test checks query behavior and unchanged rows.
+These tests do not represent retention policy approval or a real storage
+inventory. No Render configuration or customer records were used.
