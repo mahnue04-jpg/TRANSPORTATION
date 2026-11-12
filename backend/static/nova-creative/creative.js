@@ -4,6 +4,13 @@
   var activeProjectId = localStorage.getItem(activeProjectKey) || null;
   var activeBrandId = null;
   var projectRowsCache = [];
+  // Keep authenticated blob-backed MP4 previews alive until the asset list is
+  // replaced. Revoking at loadeddata can make Chrome's controls stay at 0:00.
+  var privateVideoPreviewUrls = [];
+  function clearPrivateVideoPreviewUrls() {
+    privateVideoPreviewUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    privateVideoPreviewUrls = [];
+  }
   var activeProjectRevision = 0;
   var presenterScriptProjectId = null;
   var presenterSavedScriptValue = null;
@@ -1481,6 +1488,7 @@
 
   async function refreshAssets() {
     if (!activeProjectId) {
+      clearPrivateVideoPreviewUrls();
       $("asset-list").innerHTML = "<p class=\"hint\">Select a project.</p>";
       refreshDrama(null);
       renderProductionReadiness(null);
@@ -1509,6 +1517,7 @@
     if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
+    clearPrivateVideoPreviewUrls();
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
       var mediaAvailable = row.media_available !== false;
@@ -1637,10 +1646,15 @@
           }
           var blob = await response.blob();
           if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
+          if (!blob.size || (blob.type && !blob.type.startsWith("video/"))) {
+            throw new Error("Empty or unsupported private video preview");
+          }
           var objectUrl = URL.createObjectURL(blob);
+          privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;
-          video.addEventListener("loadeddata", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
-          video.addEventListener("error", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
+          video.load();
+          // The video element may need further reads for seeking and replay.
+          // Do not revoke here; refreshAssets owns cleanup on rerender.
         } catch (err) {
           video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
         }

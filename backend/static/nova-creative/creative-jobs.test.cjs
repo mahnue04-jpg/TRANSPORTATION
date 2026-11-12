@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/creative.js', 'utf8');
 const briefSync = source.slice(source.indexOf('  function syncContentBrief('), source.indexOf('  function updateActiveProjectLabel('));
 const polling = source.slice(source.indexOf('  async function waitForScene('), source.indexOf('  async function waitForFinalPromo('));
+const privatePreviewLifecycle = source.slice(source.indexOf('  var privateVideoPreviewUrls = []'), source.indexOf('  function setActiveProjectId('));
 
 function selectionContext(extra = {}) {
   const elements = {};
@@ -92,7 +93,7 @@ test('a delayed asset fetch does not overwrite the selected project or expose mi
     refreshDrama() {}, renderProductionReadiness() {}, clearFirstShotPreview() {}, document: {querySelectorAll: () => []},
   });
   const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('\n  var clearLegacyPreviews'));
-  vm.runInContext(refresh, ctx);
+  vm.runInContext(privatePreviewLifecycle + refresh, ctx);
   const pending = ctx.refreshAssets();
   ctx.activeProjectId = 'next'; ctx.activeProjectRevision += 1;
   resolve({project: {title: 'Wrong old project'}, assets: []});
@@ -166,7 +167,7 @@ test('saved motion failures render the provider reason safely after a project re
   const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('  async function waitForScene('));
   // refreshAssets is followed by event registration; isolate its declaration.
   const end = refresh.indexOf('\n  $("reset-project-media")');
-  vm.runInContext(briefSync + escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
+  vm.runInContext(privatePreviewLifecycle + briefSync + escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
   await ctx.refreshAssets();
   const html = elements['asset-list'].innerHTML;
   assert.match(html, /insufficient credits/);
@@ -497,7 +498,7 @@ test('offline asset markup downloads through a button and never puts the file AP
       }],
     }),
   });
-  vm.runInContext(briefSync + escape + memoryNotice + failure + labels.slice(0, end), ctx);
+  vm.runInContext(privatePreviewLifecycle + briefSync + escape + memoryNotice + failure + labels.slice(0, end), ctx);
   await ctx.refreshAssets();
   const html = elements["asset-list"].innerHTML;
   assert.match(html, /asset-auth-download/);
@@ -640,4 +641,51 @@ test('switching projects revokes the saved shot playback blob', () => {
   ctx.setActiveProjectId('next');
   assert.deepEqual(revoked, ['blob:old-shot']);
   assert.equal(ctx.firstShotPreviewUrl, null);
+});
+
+
+test('authenticated MP4 preview retains its blob URL through metadata/playback and cleans up on replacement', async () => {
+  const start = source.indexOf('    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]")');
+  const end = source.indexOf('    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video")', start);
+  assert.ok(start > 0 && end > start, 'protected preview handler found');
+  const lifecycle = source.slice(source.indexOf('  var privateVideoPreviewUrls = []'), source.indexOf('  function setActiveProjectId('));
+  const events = {};
+  const released = [];
+  const preview = {
+    src: '', loads: 0, attrs: {'data-private-video-url': '/api/nova/creative/projects/p1/assets/a1/file'},
+    getAttribute(name) { return this.attrs[name]; },
+    setAttribute(name, value) { this.attrs[name] = value; },
+    addEventListener(name, handler) { events[name] = handler; },
+    load() { this.loads += 1; },
+  };
+  const assets = {contains(element) { return element === preview; }};
+  const ctx = vm.createContext({
+    activeProjectId: 'p1',
+    $: id => id === 'asset-list' ? assets : null,
+    document: {querySelectorAll: () => [preview]},
+    URL: {
+      createObjectURL: () => 'blob:protected-preview',
+      revokeObjectURL: value => { released.push(value); },
+    },
+    session: () => null, token: () => 'test-bearer',
+    assertDownloadUrlHasNoToken: value => assert.doesNotMatch(value, /token=/),
+    fetch: async (_url, options) => {
+      assert.equal(options.headers.Authorization, 'Bearer test-bearer');
+      return {
+        ok: true,
+        headers: {get: () => 'video/mp4'},
+        blob: async () => ({size: 1024, type: 'video/mp4'}),
+      };
+    },
+  });
+  vm.runInContext(lifecycle + source.slice(start, end), ctx);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(preview.src, 'blob:protected-preview');
+  assert.equal(preview.loads, 1);
+  if (events.loadeddata) events.loadeddata();
+  assert.deepEqual(released, [], 'metadata load cannot invalidate playback URL');
+  ctx.clearPrivateVideoPreviewUrls();
+  assert.deepEqual(released, ['blob:protected-preview'], 'replacing assets releases preview exactly once');
+  ctx.clearPrivateVideoPreviewUrls();
+  assert.equal(released.length, 1);
 });
