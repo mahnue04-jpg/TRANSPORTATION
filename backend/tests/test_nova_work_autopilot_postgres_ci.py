@@ -145,3 +145,22 @@ def test_misbehaving_cycle_cannot_claim_external_submission(postgres):
     with Session(postgres) as db:
         record = db.query(NovaWorkSchedulerJob).one()
         assert record.status == "FAILED"
+
+
+def test_unavailable_discovery_sources_do_not_claim_success(postgres):
+    def offline_sources(*args, **kwargs):
+        return {
+            "live_search_status": "unavailable",
+            "selected_count": 0, "ready_for_owner_review_count": 0,
+            "external_submission": False, "external_action_taken": False,
+            "financial_execution": False,
+        }
+    result = run_staging_cycle(
+        postgres, config=CONFIG, at=WHEN, cycle=offline_sources,
+    )
+    assert result["status"] == "SOURCE_UNAVAILABLE"
+    assert result["source_unavailable"] is True
+    with Session(postgres) as db:
+        row = db.query(NovaWorkSchedulerJob).one()
+        assert row.status == "SKIPPED"
+        assert "Sources unavailable" in row.notes
