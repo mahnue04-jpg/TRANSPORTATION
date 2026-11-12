@@ -17,6 +17,7 @@ on:
       - "backend/static/nova-work/index.html"
       - "backend/static/nova-work/bookkeeping.js"
       - "backend/tests/nova_bookkeeping_console.test.cjs"
+      - "backend/tests/nova_bookkeeping_session.test.cjs"
       - "backend/migrations/versions/20261111_nova_bookkeeping_consent.py"
       - ".github/workflows/nova-bookkeeping-durable-integration.yml"
   pull_request:
@@ -64,7 +65,7 @@ jobs:
       - name: Validate Work & Revenue accounting console
         run: |
           node --check static/nova-work/bookkeeping.js
-          node --test tests/nova_bookkeeping_console.test.cjs
+          node --test tests/nova_bookkeeping_console.test.cjs tests/nova_bookkeeping_session.test.cjs
       - name: Compile modified bookkeeping and CSV modules
         run: |
           python -m compileall -q app/core/nova/work_revenue/bookkeeping_*.py app/core/nova/work_revenue/operations_customer_csv_jobs.py app/core/nova/work_revenue/operations_owner_csv_api.py
