@@ -103,3 +103,27 @@ def test_missing_studio_tables_rejected(tmp_path):
         conn.execute("CREATE TABLE unrelated (x TEXT)")
     with pytest.raises(restore.RestoreBlocked, match="STUDIO_TABLES_MISSING"):
         restore.verify(db)
+
+
+def test_expected_media_file_count_accepts_known_inventory(backups):
+    db, archive = backups
+    result = restore.verify(db, archive, expected_media_files=1)
+    assert result["media_archive_files"] == 1
+
+
+def test_expected_media_file_count_rejects_partial_archive(backups):
+    db, archive = backups
+    with pytest.raises(restore.RestoreBlocked, match="MEDIA_FILE_COUNT_MISMATCH"):
+        restore.verify(db, archive, expected_media_files=2)
+
+
+def test_unrelated_archive_root_is_rejected(backups, tmp_path):
+    db, _ = backups
+    bad = tmp_path / "other.tar.gz"
+    with tarfile.open(bad, "w:gz") as tar:
+        data = b"irrelevant"
+        info = tarfile.TarInfo("other_location/other.mp4")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    with pytest.raises(restore.RestoreBlocked, match="UNSAFE_MEDIA_ARCHIVE_ENTRY"):
+        restore.verify(db, bad)
