@@ -286,3 +286,26 @@ inventory. No Render configuration or customer records were used.
   identity provider behavior, multi-tab revocation, CSRF configuration,
   or an authenticated Render browser acceptance. All require later
   isolated staging verification. No customer data or production flags used.
+
+
+## Exact staging resource identity gate — November 11, 2026
+
+The previous read-only preflight could examine any database that was not named
+`amicor-prod` or `amicor-casting-staging-db`. That negative list is not
+enough to establish an independently approved accounting staging environment.
+
+The inspector now requires both `approved_database_name` and
+`approved_bucket_name` to be explicitly supplied by a separate staging
+operator decision. It refuses to inspect resource handles without those
+independently approved names. Database inspection verifies the actual
+PostgreSQL `current_database()` equals the approved name, and bucket
+inspection requires the supplied bucket to match the approved name. Known
+production and casting database identities cannot be approved.
+
+New regressions fail closed on missing approvals, production names, and
+mismatched storage identities. Disposable PostgreSQL and Moto S3 checks
+supply their exact synthetic resource names explicitly.
+
+This is a safety preflight only; it does not prove who approved a resource,
+and no deployment, staging provisioning, feature activation, or customer
+processing has been performed.
