@@ -15,6 +15,10 @@
   const recover = byId("bookkeeping-recover");
   const submit = byId("bookkeeping-submit-form");
   const submitButton = byId("bookkeeping-submit-button");
+  const loadTasks = byId("bookkeeping-load-tasks");
+  const taskSelect = byId("bookkeeping-eligible-tasks");
+  let availableTasks = [];
+  let selectedTask = null;
   const kind = byId("bookkeeping-kind");
   const asOf = byId("bookkeeping-as-of");
   const prefix = "/api/nova/work/operations/durable/bookkeeping";
@@ -44,6 +48,11 @@
   function reset() {
     queue = [];
     selected = null;
+    availableTasks = [];
+    selectedTask = null;
+    taskSelect.replaceChildren(new Option("Load authorized tasks first", ""));
+    byId("bookkeeping-engagement").value = "";
+    byId("bookkeeping-task").value = "";
     select.replaceChildren(new Option("Load your authorized review queue", ""));
     nextAction.textContent = "No saved accounting job selected.";
     update();
@@ -52,6 +61,8 @@
     const hasJob = !!selected;
     const ready = !busy && hasJob;
     load.disabled = busy;
+    loadTasks.disabled = busy;
+    taskSelect.disabled = busy;
     status.disabled = !ready;
     download.disabled = !ready || !["AWAITING_REVIEW", "APPROVED_FOR_DOWNLOAD"].includes(selected.status);
     approve.disabled = !ready || selected.status !== "AWAITING_REVIEW";
@@ -118,6 +129,34 @@
       if (/sign-in|sign in|required|permission|consent|scope|disabled/i.test(message.textContent)) reset();
     } finally { setBusy(false); }
   }
+  async function refreshTasks() {
+    const response = await request("/eligible-tasks");
+    const result = await response.json();
+    availableTasks = Array.isArray(result.tasks) ? result.tasks : [];
+    selectedTask = null;
+    taskSelect.replaceChildren(new Option("Choose an authorized saved assignment", ""));
+    availableTasks.forEach((item, index) => {
+      taskSelect.appendChild(new Option(
+        item.work_type + " · " + item.engagement_id + " / " + item.task_id, String(index)
+      ));
+    });
+    byId("bookkeeping-engagement").value = "";
+    byId("bookkeeping-task").value = "";
+    message.textContent = availableTasks.length
+      ? availableTasks.length + " eligible bookkeeping assignment(s). Choose a task."
+      : "No authorized bookkeeping assignments. A verified signed agreement and active task are required.";
+  }
+  loadTasks.addEventListener("click", () => perform(refreshTasks));
+  taskSelect.addEventListener("change", () => {
+    const index = Number(taskSelect.value);
+    selectedTask = taskSelect.value !== "" && Number.isInteger(index)
+      ? (availableTasks[index] || null) : null;
+    byId("bookkeeping-engagement").value = selectedTask ? selectedTask.engagement_id : "";
+    byId("bookkeeping-task").value = selectedTask ? selectedTask.task_id : "";
+    if (selectedTask) kind.value = selectedTask.work_type;
+    synchronizeAsOf();
+    lastSubmission = null;
+  });
   load.addEventListener("click", () => perform(() => refreshQueue()));
   select.addEventListener("change", () => {
     const index = Number(select.value);
@@ -183,7 +222,11 @@
       const file = byId("bookkeeping-file").files[0];
       const type = kind.value;
       const date = asOf.value;
-      if (!engagement || !task || !file) throw new Error("Saved assignment and CSV required.");
+      if (!selectedTask || !availableTasks.includes(selectedTask) ||
+          engagement !== selectedTask.engagement_id ||
+          task !== selectedTask.task_id || type !== selectedTask.work_type || !file) {
+        throw new Error("Choose a verified saved assignment and CSV first.");
+      }
       if (!["transaction_workpaper", "receivables_aging", "payables_aging"].includes(type)) {
         throw new Error("Unsupported accounting work type.");
       }
