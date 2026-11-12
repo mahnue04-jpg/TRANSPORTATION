@@ -187,3 +187,47 @@ def test_health_classification_logic():
     assert _classify_health("alive", "healthy", "unavailable") == "DEGRADED"
     assert _classify_health("degraded", "healthy", "available") == "DEGRADED"
     assert _classify_health("alive", "healthy", "available") == "HEALTHY"
+
+
+def test_sqlite_staging_does_not_require_postgres_url(monkeypatch, tmp_path):
+    import sqlite3
+    from app.core.runtime_config import validate_runtime_config
+    db = tmp_path / "studio.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE evidence (id INTEGER PRIMARY KEY)")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DB_FILENAME", str(db))
+    result = validate_runtime_config()
+    assert result["has_sqlite_database"] is True
+    assert result["has_database_url"] is False
+    assert result["validation_status"] != "critical"
+
+
+def test_no_database_config_still_critical(monkeypatch):
+    from app.core.runtime_config import validate_runtime_config
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_FILENAME", raising=False)
+    result = validate_runtime_config()
+    assert result["has_sqlite_database"] is False
+    assert result["validation_status"] == "critical"
+    assert "DATABASE_URL" not in result["missing_required"]
+
+
+def test_missing_sqlite_file_cannot_be_created_by_validation(monkeypatch, tmp_path):
+    from app.core.runtime_config import validate_runtime_config
+    db = tmp_path / "absent.db"
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DB_FILENAME", str(db))
+    result = validate_runtime_config()
+    assert result["validation_status"] == "critical"
+    assert not db.exists()
+
+
+def test_postgres_database_url_remains_supported(monkeypatch):
+    from app.core.runtime_config import validate_runtime_config
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example.invalid/test")
+    monkeypatch.delenv("DB_FILENAME", raising=False)
+    result = validate_runtime_config()
+    assert result["has_database_url"] is True
+    assert result["has_sqlite_database"] is False
+    assert result["validation_status"] != "critical"
