@@ -5,6 +5,8 @@ on:
     paths:
       - 'backend/app/core/runtime_config.py'
       - 'backend/tests/test_phase7_infra_stabilization.py'
+      - 'backend/scripts/verify_studio_offline_restore.py'
+      - 'backend/tests/test_studio_offline_restore.py'
       - 'backend/scripts/check_studio_staging_release.py'
       - 'backend/tests/test_studio_staging_release_gate.py'
       - 'backend/scripts/studio_staging_backup_preflight.py'
@@ -53,6 +55,7 @@ jobs:
         run: |
           python -m pytest -q \
             backend/tests/test_phase7_infra_stabilization.py \
+            backend/tests/test_studio_offline_restore.py \
             backend/tests/test_studio_staging_release_gate.py \
             backend/tests/test_studio_staging_backup_preflight.py \
             backend/tests/test_nova_creative_first_shot_storage.py \
