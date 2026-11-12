@@ -333,3 +333,35 @@ Remaining end-to-end requirements are still actual dedicated accounting
 staging, authenticated test users, contract evidence provenance, private
 object storage and real controlled failure/restart acceptance. Tests cannot
 substitute for those external release dependencies.
+
+
+## Safe offline release-evidence command (November 11, 2026)
+
+From the `backend/` directory, run:
+
+```sh
+PYTHONPATH=. python scripts/nova_bookkeeping_release_preflight.py --output synthetic_out/nova_bookkeeping_release_gate.json
+```
+
+This command is deliberately limited to local evidence. It creates a
+structured JSON report with exact blocker codes and the next release action.
+It cannot connect to Render, apply migrations, read a customer file, create
+or access object storage, activate a feature flag, approve real client consent,
+merge a branch, or deploy.
+
+The report always records `status=BLOCKED`,
+`production_release_authorized=false`, `customer_data_allowed=false`,
+`deployment_performed=false`, `real_render_staging_checked=false`,
+and `owner_release_approval_recorded=false`. Only allowlisted,
+non-secret environment labels are evaluated. Secrets, connection strings,
+private object keys and client identifiers must not appear in this artifact.
+
+GitHub Actions stores the report alongside the existing three invented
+bookkeeping review workpapers with short-lived artifact retention. The report
+is release-blocker evidence, not an infrastructure scan and not owner approval.
+
+**Required external owner decision before proceeding to real staging:** specify
+a dedicated isolated accounting database and private bucket with acceptable
+costs. Real staging inspection also requires a verified service identity,
+reviewed contract-consent process and distinct test owner accounts. Neither
+existing `amicor-prod` nor casting-staging databases may be reused.
