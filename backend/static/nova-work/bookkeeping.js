@@ -127,9 +127,11 @@
     return response;
   }
   async function refreshQueue(preferredId) {
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const response = await request("/review-queue?limit=50");
     const data = await response.json();
-    observeSession();
+    assertSameSession(marker, epoch);
     if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     queue = Array.isArray(data.jobs) ? data.jobs : [];
     select.replaceChildren(new Option("Choose a saved accounting job", ""));
@@ -163,9 +165,11 @@
     } finally { setBusy(false); }
   }
   async function refreshTasks() {
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const response = await request("/eligible-tasks");
     const result = await response.json();
-    observeSession();
+    assertSameSession(marker, epoch);
     if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     availableTasks = Array.isArray(result.tasks) ? result.tasks : [];
     selectedTask = null;
@@ -207,9 +211,11 @@
   }));
   download.addEventListener("click", () => perform(async () => {
     if (!selected) return;
+    const marker = observeSession();
+    const epoch = sessionEpoch;
     const response = await request("/jobs/" + encodeURIComponent(selected.job_id) + "/download");
     const file = await response.blob();
-    observeSession();
+    assertSameSession(marker, epoch);
     if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     if (file.size > 1000000) throw new Error("Unexpectedly large review file.");
     const url = URL.createObjectURL(file);
