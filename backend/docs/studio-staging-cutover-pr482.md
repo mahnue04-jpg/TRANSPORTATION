@@ -92,6 +92,23 @@ The real-video worker already refuses paid provider submission when protected st
 
 The script's networked `--apply` mode is **never run in CI**; GitHub CI uses in-memory mock S3 only.
 
+## Owner laptop: verify exported backups without a service switch
+
+The staging backup copies are held on an owner-operated Windows laptop. Once the committed offline verifier has passed CI and its source has been reviewed, use a trusted Python 3.11+ environment on the **Windows laptop**, not Render, and point it only at the matching SQLite snapshot and media archive. The tool copies SQLite into a temporary directory, checks its integrity and Studio table inventory, streams media entries without extraction, then cleans up the temporary restored database. It does not connect to the internet or change Render/Neon settings.
+
+Example in **PowerShell** (replace the placeholders with the names actually present in the private backup directory, never paste customer paths or database contents into chat):
+
+```powershell
+python .\\backend\\scripts\\verify_studio_offline_restore.py \`
+  --database \"$env:USERPROFILE\\AMICOR-Private-Backups\\<snapshot>.sqlite\" \`
+  --media \"$env:USERPROFILE\\AMICOR-Private-Backups\\<media>.tar.gz\" \`
+  --expected-media-files 23
+```
+
+The expected count of 23 is derived from the prior owner-side file inventory (22 media files + 1 private import); verify that those files were actually included before relying on this number. If the archive was made with different path prefixes, **inspect the archive layout and review it** instead of bypassing archive path protections. The report contains table counts but not owner records; treat it as internal. Optional `--expected-db-sha256` and `--expected-media-sha256` compare against independently recorded SHA-256 values, never values derived from the same untrusted copy. Protect the backup at rest and preserve the originals.
+
+A passing isolated SQLite restore plus archive-read test is not proof that the **live** account, owner-bound MP4 routes, or database cutover will succeed. Before activating billable providers, separately verify authenticated owner playback, denial of cross-owner access, persistence across restart, and recovery of the saved outputs.
+
 ## Transfer acceptance
 
 1. Prepare the reviewed target schema from the exact application revision intended to run after cutover.
