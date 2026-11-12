@@ -18,6 +18,7 @@ report = {
     "branches": ["refs/pull/477/head", "refs/pull/484/head", "refs/pull/338/head"],
     "merge_conflict_free": False,
     "integration_tests_passed": False,
+    "human_merge_resolution_reviewed": False,
     "steps": [],
 }
 cmd("git", "config", "user.name", "Nova CI integration preview")
@@ -31,6 +32,19 @@ for pr in ("484", "338"):
     merged = cmd("git", "merge", "--no-ff", "--no-commit", target, check=False)
     if merged.returncode != 0:
         unmerged = cmd("git", "diff", "--name-only", "--diff-filter=U").stdout.splitlines()
+        if pr == "338" and unmerged == ["backend/static/nova-work/index.html"]:
+            reconciled = cmd(
+                "python3", "backend/scripts/nova_release_dashboard_reconcile.py",
+                check=False,
+            )
+            if reconciled.returncode == 0:
+                cmd("git", "commit", "-m", "CI ONLY: reconcile Revenue, Operations and Accounting dashboard")
+                report["steps"].append({
+                    "pr": pr, "status": "DASHBOARD_CONFLICT_RECONCILED_CI_ONLY",
+                    "conflicting_paths": unmerged,
+                    "merge_resolution_review_required": True,
+                })
+                continue
         report["steps"].append({
             "pr": pr, "status": "CONFLICTS_REQUIRE_REVIEW",
             "conflicting_paths": sorted(unmerged)[:100],
