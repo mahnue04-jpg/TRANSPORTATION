@@ -309,3 +309,27 @@ supply their exact synthetic resource names explicitly.
 This is a safety preflight only; it does not prove who approved a resource,
 and no deployment, staging provisioning, feature activation, or customer
 processing has been performed.
+
+
+## Full schema-integrity preflight (2026-11-11)
+
+A table-name-only check can give a false impression that staging is ready
+when financial security columns or uniqueness constraints were removed in a
+partially applied migration.
+
+The read-only preflight now checks the exact required columns in BOTH durable
+job and bookkeeping contract authorization tables, plus the database-enforced
+consent scope uniqueness and owner-scoped request idempotency uniqueness.
+The checks require the independently approved exact staging database identity
+and still never authorize production release.
+
+Three new destructive **disposable PostgreSQL CI-only** negative tests
+deliberately drop one accounting output-hash column, the consent uniqueness
+constraint, or the job idempotency uniqueness constraint. Each expects the
+preflight to return `BLOCKED` with no deployment. Such alterations must
+NEVER be executed on Render, even on shared staging environments.
+
+Remaining end-to-end requirements are still actual dedicated accounting
+staging, authenticated test users, contract evidence provenance, private
+object storage and real controlled failure/restart acceptance. Tests cannot
+substitute for those external release dependencies.
