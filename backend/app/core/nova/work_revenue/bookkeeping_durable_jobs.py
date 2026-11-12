@@ -292,10 +292,17 @@ def list_owner_bookkeeping_reviews(
         parts = str(row["request_key"]).split(":", 2)
         if len(parts) != 3 or parts[1] not in BOOKKEEPING_TYPES:
             continue
+        next_action = {
+            "AWAITING_REVIEW": "review_draft_and_decide",
+            "APPROVED_FOR_DOWNLOAD": "download_owner_review_copy",
+            "FAILED": "inspect_failure_then_new_request",
+            "PROCESSING": "check_status_or_recover_if_stale",
+            "REJECTED": "no_delivery",
+        }.get(row["status"], "contact_operator")
         results.append({
             "job_id": row["id"], "engagement_id": row["engagement_id"],
             "task_id": row["task_id"], "work_type": parts[1],
-            "status": row["status"], "review_required": True,
-            "delivered": False,
+            "status": row["status"], "next_action": next_action,
+            "review_required": True, "delivered": False,
         })
     return results
