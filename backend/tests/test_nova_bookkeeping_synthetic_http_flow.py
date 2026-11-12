@@ -229,6 +229,7 @@ def test_review_queue_is_owner_scoped_consent_filtered_and_data_minimized(demo):
     assert body["count"] == 1
     assert body["jobs"][0]["job_id"] == job_id
     assert body["jobs"][0]["status"] == "AWAITING_REVIEW"
+    assert body["jobs"][0]["next_action"] == "review_draft_and_decide"
     assert body["review_only"] is True
     assert body["customer_delivery_enabled"] is False
     for forbidden in ("output_ref", "output_sha256", "input_sha256",
