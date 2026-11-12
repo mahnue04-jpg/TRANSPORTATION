@@ -573,3 +573,18 @@ def test_synthetic_preview_discloses_flag_without_saving_profile(db):
     assert preview["ready_to_activate"] is True
     assert preview["is_synthetic_demo"] is True
     assert svc.get_profile(org)["configured"] is False
+
+
+def test_setup_refresh_does_not_clobber_unsaved_owner_edits():
+    """Metrics, inbox and lead refreshes must not reload and overwrite the wizard."""
+    from pathlib import Path
+    ui_path = Path(__file__).resolve().parents[1] / "static" / "nova-growth" / "growth.js"
+    script = ui_path.read_text(encoding="utf-8")
+    refresh_start = script.index("  async function refreshAll() {")
+    refresh_end = script.index("\\n  }", refresh_start) if False else script.index("\n  }", refresh_start)
+    refresh_body = script[refresh_start:refresh_end]
+    assert "refreshMetrics()" in refresh_body
+    assert "refreshInbox()" in refresh_body
+    assert "refreshLeads()" in refresh_body
+    assert "refreshSavedSetup()" not in refresh_body
+    assert "Promise.all([refreshAll(), refreshSavedSetup()])" in script
