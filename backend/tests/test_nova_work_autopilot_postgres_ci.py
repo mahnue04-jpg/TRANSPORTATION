@@ -164,3 +164,52 @@ def test_unavailable_discovery_sources_do_not_claim_success(postgres):
         row = db.query(NovaWorkSchedulerJob).one()
         assert row.status == "SKIPPED"
         assert "Sources unavailable" in row.notes
+
+
+def test_schedule_health_detects_missing_last_due_run(postgres):
+    from app.core.nova.v3.scheduled_autopilot import inspect_staging_schedule_health
+    report = inspect_staging_schedule_health(postgres, config=CONFIG, at=WHEN)
+    assert report["status"] == "MISSING_EXPECTED_RUN"
+    assert report["deployed_scheduler_verified"] is False
+    assert report["production_autopilot_enabled"] is False
+    assert report["last_due_period"] == "2026-11-12"
+
+
+def test_schedule_health_records_completed_owner_review_not_live_certification(postgres):
+    from app.core.nova.v3.scheduled_autopilot import inspect_staging_schedule_health
+    run_staging_cycle(postgres, config=CONFIG, at=WHEN, cycle=sample_cycle([]))
+    report = inspect_staging_schedule_health(postgres, config=CONFIG, at=WHEN)
+    assert report["status"] == "RECORDED_FOR_OWNER_REVIEW"
+    assert report["recorded_status"] == "PREPARED"
+    assert report["deployed_scheduler_verified"] is False
+    assert report["complete_customer_workflow_verified"] is False
+
+
+def test_schedule_health_detects_failure_and_source_unavailability(postgres):
+    from app.core.nova.v3.scheduled_autopilot import inspect_staging_schedule_health
+    with pytest.raises(RuntimeError):
+        run_staging_cycle(
+            postgres, config=CONFIG, at=WHEN,
+            cycle=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("invented outage")),
+        )
+    failed = inspect_staging_schedule_health(postgres, config=CONFIG, at=WHEN)
+    assert failed["status"] == "NEEDS_OPERATOR_REVIEW"
+    assert failed["recorded_status"] == "FAILED"
+
+
+def test_schedule_health_refuses_production_or_wrong_database(postgres):
+    from app.core.nova.v3.scheduled_autopilot import inspect_staging_schedule_health
+    bad = dict(CONFIG, AMICOR_ENVIRONMENT="production")
+    assert inspect_staging_schedule_health(postgres, config=bad, at=WHEN)["status"] == "BLOCKED"
+    mismatch = dict(CONFIG, NOVA_WORK_AUTOPILOT_APPROVED_DATABASE="wrong-database")
+    report = inspect_staging_schedule_health(postgres, config=mismatch, at=WHEN)
+    assert report["status"] == "BLOCKED"
+    assert report["reason"] == "approved_database_identity_mismatch"
+
+
+def test_schedule_health_before_5am_uses_previous_due_day(postgres):
+    from app.core.nova.v3.scheduled_autopilot import inspect_staging_schedule_health
+    early = datetime(2026, 11, 12, 4, 59, tzinfo=ZoneInfo("America/Chicago"))
+    report = inspect_staging_schedule_health(postgres, config=CONFIG, at=early)
+    assert report["status"] == "MISSING_EXPECTED_RUN"
+    assert report["last_due_period"] == "2026-11-11"
