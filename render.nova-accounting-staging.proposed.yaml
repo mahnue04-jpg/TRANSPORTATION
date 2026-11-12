@@ -1,0 +1,73 @@
+# NOT CONNECTED TO RENDER. Do not sync/apply without separate owner approval.
+# Proposed isolated bookkeeping staging infrastructure ONLY. This is intentionally
+# separate from root render.yaml, which manages existing production resources.
+# Review Render costs BEFORE creating any of these named resources.
+#
+# Release sequence:
+# 1. Owner approves a dedicated database, service, and private encrypted bucket.
+# 2. Create resources through an explicitly approved Blueprint sync.
+# 3. Keep all execution flags disabled; review actual app startup/identity.
+# 4. Approve staging-only migration separately; never use production DB.
+# 5. Verify authenticated synthetic flow and real bucket encryption.
+# 6. Obtain separate owner approval before enabling staging processing.
+#
+# No real customer data, signed-consent records or live paid services by default.
+databases:
+  - name: amicor-nova-accounting-staging-db
+    databaseName: nova_accounting_staging
+    user: nova_accounting_staging
+    region: virginia
+    plan: basic_256mb
+
+services:
+  - type: web
+    name: amicor-nova-accounting-staging
+    runtime: python
+    region: virginia
+    plan: free
+    branch: nova/bookkeeping-durable-csv-integration-20261111
+    rootDir: backend
+    autoDeployTrigger: "off"
+    buildCommand: pip install --upgrade -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health/readiness
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: amicor-nova-accounting-staging-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AMICOR_ENVIRONMENT
+        value: staging
+      - key: APP_ENV
+        value: staging
+      - key: NOVA_BOOKKEEPING_DURABLE_ENABLED
+        value: "false"
+      - key: NOVA_OPERATIONS_DURABLE_CSV_ENABLED
+        value: "false"
+      - key: NOVA_OPERATIONS_CSV_SCHEMA_APPROVED
+        value: "not-approved"
+      - key: NOVA_BOOKKEEPING_CONSENT_SCHEMA_APPROVED
+        value: "not-approved"
+      - key: PLATFORM_OPS_DOCUMENT_STORAGE
+        value: s3_private
+      # No storage credentials are included here. A separate specifically
+      # approved private S3-compatible bucket is required, configured in
+      # Render's secret settings after review. The processing flags stay OFF.
+      - key: AMICOR_DOCUMENT_S3_BUCKET
+        sync: false
+      - key: AMICOR_DOCUMENT_S3_REGION
+        sync: false
+      - key: AMICOR_DOCUMENT_S3_ACCESS_KEY
+        sync: false
+      - key: AMICOR_DOCUMENT_S3_SECRET_KEY
+        sync: false
+      - key: AMICOR_DOCUMENT_S3_ENDPOINT
+        sync: false
+      - key: HEALTH_ISF_STRIPE_ENABLED
+        value: "false"
+      - key: NOVA_STRIPE_LIVE_ENABLED
+        value: "false"
