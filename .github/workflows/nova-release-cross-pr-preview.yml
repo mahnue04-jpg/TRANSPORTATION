@@ -1,0 +1,59 @@
+name: Nova Release Cross-PR Integration Preview
+
+# Read-only integration evidence for PR 477 + PR 484 + PR 338.
+# Does not deploy, push, merge GitHub PRs, provision, or activate cron.
+on:
+  pull_request:
+    paths:
+      - "backend/scripts/nova_release_merge_preview.sh"
+      - ".github/workflows/nova-release-cross-pr-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-merge-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Inspect draft PR integration conflicts without writes
+        run: |
+          set -euo pipefail
+          bash backend/scripts/nova_release_merge_preview.sh /tmp/nova-release-merge-report.json
+          cp /tmp/nova-release-merge-report.json nova-release-merge-report.json
+      - name: Summarize release gate
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path("nova-release-merge-report.json").read_text())
+          assert data["production_merged"] is False
+          assert data["github_prs_merged"] is False
+          assert data["render_deployed"] is False
+          assert data["release_approved"] is False
+          assert data["integration_tests_passed"] is False
+          lines = [
+              "## Nova Work & Revenue / Operations cross-PR release preview",
+              "- Integration only uses temporary local git commits",
+              "- No GitHub pull requests merged; no Render deploy or migration",
+              f"- Textual merge conflict-free: {data['merge_conflict_free']}",
+              "- Combined functional tests and staging acceptance remain outstanding",
+          ]
+          for step in data["steps"]:
+              paths = ", ".join(step.get("conflicting_paths", [])[:15])
+              lines.append(f"- PR #{step['pr']}: {step['status']} " + paths)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text("\n".join(lines)+"\n")
+          print("\n".join(lines))
+          PY
+      - name: Upload non-sensitive integration blockers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-release-cross-pr-merge-evidence
+          path: nova-release-merge-report.json
+          retention-days: 5
