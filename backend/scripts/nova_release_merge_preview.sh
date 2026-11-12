@@ -61,7 +61,22 @@ for pr in ("484", "338"):
         outcome = "ALREADY_CONTAINED"
     report["steps"].append({"pr": pr, "status": outcome})
 else:
-    report["merge_conflict_free"] = True
+    # Textual merge success alone is insufficient: PR #338 can silently
+    # omit a registered Operations/Accounting subrouter in the shared router.
+    checked = cmd("python3", "backend/scripts/nova_release_router_reconcile.py", check=False)
+    if checked.returncode == 0:
+        changed = cmd("git", "diff", "--cached", "--quiet", check=False)
+        if changed.returncode == 1:
+            cmd("git", "commit", "-m", "CI ONLY: restore Operations owner API routes")
+            report["steps"].append({
+                "pr": "cross-pr-route", "status": "ROUTER_REGISTRATION_RESTORED_CI_ONLY",
+                "human_review_required": True,
+            })
+        else:
+            report["steps"].append({"pr": "cross-pr-route", "status": "ROUTER_REGISTRATION_PRESENT"})
+        report["merge_conflict_free"] = True
+    else:
+        report["steps"].append({"pr": "cross-pr-route", "status": "ROUTER_RECONCILIATION_BLOCKED"})
 report["next_action"] = (
     "Manually reconcile overlapping draft PR code and rerun combined functional tests "
     "before approval of isolated staging."
