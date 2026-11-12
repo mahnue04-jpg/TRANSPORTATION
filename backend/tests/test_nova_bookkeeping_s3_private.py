@@ -176,6 +176,7 @@ def test_staging_preflight_verifies_bucket_controls_but_denies_release(mock_priv
             "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private",
         },
         s3_client=client, bucket=BUCKET,
+        approved_bucket_name=BUCKET,
         verified_staging_identity=True,
         signed_consent_process_reviewed=False,
     )
@@ -193,6 +194,7 @@ def test_staging_preflight_rejects_missing_bucket_default_encryption(mock_privat
     report = inspect_staging_readiness(
         config={"APP_ENV": "staging", "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private"},
         s3_client=client, bucket=BUCKET,
+        approved_bucket_name=BUCKET,
         verified_staging_identity=True,
     )
     checks = {item["check"]: item["passed"] for item in report["checks"]}
