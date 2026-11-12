@@ -49,7 +49,7 @@
     localStorage.setItem("amicor_growth_token", state.token);
     sessionMeta.textContent = `Signed in as ${email}`;
     setBanner("Signed in. Growth Agent APIs require NOVA_GROWTH_AGENT_ENABLED=true.", "ok");
-    await refreshAll();
+    await Promise.all([refreshAll(), refreshSavedSetup()]);
   }
 
   function signOut() {
@@ -251,7 +251,7 @@
   }
 
   async function refreshAll() {
-    await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads(), refreshSavedSetup()]);
+    await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads()]);
   }
 
   $("login-form").addEventListener("submit", async (e) => {
@@ -607,7 +607,7 @@
 
   if (state.token) {
     sessionMeta.textContent = "Restored session token from local storage.";
-    refreshAll().catch((err) => {
+    Promise.all([refreshAll(), refreshSavedSetup()]).catch((err) => {
       setBanner(`Session restore failed: ${err.message}. Sign in again.`, "warn");
       signOut();
     });
