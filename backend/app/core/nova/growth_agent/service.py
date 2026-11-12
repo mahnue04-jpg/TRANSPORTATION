@@ -554,6 +554,7 @@ class GrowthAgentService:
                 source="widget",
                 consent_marketing=consent_marketing,
                 consent_transactional=consent_transactional,
+                is_synthetic_demo=bool(profile.is_synthetic_demo),
             )
 
         conv = None
@@ -571,6 +572,7 @@ class GrowthAgentService:
                 widget_installation_id=installation.id,
                 status="open",
                 handler="human" if profile.agent_paused else "ai",
+                is_synthetic_demo=bool(profile.is_synthetic_demo),
                 subject=safe_message[:120],
             )
             self.db.add(conv)
