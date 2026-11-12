@@ -38,6 +38,11 @@
   // current session marker only in memory; never store it or render it.
   let ownerSessionMarker = "";
   let sessionEpoch = 0;
+  const pendingRequests = new Set();
+  function cancelPendingRequests() {
+    for (const controller of pendingRequests) controller.abort();
+    pendingRequests.clear();
+  }
 
   function auth() {
     const session = window.AmiCorSession;
@@ -54,6 +59,7 @@
   function observeSession() {
     const current = sessionMarker(auth());
     if (current !== ownerSessionMarker) {
+      cancelPendingRequests();
       ownerSessionMarker = current;
       sessionEpoch += 1;
       reset();
@@ -111,20 +117,30 @@
       reset();
       throw new Error("Owner sign-in required. No accounting data requested.");
     }
-    const response = await fetch(prefix + path, Object.assign({
-      credentials: "same-origin", cache: "no-store", headers
-    }, options || {}, {
-      headers: Object.assign({}, headers, options?.headers || {})
-    }));
-    assertSameSession(currentMarker, expectedEpoch);
-    if (!response.ok) {
-      let data = {};
-      try { data = await response.json(); } catch (_) {}
+    const controller = new AbortController();
+    pendingRequests.add(controller);
+    try {
+      const response = await fetch(prefix + path, Object.assign({
+        credentials: "same-origin", cache: "no-store", headers
+      }, options || {}, {
+        signal: controller.signal,
+        headers: Object.assign({}, headers, options?.headers || {})
+      }));
       assertSameSession(currentMarker, expectedEpoch);
-      if (response.status === 401 || response.status === 403) reset();
-      throw new Error(errorText(data, response.status));
+      if (!response.ok) {
+        let data = {};
+        try { data = await response.json(); } catch (_) {}
+        assertSameSession(currentMarker, expectedEpoch);
+        if (response.status === 401 || response.status === 403) {
+          cancelPendingRequests();
+          reset();
+        }
+        throw new Error(errorText(data, response.status));
+      }
+      return response;
+    } finally {
+      pendingRequests.delete(controller);
     }
-    return response;
   }
   async function refreshQueue(preferredId) {
     const marker = observeSession();
@@ -311,6 +327,13 @@
         (result.replayed ? " (saved request)" : "") + ". Nothing delivered.";
       await refreshQueue(result.job_id);
     });
+  });
+  window.addEventListener("amicor:session-invalid", () => {
+    cancelPendingRequests();
+    ownerSessionMarker = "";
+    sessionEpoch += 1;
+    reset();
+    message.textContent = "Owner session expired. Sign in again to access bookkeeping.";
   });
   window.addEventListener("focus", observeSession);
   document.addEventListener("visibilitychange", observeSession);
