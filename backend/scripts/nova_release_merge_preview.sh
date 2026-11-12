@@ -74,7 +74,18 @@ else:
             })
         else:
             report["steps"].append({"pr": "cross-pr-route", "status": "ROUTER_REGISTRATION_PRESENT"})
-        report["merge_conflict_free"] = True
+        app_routes = cmd("python3", "backend/scripts/nova_release_main_router_reconcile.py", check=False)
+        if app_routes.returncode == 0:
+            changed_app = cmd("git", "diff", "--cached", "--quiet", check=False)
+            if changed_app.returncode == 1:
+                cmd("git", "commit", "-m", "CI ONLY: register guarded owner finance routes before app startup")
+                report["steps"].append({
+                    "pr": "cross-pr-app", "status": "APP_ROUTE_SNAPSHOT_SAFEGUARD_CI_ONLY",
+                    "human_review_required": True,
+                })
+            report["merge_conflict_free"] = True
+        else:
+            report["steps"].append({"pr": "cross-pr-app", "status": "APP_ROUTE_RECONCILIATION_BLOCKED"})
     else:
         report["steps"].append({"pr": "cross-pr-route", "status": "ROUTER_RECONCILIATION_BLOCKED"})
 report["next_action"] = (
