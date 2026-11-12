@@ -620,6 +620,8 @@ def bookkeeping_owner_eligible_tasks(
         user_id = str(getattr(owner, "user_id", "") or "")
         if not org or not user_id or org.lower() == "global":
             raise HTTPException(403, "Specific owner organization required")
+        if db.get_bind().dialect.name != "postgresql" or not sa.inspect(db.get_bind()).has_table(consents.name):
+            raise HTTPException(503, "Verified bookkeeping consent schema unavailable")
         candidates = db.execute(sa.select(
             consents.c.engagement_id, consents.c.task_id, consents.c.work_type,
         ).where(
