@@ -224,3 +224,22 @@ malformed metadata, strict batch limit and missing scope. A separate
 disposable PostgreSQL test checks query behavior and unchanged rows.
 These tests do not represent retention policy approval or a real storage
 inventory. No Render configuration or customer records were used.
+
+
+## Owner accounting review queue — development only (2026-11-11)
+
+- Added bounded `list_owner_bookkeeping_reviews` (default 25, maximum 50)
+  and owner-only GET `/operations/durable/bookkeeping/review-queue`.
+- Returns job ID, engagement ID, task ID, bookkeeping work type, review
+  status, and one next operator action. It never exposes CSV content,
+  storage keys, source/output hashes, request keys or financial amounts.
+- Every candidate job is checked against the currently active server-side
+  consent/engagement/task resolver before appearing in the queue. Revoked
+  and wrong-owner records are excluded. A queue result cannot authorize
+  a future action; review and download endpoints revalidate separately.
+- Synthetic FastAPI tests verify consent filtering and data minimization.
+  Disposable PostgreSQL HTTP tests verify that revoking the real CI
+  consent row removes the previously visible job from the queue.
+- The queue remains gated by default-off bookkeeping processing and has
+  not been enabled in Render or for customer financial data. A production
+  operator UI has not been delivered.
