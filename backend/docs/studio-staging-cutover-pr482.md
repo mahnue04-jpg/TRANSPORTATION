@@ -2,6 +2,31 @@
 
 **Scope:** Staging only. No production switch, paid-provider activation, or customer contract acceptance is authorized by this runbook.
 
+## Approved preparation-only staging release gate (2026-11-11)
+
+**Owner authorization:** Review, test, and prepare PR #482 for a staging-only release. **Not authorized:** merging the PR, triggering any Render deployment or restart, changing Render environment variables, enabling private-object-storage routing, turning on any Kling/video provider, PostgreSQL migration, accepting customer work, or modifying production. Obtain separate explicit owner approval before merging and **separate deployment approval** before deploying.
+
+**Current immutable identifiers to review just before approval:**
+- Render staging service: `srv-db9da4ijnfac73bs0isg`, branch `feature/studio-landscape-film-assembly-20261110`, automatic deployment disabled, 10 GB persistent disk mounted at `/data`.
+- Last verified deployed source: `ba7c5482a945255c46cb5195433a4d9047a46af0` (environment-triggered deploy `dep-dbqhicon74is73c7bm1g`).
+- Candidate PR: `#482`, branch `fix/studio-staging-data-transfer-20261110` targeting the existing Render branch. The exact HEAD SHA and status checks **must be refreshed** before owner approval; previous CI does not cover later commits automatically.
+
+### Phase A — SQLite-preserving application update, **not** a PostgreSQL cutover
+
+1. At release time, confirm the branch, exact candidate SHA, latest seven workflows, no conflicting pushes or unresolved review, and protected route checks. The current CI smoke validates unauthenticated health and privacy boundaries, **not** a signed-in owner or paid Kling production.
+2. Recheck the service disk and active Studio jobs immediately before deployment. Keep `DATABASE_URL` absent if the current service is intentionally SQLite and confirm `DB_FILENAME` resolves to the **existing** `/data/chat.db` rather than a new empty database. Inspect variable **presence and non-secret paths only**, never print credentials.
+3. Capture a **new consistent SQLite snapshot** immediately before any authorized staging deployment, verify `PRAGMA integrity_check`, retain the existing separately recovered off-Render copies, and confirm no missing referenced media. A prior backup from Nov 11 is not necessarily a current rollback image if staging data changed.
+4. Do **not** enable `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE` during the first SQLite-preserving code rollout. Leave `NOVA_CREATIVE_KLING_LIVE_ENABLED` and `NOVA_CREATIVE_VIDEO_LIVE_ENABLED` false; existing local media must continue working. The basic R2 canary is verified but does not establish application-level owner-scoped storage.
+5. Review merge **separately** from deployment; approval to merge does not authorize a deploy. Since Render is configured for the PR's base branch, merging changes the branch's HEAD even with autoDeploy off. Pin the reviewed commit explicitly at deployment time and preserve the old commit for rollback.
+6. After approved deployment, recheck `/api/health/detail`, unchanged SQLite backend, database integrity, startup logs, protected unauthenticated routes, signed-in access to a previously saved owner project, authenticated original MP4 playback/download, invalid-owner access denial, and recovery after restart. Do not generate paid video during this phase.
+7. **Stop and roll back** on missing owner records, database backend changing to PostgreSQL unexpectedly, broken login, missing/unplayable media, owner isolation failure, schema or migration errors, critical startup warnings, or unexpected provider submissions. Roll back to source `ba7c5482...` with the same known-good SQLite disk and provider switches off; do not overwrite or delete the SQLite file or execute a reverse migration. Document the exact rollback deployment and post-rollback health.
+
+### Phase B — separate storage and paid-video approval
+
+Only after Phase A passes: review enabling owner-scoped R2 routing in staging, verify a real authorized owner's saved MP4 (HEAD, GET, checksum, protected playback, restart persistence, owner isolation) and preserve local-file compatibility. Any migration of local media, PostgreSQL database transfer, or paid Kling test requires a distinct approval and a separate rollback plan. Avoid combined code, database, storage and billing switches.
+
+**Evidence status at approval-preparation time:** Off-Render SQLite restoration: `ok`, 12 Creative Studio tables; media archive: 23 files, 39,634,538 uncompressed bytes streamed; R2 private staging bucket basic PUT/GET/DELETE: pass. Full signed-in MP4 test: pending. Current fresh backup/inactive-job predeploy check: pending. No deployment authorization granted.
+
 ## Confirmed inventory (2026-11-10)
 
 - Render Studio validation service: `nova-studio-validation-350` (`srv-db9da4ijnfac73bs0isg`), deployed from `feature/studio-landscape-film-assembly-20261110`; Docker service with persistent `/data` disk; automatic deployment disabled.
