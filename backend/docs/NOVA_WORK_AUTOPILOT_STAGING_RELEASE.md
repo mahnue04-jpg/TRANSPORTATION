@@ -73,3 +73,26 @@ contracts.
 **Single next release gate:** owner-approved, cost-reviewed isolated staging
 infrastructure. There is no authorization to create Render services or to
 activate production in this commit.
+
+
+## Missed-run and recovery evidence — November 12, 2026
+
+A read-only `inspect_staging_schedule_health` function checks the last
+expected 5 a.m. Central run against the durable owner/day marker on an
+explicitly approved staging PostgreSQL database. It distinguishes:
+`MISSING_EXPECTED_RUN`, `RECORDED_FOR_OWNER_REVIEW`,
+`SOURCE_UNAVAILABLE`, and `NEEDS_OPERATOR_REVIEW`. It defaults to
+`BLOCKED` if the staging environment, feature flag, approved owner, or
+exact database identity cannot be established.
+
+A saved successful work-preparation record is **not evidence that a
+Render scheduler exists, is continuously running, or is ready for real
+customer data**. The health response explicitly reports
+`deployed_scheduler_verified=false` and
+`production_autopilot_enabled=false`. Failed or interrupted runs require
+manual owner review; no automatic rerun, submission, payment or contact
+occurs. Regression tests use disposable PostgreSQL only.
+
+Before declaring the live autopilot operational, externally verify the
+actual job trigger, execution timestamps, source availability, saved
+legitimate opportunities, alerting on missed runs and safe shutdown.
