@@ -20,7 +20,7 @@ test("Work & Revenue renders owner review console and its script", () => {
     "bookkeeping-approve", "bookkeeping-reject", "bookkeeping-recover",
     "bookkeeping-submit-form", "bookkeeping-submit-button", "bookkeeping-kind",
     "bookkeeping-as-of", "bookkeeping-file", "bookkeeping-engagement",
-    "bookkeeping-task"
+    "bookkeeping-task", "bookkeeping-load-tasks", "bookkeeping-eligible-tasks"
   ];
   for (const id of ids) {
     assert.match(html, new RegExp('id="' + id + '"'));
@@ -35,6 +35,10 @@ test("Review requests use authenticated owner-only bookkeeping routes", () => {
     "/recover", "/engagements/", "/tasks/"
   ]) assert.ok(js.includes(route), route + " route is required");
   assert.match(js, /getAuthHeaders/);
+  assert.match(js, /\/eligible-tasks/);
+  assert.match(js, /selectedTask/);
+  assert.match(html, /id="bookkeeping-task"[^>]+readonly/);
+  assert.match(html, /id="bookkeeping-engagement"[^>]+readonly/);
   assert.match(js, /credentials: "same-origin"/);
   assert.match(js, /cache: "no-store"/);
   assert.match(js, /status !== "AWAITING_REVIEW"/);
