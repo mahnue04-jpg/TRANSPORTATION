@@ -475,3 +475,35 @@ def test_growth_setup_page_discloses_explicit_synthetic_control():
     assert 'id="biz-synthetic"' in markup
     assert 'is_synthetic_demo: $("biz-synthetic").checked' in script
     assert '$("biz-synthetic").checked = p.is_synthetic_demo === true' in script
+
+
+def test_widget_contact_and_conversation_inherit_synthetic_profile(db):
+    """Synthetic demo chat records must not be displayed as genuine leads."""
+    svc = GrowthAgentService(db)
+    org = "org-synthetic-widget"
+    payload = {
+        "business_name": "Cedar Ridge Synthetic",
+        "website": "https://synthetic.example",
+        "timezone": "America/Chicago",
+        "operating_hours": {"mon_fri": "09:00-17:00"},
+        "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+        "faqs": [{"id": "hours", "question": "Hours?", "keywords": ["hours"], "answer": "9 to 5"}],
+        "contact_email": "owner@synthetic.example",
+        "escalation_settings": {"handoff_on_unknown": True},
+        "is_synthetic_demo": True,
+    }
+    svc.upsert_profile(org, "synthetic-owner", payload, activate=True)
+    install = svc.create_widget_installation(org, domain="synthetic.example")
+    chat = svc.widget_chat(
+        token=install["token"],
+        origin="https://synthetic.example",
+        message="What are your hours?",
+        visitor_name="Demo Visitor",
+        visitor_email="visitor@synthetic.example",
+        consent_transactional=True,
+    )
+    leads = svc.list_leads(org)
+    conv = svc.get_conversation(org, chat["conversation_id"])
+    assert len(leads) == 1
+    assert leads[0]["is_synthetic_demo"] is True
+    assert conv["is_synthetic_demo"] is True
