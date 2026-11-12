@@ -40,11 +40,43 @@ def reconcile():
         raise RuntimeError("Application router wiring changed; manual review")
     if NEEDED not in s:
         s = s.replace(ANCHOR, BLOCK + ANCHOR, 1)
-        MAIN.write_text(s, encoding="utf-8")
-        subprocess.run(["git", "add", str(MAIN)], check=True)
-        print("CI only: guarded Operations owner route copy before app registration.")
-    else:
-        print("CI application router safeguard already present.")
+    lifespan_anchor = "async def lifespan(app: FastAPI):\\n"
+    lifespan_anchor = lifespan_anchor.replace("\\\\n", "\\n")
+    if s.count(lifespan_anchor) != 1:
+        raise RuntimeError("Custom application lifespan anchor changed")
+    helper_name = "_nova_repair_finance_routes_after_import"
+    if helper_name not in s:
+        helper = '''def _nova_repair_finance_routes_after_import(app: FastAPI) -> None:
+    """Install only missing owner finance routes, after circular imports settle.
+
+    Kept as an isolated integration-candidate safeguard; reviewed source
+    refactoring is required before a permanent production release.
+    """
+    from fastapi import APIRouter
+    from app.core.nova.work_revenue.operations_owner_csv_api import router as child
+    prefix = "/api/nova/work"
+    already = {
+        (method, getattr(route, "path", ""))
+        for route in app.routes
+        for method in getattr(route, "methods", ())
+    }
+    missing = [
+        route for route in child.routes
+        if any((method, prefix + route.path) not in already
+               for method in getattr(route, "methods", ()))
+    ]
+    if missing:
+        rest = APIRouter()
+        rest.routes.extend(missing)
+        app.include_router(rest, prefix=prefix)
+
+
+'''
+        s = s.replace(lifespan_anchor, helper + lifespan_anchor, 1)
+        s = s.replace(lifespan_anchor, lifespan_anchor + "    _nova_repair_finance_routes_after_import(app)\\n", 1)
+    MAIN.write_text(s, encoding="utf-8")
+    subprocess.run(["git", "add", str(MAIN)], check=True)
+    print("CI only: guarded owner routes plus deferred custom-lifespan reconciliation.")
 
 
 if __name__ == "__main__":
