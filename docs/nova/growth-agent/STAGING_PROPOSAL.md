@@ -7,9 +7,9 @@
 | Item | Value |
 |------|-------|
 | Branch | `cursor/nova-growth-agent-mvp-1565` |
-| Candidate commit | `a81de10b7cc5c483a08877eb641680542962bb3a` (graceful-shutdown hardening + prior release-prep) |
-| Verified isolated staging URL | `http://127.0.0.1:8770/nova/growth` (agent-environment disposable staging; dedicated DB `nova_ga_staging_dispos`) |
-| Remote Render isolated service | Not found / not deployed from this agent |
+| Candidate / CI tip | `3ff7de35baa0ee262c3f49aaa3e552aa5437f5de` (CI 15/15 green; graceful-shutdown in `a81de10b`) |
+| Verified local isolated staging URL | `http://127.0.0.1:8770/nova/growth` (agent-environment disposable staging; dedicated DB `nova_ga_staging_dispos`) |
+| Remote Render isolated service | **Prepared, not provisioned** — see `render.nova-growth-staging.yaml` + `RENDER_STAGING_OWNER_APPROVAL.md` (owner approval required; no paid create without explicit OK) |
 | PR | https://github.com/mahnue04-jpg/TRANSPORTATION/pull/490 (**Draft** — keep Draft) |
 | Issue | #485 |
 
