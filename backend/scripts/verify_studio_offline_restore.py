@@ -42,6 +42,7 @@ def _check_media(archive: Path) -> int:
                 parts = Path(item.name).parts
                 if (not parts or item.name.startswith("/") or
                         any(part in {"..", ""} for part in parts) or
+                        parts[0] not in {"nova_creative_media", "nova_creative_media-private-imports"} or
                         item.issym() or item.islnk() or item.isdev() or item.isfifo()):
                     raise RestoreBlocked("UNSAFE_MEDIA_ARCHIVE_ENTRY")
                 if not (item.isfile() or item.isdir()):
@@ -65,7 +66,8 @@ def _check_media(archive: Path) -> int:
 
 def verify(database: Path, media: Path | None = None,
            expected_db_sha256: str | None = None,
-           expected_media_sha256: str | None = None) -> dict:
+           expected_media_sha256: str | None = None,
+           expected_media_files: int | None = None) -> dict:
     _safe_file(database, "DATABASE_BACKUP")
     if expected_db_sha256 and _hash(database) != expected_db_sha256.lower():
         raise RestoreBlocked("DATABASE_CHECKSUM_MISMATCH")
@@ -104,6 +106,8 @@ def verify(database: Path, media: Path | None = None,
     if media is not None:
         result["media_archive_read"] = "pass"
         result["media_archive_files"] = _check_media(media)
+        if expected_media_files is not None and result["media_archive_files"] != expected_media_files:
+            raise RestoreBlocked("MEDIA_FILE_COUNT_MISMATCH")
         result["media_extracted"] = False
     return result
 
@@ -114,11 +118,13 @@ def main(argv=None) -> int:
     parser.add_argument("--media", type=Path)
     parser.add_argument("--expected-db-sha256")
     parser.add_argument("--expected-media-sha256")
+    parser.add_argument("--expected-media-files", type=int)
     args = parser.parse_args(argv)
     try:
         print(json.dumps({"status": "passed", "checks": verify(
             args.database, args.media,
-            args.expected_db_sha256, args.expected_media_sha256)}, sort_keys=True))
+            args.expected_db_sha256, args.expected_media_sha256,
+            args.expected_media_files)}, sort_keys=True))
         return 0
     except RestoreBlocked as exc:
         print(json.dumps({"status": "blocked", "reason": str(exc)}))
