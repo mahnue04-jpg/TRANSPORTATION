@@ -18,6 +18,20 @@ from .bookkeeping_scope import consents
 
 _STAGING = "staging"
 _NEEDED_TABLES = frozenset({csv_jobs.jobs.name, consents.name})
+_REQUIRED_COLUMNS = {
+    csv_jobs.jobs.name: frozenset((
+        "id", "organization_id", "owner_user_id", "engagement_id", "task_id",
+        "request_key", "status", "input_sha256", "output_ref",
+        "output_sha256", "created_at", "updated_at",
+    )),
+    consents.name: frozenset((
+        "authorization_id", "organization_id", "owner_user_id",
+        "engagement_id", "task_id", "work_type", "status",
+        "contract_ref_sha256", "client_ai_consent_ref_sha256",
+        "data_processing_ref_sha256", "verified_by_user_id",
+        "verified_at", "valid_until", "revoked_at",
+    )),
+}
 _NEEDED_ENVS = ("AMICOR_ENVIRONMENT", "APP_ENV", "ENVIRONMENT")
 _TRUE = {"true", "1", "yes"}
 
@@ -110,11 +124,24 @@ def inspect_staging_readiness(
                 dialect_ok = engine.dialect.name == "postgresql"
                 inspector = sa.inspect(connection)
                 names = set(inspector.get_table_names()) if dialect_ok else set()
+                schema_ok = dialect_ok and _NEEDED_TABLES.issubset(names)
+                if schema_ok:
+                    for table_name, columns in _REQUIRED_COLUMNS.items():
+                        seen = {col["name"] for col in inspector.get_columns(table_name)}
+                        if not columns.issubset(seen):
+                            schema_ok = False
+                            break
+                if schema_ok:
+                    unique_names = {
+                        item.get("name") for item in
+                        inspector.get_unique_constraints(consents.name)
+                    }
+                    schema_ok = "uq_nova_bookkeeping_consent_scope" in unique_names
             valid_db_name = db_name == approved_database_name
             findings.append(_check(
                 "postgres_tables_verified",
-                dialect_ok and valid_db_name and _NEEDED_TABLES.issubset(names),
-                "Isolated PostgreSQL database with both required schema tables",
+                dialect_ok and valid_db_name and schema_ok,
+                "Approved PostgreSQL database with required columns and consent uniqueness",
             ))
         except Exception:
             findings.append(_check("postgres_tables_verified", False,
