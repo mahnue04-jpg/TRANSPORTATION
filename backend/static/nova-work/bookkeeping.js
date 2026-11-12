@@ -34,7 +34,10 @@
   let selected = null;
   let busy = false;
   let lastSubmission = null;
-  const controls = [load, status, download, approve, reject, recover, submitButton];
+  // An async fetch can outlive logout or an owner-account switch. Keep the
+  // current session marker only in memory; never store it or render it.
+  let ownerSessionMarker = "";
+  let sessionEpoch = 0;
 
   function auth() {
     const session = window.AmiCorSession;
@@ -42,19 +45,41 @@
       ? session.getAuthHeaders() : {};
     return headers || {};
   }
+  function sessionMarker(headers) {
+    return String(headers.Authorization || headers.authorization || "");
+  }
   function signedIn(headers) {
-    return !!(headers.Authorization || headers.authorization);
+    return !!sessionMarker(headers);
+  }
+  function observeSession() {
+    const current = sessionMarker(auth());
+    if (current !== ownerSessionMarker) {
+      ownerSessionMarker = current;
+      sessionEpoch += 1;
+      reset();
+    }
+    return current;
+  }
+  function assertSameSession(expectedMarker, expectedEpoch) {
+    if (sessionMarker(auth()) !== expectedMarker || sessionEpoch !== expectedEpoch) {
+      observeSession();
+      reset();
+      throw new Error("Owner session changed. Reload authorized bookkeeping jobs.");
+    }
   }
   function reset() {
     queue = [];
     selected = null;
     availableTasks = [];
     selectedTask = null;
+    lastSubmission = null;
     taskSelect.replaceChildren(new Option("Load authorized tasks first", ""));
     byId("bookkeeping-engagement").value = "";
     byId("bookkeeping-task").value = "";
     select.replaceChildren(new Option("Load your authorized review queue", ""));
     nextAction.textContent = "No saved accounting job selected.";
+    const fileInput = byId("bookkeeping-file");
+    if (fileInput) fileInput.value = "";
     update();
   }
   function update() {
@@ -79,6 +104,8 @@
     return typeof payload?.detail === "string" ? payload.detail : "Bookkeeping request unavailable (" + code + ").";
   }
   async function request(path, options) {
+    const currentMarker = observeSession();
+    const expectedEpoch = sessionEpoch;
     const headers = auth();
     if (!signedIn(headers)) {
       reset();
@@ -89,9 +116,12 @@
     }, options || {}, {
       headers: Object.assign({}, headers, options?.headers || {})
     }));
+    assertSameSession(currentMarker, expectedEpoch);
     if (!response.ok) {
       let data = {};
       try { data = await response.json(); } catch (_) {}
+      assertSameSession(currentMarker, expectedEpoch);
+      if (response.status === 401 || response.status === 403) reset();
       throw new Error(errorText(data, response.status));
     }
     return response;
@@ -99,6 +129,8 @@
   async function refreshQueue(preferredId) {
     const response = await request("/review-queue?limit=50");
     const data = await response.json();
+    observeSession();
+    if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     queue = Array.isArray(data.jobs) ? data.jobs : [];
     select.replaceChildren(new Option("Choose a saved accounting job", ""));
     queue.forEach((job, index) => {
@@ -121,6 +153,7 @@
     update();
   }
   async function perform(handler) {
+    observeSession();
     if (busy) return;
     setBusy(true);
     try { await handler(); }
@@ -132,6 +165,8 @@
   async function refreshTasks() {
     const response = await request("/eligible-tasks");
     const result = await response.json();
+    observeSession();
+    if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     availableTasks = Array.isArray(result.tasks) ? result.tasks : [];
     selectedTask = null;
     taskSelect.replaceChildren(new Option("Choose an authorized saved assignment", ""));
@@ -174,6 +209,8 @@
     if (!selected) return;
     const response = await request("/jobs/" + encodeURIComponent(selected.job_id) + "/download");
     const file = await response.blob();
+    observeSession();
+    if (!signedIn(auth())) throw new Error("Owner sign-in required.");
     if (file.size > 1000000) throw new Error("Unexpectedly large review file.");
     const url = URL.createObjectURL(file);
     try {
@@ -255,5 +292,7 @@
       await refreshQueue(result.job_id);
     });
   });
-  reset();
+  window.addEventListener("focus", observeSession);
+  document.addEventListener("visibilitychange", observeSession);
+  observeSession();
 })();
