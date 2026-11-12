@@ -1540,6 +1540,8 @@ class GrowthAgentService:
         contact = self._org_query(GaContact, org_id).filter_by(id=contact_id).one_or_none()
         if not contact:
             raise GrowthAgentError("NOT_FOUND", "Contact not found", http_status=404)
+        # Never downgrade a synthetic profile or synthetic lead to a real booking.
+        is_synthetic_demo = bool(is_synthetic_demo or profile.is_synthetic_demo or contact.is_synthetic_demo)
         service = (
             self.db.query(GaAppointmentService)
             .filter_by(organization_id=org_id, code=service_code, active=True)
