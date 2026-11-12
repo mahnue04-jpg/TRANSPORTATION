@@ -430,3 +430,48 @@ def test_cross_tenant_query_isolation(db):
         svc.get_conversation("org-b", "missing")
     # Contact from A must not appear when listing B
     assert all(l["id"] != contact.id for l in svc.list_leads("org-b"))
+
+
+def test_synthetic_profile_flag_persists_across_save_and_reload(db):
+    """Owner-selected synthetic profiles must not be silently relabeled as real."""
+    svc = GrowthAgentService(db)
+    org = "org-synthetic-label"
+    payload = {
+        "business_name": "Cedar Ridge Home Services",
+        "website": "https://demo.cedar-ridge.example",
+        "timezone": "America/Chicago",
+        "operating_hours": {"mon_fri": "09:00-17:00"},
+        "services": [{"code": "consult", "name": "Consultation", "duration_minutes": 30}],
+        "faqs": [{
+            "id": "faq_hours",
+            "question": "What are your hours?",
+            "keywords": ["hours"],
+            "answer": "Mon-Fri 9-5 local time.",
+        }],
+        "contact_email": "owner@cedar-ridge.example",
+        "handoff_phone": "+15555550100",
+        "escalation_settings": {"handoff_on_unknown": True},
+        "is_synthetic_demo": True,
+    }
+    saved = svc.upsert_profile(org, "owner-synthetic", payload, activate=True)
+    assert saved["activated"] is True
+    assert saved["is_synthetic_demo"] is True
+    db.commit()
+    assert GrowthAgentService(db).get_profile(org)["is_synthetic_demo"] is True
+
+    # Later UI saves must explicitly retain the selection.
+    saved_again = svc.upsert_profile(org, "owner-synthetic", payload, activate=False)
+    assert saved_again["is_synthetic_demo"] is True
+    db.commit()
+    assert GrowthAgentService(db).get_profile(org)["is_synthetic_demo"] is True
+
+
+def test_growth_setup_page_discloses_explicit_synthetic_control():
+    """Prevent UI regression where the API defaults the demo flag to false."""
+    from pathlib import Path
+    ui = Path(__file__).resolve().parents[1] / "static" / "nova-growth"
+    markup = (ui / "index.html").read_text(encoding="utf-8")
+    script = (ui / "growth.js").read_text(encoding="utf-8")
+    assert 'id="biz-synthetic"' in markup
+    assert 'is_synthetic_demo: $("biz-synthetic").checked' in script
+    assert '$("biz-synthetic").checked = p.is_synthetic_demo === true' in script
