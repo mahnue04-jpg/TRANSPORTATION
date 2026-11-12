@@ -565,3 +565,38 @@ def bookkeeping_owner_recover_stale_job(
         )
     except (ConsentNotVerified, bk_jobs.base.CustomerCSVBlocked) as exc:
         _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/review-queue")
+def bookkeeping_owner_review_queue(
+    limit: int = 25,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """List only permitted owner jobs, without any private artifact metadata.
+
+    A historical job is not proof its consent is current. No unverified job
+    may appear in the active owner review queue.
+    """
+    try:
+        entries = bk_jobs.list_owner_bookkeeping_reviews(
+            db, org=str(owner.organization_id),
+            owner=str(owner.user_id), limit=limit,
+        )
+        allowed = []
+        for entry in entries:
+            try:
+                resolve_bookkeeping_assignment(
+                    db, owner=owner, engagement_id=entry["engagement_id"],
+                    task_id=entry["task_id"], work_type=entry["work_type"],
+                )
+            except ConsentNotVerified:
+                continue
+            allowed.append(entry)
+        return {
+            "jobs": allowed, "count": len(allowed),
+            "review_only": True, "customer_delivery_enabled": False,
+            "historical_job_access_authorized": False,
+        }
+    except bk_jobs.base.CustomerCSVBlocked as exc:
+        _accounting_unavailable(exc)
