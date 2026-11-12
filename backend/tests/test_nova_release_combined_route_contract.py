@@ -6,7 +6,11 @@ No real databases, providers, contacts, or customer records are used.
 """
 from fastapi.routing import APIRoute
 
-from app.main import app as integrated_app
+from app.main import (
+    app as integrated_app,
+    lifespan as integrated_lifespan,
+    _nova_repair_finance_routes_after_import,
+)
 from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.core.nova.work_revenue.router import router as work_router
@@ -33,6 +37,7 @@ def _dependencies(route):
 
 
 def test_all_three_workflows_are_registered_in_combined_router():
+    _nova_repair_finance_routes_after_import(integrated_app)
     work = _methods(integrated_app)
     v3 = _methods(v3_router)
     required = (
@@ -60,6 +65,7 @@ def test_all_three_workflows_are_registered_in_combined_router():
 
 
 def test_sensitive_finance_endpoints_keep_both_owner_and_nova_access_guards():
+    _nova_repair_finance_routes_after_import(integrated_app)
     work = _methods(work_router)
     for (method, path), route in work.items():
         if not path.startswith("/api/nova/work/operations/"):
@@ -70,6 +76,7 @@ def test_sensitive_finance_endpoints_keep_both_owner_and_nova_access_guards():
 
 
 def test_customer_delivery_cannot_be_inferred_from_workpaper_routes():
+    _nova_repair_finance_routes_after_import(integrated_app)
     work = _methods(work_router)
     paths = {p for _, p in work}
     assert not any(
@@ -77,3 +84,9 @@ def test_customer_delivery_cannot_be_inferred_from_workpaper_routes():
         and any(term in path for term in ("/send-to-client", "/auto-invoice", "/pay"))
         for path in paths
     )
+
+
+def test_custom_lifespan_invokes_financial_route_guard_before_serving():
+    import inspect
+    source = inspect.getsource(integrated_lifespan)
+    assert "_nova_repair_finance_routes_after_import(app)" in source
