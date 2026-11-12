@@ -55,6 +55,15 @@ Do not confuse database asset references with physically retrievable MP4 files. 
 - The active SQLite service emitted `Runtime config validation CRITICAL: missing required vars — [redacted secret vars]` despite a successful primary startup validator and database readiness. The separate legacy runtime validator treated `DATABASE_URL` as mandatory on SQLite. The draft PR now contains a read-only SQLite recognition fix and regression tests; **this fix is not yet deployed to staging**.
 - Before cutover: review diagnostic CI, verify no active render jobs, perform an **isolated restore** of the off-Render backup, inventory real owner media references, confirm a truly empty Neon destination with schema, then obtain explicit owner approval for migration. Neither passing R2 canary nor passing CI authorizes a production switch or paid-provider activation.
 
+## Owner laptop isolated backup evidence (2026-11-11)
+
+The owner completed two **read-only PowerShell/Python checks** directly against the off-Render copies at `AMICOR-Private-Backups`:
+
+- Python 3.14.4 opened the 8,462,336-byte `chat-backup-*.sqlite` in read-only mode and restored it into a new `:memory:` database through SQLite's backup API. `PRAGMA integrity_check` returned `ok`; the three required Studio tables were present, and 12 `nova_creative_*` tables were found. This is **actual backup restore evidence**, not only a CI fixture.
+- Python streamed every member of `studio-media-20261111-232118.tar.gz` without extraction; archive readability passed, exactly **23 media files** were read, and their declared sizes matched **39,634,538 uncompressed bytes**. The archive itself was **36,914,021 bytes** on Windows.
+- The previously reviewed file-copy hashes were matched between Windows and Render for the backup export. The separate archive streaming result proves member readability; it does **not** independently decode each MP4, prove file-by-file SHA-256 matches against live originals, or demonstrate full owner-authenticated playback.
+- **Status:** Windows recovery verification for the SQLite snapshot and media tarball is complete at the structural/readability level. A full customer recovery rehearsal and signed-in MP4 playback remain outstanding. Preserve originals and do not migrate or activate paid generation based solely on these checks.
+
 ## Access and change gate
 
 1. Identify the existing SQLite database file on the actual Render staging `/data` disk using an authenticated administration channel. The Render management connector can inspect service metadata, but does **not** provide disk-level file access. Do not infer the file path.
