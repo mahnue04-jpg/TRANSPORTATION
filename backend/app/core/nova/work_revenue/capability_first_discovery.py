@@ -79,7 +79,7 @@ _DIGITAL_SEARCH_INTENT = re.compile(
     r"virtual assistant|virtual assistance|administrative|admin support|"
     r"ai operations|ai workflow|automation support|workflow automation|"
     r"content operations|project coordination|crm|reporting|research|"
-    r"data work|data entry|data cleanup|spreadsheet|bookkeeping"
+    r"data work|data[\s-]?entry|data cleanup|spreadsheet|bookkeeping"
     r")\b",
     re.I,
 )
@@ -88,7 +88,7 @@ _DIGITAL_DOMAIN = re.compile(
     r"ai operations|ai workflow|workflow automation|automation support|"
     r"administrative support|admin support|virtual assistant|virtual assistance|"
     r"project coordination|content operations|crm|customer relationship|"
-    r"research|reporting|data entry|data cleanup|data work|spreadsheet|"
+    r"research|reporting|data[\s-]?entry|data cleanup|data work|spreadsheet|"
     r"bookkeeping support|bookkeeping|digital business operations"
     r")\b",
     re.I,
@@ -210,7 +210,7 @@ def digital_contractor_rank_signal(text: str) -> bool:
 # two or more lanes is a union search: a listing may match any one lane.
 _DIGITAL_QUERY_LANES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ai", re.compile(r"\b(ai|artificial intelligence|automation|workflow automation|ai operations)\b", re.I)),
-    ("admin", re.compile(r"\b(administrative support|admin support|virtual assistant|virtual assistance|data entry)\b", re.I)),
+    ("admin", re.compile(r"\b(administrative support|admin support|virtual assistant|virtual assistance|data[\s-]?entry)\b", re.I)),
     ("research", re.compile(r"\bresearch\b", re.I)),
     ("reporting", re.compile(r"\breporting\b", re.I)),
     ("crm", re.compile(r"\bcrm\b", re.I)),
@@ -224,7 +224,7 @@ _LISTING_LANE_TITLE = re.compile(
     r"administrative (?:assistant|support|coordinator|specialist)|"
     r"admin(?:istrative)? assistant|"
     r"operations assistant|"
-    r"data entry|"
+    r"data[\s-]?entry|"
     r"research (?:assistant|contractor|support|specialist|analyst)|"
     r"business research|"
     r"reporting (?:assistant|specialist|coordinator|support)|"
@@ -287,6 +287,14 @@ def is_multi_lane_remote_digital_query(query: str | None) -> bool:
 
 # One explicit lane must match its own title family. A research description
 # inside a copywriter or project-manager listing is not research work.
+# Data entry shares the admin query lane, but a data-entry search still has
+# to keep genuine data-entry titles. A virtual-assistant search does not.
+_DATA_ENTRY_QUERY = re.compile(r"\bdata[\s-]?entry\b", re.I)
+_DATA_ENTRY_TITLE = re.compile(r"\bdata[\s-]?entry\b", re.I)
+_NEGATED_DATA_ENTRY_TITLE = re.compile(
+    r"\b(?:not|no|without|non)\s+(?:a\s+|an\s+)?data[\s-]?entry\b",
+    re.I,
+)
 _SINGLE_LANE_TITLES: dict[str, re.Pattern[str]] = {
     "admin": re.compile(
         r"\b("
@@ -332,7 +340,14 @@ def single_lane_title_match(job: dict[str, Any], query: str | None) -> bool | No
     title = str(job.get("title") or job.get("opportunity_title") or "")
     if _LEADERSHIP_TITLE.search(title):
         return False
-    return bool(pattern.search(title))
+    if pattern.search(title):
+        return True
+    lane = next(iter(lanes))
+    if lane == "admin" and _DATA_ENTRY_QUERY.search(str(query or "")):
+        if _NEGATED_DATA_ENTRY_TITLE.search(title):
+            return False
+        return bool(_DATA_ENTRY_TITLE.search(title))
+    return False
 
 
 def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
@@ -347,14 +362,76 @@ def matches_remote_digital_work_lane(job: dict[str, Any]) -> bool:
     return bool(_LISTING_LANE_TITLE.search(title))
 
 
+_ONSITE_STATUS_NORMALIZED = frozenset({
+    "on site",
+    "onsite",
+    "in person",
+    "on premise",
+})
+# Explicit denial. "not remote-only" stays remote because the hyphen continues
+# the word. A separate sentence that remote work is not offered fails closed.
+_REMOTE_DENIAL = re.compile(
+    r"("
+    r"\bnot\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|role|position|job|option)\b)?"
+    r"|"
+    r"\b(?:non|no)\s+remote(?!\s*[-/])\b"
+    r"|"
+    r"\b(?:is|are)\s+not\s+(?:a\s+|an\s+)?(?:fully\s+)?remote(?!\s*[-/])\b"
+    r"|"
+    r"\b(?:no|without)\s+(?:fully\s+)?remote(?!\s*[-/])\b(?:\s+(?:work|working|roles?|positions?|jobs?|options?)\b)?"
+    r"|"
+    r"\bremote(?:\s+(?:work|working|roles?|positions?|jobs?|options?|employment))?\s+"
+    r"(?:(?:is|are)\s+not|(?:isn['’]t|aren['’]t))\s+"
+    r"(?:offered|available|allowed|possible|supported|provided|an\s+option)\b"
+    r"|"
+    r"\b(?:does|do)\s+not\s+offer\s+remote\b"
+    r")",
+    re.I,
+)
+
+
+def _normalized_remote_status(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _remote_denial_text(text: str) -> str:
+    """Turn not_remote / non-remote tokens into words the denial pattern can see."""
+    return re.sub(
+        r"\b(not|non|no)[_-]remote\b",
+        r"\1 remote",
+        str(text or ""),
+        flags=re.I,
+    )
+
+
+def _status_denies_remote(status: str) -> bool:
+    if status in _ONSITE_STATUS_NORMALIZED:
+        return True
+    return bool(re.search(r"\b(?:not|non|no)\b", status) and "remote" in status)
+
+
+def _listing_denies_remote(text: str) -> bool:
+    return bool(_REMOTE_DENIAL.search(_remote_denial_text(text)))
+
+
 def _role_is_remote(job: dict[str, Any]) -> bool:
-    """True when the listing is remote work rather than a place the worker must occupy."""
-    remote = str(job.get("remote_status") or "").strip().lower().replace("_", " ").replace("-", " ")
-    if "remote" in remote or remote in {"worldwide", "anywhere", "global", "work from home", "wfh"}:
+    """True when the listing is remote work rather than a place the worker must occupy.
+
+    `not_remote` is not remote. Text that says remote work is not offered is not
+    remote, even when the title or status also contains the word remote. An
+    on-site status stays on-site. Those listings fail closed for a non-US place.
+    """
+    status = _normalized_remote_status(job.get("remote_status"))
+    if _status_denies_remote(status):
+        return False
+    listing = _listing_text(job)
+    if _listing_denies_remote(listing):
+        return False
+    if "remote" in status or status in {"worldwide", "anywhere", "global", "work from home", "wfh"}:
         return True
     return bool(re.search(
         r"\b(?:fully remote|remote|worldwide|work from anywhere|work from home)\b",
-        _listing_text(job),
+        listing,
         re.I,
     ))
 
@@ -365,6 +442,8 @@ def non_us_location_required(job: dict[str, Any]) -> bool:
     A remote listing may name a client country. That is not a residency
     requirement. Explicit based, located, or reside language still is.
     Geography that also allows the United States or worldwide stays eligible.
+    `not_remote`, an on-site status, or text that remote work is not offered
+    does not waive a non-US geography.
     """
     from app.core.nova.work_revenue.international_match import (
         is_client_location_span,
@@ -1181,7 +1260,7 @@ def score_discovery_candidate(job: dict[str, Any], *, query: str | None = None) 
     score += min(25, preferred_hits * 4)
     score -= min(40, downrank_hits * 12)
 
-    remote_ok = "remote" in text.lower() or str(job.get("remote_status") or "").lower() == "remote"
+    remote_ok = _role_is_remote(job)
     if remote_ok:
         score += 8
     else:

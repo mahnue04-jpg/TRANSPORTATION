@@ -203,6 +203,8 @@ jobs:
             test_remote_client_country_is_not_worker_location \
             test_worker_location_still_blocks_when_it_is_mandatory \
             test_visa_and_permit_kinds_do_not_substitute_for_each_other \
+            test_negated_remote_status_does_not_waive_foreign_onsite \
+            test_explicit_remote_denial_keeps_overseas_residency_closed \
             test_native_fluency_is_never_claimed_for_a_tested_language
           run_required_file tests/test_nova_work_eligibility_explanations.py \
             test_owner_explanations_name_the_country_and_fail_closed \
