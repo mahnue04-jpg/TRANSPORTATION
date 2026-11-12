@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - "backend/scripts/nova_release_merge_preview.sh"
+      - "backend/scripts/nova_release_dashboard_reconcile.py"
+      - "backend/scripts/nova_release_combined_ui_contract.py"
       - ".github/workflows/nova-release-cross-pr-preview.yml"
   workflow_dispatch:
 
@@ -27,6 +29,17 @@ jobs:
           set -euo pipefail
           bash backend/scripts/nova_release_merge_preview.sh /tmp/nova-release-merge-report.json
           cp /tmp/nova-release-merge-report.json nova-release-merge-report.json
+      - name: Check combined Work & Revenue + Operations + Bookkeeping UI
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("nova-release-merge-report.json").read_text())
+          if not report["merge_conflict_free"]:
+              raise SystemExit("Combined UI test blocked: unresolved draft PR conflicts")
+          PY
+          python3 backend/scripts/nova_release_combined_ui_contract.py
       - name: Summarize release gate
         run: |
           python3 - <<'PY'
@@ -38,12 +51,13 @@ jobs:
           assert data["render_deployed"] is False
           assert data["release_approved"] is False
           assert data["integration_tests_passed"] is False
+          assert data["human_merge_resolution_reviewed"] is False
           lines = [
               "## Nova Work & Revenue / Operations cross-PR release preview",
               "- Integration only uses temporary local git commits",
               "- No GitHub pull requests merged; no Render deploy or migration",
               f"- Textual merge conflict-free: {data['merge_conflict_free']}",
-              "- Combined functional tests and staging acceptance remain outstanding",
+              "- Static UI contract is checked separately; combined functional tests and staging acceptance remain outstanding",
           ]
           for step in data["steps"]:
               paths = ", ".join(step.get("conflicting_paths", [])[:15])
