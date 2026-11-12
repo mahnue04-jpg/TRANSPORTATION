@@ -227,6 +227,7 @@ class GrowthAgentService:
             "checklist": checklist,
             "ready_to_activate": all(checklist.values()),
             "activated": False,
+            "is_synthetic_demo": bool(data.get("is_synthetic_demo")),
         }
         if preview_only:
             return preview
