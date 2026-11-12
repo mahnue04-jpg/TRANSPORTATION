@@ -31,8 +31,10 @@ _WALK_ENCODER_HEADROOM = 48 * MIB
 _WALK_ENCODE_RESERVE = 32 * MIB
 _WALK_CHUNK_SECONDS = 4.0
 
-# Spoken form for TTS; captions keep the brand spelling AMICOR.
-AMICOR_SPOKEN = "AH-mih-kor"
+# TTS input is deliberately phonetic: two ordinary words give the neural voice
+# a stable AM-ee-core reading instead of the incorrect AH-mih-kor. Captions
+# and visible branding must always retain the canonical spelling AMICOR.
+AMICOR_SPOKEN = "Ammy Core"
 DEFAULT_SCRIPT = (
     "Meet AMICOR Nova — your AI workspace for everyday business work."
 )
@@ -848,6 +850,16 @@ def _render_walking_core(
                     )
             wav_path = Path(narration["wav_path"])
             audio_duration = float(narration["duration_seconds"] or 0.0)
+            # Never silently cut off the final words/CTA when TTS runs longer
+            # than the advertised commercial duration. The prior 30s render
+            # had 35.45s of narration but encoded only 32s of video.
+            if audio_duration > max_seconds + 0.05:
+                raise WalkingPresenterError(
+                    "NARRATION_TOO_LONG",
+                    f"Narration is {audio_duration:.2f}s, longer than the {max_seconds:.2f}s "
+                    "commercial limit. Shorten the script or adjust the voice rate "
+                    "and rerender; narration will not be truncated.",
+                )
             duration = max(min_seconds, min(max_seconds, max(audio_duration, float(target_seconds))))
             frame_count = max(int(duration * fps), 24)
             rms = _rms_envelope(wav_path, fps=fps, frame_count=frame_count)
