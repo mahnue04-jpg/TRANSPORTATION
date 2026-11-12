@@ -24,11 +24,14 @@ on:
     paths:
       - "backend/app/core/nova/work_revenue/bookkeeping_*.py"
       - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
+      - "backend/app/core/nova/work_revenue/operations_owner_csv_api.py"
+      - "backend/migrations/versions/20261111_nova_bookkeeping_consent.py"
       - "backend/tests/test_nova_bookkeeping_*.py"
       - "backend/tests/test_nova_operations_customer_csv_jobs.py"
       - "backend/static/nova-work/index.html"
       - "backend/static/nova-work/bookkeeping.js"
       - "backend/tests/nova_bookkeeping_console.test.cjs"
+      - "backend/tests/nova_bookkeeping_session.test.cjs"
       - "backend/scripts/nova_synthetic_bookkeeping_job.py"
       - ".github/workflows/nova-bookkeeping-durable-integration.yml"
   workflow_dispatch:
