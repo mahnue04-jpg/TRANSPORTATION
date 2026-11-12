@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
@@ -22,6 +22,7 @@ from app.core.nova.work_revenue import managed
 from app.core.nova.work_revenue import autonomous_executor
 from app.core.nova.work_revenue import work_inputs
 from app.core.nova.work_revenue import owner_completion
+from app.core.nova.work_revenue import owner_review_evidence
 from app.core.nova.work_revenue.schemas import (
     ApplicationCreate,
     ApplicationDecision,
@@ -181,6 +182,47 @@ def work_guardrails(user: UserContext = Depends(get_current_user_context)):
         "core_readiness": surface.get("core_readiness"),
         "live_disabled": surface.get("live_disabled"),
     }
+
+
+@router.get("/owner-review/evidence-export")
+def owner_review_evidence_export(
+    organization_id: str | None = None,
+    export_format: str = Query(default="csv", alias="format"),
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Read-only development evidence for saved fictional opportunities.
+
+    Production refuses the export. The caller cannot select another tenant.
+    Nothing is submitted, approved, or charged.
+    """
+    if organization_id and organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant owner-review evidence export denied")
+    if not user.organization_id:
+        raise HTTPException(status_code=400, detail="Organization scope is required for Nova")
+    try:
+        payload = owner_review_evidence.build_owner_review_evidence(
+            db,
+            organization_id=user.organization_id,
+            user=user,
+        )
+    except owner_review_evidence.OwnerReviewEvidenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    requested = (export_format or "csv").strip().lower()
+    if requested == "json":
+        return payload
+    if requested != "csv":
+        raise HTTPException(status_code=400, detail="Evidence export format must be csv or json")
+    body = owner_review_evidence.render_evidence_csv(payload["rows"])
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="owner-review-evidence-development.csv"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/profile")
