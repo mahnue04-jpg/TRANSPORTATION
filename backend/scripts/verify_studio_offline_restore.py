@@ -35,6 +35,9 @@ def _safe_file(path: Path, kind: str) -> None:
 def _check_media(archive: Path) -> int:
     _safe_file(archive, "MEDIA_ARCHIVE")
     files = 0
+    total_bytes = 0
+    max_archive_bytes = 8 * 1024 * 1024 * 1024
+    max_files = 100000
     seen = set()
     try:
         with tarfile.open(archive, mode="r:gz") as tar:
@@ -52,13 +55,19 @@ def _check_media(archive: Path) -> int:
                 seen.add(item.name)
                 if item.isfile():
                     files += 1
+                    if files > max_files or item.size < 0 or item.size > max_archive_bytes - total_bytes:
+                        raise RestoreBlocked("MEDIA_ARCHIVE_LIMIT_EXCEEDED")
+                    total_bytes += item.size
                     # Read every compressed member to surface truncated media archives.
                     stream = tar.extractfile(item)
                     if stream is None:
                         raise RestoreBlocked("UNREADABLE_MEDIA_ARCHIVE_ENTRY")
                     with stream:
-                        while stream.read(1024 * 1024):
-                            pass
+                        observed = 0
+                        while chunk := stream.read(1024 * 1024):
+                            observed += len(chunk)
+                        if observed != item.size:
+                            raise RestoreBlocked("MEDIA_ARCHIVE_ENTRY_TRUNCATED")
     except (tarfile.TarError, EOFError, OSError) as exc:
         raise RestoreBlocked("MEDIA_ARCHIVE_INVALID") from exc
     return files
