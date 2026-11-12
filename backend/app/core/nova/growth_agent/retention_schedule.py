@@ -138,7 +138,33 @@ class RetentionScheduler:
                 continue
         return created
 
+    def release_held_claims(self, db: Session) -> int:
+        """Release running schedule rows still held by this scheduler."""
+        prefix = f"{self.scheduler_id}:"
+        rows = (
+            db.query(GaRetentionScheduleRun)
+            .filter(
+                GaRetentionScheduleRun.status == "running",
+                GaRetentionScheduleRun.claimed_by.isnot(None),
+                GaRetentionScheduleRun.claimed_by.like(f"{prefix}%"),
+            )
+            .all()
+        )
+        released = 0
+        for row in rows:
+            row.status = "pending"
+            row.claimed_by = None
+            row.claimed_at = None
+            row.lease_expires_at = None
+            row.updated_at = _utcnow()
+            released += 1
+        if released:
+            db.flush()
+        return released
+
     def claim_runs(self, db: Session, *, limit: int | None = None) -> list[GaRetentionScheduleRun]:
+        if self._stop.is_set():
+            return []
         now = _utcnow()
         batch = max(1, min(limit or self.claim_batch, 50))
         claim_token = f"{self.scheduler_id}:{uuid4().hex[:8]}"
@@ -391,6 +417,21 @@ class RetentionScheduler:
         self.request_shutdown()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        db = self.session_factory()
+        try:
+            released = self.release_held_claims(db)
+            if released:
+                db.commit()
+            else:
+                db.rollback()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception(
+                "retention scheduler failed to release claims on join id=%s",
+                self.scheduler_id,
+            )
+        finally:
+            db.close()
 
 
 _RUNTIME_SCHEDULER: RetentionScheduler | None = None

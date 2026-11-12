@@ -132,8 +132,34 @@ class MockDeliveryWorker:
             if owns:
                 session.close()
 
+    def release_held_claims(self, db: Session) -> int:
+        """Release any running jobs still held by this worker (graceful stop / join timeout)."""
+        prefix = f"{self.worker_id}:"
+        rows = (
+            db.query(GaDeliveryAttempt)
+            .filter(
+                GaDeliveryAttempt.status == "running",
+                GaDeliveryAttempt.claimed_by.isnot(None),
+                GaDeliveryAttempt.claimed_by.like(f"{prefix}%"),
+            )
+            .all()
+        )
+        released = 0
+        for row in rows:
+            row.status = "queued"
+            row.claimed_by = None
+            row.claimed_at = None
+            row.lease_expires_at = None
+            released += 1
+        if released:
+            db.flush()
+        return released
+
     def claim_jobs(self, db: Session, *, limit: int | None = None) -> list[GaDeliveryAttempt]:
         """Atomically claim a batch of available mock delivery jobs."""
+        if self._stop.is_set():
+            # Graceful shutdown: never take new leases after stop is requested.
+            return []
         now = _utcnow()
         batch = max(1, min(limit or self.batch_size, 100))
         claim_token = f"{self.worker_id}:{uuid4().hex[:8]}"
@@ -359,7 +385,26 @@ class MockDeliveryWorker:
             pass
         db = self.session_factory()
         results: list[dict[str, Any]] = []
+        released_on_stop = 0
         try:
+            if self._stop.is_set():
+                # Ensure no dangling leases remain if stop arrived mid-flight.
+                released_on_stop = self.release_held_claims(db)
+                self.stats["ticks"] += 1
+                db.commit()
+                self._heartbeat(status="stopping", db=db)
+                return {
+                    "worker_id": self.worker_id,
+                    "claimed": 0,
+                    "processed": 0,
+                    "released_on_stop": released_on_stop,
+                    "results": [],
+                    "stats": dict(self.stats),
+                    "live_send": False,
+                    "mock_only": True,
+                    "organization_id": self.organization_id,
+                    "shutdown": True,
+                }
             claimed = self.claim_jobs(db, limit=limit)
             for attempt in claimed:
                 if self._stop.is_set():
@@ -369,8 +414,11 @@ class MockDeliveryWorker:
                         attempt.claimed_by = None
                         attempt.claimed_at = None
                         attempt.lease_expires_at = None
+                        released_on_stop += 1
                     continue
                 results.append(self.process_attempt(db, attempt))
+            if self._stop.is_set():
+                released_on_stop += self.release_held_claims(db)
             self.stats["ticks"] += 1
             db.commit()
             self._heartbeat(status="running" if not self._stop.is_set() else "stopping", db=db)
@@ -378,6 +426,7 @@ class MockDeliveryWorker:
                 "worker_id": self.worker_id,
                 "claimed": len(claimed),
                 "processed": len(results),
+                "released_on_stop": released_on_stop,
                 "results": results,
                 "stats": dict(self.stats),
                 "live_send": False,
@@ -418,6 +467,21 @@ class MockDeliveryWorker:
         self.request_shutdown()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        # Belt-and-suspenders: release any leases still held if the thread timed out.
+        db = self.session_factory()
+        try:
+            released = self.release_held_claims(db)
+            if released:
+                db.commit()
+            else:
+                db.rollback()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception(
+                "growth worker failed to release claims on join worker_id=%s", self.worker_id
+            )
+        finally:
+            db.close()
         self._heartbeat(status="stopped")
 
 

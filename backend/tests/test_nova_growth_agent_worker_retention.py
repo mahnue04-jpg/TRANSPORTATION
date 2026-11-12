@@ -460,11 +460,57 @@ def test_graceful_shutdown_releases_unprocessed(Session, db):
     worker = MockDeliveryWorker(Session, organization_id="org-stop", worker_id="stopper")
     worker.request_shutdown()
     out = worker.run_once(limit=10)
-    # With stop already set, claimed jobs are released back to queued without processing.
+    # With stop already set, worker must not claim new jobs.
     assert out["processed"] == 0
+    assert out["claimed"] == 0
+    assert out.get("shutdown") is True
     queued = (
         db.query(GaDeliveryAttempt)
         .filter_by(organization_id="org-stop", status="queued")
         .count()
     )
     assert queued >= 1
+
+
+def test_graceful_shutdown_releases_already_held_leases(Session, db):
+    """If stop arrives after a claim, held running leases must return to queued."""
+    svc = GrowthAgentService(db)
+    _activate(svc, "org-stop-held")
+    contact = svc._upsert_contact(
+        "org-stop-held",
+        name="Held",
+        email="held@example.com",
+        consent_transactional=True,
+        channel="email",
+        source="test",
+    )
+    db.commit()
+    preview = svc.preview_workflow(
+        "org-stop-held", workflow_code="inquiry_ack", contact_id=contact.id
+    )
+    svc.approve_and_execute_workflow(
+        "org-stop-held",
+        run_id=preview["run_id"],
+        dry_run=True,
+        idempotency_key=f"held-{preview['run_id']}",
+    )
+    worker = MockDeliveryWorker(Session, organization_id="org-stop-held", worker_id="holder")
+    claimed = worker.claim_jobs(db, limit=5)
+    assert len(claimed) >= 1
+    db.commit()
+    worker.request_shutdown()
+    released = worker.release_held_claims(db)
+    db.commit()
+    assert released >= 1
+    assert (
+        db.query(GaDeliveryAttempt)
+        .filter_by(organization_id="org-stop-held", status="queued")
+        .count()
+        >= 1
+    )
+    assert (
+        db.query(GaDeliveryAttempt)
+        .filter_by(organization_id="org-stop-held", status="running")
+        .count()
+        == 0
+    )
