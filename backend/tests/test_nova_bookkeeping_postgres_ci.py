@@ -654,3 +654,24 @@ def test_staging_preflight_denies_missing_consent_unique_constraint(pg):
     checks = {entry["check"]: entry["passed"] for entry in report["checks"]}
     assert checks["postgres_tables_verified"] is False
     assert report["production_release_authorized"] is False
+
+
+def test_staging_preflight_denies_missing_job_deduplication_constraint(pg):
+    """Financial job idempotency requires an actual PostgreSQL unique index."""
+    from app.core.nova.work_revenue.bookkeeping_staging_preflight import inspect_staging_readiness
+    engine, _, _ = pg
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "ALTER TABLE nova_operations_customer_csv_jobs "
+            "DROP CONSTRAINT uq_nova_customer_csv_request"
+        ))
+    report = inspect_staging_readiness(
+        config={"APP_ENV": "staging", "AMICOR_ENVIRONMENT": "staging",
+                "PLATFORM_OPS_DOCUMENT_STORAGE": "s3_private"},
+        engine=engine, verified_staging_identity=True,
+        approved_database_name="nova_bookkeeping_ephemeral",
+    )
+    flags = {item["check"]: item["passed"] for item in report["checks"]}
+    assert flags["postgres_tables_verified"] is False
+    assert report["status"] == "BLOCKED"
+    assert report["deployment_performed"] is False
