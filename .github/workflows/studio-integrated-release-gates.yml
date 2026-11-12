@@ -1,0 +1,88 @@
+name: Creative Studio integrated release gates
+
+on:
+  pull_request:
+    paths:
+      - 'backend/app/core/runtime_config.py'
+      - 'backend/tests/test_phase7_infra_stabilization.py'
+      - 'backend/scripts/verify_studio_offline_restore.py'
+      - 'backend/tests/test_studio_offline_restore.py'
+      - 'backend/scripts/check_studio_staging_release.py'
+      - 'backend/tests/test_studio_staging_release_gate.py'
+      - 'backend/scripts/studio_staging_backup_preflight.py'
+      - 'backend/scripts/migrate_studio_staging.py'
+      - 'backend/tests/test_studio_staging_backup_preflight.py'
+      - 'backend/tests/test_studio_staging_data_transfer.py'
+      - 'backend/tests/test_nova_creative_first_shot_storage.py'
+      - 'backend/tests/test_nova_creative_master_download_http.py'
+      - 'backend/app/core/nova/creative_studio/private_object_storage.py'
+      - 'backend/app/core/nova/creative_studio/service.py'
+      - 'backend/tests/test_nova_creative_bucket_preflight.py'
+      - 'backend/scripts/verify_studio_staging_storage_canary.py'
+      - 'backend/tests/test_studio_staging_storage_canary.py'
+      - '.github/workflows/studio-integrated-release-gates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  studio-release-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TESTING: 'true'
+      NOVA_CREATIVE_VIDEO_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_KLING_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_IMAGE_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_VOICE_LIVE_ENABLED: 'false'
+      NOVA_STUDIO_PRIVATE_OBJECT_STORAGE: 'false'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg espeak-ng
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt pytest
+      - name: Run integrated no-provider release checks
+        run: |
+          python -m pytest -q \
+            backend/tests/test_phase7_infra_stabilization.py \
+            backend/tests/test_studio_offline_restore.py \
+            backend/tests/test_studio_staging_release_gate.py \
+            backend/tests/test_studio_staging_backup_preflight.py \
+            backend/tests/test_nova_creative_first_shot_storage.py \
+            backend/tests/test_nova_creative_master_download_http.py \
+            backend/tests/test_nova_creative_first_shot_readiness.py \
+            backend/tests/test_nova_creative_widescreen_assembly.py \
+            backend/tests/test_nova_creative_signed_in_montage.py \
+            backend/tests/test_nova_creative_bucket_preflight.py \
+            backend/tests/test_studio_staging_storage_canary.py
+      - name: Run signed-in customer editor and MP4 UI cleanup tests
+        run: node --test backend/static/nova-creative/creative-jobs.test.cjs backend/tests/js/test_creative_studio_master_download.mjs
+      - name: Check customer editor syntax
+        run: |
+          node --check backend/static/nova-creative/creative.js
+          node --check backend/static/nova-creative/calendar.js
+
+  staging-http-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify actual staging SQLite health and authentication boundaries
+        run: |
+          python backend/scripts/check_studio_staging_release.py \
+            --base-url https://nova-studio-validation-350.onrender.com

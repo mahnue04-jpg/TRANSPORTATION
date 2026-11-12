@@ -44,6 +44,23 @@ def _bucket() -> str:
     return name
 
 
+def verify_bucket_ready() -> None:
+    """Fail closed before paid rendering if private storage cannot be reached.
+
+    Only performs a read-only S3 HEAD request. It does not guarantee that a
+    subsequent upload will succeed, so completion still requires the existing
+    upload, HEAD size/checksum, and protected download verification.
+    """
+    if not enabled():
+        raise PrivateStorageError("Private object storage is disabled")
+    client = _client()
+    bucket = _bucket()
+    try:
+        client.head_bucket(Bucket=bucket)
+    except Exception as exc:
+        raise PrivateStorageError("Private object storage is not reachable") from exc
+
+
 def make_key(owner_id: str, project_id: str, filename: str) -> str:
     if not _IDENTIFIER.fullmatch(owner_id) or not _IDENTIFIER.fullmatch(project_id):
         raise PrivateStorageError("Invalid private object owner/project")
