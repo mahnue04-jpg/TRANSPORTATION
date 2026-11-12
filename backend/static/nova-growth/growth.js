@@ -232,8 +232,26 @@
       .replace(/"/g, "&quot;");
   }
 
+  async function refreshSavedSetup() {
+    if (!state.token) return;
+    const p = await api("/api/nova/growth-agent/profile");
+    if (!p.configured) return;
+    // Load persisted owner values, including the synthetic flag, so a later
+    // Save does not silently relabel a demo as a real customer profile.
+    $("biz-name").value = p.business_name || "";
+    $("biz-web").value = p.website || "";
+    $("biz-tz").value = p.timezone || "America/Chicago";
+    $("biz-plan").value = p.plan_code || "starter";
+    $("biz-email").value = p.contact_email || "";
+    $("biz-phone").value = p.handoff_phone || "";
+    $("biz-hours").value = JSON.stringify(p.operating_hours || {}, null, 2);
+    $("biz-services").value = JSON.stringify(p.services || [], null, 2);
+    $("biz-faqs").value = JSON.stringify(p.faqs || [], null, 2);
+    $("biz-synthetic").checked = p.is_synthetic_demo === true;
+  }
+
   async function refreshAll() {
-    await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads()]);
+    await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads(), refreshSavedSetup()]);
   }
 
   $("login-form").addEventListener("submit", async (e) => {
