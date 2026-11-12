@@ -10,6 +10,8 @@ from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.core.nova.work_revenue.router import router as work_router
 from app.core.nova.v3.router import router as v3_router
+from app.core.nova.work_revenue import router as work_router_module
+from app.core.nova.work_revenue import operations_owner_csv_api as owner_api_module
 
 
 def _methods(router):
@@ -47,7 +49,10 @@ def test_all_three_workflows_are_registered_in_combined_router():
     for item in required:
         assert item in work, (
             f"Unregistered integrated endpoint {item}; available operations routes: "
-            f"{sorted(k for k in work if '/operations/' in k[1])[:35]}"
+            f"{sorted(k for k in work if '/operations/' in k[1])[:35]}; "
+            f"owner_router_registered={hasattr(work_router_module, 'owner_csv_router')}; "
+            f"owner_route_count={len(owner_api_module.router.routes)}; "
+            f"work_router_route_count={len(work_router.routes)}"
         )
     assert ("POST", "/api/nova/v3/live/jobs/autopilot-cycle") in v3
 
