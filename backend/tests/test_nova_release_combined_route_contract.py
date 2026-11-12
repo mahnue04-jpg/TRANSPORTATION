@@ -45,7 +45,10 @@ def test_all_three_workflows_are_registered_in_combined_router():
         ("GET", "/api/nova/work/operations/durable/bookkeeping/jobs/{job_id}/download"),
     )
     for item in required:
-        assert item in work, f"Unregistered integrated endpoint {item}"
+        assert item in work, (
+            f"Unregistered integrated endpoint {item}; available operations routes: "
+            f"{sorted(k for k in work if '/operations/' in k[1])[:35]}"
+        )
     assert ("POST", "/api/nova/v3/live/jobs/autopilot-cycle") in v3
 
 
