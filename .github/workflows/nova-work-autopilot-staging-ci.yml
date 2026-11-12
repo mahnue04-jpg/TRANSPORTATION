@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
-          python scripts/nova_work_autopilot_staging.py > /tmp/nova_work_autopilot_blocked.json
+          PYTHONPATH=. python scripts/nova_work_autopilot_staging.py > /tmp/nova_work_autopilot_blocked.json
           python - <<'PY'
           import json
           from pathlib import Path
