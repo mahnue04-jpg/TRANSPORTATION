@@ -295,7 +295,7 @@ def test_provider_banner_names_block_reason_without_secret_values():
     rows = {row["kind"]: row for row in provider_statuses()}
     assert rows["talking_avatar"]["credential_env_names"] == ["FAL_KEY"]
     assert rows["talking_avatar"]["invalid_credential_checked"] is False
-    assert "reviewed-planning-video-import-20261030" in html
+    assert "creative.js?v=private-video-playback-diagnostics-20261112" in html
     assert 'aria-controls="genova-avatar-readiness-result"' in html
     assert "provider_block_reason" in script
     blob = str(rows)

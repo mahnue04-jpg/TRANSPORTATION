@@ -1586,7 +1586,7 @@
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + licenseNote + downloadControl + captionControl;
+          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p></div>" : "") + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
@@ -1631,7 +1631,29 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]"), function (video) {
       var projectId = activeProjectId;
-      (async function () {
+      var container = video.parentElement && video.parentElement.parentElement;
+      var status = container && container.querySelector(".private-video-status");
+      var playButton = container && container.querySelector(".private-video-retry");
+      var loading = false;
+      function previewStatus(message) {
+        if (status) status.textContent = message;
+      }
+      video.addEventListener("loadedmetadata", function () {
+        previewStatus("Video ready: " + (isFinite(video.duration) ? Math.round(video.duration) + " seconds" : "duration unknown") + ". Press Play.");
+      });
+      video.addEventListener("error", function () {
+        previewStatus("Chrome could not play this saved MP4. Download still works; verify the browser supports its video codec.");
+      });
+      async function loadPrivatePreview(startPlayback) {
+        if (loading) return;
+        // A normal click can start playback without refetching an already-loaded blob.
+        if (startPlayback && video.src && video.readyState >= 1) {
+          try { await video.play(); } catch (err) { previewStatus("Playback was blocked or unsupported by this browser."); }
+          return;
+        }
+        loading = true;
+        if (playButton) playButton.disabled = true;
+        previewStatus("Loading saved MP4 securely…");
         try {
           var path = video.getAttribute("data-private-video-url");
           assertDownloadUrlHasNoToken(path);
@@ -1641,9 +1663,9 @@
           var response = shared && typeof shared.authFetch === "function"
             ? await shared.authFetch(path, {method: "GET", headers: headers})
             : await fetch(path, {method: "GET", headers: headers});
-          if (!response.ok || !(response.headers.get("content-type") || "").startsWith("video/")) {
-            throw new Error("Private video preview unavailable");
-          }
+          var mediaType = response.headers && response.headers.get("content-type") || "";
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          if (!mediaType.startsWith("video/")) throw new Error("Unexpected media content type");
           var blob = await response.blob();
           if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
           if (!blob.size || (blob.type && !blob.type.startsWith("video/"))) {
@@ -1653,12 +1675,23 @@
           privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;
           video.load();
-          // The video element may need further reads for seeking and replay.
-          // Do not revoke here; refreshAssets owns cleanup on rerender.
+          // Do not revoke the blob after loadeddata: playback and seeking still need it.
+          previewStatus("MP4 received (" + Math.round(blob.size / 1024) + " KB). Loading video metadata…");
+          if (startPlayback) {
+            try { await video.play(); } catch (err) {
+              previewStatus("MP4 downloaded, but Chrome could not start playback. Check the browser's supported codec.");
+            }
+          }
         } catch (err) {
+          previewStatus("Preview unavailable (" + (err && err.message || "media error") + "). The protected Download AI video button remains available.");
           video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
+        } finally {
+          loading = false;
+          if (playButton) playButton.disabled = false;
         }
-      })();
+      }
+      if (playButton) playButton.addEventListener("click", function () { loadPrivatePreview(true); });
+      loadPrivatePreview(false);
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
