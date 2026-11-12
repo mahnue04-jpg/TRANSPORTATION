@@ -8,9 +8,10 @@ Legend: **IMPLEMENTED** / **TESTED SYNTHETICALLY** / **VERIFIED STAGING** / **VE
 | Deny-by-default org auth | IMPLEMENTED + TESTED SYNTHETICALLY | `tenant.py`, integration isolation tests |
 | Setup wizard + activate checklist | IMPLEMENTED | `/api/nova/growth-agent/profile`, owner UI |
 | Inbox AI/human + handoff + pause | IMPLEMENTED + TESTED SYNTHETICALLY | service + demo + UI |
-| CRM states/search | IMPLEMENTED + TESTED SYNTHETICALLY | leads API + tests |
+| CRM states/search | IMPLEMENTED + TESTED SYNTHETICALLY | leads API + owner UI PATCH + tests |
 | Analytics with denominators | IMPLEMENTED + TESTED SYNTHETICALLY | `analytics()` + unit/integration |
-| Embeddable widget + signed token | IMPLEMENTED + TESTED SYNTHETICALLY | `widget.js`, crypto + security tests |
+| Embeddable widget + signed token | IMPLEMENTED + TESTED SYNTHETICALLY | `widget.js`, crypto + security tests; public chat gated by `NOVA_GROWTH_AGENT_WIDGET_ENABLED` |
+| Appointment cancel → rebook + reschedule | IMPLEMENTED + TESTED SYNTHETICALLY | `book_appointment` slot reuse, `reschedule_appointment`, integration tests |
 | FAQ grounding / I-don't-know | IMPLEMENTED + TESTED SYNTHETICALLY | `faq_engine` tests |
 | Consent + STOP suppression | IMPLEMENTED + TESTED SYNTHETICALLY | consent/workflow tests |
 | Workflow dry-run mock delivery | IMPLEMENTED + TESTED SYNTHETICALLY | workflows + demo |

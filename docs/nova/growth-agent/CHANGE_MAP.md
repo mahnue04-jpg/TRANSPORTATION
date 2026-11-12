@@ -25,6 +25,12 @@
 - `v3/growth/**` (existing synthetic lab left intact)
 - Stripe LIVE paths, Render hostname, telecom keys
 
+## Continue pass (post-MVP polish)
+
+- Cancel → rebook reuses the cancelled appointment row (unique slot preserved)
+- `POST /appointments/{id}/reschedule` + owner CRM lead state/notes Save UI
+- Public `POST /widget/chat` hard-requires `NOVA_GROWTH_AGENT_WIDGET_ENABLED`
+
 ## Integration rules
 
 1. Reuse auth/org scoping only.

@@ -11,6 +11,7 @@ python -m pip install -r requirements.txt pytest
 export TESTING=true
 export NOVA_GROWTH_AGENT_ENABLED=true
 export NOVA_GROWTH_AGENT_DEMO_MODE=true
+export NOVA_GROWTH_AGENT_WIDGET_ENABLED=true
 export NOVA_GROWTH_AGENT_WIDGET_SECRET=local-dev-only
 export SECRET_KEY=local
 export JWT_SECRET=local

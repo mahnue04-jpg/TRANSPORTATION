@@ -22,8 +22,9 @@ Gate: `NOVA_GROWTH_AGENT_ENABLED=true` (else 404). Live send flags hard-off.
 | POST | `/workflows/preview` | owner | Dry-run preview + cost estimate |
 | POST | `/workflows/execute` | owner | Approve mock delivery (default dry_run) |
 | GET | `/availability` | owner | Slots for day/service |
-| POST | `/appointments` | owner | Book (idempotent) |
+| POST | `/appointments` | owner | Book (idempotent; reuses cancelled slot) |
 | POST | `/appointments/{id}/cancel` | owner | Cancel |
+| POST | `/appointments/{id}/reschedule` | owner | Reschedule (idempotent) |
 | GET | `/analytics` | owner | Metrics with window denominators |
 | GET | `/audit` | owner | Audit history |
 | GET | `/export` | owner | Org-scoped export |

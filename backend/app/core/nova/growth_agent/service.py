@@ -1247,20 +1247,49 @@ class GrowthAgentService:
                 existing=existing,
                 buffer_minutes=service.buffer_minutes,
             )
-            appt = GaAppointment(
-                id=_id(),
-                organization_id=org_id,
-                contact_id=contact_id,
-                service_id=service.id,
-                conversation_id=conversation_id,
-                starts_at_utc=start.replace(tzinfo=None),
-                ends_at_utc=end.replace(tzinfo=None),
-                status="confirmed",
-                idempotency_key=idempotency_key,
-                timezone=profile.timezone,
-                is_synthetic_demo=is_synthetic_demo,
+            # Reuse a cancelled row at the same unique slot so cancel→rebook works
+            # without relaxing the DB unique constraint.
+            start_naive = start.replace(tzinfo=None)
+            end_naive = end.replace(tzinfo=None)
+            cancelled = (
+                self._org_query(GaAppointment, org_id)
+                .filter_by(
+                    service_id=service.id,
+                    starts_at_utc=start_naive,
+                    status="cancelled",
+                )
+                .one_or_none()
             )
-            self.db.add(appt)
+            if cancelled:
+                cancelled.contact_id = contact_id
+                cancelled.conversation_id = conversation_id
+                cancelled.ends_at_utc = end_naive
+                cancelled.status = "confirmed"
+                cancelled.idempotency_key = idempotency_key
+                cancelled.timezone = profile.timezone
+                cancelled.is_synthetic_demo = is_synthetic_demo
+                appt = cancelled
+                event_type = "appointment_rebooked"
+                audit_action = "appointment.rebook"
+                summary = "Cancelled appointment slot rebooked"
+            else:
+                appt = GaAppointment(
+                    id=_id(),
+                    organization_id=org_id,
+                    contact_id=contact_id,
+                    service_id=service.id,
+                    conversation_id=conversation_id,
+                    starts_at_utc=start_naive,
+                    ends_at_utc=end_naive,
+                    status="confirmed",
+                    idempotency_key=idempotency_key,
+                    timezone=profile.timezone,
+                    is_synthetic_demo=is_synthetic_demo,
+                )
+                self.db.add(appt)
+                event_type = "appointment_booked"
+                audit_action = "appointment.book"
+                summary = "Appointment confirmed"
             try:
                 self.db.flush()
             except IntegrityError as exc:
@@ -1273,7 +1302,7 @@ class GrowthAgentService:
                     id=_id(),
                     organization_id=org_id,
                     contact_id=contact.id,
-                    event_type="appointment_booked",
+                    event_type=event_type,
                     payload_json={"appointment_id": appt.id, "service_code": service_code},
                 )
             )
@@ -1293,11 +1322,11 @@ class GrowthAgentService:
             self._idempotent_put(org_id, "appointment_book", idempotency_key, response)
             self.audit(
                 org_id,
-                action="appointment.book",
+                action=audit_action,
                 entity_type="appointment",
                 entity_id=appt.id,
                 actor_user_id=actor_user_id,
-                summary="Appointment confirmed",
+                summary=summary,
             )
             self.db.commit()
             return response
@@ -1312,6 +1341,8 @@ class GrowthAgentService:
         appt = self._org_query(GaAppointment, org_id).filter_by(id=appointment_id).one_or_none()
         if not appt:
             raise GrowthAgentError("NOT_FOUND", "Appointment not found", http_status=404)
+        if appt.status == "cancelled":
+            return {"id": appt.id, "status": appt.status}
         appt.status = "cancelled"
         self.audit(
             org_id,
@@ -1323,6 +1354,120 @@ class GrowthAgentService:
         )
         self.db.commit()
         return {"id": appt.id, "status": appt.status}
+
+    def reschedule_appointment(
+        self,
+        org_id: str,
+        appointment_id: str,
+        *,
+        starts_at_utc: str,
+        idempotency_key: str,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        cached = self._idempotent_get(org_id, "appointment_reschedule", idempotency_key)
+        if cached:
+            return cached
+        appt = self._org_query(GaAppointment, org_id).filter_by(id=appointment_id).one_or_none()
+        if not appt:
+            raise GrowthAgentError("NOT_FOUND", "Appointment not found", http_status=404)
+        if appt.status == "cancelled":
+            raise GrowthAgentError(
+                "INVALID_STATE",
+                "Cancelled appointments cannot be rescheduled; book a new slot instead",
+                http_status=409,
+            )
+        profile = self._require_profile(org_id)
+        service = (
+            self.db.query(GaAppointmentService)
+            .filter_by(id=appt.service_id, organization_id=org_id, active=True)
+            .one_or_none()
+        )
+        if not service:
+            raise GrowthAgentError("NOT_FOUND", "Service not found", http_status=404)
+        start = appt_mod.parse_iso_utc(starts_at_utc)
+        end = start + timedelta(minutes=service.duration_minutes)
+        start_naive = start.replace(tzinfo=None)
+        end_naive = end.replace(tzinfo=None)
+
+        with _BOOK_LOCK:
+            existing_rows = (
+                self._org_query(GaAppointment, org_id)
+                .filter(GaAppointment.status != "cancelled", GaAppointment.id != appt.id)
+                .all()
+            )
+            existing = [
+                {"starts_at_utc": a.starts_at_utc, "ends_at_utc": a.ends_at_utc, "status": a.status}
+                for a in existing_rows
+            ]
+            appt_mod.assert_no_overlap(
+                starts_at_utc=start,
+                ends_at_utc=end,
+                existing=existing,
+                buffer_minutes=service.buffer_minutes,
+            )
+            # Free the unique slot if a cancelled appointment already occupies the target.
+            blocker = (
+                self._org_query(GaAppointment, org_id)
+                .filter(
+                    GaAppointment.service_id == service.id,
+                    GaAppointment.starts_at_utc == start_naive,
+                    GaAppointment.status == "cancelled",
+                    GaAppointment.id != appt.id,
+                )
+                .one_or_none()
+            )
+            if blocker:
+                # Nudge cancelled row off the unique key while preserving history.
+                blocker.starts_at_utc = blocker.starts_at_utc + timedelta(microseconds=1)
+                self.db.flush()
+
+            appt.starts_at_utc = start_naive
+            appt.ends_at_utc = end_naive
+            appt.status = "rescheduled"
+            appt.idempotency_key = idempotency_key
+            appt.timezone = profile.timezone
+            try:
+                self.db.flush()
+            except IntegrityError as exc:
+                self.db.rollback()
+                raise DoubleBookError() from exc
+
+            self.db.add(
+                GaLeadEvent(
+                    id=_id(),
+                    organization_id=org_id,
+                    contact_id=appt.contact_id,
+                    event_type="appointment_rescheduled",
+                    payload_json={
+                        "appointment_id": appt.id,
+                        "starts_at_utc": start.isoformat().replace("+00:00", "Z"),
+                    },
+                )
+            )
+            cal = self.calendar.write_event(
+                {"action": "reschedule", "appointment_id": appt.id, "live": False}
+            )
+            response = {
+                "id": appt.id,
+                "status": appt.status,
+                "starts_at_utc": start.isoformat().replace("+00:00", "Z"),
+                "ends_at_utc": end.isoformat().replace("+00:00", "Z"),
+                "service_code": service.code,
+                "contact_id": appt.contact_id,
+                "calendar_sync": {"provider": cal.provider, "status": cal.status, "live": False},
+                "is_synthetic_demo": bool(appt.is_synthetic_demo),
+            }
+            self._idempotent_put(org_id, "appointment_reschedule", idempotency_key, response)
+            self.audit(
+                org_id,
+                action="appointment.reschedule",
+                entity_type="appointment",
+                entity_id=appt.id,
+                actor_user_id=actor_user_id,
+                summary="Appointment rescheduled",
+            )
+            self.db.commit()
+            return response
 
     # ── analytics / health / commercial ──────────────────────────────────────
 

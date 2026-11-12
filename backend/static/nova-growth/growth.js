@@ -160,17 +160,46 @@
         box.textContent = "No leads yet.";
         return;
       }
+      const states = ["new", "contacted", "qualified", "booked", "closed"];
       box.className = "";
-      box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>State</th><th>Notes</th><th>Demo</th></tr></thead><tbody>${rows
-        .map(
-          (l) => `<tr>
+      box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>State</th><th>Notes</th><th>Demo</th><th></th></tr></thead><tbody>${rows
+        .map((l) => {
+          const stateOpts = states
+            .map(
+              (s) =>
+                `<option value="${s}" ${s === l.lead_state ? "selected" : ""}>${s}</option>`
+            )
+            .join("");
+          return `<tr data-lead-id="${escapeHtml(l.id)}">
             <td>${escapeHtml(l.display_name || l.id)}</td>
-            <td>${escapeHtml(l.lead_state)}</td>
-            <td>${escapeHtml(l.notes || "")}</td>
+            <td><select aria-label="Lead state" data-lead-state>${stateOpts}</select></td>
+            <td><input type="text" aria-label="Lead notes" data-lead-notes value="${escapeHtml(
+              l.notes || ""
+            )}" /></td>
             <td>${l.is_synthetic_demo ? '<span class="tag demo">Synthetic</span>' : ""}</td>
-          </tr>`
-        )
+            <td><button type="button" class="secondary" data-save-lead>Save</button></td>
+          </tr>`;
+        })
         .join("")}</tbody></table>`;
+      box.querySelectorAll("[data-save-lead]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const row = btn.closest("tr");
+          const id = row?.dataset.leadId;
+          if (!id) return;
+          const leadState = row.querySelector("[data-lead-state]")?.value;
+          const notes = row.querySelector("[data-lead-notes]")?.value || "";
+          try {
+            await api(`/api/nova/growth-agent/leads/${encodeURIComponent(id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ lead_state: leadState, notes }),
+            });
+            setBanner(`Lead ${leadState} saved.`, "ok");
+            await refreshLeads();
+          } catch (err) {
+            setBanner(err.message, "warn");
+          }
+        });
+      });
     } catch (err) {
       box.className = "error";
       box.textContent = err.message;

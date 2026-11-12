@@ -18,6 +18,7 @@ from app.core.nova.growth_agent.schemas import (
     ConsentIn,
     LeadUpdateIn,
     ProfileUpsertIn,
+    RescheduleIn,
     WidgetChatIn,
     WidgetCreateIn,
     WorkflowExecuteIn,
@@ -148,12 +149,10 @@ def widget_chat(
     origin: str | None = Header(default=None, alias="Origin"),
     svc: GrowthAgentService = Depends(_svc),
 ) -> dict[str, Any]:
-    # Master flag required. NOVA_GROWTH_AGENT_WIDGET_ENABLED is recommended for
-    # staging public embeds; when unset, authenticated synthetic demos still work
-    # via the same chat endpoint with a signed token.
-    if not live_flags().get("GROWTH_AGENT_ENABLED"):
-        raise HTTPException(status_code=404, detail="Growth Agent disabled")
-    _ = widget_public_enabled  # documented companion flag; not a hard block in MVP
+    # Public embed requires both master + widget flags. Signed token alone is
+    # not enough when NOVA_GROWTH_AGENT_WIDGET_ENABLED is unset.
+    if not live_flags().get("GROWTH_AGENT_ENABLED") or not widget_public_enabled():
+        raise HTTPException(status_code=404, detail="Growth Agent widget disabled")
     try:
         return svc.widget_chat(
             token=body.token,
@@ -358,6 +357,27 @@ def cancel_appt(
         return svc.cancel_appointment(
             _org(user, organization_id),
             appointment_id,
+            actor_user_id=user.user_id,
+        )
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
+@router.post("/appointments/{appointment_id}/reschedule")
+def reschedule_appt(
+    appointment_id: str,
+    body: RescheduleIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    org = _org(user, body.organization_id)
+    try:
+        return svc.reschedule_appointment(
+            org,
+            appointment_id,
+            starts_at_utc=body.starts_at_utc,
+            idempotency_key=body.idempotency_key,
             actor_user_id=user.user_id,
         )
     except GrowthAgentError as exc:

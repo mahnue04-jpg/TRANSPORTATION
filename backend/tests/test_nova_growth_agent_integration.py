@@ -214,6 +214,69 @@ def test_booking_concurrency_no_double_book(db):
     assert again["id"] == first[1]
 
 
+def test_cancel_rebook_and_reschedule(db):
+    svc = GrowthAgentService(db)
+    org = "org-int-4"
+    _activate(svc, org)
+    contact = svc._upsert_contact(
+        org,
+        name="Jamie",
+        email="jamie@example.com",
+        consent_transactional=True,
+        channel="email",
+        source="test",
+    )
+    db.commit()
+    day = None
+    for offset in range(1, 10):
+        candidate = datetime.now(timezone.utc) + timedelta(days=offset)
+        if candidate.weekday() < 5:
+            day = candidate.strftime("%Y-%m-%d")
+            break
+    availability = svc.list_availability(org, service_code="consult", day=day)
+    assert len(availability["slots"]) >= 2
+    slot_a = availability["slots"][0]["starts_at_utc"]
+    slot_b = availability["slots"][1]["starts_at_utc"]
+
+    booked = svc.book_appointment(
+        org,
+        contact_id=contact.id,
+        service_code="consult",
+        starts_at_utc=slot_a,
+        idempotency_key="book-a",
+    )
+    cancelled = svc.cancel_appointment(org, booked["id"], actor_user_id="owner-1")
+    assert cancelled["status"] == "cancelled"
+
+    rebooked = svc.book_appointment(
+        org,
+        contact_id=contact.id,
+        service_code="consult",
+        starts_at_utc=slot_a,
+        idempotency_key="book-a-again",
+    )
+    assert rebooked["status"] == "confirmed"
+    assert rebooked["id"] == booked["id"]
+
+    moved = svc.reschedule_appointment(
+        org,
+        rebooked["id"],
+        starts_at_utc=slot_b,
+        idempotency_key="resched-1",
+        actor_user_id="owner-1",
+    )
+    assert moved["status"] == "rescheduled"
+    assert moved["starts_at_utc"] == slot_b
+    replay = svc.reschedule_appointment(
+        org,
+        rebooked["id"],
+        starts_at_utc=slot_b,
+        idempotency_key="resched-1",
+        actor_user_id="owner-1",
+    )
+    assert replay["id"] == moved["id"]
+
+
 def test_synthetic_demo_end_to_end(db):
     report = run_synthetic_demo(db, organization_id="org-demo", owner_user_id="owner-demo")
     assert report["label"].startswith("SYNTHETIC")

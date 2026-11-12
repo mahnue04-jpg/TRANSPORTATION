@@ -49,6 +49,7 @@ jobs:
           AMICOR_ENVIRONMENT: test
           NOVA_GROWTH_AGENT_ENABLED: "true"
           NOVA_GROWTH_AGENT_DEMO_MODE: "true"
+          NOVA_GROWTH_AGENT_WIDGET_ENABLED: "true"
           NOVA_GROWTH_AGENT_WIDGET_SECRET: ci-widget-secret
           NOVA_STRIPE_LIVE_ENABLED: "false"
           SECRET_KEY: ci-only-placeholder

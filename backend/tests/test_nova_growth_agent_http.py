@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 os.environ["NOVA_GROWTH_AGENT_ENABLED"] = "true"
 os.environ["NOVA_GROWTH_AGENT_DEMO_MODE"] = "true"
+os.environ["NOVA_GROWTH_AGENT_WIDGET_ENABLED"] = "true"
 os.environ.setdefault("TESTING", "true")
 
 from app.auth import SEED_PASSWORD, ensure_auth_schema, seed_default_users
@@ -63,3 +64,14 @@ def test_disabled_flag_returns_404(monkeypatch: pytest.MonkeyPatch, client: Test
     headers = _headers(client)
     res = client.get("/api/nova/growth-agent/health", headers=headers)
     assert res.status_code == 404
+
+
+def test_widget_chat_requires_widget_flag(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_WIDGET_ENABLED", "false")
+    res = client.post(
+        "/api/nova/growth-agent/widget/chat",
+        json={"token": "not-a-real-token", "message": "hi"},
+    )
+    assert res.status_code == 404
+    detail = res.json()["detail"]
+    assert "widget" in (detail if isinstance(detail, str) else str(detail)).lower()

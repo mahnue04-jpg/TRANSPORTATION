@@ -86,3 +86,8 @@ class BookIn(OrgScoped):
     idempotency_key: str
     conversation_id: str | None = None
     is_synthetic_demo: bool = False
+
+
+class RescheduleIn(OrgScoped):
+    starts_at_utc: str
+    idempotency_key: str
