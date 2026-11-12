@@ -37,7 +37,9 @@ def _dependencies(route):
 
 
 def test_all_three_workflows_are_registered_in_combined_router():
+    before_count = len(integrated_app.routes)
     _nova_repair_finance_routes_after_import(integrated_app)
+    after_count = len(integrated_app.routes)
     work = _methods(integrated_app)
     v3 = _methods(v3_router)
     required = (
@@ -59,7 +61,9 @@ def test_all_three_workflows_are_registered_in_combined_router():
             f"owner_router_registered={hasattr(work_router_module, 'owner_csv_router')}; "
             f"owner_route_count={len(owner_api_module.router.routes)}; "
             f"work_router_route_count={len(work_router.routes)}; "
-            f"app_route_count={len(integrated_app.routes)}"
+            f"app_route_count={len(integrated_app.routes)}; "
+            f"app_before={before_count}; app_after={after_count}; "
+            f"child_path_samples={[route.path for route in owner_api_module.router.routes[:5]]}"
         )
     assert ("POST", "/api/nova/v3/live/jobs/autopilot-cycle") in v3
 
