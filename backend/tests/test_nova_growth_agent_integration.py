@@ -507,3 +507,44 @@ def test_widget_contact_and_conversation_inherit_synthetic_profile(db):
     assert len(leads) == 1
     assert leads[0]["is_synthetic_demo"] is True
     assert conv["is_synthetic_demo"] is True
+
+
+def test_booking_inherits_synthetic_label_from_contact_even_if_caller_omits_flag(db):
+    """Prevent default-false booking requests from mislabeling demo appointments."""
+    from datetime import datetime, timedelta, timezone
+
+    svc = GrowthAgentService(db)
+    org = "org-synthetic-booking"
+    svc.upsert_profile(
+        org, "owner-synthetic",
+        {
+            "business_name": "Cedar Ridge Synthetic",
+            "website": "https://synthetic.example",
+            "timezone": "America/Chicago",
+            "operating_hours": {"mon_fri": "09:00-17:00"},
+            "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+            "faqs": [{"id": "hours", "question": "Hours?", "keywords": ["hours"], "answer": "9 to 5"}],
+            "contact_email": "owner@synthetic.example",
+            "escalation_settings": {"handoff_on_unknown": True},
+            "is_synthetic_demo": True,
+        },
+        activate=True,
+    )
+    contact = svc._upsert_contact(
+        org, name="Test Visitor", email="visitor@synthetic.example",
+        consent_transactional=True, is_synthetic_demo=True,
+    )
+    db.commit()
+    # Future weekday morning UTC avoids dependence on dates of existing rows.
+    monday = datetime(2027, 1, 4, 15, 0, tzinfo=timezone.utc)
+    booking = svc.book_appointment(
+        org,
+        contact_id=contact.id,
+        service_code="consult",
+        starts_at_utc=monday.isoformat().replace("+00:00", "Z"),
+        idempotency_key="synthetic-booking-default-false",
+    )
+    assert booking["status"] == "confirmed"
+    assert booking["is_synthetic_demo"] is True
+    listed = svc.list_appointments(org)
+    assert any(a["id"] == booking["id"] and a["is_synthetic_demo"] for a in listed)
