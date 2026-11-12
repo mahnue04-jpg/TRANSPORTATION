@@ -31,4 +31,9 @@ def test_private_video_playback_diagnostics_are_visible_and_no_payment_is_trigge
     assert 'video.addEventListener("error"' in js
     assert 'Preview unavailable (' in js
     assert 'startPlayback && video.src && video.readyState >= 1' in js
-    assert "creative.js?v=private-video-playback-diagnostics-20261112" in html
+    assert "creative.js?v=private-video-csp-blob-playback-20261112" in html
+    assert 'new Blob([blob], {type: "video/mp4"})' in js
+    assert "media-src allows blob" in js or "media-src blob:" in js
+    assert "Load and listen (free)" in js
+    assert "data-private-audio-url=" in js
+    assert "private-studio-s3://" in js

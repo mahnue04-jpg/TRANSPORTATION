@@ -237,9 +237,37 @@
       (state.candidate_audio || []).forEach(function (item) {
         var row = document.createElement("div"); row.className = "actions wrap";
         var title = document.createElement("span"); title.textContent = item.title + (item.matches_saved_script === false ? " — does not match the latest saved presenter script" : "");
+        var player = document.createElement("audio"); player.controls = true; player.playsInline = true; player.preload = "metadata";
+        player.setAttribute("aria-label", "Approved or candidate narration preview");
         var listen = document.createElement("button"); listen.type = "button"; listen.className = "secondary";
-        listen.textContent = "Download narration to review";
+        listen.textContent = "Load and listen (free)";
         listen.addEventListener("click", async function () {
+          if (activeProjectId !== p) return;
+          listen.disabled = true;
+          try {
+            var path = "/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file";
+            assertDownloadUrlHasNoToken(path);
+            var shared = session();
+            var headers = {};
+            if (token()) headers.Authorization = "Bearer " + token();
+            var response = shared && typeof shared.authFetch === "function"
+              ? await shared.authFetch(path, {method: "GET", headers: headers})
+              : await fetch(path, {method: "GET", headers: headers});
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            var mediaType = (response.headers.get("content-type") || "audio/mpeg").split(";")[0].trim();
+            var blob = await response.blob();
+            if (!blob.size) throw new Error("Empty narration file");
+            var objectUrl = URL.createObjectURL(new Blob([blob], {type: mediaType || "audio/mpeg"}));
+            privateVideoPreviewUrls.push(objectUrl);
+            player.src = objectUrl;
+            player.load();
+            try { await player.play(); } catch (playErr) { /* autoplay may be blocked; controls remain */ }
+          } catch (error) { showBanner(error.message || "Could not load narration preview.", false); }
+          finally { listen.disabled = false; }
+        });
+        var downloadBtn = document.createElement("button"); downloadBtn.type = "button"; downloadBtn.className = "secondary";
+        downloadBtn.textContent = "Download narration";
+        downloadBtn.addEventListener("click", async function () {
           if (activeProjectId !== p) return;
           try { await downloadProtectedAsset("/api/nova/creative/projects/" + encodeURIComponent(p) + "/assets/" + encodeURIComponent(item.asset_id) + "/file", item.filename || "genova-narration.wav"); }
           catch (error) { showBanner(error.message, false); }
@@ -255,7 +283,7 @@
             if (activeProjectId === p) { await genovaNarrationChoices(); await checkGenovaAvatarReadiness(); }
           } catch (error) { if (activeProjectId === p) { target.textContent = "Narration approval failed: " + error.message; approve.disabled = false; } }
         });
-        row.appendChild(title); row.appendChild(listen); row.appendChild(approve); target.appendChild(row);
+        row.appendChild(title); row.appendChild(player); row.appendChild(listen); row.appendChild(downloadBtn); row.appendChild(approve); target.appendChild(row);
       });
       if (!(state.candidate_audio || []).length) target.appendChild(document.createTextNode(" No saved narration is available in this project."));
     } catch (error) { if (activeProjectId === p) target.textContent = "Could not load narration: " + error.message; }
@@ -1578,15 +1606,19 @@
           licenseNote = "<p class=\"hint\">PREVIEW_ONLY. Presenter NOT USED. Lip-sync presenter: no. Commercial-use clearance: " +
             escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
         }
-        var isPrivateImportedVideo = (row.metadata || {}).source === "owner_video_import";
-        var videoSourceAttr = isPrivateImportedVideo
+        var rawVideoUrl = String(row.url || "");
+        var isPrivateImportedVideo = (row.metadata || {}).source === "owner_video_import"
+          || rawVideoUrl.indexOf("private-studio://") === 0
+          || rawVideoUrl.indexOf("private-studio-s3://") === 0
+          || (!!filePath && rawVideoUrl.indexOf("/api/") !== 0 && !/^https?:\/\//i.test(rawVideoUrl) && mediaAvailable);
+        var videoSourceAttr = isPrivateImportedVideo && filePath
           ? ("data-private-video-url=\"" + escapeHtml(filePath) + "\"")
           : ("src=\"" + escapeHtml(row.url) + "\"");
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" " + videoSourceAttr +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p></div>" : "") + licenseNote + downloadControl + captionControl;
+          "</figure>" + (isPrivateImportedVideo && filePath ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p></div>" : "") + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
@@ -1596,9 +1628,15 @@
           ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
             escapeHtml(audioPath) + "\" data-download-name=\"" + audioName + "\">Download voice</button>")
           : ("<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
-        var privateAudio = (row.metadata || {}).source === "owner_audio_upload";
-        media = privateAudio
-          ? "<p class=\"hint\">Private recording. Download voice to listen, then use the narration approval section.</p>" + audioControl
+        var privateAudio = (row.metadata || {}).source === "owner_audio_upload"
+          || String(row.url || "").indexOf("private-studio://") === 0
+          || String(row.url || "").indexOf("private-studio-s3://") === 0;
+        media = privateAudio && audioPath
+          ? ("<div class=\"generated-media\"><audio controls playsinline preload=\"metadata\" data-private-audio-url=\"" +
+            escapeHtml(audioPath) + "\"></audio></div>" +
+            "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-audio-retry\">Load and listen (free)</button>" +
+            "<p class=\"hint private-audio-status\" role=\"status\" aria-live=\"polite\">Loading protected narration…</p></div>" +
+            "<p class=\"hint\">Private recording. Listen here or download, then approve in the narration section.</p>" + audioControl)
           : "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
             escapeHtml(row.url) + "\"></audio></div>" + audioControl;
       }
@@ -1642,7 +1680,11 @@
         previewStatus("Video ready: " + (isFinite(video.duration) ? Math.round(video.duration) + " seconds" : "duration unknown") + ". Press Play.");
       });
       video.addEventListener("error", function () {
-        previewStatus("Chrome could not play this saved MP4. Download still works; verify the browser supports its video codec.");
+        var code = video.error && video.error.code;
+        var detail = code === 4
+          ? "Browser refused this media source (codec or Content-Security-Policy media-src). Download still works."
+          : "Chrome could not play this saved MP4. Download still works; verify H.264/AAC and that media-src allows blob:.";
+        previewStatus(detail);
       });
       async function loadPrivatePreview(startPlayback) {
         if (loading) return;
@@ -1664,26 +1706,30 @@
             ? await shared.authFetch(path, {method: "GET", headers: headers})
             : await fetch(path, {method: "GET", headers: headers});
           var mediaType = response.headers && response.headers.get("content-type") || "";
+          var expectedLength = Number(response.headers && response.headers.get("content-length") || 0);
           if (!response.ok) throw new Error("HTTP " + response.status);
-          if (!mediaType.startsWith("video/")) throw new Error("Unexpected media content type");
+          if (!mediaType.toLowerCase().startsWith("video/")) throw new Error("Unexpected media content type: " + mediaType);
           var blob = await response.blob();
           if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
-          if (!blob.size || (blob.type && !blob.type.startsWith("video/"))) {
-            throw new Error("Empty or unsupported private video preview");
+          if (!blob.size) throw new Error("Empty private video preview");
+          if (expectedLength > 0 && blob.size !== expectedLength) {
+            throw new Error("Incomplete download (" + blob.size + " of " + expectedLength + " bytes)");
           }
-          var objectUrl = URL.createObjectURL(blob);
+          // Normalize MIME so Chrome does not inherit an empty or attachment-derived type.
+          var playable = new Blob([blob], {type: "video/mp4"});
+          var objectUrl = URL.createObjectURL(playable);
           privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;
           video.load();
           // Do not revoke the blob after loadeddata: playback and seeking still need it.
-          previewStatus("MP4 received (" + Math.round(blob.size / 1024) + " KB). Loading video metadata…");
+          previewStatus("MP4 received (" + Math.round(playable.size / 1024) + " KB). Loading video metadata…");
           if (startPlayback) {
             try { await video.play(); } catch (err) {
-              previewStatus("MP4 downloaded, but Chrome could not start playback. Check the browser's supported codec.");
+              previewStatus("MP4 downloaded, but Chrome could not start playback. Check codec support and media-src blob: CSP.");
             }
           }
         } catch (err) {
-          previewStatus("Preview unavailable (" + (err && err.message || "media error") + "). The protected Download AI video button remains available.");
+          previewStatus("Preview unavailable (" + (err && err.message || "media error") + "). Use Load and play again, or the protected Download button.");
           video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
         } finally {
           loading = false;
@@ -1692,6 +1738,64 @@
       }
       if (playButton) playButton.addEventListener("click", function () { loadPrivatePreview(true); });
       loadPrivatePreview(false);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-audio-url]"), function (audio) {
+      var projectId = activeProjectId;
+      var container = audio.parentElement && audio.parentElement.parentElement;
+      var status = container && container.querySelector(".private-audio-status");
+      var playButton = container && container.querySelector(".private-audio-retry");
+      var loading = false;
+      function previewStatus(message) { if (status) status.textContent = message; }
+      audio.addEventListener("loadedmetadata", function () {
+        previewStatus("Narration ready: " + (isFinite(audio.duration) ? Math.round(audio.duration) + " seconds" : "duration unknown") + ". Press Play.");
+      });
+      audio.addEventListener("error", function () {
+        previewStatus("Browser could not play this narration preview. Download still works.");
+      });
+      async function loadPrivateAudio(startPlayback) {
+        if (loading) return;
+        if (startPlayback && audio.src && audio.readyState >= 1) {
+          try { await audio.play(); } catch (err) { previewStatus("Playback was blocked by this browser."); }
+          return;
+        }
+        loading = true;
+        if (playButton) playButton.disabled = true;
+        previewStatus("Loading narration securely…");
+        try {
+          var path = audio.getAttribute("data-private-audio-url");
+          assertDownloadUrlHasNoToken(path);
+          var shared = session();
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = shared && typeof shared.authFetch === "function"
+            ? await shared.authFetch(path, {method: "GET", headers: headers})
+            : await fetch(path, {method: "GET", headers: headers});
+          var mediaType = response.headers && response.headers.get("content-type") || "";
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          if (!mediaType.toLowerCase().startsWith("audio/") && !mediaType.toLowerCase().startsWith("video/")) {
+            throw new Error("Unexpected media content type: " + mediaType);
+          }
+          var blob = await response.blob();
+          if (activeProjectId !== projectId || !$("asset-list").contains(audio)) return;
+          if (!blob.size) throw new Error("Empty narration preview");
+          var playable = new Blob([blob], {type: mediaType.split(";")[0].trim() || "audio/mpeg"});
+          var objectUrl = URL.createObjectURL(playable);
+          privateVideoPreviewUrls.push(objectUrl);
+          audio.src = objectUrl;
+          audio.load();
+          previewStatus("Narration received (" + Math.round(playable.size / 1024) + " KB). Loading metadata…");
+          if (startPlayback) {
+            try { await audio.play(); } catch (err) { previewStatus("Narration loaded; press Play if autoplay was blocked."); }
+          }
+        } catch (err) {
+          previewStatus("Narration preview unavailable (" + (err && err.message || "media error") + "). Use Download voice.");
+        } finally {
+          loading = false;
+          if (playButton) playButton.disabled = false;
+        }
+      }
+      if (playButton) playButton.addEventListener("click", function () { loadPrivateAudio(true); });
+      loadPrivateAudio(false);
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");

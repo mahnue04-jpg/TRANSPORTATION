@@ -1,0 +1,43 @@
+{
+  "blocked": {
+    "final": {
+      "readyState": 0,
+      "networkState": 3,
+      "duration": null,
+      "currentTime": 0,
+      "paused": true,
+      "error": {
+        "code": 4,
+        "message": "MEDIA_ELEMENT_ERROR: Media load rejected by URL safety check"
+      }
+    },
+    "status_text": "CSP page: blocked (expect media-src violation for blob:)\nfetch status: 200 type=video/mp4\nblob size=22298 type=video/mp4\nobjectURL=blob:http://127.0.0.1:8877/8aa11c71-39e8-424b-b243-b8263a6387ee\nload event: error\nplay() rejected: NotSupportedError The element has no supported sources.\nFINAL: duration=NaN currentTime=0 readyState=0 networkState=3 paused=true error={\"code\":4,\"message\":\"MEDIA_ELEMENT_ERROR: Media load rejected by URL safety check\"}",
+    "csp_violations": [
+      {
+        "violatedDirective": "media-src",
+        "effectiveDirective": "media-src",
+        "blockedURI": "blob",
+        "disposition": "enforce",
+        "originalPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+      },
+      {
+        "type": "console",
+        "text": "Loading media from  'blob:http://127.0.0.1:8877/8aa11c71-39e8-424b-b243-b8263a6387ee' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked."
+      }
+    ],
+    "screenshot": "/opt/cursor/artifacts/studio-csp-blocked.png"
+  },
+  "allowed": {
+    "final": {
+      "readyState": 4,
+      "networkState": 1,
+      "duration": 2,
+      "currentTime": 0.723387,
+      "paused": false,
+      "error": null
+    },
+    "status_text": "CSP page: allowed (media-src includes blob:)\nfetch status: 200 type=video/mp4\nblob size=22298 type=video/mp4\nobjectURL=blob:http://127.0.0.1:8877/b8df11e8-6d99-449c-bec4-62ae848cad6b\nload event: loadedmetadata\nplay(): resolved\nFINAL: duration=2 currentTime=0.723387 readyState=4 networkState=1 paused=false error=null",
+    "csp_violations": [],
+    "screenshot": "/opt/cursor/artifacts/studio-csp-allowed.png"
+  }
+}

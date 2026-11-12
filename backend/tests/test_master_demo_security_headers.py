@@ -75,6 +75,30 @@ async def test_workspace_generated_audio_allowed_without_remote_media_or_script_
     assert 'https:' not in policy
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/nova/creative",
+        "/nova/creative/",
+        "/static/nova-creative/index.html",
+        "/static/nova-creative/creative.js",
+    ],
+)
+@pytest.mark.asyncio
+async def test_creative_studio_allows_authenticated_blob_media_previews(path):
+    """Private MP4/audio previews use fetch→blob URLs; CSP must allow media-src blob:."""
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        return SimpleNamespace(headers={})
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
+    policy = response.headers["Content-Security-Policy"]
+    assert "media-src 'self' blob:;" in policy
+    assert "connect-src 'self'" in policy
+    assert "https:" not in policy
+
+
 @pytest.mark.asyncio
 async def test_generated_audio_permission_does_not_expand_other_routes():
     middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)

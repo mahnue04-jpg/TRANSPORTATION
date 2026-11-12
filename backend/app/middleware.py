@@ -109,6 +109,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Generated Workspace speech uses a local Blob URL, never a remote media host.
         if request.url.path.rstrip("/") == "/nova/workspace":
             headers["Content-Security-Policy"] += " media-src 'self' blob:;"
+        # Creative Studio private MP4 / narration previews use authenticated fetch → blob: URLs.
+        # Without media-src blob:, Chrome keeps a black HTML5 player at 0:00 while downloads still work.
+        path = request.url.path.rstrip("/")
+        if path == "/nova/creative" or path.startswith("/static/nova-creative"):
+            if "media-src" not in headers["Content-Security-Policy"]:
+                headers["Content-Security-Policy"] += " media-src 'self' blob:;"
         if request.url.path.rstrip("/") == "/nova/synapse":
             from app.core.nova.synapse.router import provider_origin
             origin = provider_origin()

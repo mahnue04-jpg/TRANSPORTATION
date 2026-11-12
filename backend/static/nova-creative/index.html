@@ -439,6 +439,7 @@
         <p class="hint">Import your completed MP4 into this project without generating or buying media. Import preserves existing scripts and approvals. Check narration, captions, licensing and publishing approval separately.</p>
         <label>Finished MP4 (H.264/AAC, up to 128 MB and 120 seconds)<input id="finished-video-file" type="file" accept="video/mp4,.mp4" /></label>
         <button type="button" id="import-finished-video" class="secondary">Import finished video (free)</button>
+        <p class="hint">After import, use <strong>Load and play saved video (free)</strong> under the asset. Status text reports duration or the exact recovery error. If the player stays black, hard-refresh once so the browser loads the current Studio script and CSP. Downloaded MP4 remains available as a backup.</p>
       </section>
       <details class="studio-details" aria-label="Operations Agent narration quality review">
         <summary>30s Operations Agent narration QC — owner review required</summary>
@@ -462,7 +463,7 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=private-video-playback-diagnostics-20261112"></script>
+  <script src="/static/nova-creative/creative.js?v=private-video-csp-blob-playback-20261112"></script>
   <script src="/static/nova-creative/calendar.js?v=20261108"></script>
 </body>
 </html>

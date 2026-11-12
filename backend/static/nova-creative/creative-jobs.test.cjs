@@ -662,7 +662,8 @@ test('authenticated MP4 preview retains its blob URL through metadata/playback a
   const ctx = vm.createContext({
     activeProjectId: 'p1',
     $: id => id === 'asset-list' ? assets : null,
-    document: {querySelectorAll: () => [preview]},
+    document: {querySelectorAll: (sel) => sel.indexOf('private-audio') >= 0 ? [] : [preview]},
+    Blob: function Blob(parts, options) { this.size = parts[0] && parts[0].size || 0; this.type = options && options.type || ''; },
     URL: {
       createObjectURL: () => 'blob:protected-preview',
       revokeObjectURL: value => { released.push(value); },
@@ -673,7 +674,7 @@ test('authenticated MP4 preview retains its blob URL through metadata/playback a
       assert.equal(options.headers.Authorization, 'Bearer test-bearer');
       return {
         ok: true,
-        headers: {get: () => 'video/mp4'},
+        headers: {get: (name) => name === 'content-length' ? '1024' : 'video/mp4'},
         blob: async () => ({size: 1024, type: 'video/mp4'}),
       };
     },
