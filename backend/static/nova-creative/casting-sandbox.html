@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+  <link rel="stylesheet" href="/static/nova-language/surface.css" />
   <style>
     #playback { display: block; width: 100%; max-height: 240px; margin-top: 12px; background: #111; }
     button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
@@ -35,6 +36,24 @@
   </header>
   <main class="studio-main">
     <p class="disclaimer">Disposable test workflow for an authenticated Nova account. Not a public audition portal. No relationship or integration with Zeus. Campaigns stay unpublished, callbacks are recorded only, and no invitation is sent.</p>
+    <section class="nova-language-bar" aria-label="Screen language" data-nova-language-surface="casting-sandbox">
+      <label for="screen-language">Screen language</label>
+      <select id="screen-language" aria-label="Screen language">
+        <option value="en">English</option>
+        <option value="so">Af-Soomaali</option>
+        <option value="ar">العربية</option>
+        <option value="fr">Français</option>
+        <option value="es">Español</option>
+        <option value="ja" data-rollout="planned">日本語</option>
+        <option value="ko" data-rollout="planned">한국어</option>
+        <option value="el" data-rollout="planned">Ελληνικά</option>
+        <option value="ru" data-rollout="planned">Русский</option>
+        <option value="de" data-rollout="planned">Deutsch</option>
+      </select>
+      <p id="language-fallback" class="hint">If this screen cannot show the selected language, the original text stays in place.</p>
+      <p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
+      <p class="hint">Live voice interpretation is not available. Bidirectional conversation translation is not available yet.</p>
+    </section>
     <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
     <p id="status" class="hint" aria-live="polite">Loading sandbox readiness.</p>
     <p id="scanner-readiness" class="hint" aria-live="polite">Scanner readiness has not been checked.</p>
@@ -146,6 +165,8 @@
       <p class="hint">A size without a file stays quarantined. An uploaded file is scanned, stored outside public hosting, and played only for this signed-in account. No signed URL is created.</p>
     </section>
   </main>
+  <script src="/static/nova-language/preference.js?v=20261022.3"></script>
+  <script src="/static/nova-language/surface.js?v=20261022.3"></script>
   <script>
     (function () {
       var tokenKey = "amicor_nova_creative_token";
