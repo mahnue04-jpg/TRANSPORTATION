@@ -40,8 +40,7 @@ def reconcile():
         raise RuntimeError("Application router wiring changed; manual review")
     if NEEDED not in s:
         s = s.replace(ANCHOR, BLOCK + ANCHOR, 1)
-    lifespan_anchor = "async def lifespan(app: FastAPI):\\n"
-    lifespan_anchor = lifespan_anchor.replace("\\\\n", "\\n")
+    lifespan_anchor = "async def lifespan(app: FastAPI):"
     if s.count(lifespan_anchor) != 1:
         raise RuntimeError("Custom application lifespan anchor changed")
     helper_name = "_nova_repair_finance_routes_after_import"
@@ -73,7 +72,7 @@ def reconcile():
 
 '''
         s = s.replace(lifespan_anchor, helper + lifespan_anchor, 1)
-        s = s.replace(lifespan_anchor, lifespan_anchor + "    _nova_repair_finance_routes_after_import(app)\\n", 1)
+        s = s.replace(lifespan_anchor, lifespan_anchor + "\n    _nova_repair_finance_routes_after_import(app)\n", 1)
     MAIN.write_text(s, encoding="utf-8")
     subprocess.run(["git", "add", str(MAIN)], check=True)
     print("CI only: guarded owner routes plus deferred custom-lifespan reconciliation.")
