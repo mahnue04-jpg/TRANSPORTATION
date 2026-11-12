@@ -2701,7 +2701,8 @@ if os.path.isdir(_static_dir):
 _nova_media_configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
 if _nova_media_configured:
     _nova_media_dir = _nova_media_configured
-elif os.path.isdir("/data/onboarding_docs"):
+elif os.path.ismount("/data"):
+    # The mount may exist before /data/onboarding_docs is created.
     _nova_media_dir = "/data/onboarding_docs/nova_creative_media"
 else:
     _nova_media_dir = os.path.join(_static_dir, "generated", "nova-creative")
