@@ -22,7 +22,7 @@ from app.core.nova.work_revenue import operations_owner_csv_api as owner_api_mod
 def _methods(router):
     result = {}
     for route in router.routes:
-        if isinstance(route, APIRoute):
+        if getattr(route, "path", None) and getattr(route, "methods", None):
             for method in route.methods:
                 if method not in {"HEAD", "OPTIONS"}:
                     key = (method, route.path)
