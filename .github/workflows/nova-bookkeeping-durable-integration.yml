@@ -20,6 +20,8 @@ on:
       - "backend/tests/nova_bookkeeping_console.test.cjs"
       - "backend/tests/nova_bookkeeping_session.test.cjs"
       - "backend/migrations/versions/20261111_nova_bookkeeping_consent.py"
+      - "render.nova-accounting-staging.proposed.yaml"
+      - "backend/tests/test_nova_accounting_staging_blueprint.py"
       - ".github/workflows/nova-bookkeeping-durable-integration.yml"
   pull_request:
     paths:
@@ -70,6 +72,11 @@ jobs:
         run: |
           node --check static/nova-work/bookkeeping.js
           node --test tests/nova_bookkeeping_console.test.cjs tests/nova_bookkeeping_session.test.cjs
+      - name: Verify isolated staging blueprint is default-off and separate from production
+        run: |
+          python -m pip install PyYAML
+          python -m pytest -v -rs tests/test_nova_accounting_staging_blueprint.py
+          echo "Staging Blueprint is a PROPOSAL only. Render resources have not been provisioned." >> "$GITHUB_STEP_SUMMARY"
       - name: Compile modified bookkeeping and CSV modules
         run: |
           python -m compileall -q app/core/nova/work_revenue/bookkeeping_*.py app/core/nova/work_revenue/operations_customer_csv_jobs.py app/core/nova/work_revenue/operations_owner_csv_api.py
