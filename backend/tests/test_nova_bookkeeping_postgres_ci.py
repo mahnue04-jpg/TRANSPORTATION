@@ -475,6 +475,7 @@ def test_staging_preflight_on_disposable_postgres(pg):
             "NOVA_OPERATIONS_DURABLE_CSV_ENABLED": "false",
         },
         engine=engine, verified_staging_identity=True,
+        approved_database_name="nova_bookkeeping_ephemeral",
         signed_consent_process_reviewed=False,
     )
     checks = {item["check"]: item["passed"] for item in report["checks"]}
