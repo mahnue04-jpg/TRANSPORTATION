@@ -132,11 +132,18 @@ def inspect_staging_readiness(
                             schema_ok = False
                             break
                 if schema_ok:
-                    unique_names = {
+                    consent_uniques = {
                         item.get("name") for item in
                         inspector.get_unique_constraints(consents.name)
                     }
-                    schema_ok = "uq_nova_bookkeeping_consent_scope" in unique_names
+                    job_uniques = {
+                        item.get("name") for item in
+                        inspector.get_unique_constraints(csv_jobs.jobs.name)
+                    }
+                    schema_ok = (
+                        "uq_nova_bookkeeping_consent_scope" in consent_uniques
+                        and "uq_nova_customer_csv_request" in job_uniques
+                    )
             valid_db_name = db_name == approved_database_name
             findings.append(_check(
                 "postgres_tables_verified",
