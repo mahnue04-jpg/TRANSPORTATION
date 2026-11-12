@@ -642,3 +642,50 @@ test('switching projects revokes the saved shot playback blob', () => {
   assert.deepEqual(revoked, ['blob:old-shot']);
   assert.equal(ctx.firstShotPreviewUrl, null);
 });
+
+
+test('authenticated MP4 preview retains its blob URL through metadata/playback and cleans up on replacement', async () => {
+  const start = source.indexOf('    Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]")');
+  const end = source.indexOf('    Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video")', start);
+  assert.ok(start > 0 && end > start, 'protected preview handler found');
+  const lifecycle = source.slice(source.indexOf('  var privateVideoPreviewUrls = []'), source.indexOf('  function setActiveProjectId('));
+  const events = {};
+  const released = [];
+  const preview = {
+    src: '', loads: 0, attrs: {'data-private-video-url': '/api/nova/creative/projects/p1/assets/a1/file'},
+    getAttribute(name) { return this.attrs[name]; },
+    setAttribute(name, value) { this.attrs[name] = value; },
+    addEventListener(name, handler) { events[name] = handler; },
+    load() { this.loads += 1; },
+  };
+  const assets = {contains(element) { return element === preview; }};
+  const ctx = vm.createContext({
+    activeProjectId: 'p1',
+    $: id => id === 'asset-list' ? assets : null,
+    document: {querySelectorAll: () => [preview]},
+    URL: {
+      createObjectURL: () => 'blob:protected-preview',
+      revokeObjectURL: value => { released.push(value); },
+    },
+    session: () => null, token: () => 'test-bearer',
+    assertDownloadUrlHasNoToken: value => assert.doesNotMatch(value, /token=/),
+    fetch: async (_url, options) => {
+      assert.equal(options.headers.Authorization, 'Bearer test-bearer');
+      return {
+        ok: true,
+        headers: {get: () => 'video/mp4'},
+        blob: async () => ({size: 1024, type: 'video/mp4'}),
+      };
+    },
+  });
+  vm.runInContext(lifecycle + source.slice(start, end), ctx);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(preview.src, 'blob:protected-preview');
+  assert.equal(preview.loads, 1);
+  if (events.loadeddata) events.loadeddata();
+  assert.deepEqual(released, [], 'metadata load cannot invalidate playback URL');
+  ctx.clearPrivateVideoPreviewUrls();
+  assert.deepEqual(released, ['blob:protected-preview'], 'replacing assets releases preview exactly once');
+  ctx.clearPrivateVideoPreviewUrls();
+  assert.equal(released.length, 1);
+});
