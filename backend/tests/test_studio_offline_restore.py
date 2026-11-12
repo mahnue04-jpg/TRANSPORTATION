@@ -127,3 +127,24 @@ def test_unrelated_archive_root_is_rejected(backups, tmp_path):
         tar.addfile(info, io.BytesIO(data))
     with pytest.raises(restore.RestoreBlocked, match="UNSAFE_MEDIA_ARCHIVE_ENTRY"):
         restore.verify(db, bad)
+
+
+def test_declared_oversize_media_archive_member_is_rejected(backups, monkeypatch):
+    db, archive = backups
+    real_open = restore.tarfile.open
+    class OversizedMedia:
+        def __init__(self):
+            self.context = None
+        def __enter__(self):
+            self.context = real_open(archive, mode="r:gz")
+            self.context.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.context.__exit__(*args)
+        def __iter__(self):
+            member = self.context.next()
+            member.size = 8 * 1024 * 1024 * 1024 + 1
+            yield member
+    monkeypatch.setattr(restore.tarfile, "open", lambda *args, **kwargs: OversizedMedia())
+    with pytest.raises(restore.RestoreBlocked, match="MEDIA_ARCHIVE_LIMIT_EXCEEDED"):
+        restore.verify(db, archive)
