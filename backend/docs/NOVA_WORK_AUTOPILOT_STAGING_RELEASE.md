@@ -96,3 +96,39 @@ occurs. Regression tests use disposable PostgreSQL only.
 Before declaring the live autopilot operational, externally verify the
 actual job trigger, execution timestamps, source availability, saved
 legitimate opportunities, alerting on missed runs and safe shutdown.
+
+
+## Render cron deployment proposal — November 12, 2026
+
+Added `render.nova-work-autopilot-cron.proposed.yaml`, which is NOT part of
+the existing root production `render.yaml` and has not been synchronized
+to Render. It specifies a proposed paid `0.5c-512mb` cron service on
+the Work & Revenue draft branch, with automatic deployment OFF and the
+staging execution flag FALSE. No owner account, provider key, or financial
+credentials are committed. It points at the separately proposed isolated
+accounting PostgreSQL resource from PR #484; that database is not deployed.
+
+Render cron schedules are evaluated in UTC. The proposed `0 10,11 * * *`
+invokes at both possible UTC hours corresponding to 5 a.m. US Central
+across daylight saving changes, while the application guard allows the
+5 a.m. local execution only. The extra blocked invocation can still add
+billable running time; it is not a cost-free scheduler. Render documents
+a minimum $1/month per cron service in addition to usage-based charges.
+Actual costs and any database/storage costs must be approved before
+provisioning.
+
+Four new CI checks validate that this proposal is separate from production,
+has no embedded credentials, has all execution/paid flags OFF, and handles
+summer/winter UTC-to-Central conversion. A successful cron Blueprint test
+does not verify the actual scheduled trigger, provider access, job postings,
+or owner review. Real Render resources were not created.
+
+**Verified acceptance run 43237941256: 23 tests passed** against synthetic
+providers and disposable PostgreSQL (including cron-proposal checks). The
+default-disabled CLI refused to open live connections as expected.
+
+The next work that changes deployment state requires the owner's separate
+specific approval: create a dedicated billable isolated database, web
+staging and cron service, provision secure private storage, apply reviewed
+staging migrations, establish test users and real permission records.
+Only then should an actual deployed run and missed-run alarm be accepted.
