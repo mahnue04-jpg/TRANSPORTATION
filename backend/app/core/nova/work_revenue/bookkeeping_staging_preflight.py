@@ -37,6 +37,8 @@ def inspect_staging_readiness(
     bucket: str | None = None,
     verified_staging_identity: bool = False,
     signed_consent_process_reviewed: bool = False,
+    approved_database_name: str | None = None,
+    approved_bucket_name: str | None = None,
 ) -> dict[str, Any]:
     """Report release blockers; never imply readiness from CI synthetic mocks.
 
@@ -69,15 +71,36 @@ def inspect_staging_readiness(
         ),
     ]
 
-    # Never make an external call if any env declares production or staging
-    # identity is unverified. This remains a pure configuration check.
+    # Independent approval of exact resource names is required.
+    # Merely excluding two known production names is insufficient.
+    forbidden = {"amicor-prod", "amicor-casting-staging-db"}
+    def approved_name(value: str | None) -> bool:
+        return (
+            isinstance(value, str) and bool(value.strip())
+            and value == value.strip() and len(value) <= 128
+            and value.lower() not in forbidden
+        )
     may_inspect = isolated_staging and verified_staging_identity
+    db_identity_ok = may_inspect and approved_name(approved_database_name)
+    bucket_name = bucket or _env_of(config, "AMICOR_DOCUMENT_S3_BUCKET")
+    bucket_identity_ok = (
+        may_inspect and approved_name(approved_bucket_name)
+        and approved_bucket_name == bucket_name
+    )
+    findings.append(_check(
+        "approved_accounting_database_identity", db_identity_ok,
+        "Exact independently approved accounting staging database required",
+    ))
+    findings.append(_check(
+        "approved_private_bucket_identity", bucket_identity_ok,
+        "Exact independently approved private accounting bucket required",
+    ))
     findings.append(_check(
         "operator_verified_staging_identity", verified_staging_identity and isolated_staging,
         "Independent operator confirmation of isolated staging required",
     ))
 
-    if engine is None or not may_inspect:
+    if engine is None or not db_identity_ok:
         findings.append(_check("postgres_tables_verified", False,
                                "No approved isolated staging DB inspection"))
     else:
@@ -87,12 +110,7 @@ def inspect_staging_readiness(
                 dialect_ok = engine.dialect.name == "postgresql"
                 inspector = sa.inspect(connection)
                 names = set(inspector.get_table_names()) if dialect_ok else set()
-            disallowed = {"amicor-prod", "amicor-casting-staging-db"}
-            valid_db_name = (
-                isinstance(db_name, str)
-                and db_name.strip()
-                and db_name.lower() not in disallowed
-            )
+            valid_db_name = db_name == approved_database_name
             findings.append(_check(
                 "postgres_tables_verified",
                 dialect_ok and valid_db_name and _NEEDED_TABLES.issubset(names),
@@ -102,8 +120,7 @@ def inspect_staging_readiness(
             findings.append(_check("postgres_tables_verified", False,
                                    "Unable to verify isolated staging PostgreSQL schema"))
 
-    bucket_name = bucket or _env_of(config, "AMICOR_DOCUMENT_S3_BUCKET")
-    if not may_inspect or s3_client is None or not bucket_name:
+    if not bucket_identity_ok or s3_client is None:
         findings.extend([
             _check("s3_public_access_block", False, "Approved staging bucket inspection missing"),
             _check("s3_default_encryption", False, "Approved staging bucket encryption inspection missing"),
