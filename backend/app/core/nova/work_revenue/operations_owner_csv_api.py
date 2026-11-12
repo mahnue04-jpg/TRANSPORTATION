@@ -600,3 +600,53 @@ def bookkeeping_owner_review_queue(
         }
     except bk_jobs.base.CustomerCSVBlocked as exc:
         _accounting_unavailable(exc)
+
+
+@router.get("/durable/bookkeeping/eligible-tasks")
+def bookkeeping_owner_eligible_tasks(
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Present only exact current, independently verified saved assignments.
+
+    The listing is not itself consent, does not create jobs, and contains no
+    documents, source hashes, invoice figures, or customer file metadata.
+    """
+    try:
+        bk_jobs.require_bookkeeping_runtime(db)
+        from .bookkeeping_scope import consents
+        import sqlalchemy as sa
+        org = str(getattr(owner, "organization_id", "") or "")
+        user_id = str(getattr(owner, "user_id", "") or "")
+        if not org or not user_id or org.lower() == "global":
+            raise HTTPException(403, "Specific owner organization required")
+        candidates = db.execute(sa.select(
+            consents.c.engagement_id, consents.c.task_id, consents.c.work_type,
+        ).where(
+            consents.c.organization_id == org,
+            consents.c.owner_user_id == user_id,
+            consents.c.status == "APPROVED",
+            consents.c.revoked_at.is_(None),
+        ).order_by(consents.c.engagement_id, consents.c.task_id).limit(101)).mappings().all()
+        if len(candidates) > 100:
+            raise HTTPException(409, "Too many authorized assignments; narrow review scope")
+        allowed = []
+        for entry in candidates:
+            try:
+                resolve_bookkeeping_assignment(
+                    db, owner=owner, engagement_id=entry["engagement_id"],
+                    task_id=entry["task_id"], work_type=entry["work_type"],
+                )
+            except ConsentNotVerified:
+                continue
+            allowed.append({
+                "engagement_id": entry["engagement_id"],
+                "task_id": entry["task_id"], "work_type": entry["work_type"],
+                "review_required": True, "execution_authorized": False,
+            })
+        return {
+            "tasks": allowed, "count": len(allowed), "owner_only": True,
+            "execution_authorized": False, "customer_delivery_enabled": False,
+        }
+    except bk_jobs.base.CustomerCSVBlocked as exc:
+        _accounting_unavailable(exc)
