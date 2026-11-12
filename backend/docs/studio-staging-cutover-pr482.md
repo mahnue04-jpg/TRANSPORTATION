@@ -42,6 +42,19 @@ This creates an integrity-checked SQLite snapshot with owner-only file permissio
 
 Do not confuse database asset references with physically retrievable MP4 files. For remote references, confirm authorized access to the bucket and persisted bytes in a separate owner-scoped procedure. For local file references, enumerate and copy the real referenced bytes through a trusted service shell; the inventory output intentionally contains counts only. Keep provider billing off.
 
+
+## Owner-operated staging evidence (2026-11-11; screenshots reviewed)
+
+- The owner used the Render Shell on `nova-studio-validation-350` to confirm the live SQLite file `/data/chat.db` passes `PRAGMA quick_check`, then created a separately integrity-checked SQLite backup on the persistent disk. The source disk remained in use; no database switch was performed.
+- A private media archive of `/data/nova_creative_media` and `/data/nova_creative_media-private-imports` was created, archive-read checked, and SHA-256 hashed. Owner-side counts showed 22 media files and one private-import file before archive creation.
+- The owner transferred three SQLite snapshots and the media archive to a private Windows laptop directory. Each local file had a SHA-256 calculated; screenshots showed matching SHA-256 values against the originals in Render Shell. This is off-Render copy evidence, **not** an isolated restoration or proof of recoverable video playback.
+- The Windows SSH/SCP client emitted a `server gave bad signature for ED25519 key 0: incorrect signature` warning despite successful SSH login and four completed transfers. **Investigate host-key negotiation before relying on this path for subsequent sensitive transfers. Never disable host-key checking to suppress it.**
+- The owner created Cloudflare R2 bucket `amicor-nova-studio-staging`, confirmed public access disabled, and configured a dedicated Account API token with Object Read & Write permission restricted to that bucket. The existing `amicor-prod` bucket was not selected.
+- Render environment changes were saved and applied by an environment-triggered deployment of existing source commit `ba7c548` (not this draft PR). Render Shell reported the four `NOVA_STUDIO_S3_*` settings present and `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE` disabled.
+- From the **actual Render staging instance**, a read-only `list_objects_v2` against the staging R2 bucket returned PASS. A randomized 4 KiB test object was uploaded, downloaded with matching contents, deleted, and cleanup confirmed. This demonstrates S3 endpoint/credentials and basic PUT/GET/DELETE but **not** owner-scoped MP4 playback, video render or provider billing.
+- The active SQLite service emitted `Runtime config validation CRITICAL: missing required vars — [redacted secret vars]` despite a successful primary startup validator and database readiness. The separate legacy runtime validator treated `DATABASE_URL` as mandatory on SQLite. The draft PR now contains a read-only SQLite recognition fix and regression tests; **this fix is not yet deployed to staging**.
+- Before cutover: review diagnostic CI, verify no active render jobs, perform an **isolated restore** of the off-Render backup, inventory real owner media references, confirm a truly empty Neon destination with schema, then obtain explicit owner approval for migration. Neither passing R2 canary nor passing CI authorizes a production switch or paid-provider activation.
+
 ## Access and change gate
 
 1. Identify the existing SQLite database file on the actual Render staging `/data` disk using an authenticated administration channel. The Render management connector can inspect service metadata, but does **not** provide disk-level file access. Do not infer the file path.
