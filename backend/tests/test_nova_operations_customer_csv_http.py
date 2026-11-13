@@ -190,3 +190,17 @@ def test_assignment_revoked_during_upload_never_reserves_job(harness, monkeypatc
     response = client.get("/api/nova/work/operations/durable/jobs")
     assert response.status_code == 200
     assert response.json()["jobs"] == []
+
+
+def test_http_review_rejects_tampered_artifact(harness):
+    """Owner approval must not claim success for corrupt saved CSV output."""
+    client, _, store, _ = harness
+    job_id = create(client, key="http-tamper-approval").json()["job_id"]
+    key = next(iter(store.objects))
+    store.objects[key] = b"corrupt synthetic CSV"
+    response = client.post(
+        f"/api/nova/work/operations/durable/jobs/{job_id}/review",
+        json={"approve": True},
+    )
+    assert response.status_code == 503
+    assert client.get(f"/api/nova/work/operations/durable/jobs/{job_id}").json()["status"] == "AWAITING_REVIEW"
