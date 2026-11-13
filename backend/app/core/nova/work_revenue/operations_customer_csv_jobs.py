@@ -146,6 +146,18 @@ def submit_review_job(
         storage_ref = saved[1]
         if saved[2] != len(result.cleaned_csv.encode("utf-8")):
             raise CustomerCSVBlocked("Artifact size mismatch", 503)
+        # A successful object-store PUT acknowledgement is insufficient.
+        # Read the private artifact back before telling the owner it is ready;
+        # corrupted, truncated or missing objects must never enter review.
+        try:
+            verified_bytes, _ = _store().retrieve(storage_ref=storage_ref)
+        except Exception as exc:
+            raise CustomerCSVBlocked("Saved private artifact cannot be verified", 503) from exc
+        if (
+            len(verified_bytes) != len(result.cleaned_csv.encode("utf-8"))
+            or hashlib.sha256(verified_bytes).hexdigest() != result.output_sha256
+        ):
+            raise CustomerCSVBlocked("Saved private artifact integrity mismatch", 503)
         finalized = db.execute(sa.update(jobs).where(
             jobs.c.id == job_id, jobs.c.status == "PROCESSING",
         ).values(
