@@ -26,6 +26,7 @@
 <a data-nova-i18n="Communications" href="/nova/communications">Communications</a>
 <a data-nova-i18n="Government" href="/nova/government">Government</a>
 <a data-nova-i18n="Business" href="/nova/business">Business</a>
+<a href="#growth-agent-overview">Growth Agent</a>
 <a data-nova-i18n="Accounting" href="/nova/accounting">Accounting</a>
 <a data-nova-i18n="Aging" href="/nova/accounting/aging">Aging</a>
 <a data-nova-i18n="Trends" href="/nova/accounting/trends">Trends</a>
@@ -35,6 +36,19 @@
 </nav>
 </header>
 <main class="ws-main">
+<section class="card" id="growth-agent-overview" aria-labelledby="growth-agent-overview-title">
+<h2 id="growth-agent-overview-title">Growth Agent — Owner Overview</h2>
+<p class="hint">Read-only owner view. Values come from this organization's Growth Agent records; synthetic demonstrations must not be mistaken for real customer revenue.</p>
+<p class="hint" id="growth-agent-status" role="status">Sign in to view your Growth Agent activity.</p>
+<div class="dashboard" id="growth-agent-summary" hidden>
+<div class="item"><strong id="growth-agent-leads">—</strong><div class="muted">Saved leads</div></div>
+<div class="item"><strong id="growth-agent-conversations">—</strong><div class="muted">Conversations</div></div>
+<div class="item"><strong id="growth-agent-appointments">—</strong><div class="muted">Appointments</div></div>
+<div class="item"><strong id="growth-agent-transport">—</strong><div class="muted">Delivery mode</div></div>
+</div>
+<div class="command-actions"><button type="button" id="growth-agent-refresh">Refresh Growth Agent</button><a class="button" href="/nova/growth">Open detailed Growth Agent dashboard</a></div>
+<p class="hint">Approval queue and Creative Studio campaign attribution are planned; they are not connected in this view.</p>
+</section>
 <section class="card language-card">
 <label data-nova-i18n="Screen language" for="screen-language">Screen language</label>
 <select aria-label="Screen language" data-nova-label="Screen language" id="screen-language"><option value="en">English</option><option value="so">Af-Soomaali</option><option value="ar">العربية</option><option value="fr">Français</option><option value="es">Español</option><option value="ja" data-rollout="planned">日本語</option><option value="ko" data-rollout="planned">한국어</option><option value="el" data-rollout="planned">Ελληνικά</option><option value="ru" data-rollout="planned">Русский</option><option value="de" data-rollout="planned">Deutsch</option></select>
@@ -160,5 +174,6 @@
 <script src="/static/nova-workspace/speech.js?v=20261010.1"></script>
 <script src="/static/nova-workspace/workspace.js?v=20261010.1"></script>
 <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>
+<script src="/static/nova-workspace/growth-overview.js?v=20261112.1"></script>
 </body>
 </html>
