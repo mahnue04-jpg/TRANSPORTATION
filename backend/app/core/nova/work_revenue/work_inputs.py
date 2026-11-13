@@ -8,12 +8,14 @@ import io
 import json
 import os
 import re
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
+from app.modules.platform_ops.secure_storage import S3PrivateDocumentStorage, SecureStorageNotConfigured
 from app.core.nova.work_revenue.models import NovaWorkInput
 from app.core.nova.work_revenue.service import NovaWorkError, _record_audit, get_engagement
 from app.helpers import now, uuid4
@@ -29,6 +31,92 @@ _ALLOWED_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/octet-stream",
 }
+
+
+
+_PRIVATE_PREFIX = "s3-private:"
+_RESTRICTED_ENVS = frozenset({"production", "prod"})
+
+
+def _private_inputs_required() -> bool:
+    """Production customer inputs must never silently use local plaintext disk."""
+    envs = {
+        os.getenv(name, "").strip().lower()
+        for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")
+        if os.getenv(name)
+    }
+    return bool(envs & _RESTRICTED_ENVS)
+
+
+def _private_input_store() -> S3PrivateDocumentStorage:
+    if os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", "").strip().lower() != "s3_private":
+        raise NovaWorkError(
+            "Private customer-file storage required before accepting real work",
+            status_code=503,
+        )
+    try:
+        return S3PrivateDocumentStorage()
+    except SecureStorageNotConfigured as exc:
+        raise NovaWorkError("Private customer-file storage unavailable", status_code=503) from exc
+
+
+def _persist_work_bytes(
+    *, organization_id: str, engagement_id: str, input_id: str,
+    filename: str, content_type: str, content: bytes,
+) -> str:
+    if _private_inputs_required() or os.getenv("NOVA_WORK_INPUT_S3_ENABLED", "").strip().lower() == "true":
+        store = _private_input_store()
+        try:
+            _, reference, size = store.store(
+                organization_id=organization_id,
+                application_id=engagement_id,
+                category="nova-work-inputs",
+                filename=f"{input_id}{Path(filename).suffix.lower()}",
+                content_type=content_type,
+                stream=BytesIO(content),
+            )
+            if size != len(content):
+                raise NovaWorkError("Private work input storage size mismatch", status_code=503)
+            retrieved, _ = store.retrieve(storage_ref=reference)
+            if hashlib.sha256(retrieved).digest() != hashlib.sha256(content).digest():
+                raise NovaWorkError("Private work input verification failed", status_code=503)
+            return _PRIVATE_PREFIX + reference
+        except Exception as exc:
+            # Never silently retry sensitive customer data on a local filesystem.
+            if "reference" in locals():
+                try:
+                    store.delete(storage_ref=reference)
+                except Exception:
+                    pass
+            if isinstance(exc, NovaWorkError):
+                raise
+            raise NovaWorkError("Private work input storage failed", status_code=503) from exc
+    destination = _path_for(organization_id, engagement_id, input_id, filename)
+    destination.write_bytes(content)
+    return str(destination)
+
+
+def read_work_input_bytes(row: NovaWorkInput) -> bytes:
+    """Read private or legacy development inputs with integrity verification."""
+    ref = str(row.storage_ref or "")
+    if ref.startswith(_PRIVATE_PREFIX):
+        try:
+            content, _ = _private_input_store().retrieve(storage_ref=ref[len(_PRIVATE_PREFIX):])
+        except Exception as exc:
+            raise NovaWorkError("Private work input unavailable", status_code=503) from exc
+    else:
+        if _private_inputs_required():
+            raise NovaWorkError(
+                "Legacy local work input cannot be processed in production; secure migration required",
+                status_code=503,
+            )
+        path = input_file_path(row)
+        if path is None:
+            raise NovaWorkError("Work input file is not stored", status_code=404)
+        content = path.read_bytes()
+    if len(content) != row.file_size or hashlib.sha256(content).hexdigest() != row.sha256:
+        raise NovaWorkError("Work input integrity verification failed", status_code=503)
+    return content
 
 
 def _safe_token(value: str, limit: int = 120) -> str:
@@ -169,8 +257,11 @@ def create_work_input(
     _validate_file(filename, content_type, content)
     input_id = "NWI-" + uuid4().replace("-", "")[:12].upper()
     digest = hashlib.sha256(content).hexdigest()
-    dest = _path_for(organization_id, engagement_id, input_id, filename)
-    dest.write_bytes(content)
+    storage_ref = _persist_work_bytes(
+        organization_id=organization_id, engagement_id=engagement_id,
+        input_id=input_id, filename=filename, content_type=content_type,
+        content=content,
+    )
     row = NovaWorkInput(
         input_id=input_id,
         organization_id=organization_id,
@@ -180,7 +271,7 @@ def create_work_input(
         content_type=str(content_type or "application/octet-stream")[:120],
         file_size=len(content),
         sha256=digest,
-        storage_ref=str(dest),
+        storage_ref=storage_ref,
         status="AVAILABLE",
         notes=(notes or None),
         is_active=True,
@@ -218,8 +309,11 @@ def create_generated_output(
         raise NovaWorkError("Generated output is empty", status_code=400)
     input_id = "NWO-" + uuid4().replace("-", "")[:12].upper()
     digest = hashlib.sha256(content).hexdigest()
-    dest = _path_for(organization_id, engagement_id, input_id, filename)
-    dest.write_bytes(content)
+    storage_ref = _persist_work_bytes(
+        organization_id=organization_id, engagement_id=engagement_id,
+        input_id=input_id, filename=filename, content_type=content_type,
+        content=content,
+    )
     row = NovaWorkInput(
         input_id=input_id,
         organization_id=organization_id,
@@ -230,7 +324,7 @@ def create_generated_output(
         content_type=str(content_type or "application/octet-stream")[:120],
         file_size=len(content),
         sha256=digest,
-        storage_ref=str(dest),
+        storage_ref=storage_ref,
         status="AVAILABLE",
         notes=(notes or None),
         is_active=True,
@@ -253,20 +347,18 @@ def create_generated_output(
 
 
 def process_tabular_source(row: NovaWorkInput) -> dict[str, Any]:
-    path = input_file_path(row)
-    if path is None:
-        raise NovaWorkError("Source file is not stored", status_code=404)
+    content = read_work_input_bytes(row)
     ext = Path(row.original_filename).suffix.lower()
     if ext not in {".csv", ".xlsx"}:
         raise NovaWorkError("Tabular transformation currently supports CSV and XLSX", status_code=409)
 
     raw_rows: list[list[str]] = []
     if ext == ".csv":
-        text = path.read_bytes().decode("utf-8-sig", errors="replace")
+        text = content.decode("utf-8-sig", errors="replace")
         raw_rows = [[str(cell) for cell in record] for record in csv.reader(io.StringIO(text))]
     else:
         openpyxl = importlib.import_module("openpyxl")
-        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        workbook = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
         sheet = workbook.worksheets[0]
         raw_rows = [
             ["" if cell is None else str(cell) for cell in values]
@@ -418,12 +510,8 @@ def inspect_work_inputs(
     )
     parsed: list[dict[str, Any]] = []
     for row in rows:
-        path = input_file_path(row)
-        if path is None:
-            parsed.append({"input_id": row.input_id, "filename": row.original_filename, "available": False})
-            continue
         try:
-            content = path.read_bytes()
+            content = read_work_input_bytes(row)
             text, diagnostics = _extract_text(row.original_filename, row.content_type, content)
             parsed.append({
                 "input_id": row.input_id,
@@ -432,12 +520,19 @@ def inspect_work_inputs(
                 "text": text,
                 "diagnostics": diagnostics,
             })
+        except NovaWorkError as exc:
+            parsed.append({
+                "input_id": row.input_id,
+                "filename": row.original_filename,
+                "available": False,
+                "parse_error": str(exc)[:400],
+            })
         except Exception as exc:
             parsed.append({
                 "input_id": row.input_id,
                 "filename": row.original_filename,
                 "available": True,
-                "parse_error": str(exc)[:400],
+                "parse_error": type(exc).__name__,
             })
     source_data_available = any(item.get("available") and item.get("text") for item in parsed)
     source_records_exist = bool(rows)
