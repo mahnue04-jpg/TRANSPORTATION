@@ -4,11 +4,33 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>AMICOR Nova Creative Studio</title>
+  <style id="studio-mobile-recovery-style">
+    /* Inline fallback remains visible if external CSS/JS fail on mobile. */
+    #studio-mobile-recovery { display: block; padding: 12px 16px; margin: 12px; border: 1px solid #a57c25; border-radius: 10px; background: #fff9e8; color: #252018; font: 16px/1.5 system-ui, sans-serif; }
+    #studio-mobile-recovery a { color: #173e67; text-decoration: underline; }
+  </style>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-creative/creative.css" />
 </head>
 <body>
+  <div id="studio-mobile-recovery" role="status">AMICOR Nova Creative Studio is loading. If the controls do not appear, <a href="/nova">open Nova Home</a> or try Safari directly. Your saved projects have not been deleted by this page.</div>
+  <script>
+    // The fallback is a diagnostic only; remove it as soon as normal HTML renders.
+    (function () {
+      function clearFallback() {
+        var el = document.getElementById("studio-mobile-recovery");
+        if (el && document.querySelector(".studio-header") && document.querySelector(".studio-main")) {
+          el.parentNode.removeChild(el);
+        }
+      }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", clearFallback, { once: true });
+      } else {
+        clearFallback();
+      }
+    })();
+  </script>
   <header class="studio-header">
     <div class="amicor-brand-lockup">
       <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
