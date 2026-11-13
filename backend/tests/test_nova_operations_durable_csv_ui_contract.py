@@ -47,3 +47,22 @@ def test_saved_job_history_controls_and_reopen_endpoint():
     assert '"/api/nova/work/operations/durable/jobs"' in JS
     assert "await refreshJobStatus()" in JS
     assert "No customer delivery" in JS
+
+
+def test_preview_first_recovery_controls_are_wired_and_explicit():
+    for element_id in (
+        "operations-recovery-preview",
+        "operations-recovery-apply",
+        "operations-recovery-confirm",
+        "operations-recovery-result",
+    ):
+        assert f'id="{element_id}"' in HTML
+        assert f'getElementById("{element_id}")' in JS
+    assert 'id="operations-recovery-apply" disabled' in HTML
+    assert '"/api/nova/work/operations/durable/jobs/recover-stale-batch"' in JS
+    assert 'JSON.stringify({apply: false, limit: 25})' in JS
+    assert 'JSON.stringify({apply: true, limit: 25, expected_job_ids: selected})' in JS
+    assert '"X-Nova-Owner-Action": "recover-previewed-stale-jobs"' in JS
+    assert 'recoveryConfirm.checked' in JS
+    assert 'clearRecoveryPreview();' in JS
+    assert 'No customer files restarted or delivered' in JS
