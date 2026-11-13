@@ -6,7 +6,15 @@
   <title>AMICOR Nova Creative Studio</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
-  <link rel="stylesheet" href="/static/nova-creative/creative.css" />\n<style>
+  <link rel="stylesheet" href="/static/nova-creative/creative.css?v=studio-login-ux-20261112" />\n<style>
+/* Basic page styling survives a blocked/cached stylesheet in the isolated preview. */
+body { margin:0; color:#1c1914; background:#f3efe6; font:16px/1.5 "Segoe UI",Arial,sans-serif; }
+.studio-header,.studio-main {max-width:980px;margin:0 auto;padding:16px 20px}
+.studio-nav {display:flex;flex-wrap:wrap;gap:12px}
+.studio-main > .card {background:#fffdf8;border:1px solid #d9d0c1;border-radius:12px;padding:18px;margin:18px 0}
+.actions {display:flex;flex-wrap:wrap;gap:10px}
+button,input,textarea,select {font:inherit}
+.hidden {display:none!important}
 /* Minimal fallback when a staging stylesheet is delayed or blocked. */
 #studio-account {max-width:980px;margin:16px auto;padding:20px;border:1px solid #d9d0c1;border-radius:12px;background:#fffdf8;color:#1c1914;font:16px/1.45 "Segoe UI",Arial,sans-serif}
 #studio-account .hidden {display:none!important}
@@ -69,7 +77,7 @@
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
       </div>
       <div id="staging-register-panel" style="display:none; margin-top:16px;">
-        <p><strong>New test account required.</strong> Use a separate test email and a NEW password, not your regular AMICOR password. Test accounts may be lost when this free staging server restarts.</p>
+        <p>Use your existing staging account above if you already have one. Create a separate test account only if you have never registered for this isolated staging environment. Do not reuse a production password. Test accounts may be lost after staging resets.</p>
         <button type="button" id="staging-register-toggle" class="secondary">Create test account</button>
         <form id="staging-register-form" class="grid hidden" autocomplete="off">
           <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
