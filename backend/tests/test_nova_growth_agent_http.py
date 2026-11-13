@@ -189,3 +189,30 @@ def test_workflow_review_detail_absent_run_does_not_leak(client: TestClient) -> 
         headers=headers,
     )
     assert response.status_code == 404
+
+
+def test_review_decision_requires_authentication(client: TestClient) -> None:
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        json={"decision": "reject"},
+    )
+    assert response.status_code in {401, 403}
+
+
+def test_review_decision_rejects_unsupported_approval(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        headers=headers, json={"decision": "approve"},
+    )
+    assert response.status_code == 422
+
+
+def test_review_decision_rejects_cross_tenant_request(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        headers=headers,
+        json={"decision": "reject", "organization_id": "other-tenant-unknown"},
+    )
+    assert response.status_code == 403
