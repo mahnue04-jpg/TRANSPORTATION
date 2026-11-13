@@ -830,7 +830,8 @@ def test_studio_new_project_opens_its_workspace_not_unrelated_commercial():
     assert 'id="studio-project-workspace"' in html
     assert 'id="studio-project-workspace-continue"' in html
     assert 'id="brief-form"' in html
-    assert 'showCurrentProjectWorkspace(row, true)' in script
+    assert 'showCurrentProjectWorkspace(row, true, true)' in script
+    assert 'showCurrentProjectWorkspace(activeRow, false, false)' in script
     assert 'setActiveProjectId(row.id)' in script
     assert 'panel.scrollIntoView({ behavior: "auto", block: "start" })' in script
     assert 'No video render or charge starts when you create a project.' in html
