@@ -86,6 +86,11 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     assert inspection.json()['video_codec']=='h264'
     assert inspection.json()['duration_seconds'] > 0
     assert inspection.json()['browser_playback_verified'] is False
+    assert inspection.json()['mp4_structure_complete'] is True
+    assert inspection.json()['mp4_has_ftyp'] is True
+    assert inspection.json()['mp4_has_moov'] is True
+    assert inspection.json()['mp4_has_mdat'] is True
+    assert isinstance(inspection.json()['mp4_faststart'], bool)
     assert [job.id for job in service.store.list_jobs(pid, 'owner')] == jobs_before
     assert [row.id for row in service.store.list_assets(pid, 'owner')] == assets_before
     duplicate=client.post(url,files={'file':('again.mp4',data,'video/mp4')})
