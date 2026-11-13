@@ -46,3 +46,16 @@ def test_growth_overview_checks_tenant_identity_and_prevents_old_refresh_status(
     assert "currentOrganization() !== organizationAtStart" in growth
     assert "currentOrganization() === organizationAtStart" in growth
     assert "if (request !== requestId) return;" in growth
+
+
+def test_growth_handoff_review_is_read_only_and_escapes_untrusted_subjects():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    growth = (STATIC / "growth-overview.js").read_text(encoding="utf-8")
+    assert 'id="growth-agent-review"' in html
+    assert 'id="growth-agent-review-list"' in html
+    assert 'row.handler === "human" || row.status === "handed_off"' in growth
+    assert 'subject.textContent =' in growth
+    assert 'item.append(subject, flag)' in growth
+    assert 'reviewList.appendChild(item)' in growth
+    assert 'handoff.is_synthetic_demo === true' in growth
+    assert 'reviewPanel.hidden = true' in growth or 'byId("growth-agent-review").hidden = true' in growth
