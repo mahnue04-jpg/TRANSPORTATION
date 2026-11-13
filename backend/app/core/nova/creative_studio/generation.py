@@ -449,6 +449,45 @@ def assemble_short_video(
     duration = int(duration_target)
     if duration not in DURATIONS:
         raise ValueError(f"Unsupported duration_target; allowed: {DURATIONS}")
+    if duration == 5:
+        # One controlled planning scene, not six commercial beats and not a
+        # provider-generated MP4. Keep spoken text realistically brief.
+        spoken = str(reviewed_script or "").strip()
+        if not spoken or len(spoken.split()) > 14:
+            spoken = "Welcome to AMICOR Nova!"
+        visual = (
+            f"One continuous five-second live-action shot for {platform}. "
+            f"Subject: {topic}. A professional presenter in a navy suit "
+            "stands in a bright modern office, smiles, takes one natural step "
+            "and gestures toward the camera. Keep face, hair, clothing and "
+            "background consistent. No cuts; show actual body motion."
+        )
+        scene = {
+            "index": 1,
+            "heading": "Original five-second motion test",
+            "description": str(topic).strip() or "Single presenter motion shot",
+            "visual_prompt": visual,
+            "voiceover_text": spoken,
+            "subtitle_text": spoken,
+            "duration_seconds": 5.0,
+            "transition_note": "Single continuous shot; no cut",
+            "music_mood_note": "No music during movement and voice acceptance",
+        }
+        return {
+            "full_script": spoken,
+            "scenes": [scene],
+            "captions": spoken,
+            "hashtags": [],
+            "final_cta": "",
+            "recommended_duration": 5,
+            "music_mood_note": "No music",
+            "transition_note": "Single continuous shot",
+            "status_label": "GENERATED",
+            "media_generated": False,
+            "video_provider_status": "CONFIG_REQUIRED",
+            "timing_verified": False,
+            "owner_review_required": True,
+        }
     if content_mode != "marketing":
         pack = _reviewed_content_pack(topic=topic, script=reviewed_script, platform=platform,
                                       duration=duration, style=style)
