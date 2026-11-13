@@ -112,3 +112,31 @@ def test_development_legacy_work_inputs_remain_readable(monkeypatch, tmp_path):
     path = tmp_path / "legacy.csv"
     path.write_bytes(content)
     assert work_inputs.read_work_input_bytes(_row(str(path), content)) == content
+
+
+def test_production_client_upload_requires_explicit_owner_authority(monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    monkeypatch.setattr(work_inputs, "get_engagement", lambda *args, **kwargs: {
+        "status": "ACTIVE", "blockers": None,
+    })
+    with pytest.raises(NovaWorkError, match="owner confirmation") as error:
+        work_inputs.create_work_input(
+            object(), "eng", organization_id="org", user=SimpleNamespace(user_id="owner"),
+            filename="records.csv", content_type="text/csv", content=b"Name\nAda\n",
+        )
+    assert error.value.status_code == 403
+
+
+def test_production_client_upload_rejects_blocked_or_inactive_engagement(monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    engagement = {"status": "NOT_STARTED", "blockers": None}
+    monkeypatch.setattr(work_inputs, "get_engagement", lambda *args, **kwargs: engagement)
+    for status, blockers in (("NOT_STARTED", None), ("ACTIVE", "client agreement pending")):
+        engagement.update(status=status, blockers=blockers)
+        with pytest.raises(NovaWorkError, match="Active, unblocked") as error:
+            work_inputs.create_work_input(
+                object(), "eng", organization_id="org", user=SimpleNamespace(user_id="owner"),
+                filename="records.csv", content_type="text/csv",
+                content=b"Name\nAda\n", owner_confirmed_contract=True,
+            )
+        assert error.value.status_code == 409
