@@ -7,6 +7,7 @@
   const list = byId("growth-agent-audit-list");
   if (!loadButton || !status || !list) return;
   let requestId = 0;
+  let visibleOwner = null;
 
   function sessionState() {
     const session = window.AmiCorSession;
@@ -20,6 +21,7 @@
   function clear(message) {
     ++requestId;
     list.replaceChildren();
+    visibleOwner = null;
     status.textContent = message;
   }
   function isSameOwner(state) {
@@ -57,6 +59,7 @@
       });
       if (request !== requestId || !isSameOwner(state)) return;
       list.replaceChildren(...nodes);
+      visibleOwner = { token: state.token, org: state.org };
       status.textContent = rows.length
         ? rows.length + " recent workflow audit event(s) shown; activity does not prove external delivery."
         : "No workflow audit events among the latest 50 records.";
@@ -66,7 +69,13 @@
       if (request === requestId) loadButton.disabled = false;
     }
   }
+  function verifyVisibleOwner() {
+    if (visibleOwner && !isSameOwner(visibleOwner))
+      clear("Session or organization changed. Reload workflow activity to continue.");
+  }
   loadButton.addEventListener("click", showWorkflowAudit);
+  window.addEventListener("focus", verifyVisibleOwner);
+  document.addEventListener("visibilitychange", verifyVisibleOwner);
   byId("sign-out")?.addEventListener("click", () => clear("Sign in to review Growth Agent activity."));
   window.addEventListener("nova:workspace-signed-in", () => clear("Select View recent workflow activity to inspect the audit trail."));
 })();
