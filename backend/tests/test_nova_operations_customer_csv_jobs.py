@@ -209,3 +209,34 @@ def test_review_does_not_claim_approval_if_conditional_update_loses_race(state, 
         jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
     monkeypatch.setattr(db, "execute", original_execute)
     assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_cannot_approve_corrupt_private_artifact(state):
+    """Corrupted output is never recorded as approved or delivered."""
+    db, store = state
+    job_id = submit(db, request_key="corrupt-approval")["job_id"]
+    key = next(iter(store.objects))
+    store.objects[key] = b"corrupted synthetic output"
+    with pytest.raises(jobs.CustomerCSVBlocked, match="integrity"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_cannot_approve_missing_private_artifact(state):
+    """Deleted private output must fail closed before approval."""
+    db, store = state
+    job_id = submit(db, request_key="missing-approval")["job_id"]
+    store.objects.clear()
+    with pytest.raises(jobs.CustomerCSVBlocked, match="unavailable"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_can_reject_corrupt_artifact_without_downloading(state):
+    """Owner must still be able to reject an unsafe output."""
+    db, store = state
+    job_id = submit(db, request_key="reject-corrupt")["job_id"]
+    store.objects.clear()
+    rejected = jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=False)
+    assert rejected["status"] == "REJECTED"
+    assert rejected["delivered"] is False
