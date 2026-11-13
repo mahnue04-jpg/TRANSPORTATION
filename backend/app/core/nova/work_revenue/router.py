@@ -558,7 +558,11 @@ async def upload_work_input(
     db: Session = Depends(get_db),
 ):
     try:
-        content = await file.read()
+        # Never read an arbitrarily large customer upload into memory.
+        # One extra byte distinguishes an accepted file from an oversized one.
+        content = await file.read(work_inputs.MAX_WORK_INPUT_BYTES + 1)
+        if len(content) > work_inputs.MAX_WORK_INPUT_BYTES:
+            raise service.NovaWorkError("Work input exceeds the 20 MB limit", status_code=413)
         return work_inputs.create_work_input(
             db,
             engagement_id,
