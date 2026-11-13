@@ -60,6 +60,16 @@ Draft GitHub review #508 isolates Botora's changes against a dedicated review ba
 
 Four JavaScript control tests passed in an isolated Node VM with synthetic DOM and HTTP fixtures: signed-out users make no request; retry preserves request identity; a late search response cannot restore records/download after sign-out; provider failure unlocks controls without fabricating output. These complement the 12 Python checks. They are not an interactive browser or hosted-owner-authentication test.
 
+## Actual local authentication integration
+
+The authenticated acceptance script imported the real app.main application using an existing complete development Python environment. It created disposable users and an isolated SQLite database, generated private test secrets without printing them, and used the application's real password-login endpoint and JWT verification. No authentication dependency override was used.
+
+The authenticated owner processed a real public Osiris Tours source page, reused the saved result on retry, retrieved the job and downloaded its review CSV. Anonymous requests were denied. A separately logged-in non-owner was denied both job access and CSV download. A fresh Python process then reused the saved token, database and files and successfully retrieved the job and CSV. Review stayed PENDING and outreach stayed zero.
+
+This removes the earlier missing-import obstacle for that complete local environment and demonstrates local JWT integration. It does not demonstrate the application lifespan, an interactive browser, a hosted owner account, PostgreSQL, private cloud object storage or a deployed worker restart. Private test credentials and session files must never enter GitHub, shared evidence or user-facing downloads.
+
+Current read-only Render inventory showed no dedicated Botora/Work & Revenue test service/database. Its three listed PostgreSQL instances belong to production, Casting and Growth. None was modified or reused. No paid resource or production change was made. Hosted persistence and browser acceptance remain release blockers.
+
 ## Reproduce in development
 
 From the repository root with its Python dependencies installed:
