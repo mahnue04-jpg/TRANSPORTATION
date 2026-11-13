@@ -297,7 +297,12 @@ def create_work_input(
         organization_id=organization_id,
         user=user,
         event_type="WORK_INPUT_UPLOADED",
-        summary=f"Work input uploaded for engagement {engagement_id}: {row.original_filename}. Internal use only.",
+        summary=(
+            f"Work input uploaded for engagement {engagement_id}: {row.original_filename}. "
+            + ("Owner asserted client data-processing authority; contract not independently verified. "
+               if _private_inputs_required() else "Development/internal input. ")
+            + "Internal use only; no external delivery."
+        ),
         ref_id=input_id,
         entity_type="work_input",
         actor_category="OWNER",
