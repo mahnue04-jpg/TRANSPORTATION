@@ -73,10 +73,16 @@ def clean_csv_text(
     for row in rows:
         writer.writerow(tuple(safe_spreadsheet_cell(value) for value in row))
     cleaned = out.getvalue()
+    cleaned_bytes = cleaned.encode("utf-8")
+    # Escaping and CSV quoting can make output larger than the accepted input.
+    # The private-review download endpoint enforces the same byte limit; fail
+    # before storing an artifact that its owner could never retrieve.
+    if len(cleaned_bytes) > max_bytes:
+        raise SpreadsheetInputError("Cleaned CSV exceeds output size limit")
     return CleanupResult(
         cleaned_csv=cleaned,
         input_sha256=hashlib.sha256(encoded).hexdigest(),
-        output_sha256=hashlib.sha256(cleaned.encode("utf-8")).hexdigest(),
+        output_sha256=hashlib.sha256(cleaned_bytes).hexdigest(),
         input_rows=input_rows,
         output_rows=len(rows),
         duplicate_rows_removed=duplicates,
