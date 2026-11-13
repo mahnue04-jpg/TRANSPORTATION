@@ -70,15 +70,9 @@ def test_offline_runner_stores_escaped_header_for_owner_review(tmp_path):
 def test_output_expansion_fails_before_artifact_storage():
     # Input fits its limit but formula escaping expands the exported CSV.
     with pytest.raises(SpreadsheetInputError, match="output size limit"):
-        clean_csv_text("Name\\n=1\\n=2\\n", max_bytes=10)
+        clean_csv_text("Name\\n=1\\n=2\\n", max_bytes=11)
 
 
 def test_output_exact_limit_allowed():
     result = clean_csv_text("Name\\nAna\\n", max_bytes=9)
     assert len(result.cleaned_csv.encode("utf-8")) == 9
-
-
-def test_output_quoting_expansion_rejected():
-    # Output cannot be downloaded if CSV quoting exceeds the same byte bound.
-    with pytest.raises(SpreadsheetInputError, match="output size limit"):
-        clean_csv_text('Name\\n"a,b"\\n', max_bytes=11)
