@@ -209,7 +209,7 @@ def recover_stale_job(
 
 def recover_owned_stale_jobs(
     db: Session, *, org: str, owner: str, dry_run: bool = True,
-    limit: int = 25,
+    limit: int = 25, expected_job_ids: list[str] | None = None,
 ) -> dict:
     """Preview or mark a bounded set of this owner's stale jobs FAILED.
 
@@ -225,6 +225,15 @@ def recover_owned_stale_jobs(
         raise CustomerCSVBlocked("Boolean dry_run required", 400)
     if type(limit) is not int or not 1 <= limit <= 50:
         raise CustomerCSVBlocked("Recovery limit must be between 1 and 50", 400)
+    if not dry_run:
+        if (
+            not isinstance(expected_job_ids, list)
+            or not expected_job_ids
+            or len(expected_job_ids) > limit
+            or any(not isinstance(item, str) or not item or len(item) > 36 for item in expected_job_ids)
+            or len(set(expected_job_ids)) != len(expected_job_ids)
+        ):
+            raise CustomerCSVBlocked("Exact previewed job IDs required for recovery", 409)
     cutoff = _utc() - timedelta(minutes=15)
     query = (
         sa.select(jobs.c.id)
@@ -250,6 +259,8 @@ def recover_owned_stale_jobs(
                 "recovered_job_ids": [], "recovered_count": 0,
                 "requires_reupload": False, "delivered": False,
             }
+        if ids != expected_job_ids:
+            raise CustomerCSVBlocked("Recovery preview changed; refresh before applying", 409)
         recovered = []
         for job_id in ids:
             updated = db.execute(
