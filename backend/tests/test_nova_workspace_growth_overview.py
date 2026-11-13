@@ -26,3 +26,15 @@ def test_growth_overview_uses_session_and_only_reads_owner_apis():
     assert "Array.isArray(appointments.appointments)" in script
     assert "method: \"POST\"" not in script
     assert "method: \"PATCH\"" not in script
+
+
+def test_growth_overview_handles_login_and_stale_responses():
+    workspace = (STATIC / "workspace.js").read_text(encoding="utf-8")
+    growth = (STATIC / "growth-overview.js").read_text(encoding="utf-8")
+    assert 'window.dispatchEvent(new Event("nova:workspace-signed-in"))' in workspace
+    assert 'window.addEventListener("nova:workspace-signed-in", load)' in growth
+    assert "setTimeout(load" not in growth
+    assert "const tokenAtStart = currentToken()" in growth
+    assert "request !== requestId" in growth
+    assert "currentToken() === tokenAtStart" in growth
+    assert "requestId++" in growth
