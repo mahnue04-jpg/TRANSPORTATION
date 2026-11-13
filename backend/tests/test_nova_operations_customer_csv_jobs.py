@@ -277,3 +277,58 @@ def test_owner_job_history_preserves_tenant_isolation(state):
     submit(db, request_key="tenant-a-job")
     assert jobs.list_owned_jobs(db, org="org-b", owner="owner-a") == []
     assert jobs.list_owned_jobs(db, org="org-a", owner="owner-b") == []
+
+
+def test_batch_stale_recovery_preview_is_read_only_and_scoped(state):
+    from datetime import timedelta
+    db, _ = state
+    old = jobs._utc() - timedelta(minutes=30)
+    for job_id, org, owner, status in [
+        ("stale-a", "org-a", "owner-a", "PROCESSING"),
+        ("stale-other-org", "org-b", "owner-a", "PROCESSING"),
+        ("stale-other-owner", "org-a", "owner-b", "PROCESSING"),
+        ("already-reviewed", "org-a", "owner-a", "AWAITING_REVIEW"),
+    ]:
+        db.execute(jobs.sa.insert(jobs.jobs).values(
+            id=job_id, organization_id=org, owner_user_id=owner,
+            engagement_id="eng", task_id="task", request_key=job_id,
+            input_sha256="a" * 64, status=status,
+            created_at=old, updated_at=old,
+        ))
+    db.commit()
+    preview = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=True)
+    assert preview["candidate_job_ids"] == ["stale-a"]
+    assert preview["recovered_count"] == 0
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="stale-a")["status"] == "PROCESSING"
+    applied = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False)
+    assert applied["recovered_job_ids"] == ["stale-a"]
+    assert applied["recovered_count"] == 1
+    assert applied["requires_reupload"] is True
+    assert applied["delivered"] is False
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="stale-a")["status"] == "FAILED"
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="already-reviewed")["status"] == "AWAITING_REVIEW"
+    assert jobs.job_status(db, org="org-b", owner="owner-a", job_id="stale-other-org")["status"] == "PROCESSING"
+    assert jobs.job_status(db, org="org-a", owner="owner-b", job_id="stale-other-owner")["status"] == "PROCESSING"
+
+
+def test_batch_stale_recovery_is_bounded_and_repeat_safe(state):
+    from datetime import timedelta
+    db, _ = state
+    old = jobs._utc() - timedelta(minutes=40)
+    for n in range(3):
+        db.execute(jobs.sa.insert(jobs.jobs).values(
+            id=f"old-{n}", organization_id="org-a", owner_user_id="owner-a",
+            engagement_id="eng", task_id="task", request_key=f"old-{n}",
+            input_sha256="b" * 64, status="PROCESSING",
+            created_at=old, updated_at=old,
+        ))
+    db.commit()
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", limit=0)
+    first = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2)
+    assert first["recovered_count"] == 2
+    second = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2)
+    assert second["recovered_count"] == 1
+    third = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False)
+    assert third["recovered_count"] == 0
+    assert third["requires_reupload"] is False
