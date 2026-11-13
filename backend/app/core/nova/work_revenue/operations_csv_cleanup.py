@@ -64,10 +64,14 @@ def clean_csv_text(
         raise SpreadsheetInputError("Invalid CSV structure") from exc
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(columns)
-    # Guard formula injection in CSV exports consumed by spreadsheet applications.
+    # Spreadsheet applications also evaluate formulas in the header row.
+    # Escape headers and values consistently; CSV quoting alone is insufficient.
+    def safe_spreadsheet_cell(value: str) -> str:
+        return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
+
+    writer.writerow(tuple(safe_spreadsheet_cell(column) for column in columns))
     for row in rows:
-        writer.writerow(tuple("'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in row))
+        writer.writerow(tuple(safe_spreadsheet_cell(value) for value in row))
     cleaned = out.getvalue()
     return CleanupResult(
         cleaned_csv=cleaned,
