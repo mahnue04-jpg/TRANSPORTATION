@@ -175,3 +175,17 @@ def test_workflow_review_queue_limit_is_validated(client: TestClient) -> None:
     headers = _headers(client)
     response = client.get("/api/nova/growth-agent/workflows/review-queue?limit=101", headers=headers)
     assert response.status_code == 422
+
+
+def test_workflow_review_detail_requires_authentication(client: TestClient) -> None:
+    response = client.get("/api/nova/growth-agent/workflows/review-queue/not-a-real-run")
+    assert response.status_code in {401, 403}
+
+
+def test_workflow_review_detail_absent_run_does_not_leak(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.get(
+        "/api/nova/growth-agent/workflows/review-queue/not-a-real-run",
+        headers=headers,
+    )
+    assert response.status_code == 404
