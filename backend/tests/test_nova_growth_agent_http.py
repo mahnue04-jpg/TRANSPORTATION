@@ -149,3 +149,29 @@ def test_http_journey_smoke_authenticated(client: TestClient) -> None:
     health = client.get("/api/nova/growth-agent/health", headers=headers)
     assert health.status_code == 200
     assert health.json()["live_flags"]["sms"] is False
+
+
+def test_workflow_review_queue_requires_authentication(client: TestClient) -> None:
+    """Workflow previews must never become a public endpoint."""
+    response = client.get("/api/nova/growth-agent/workflows/review-queue")
+    assert response.status_code in {401, 403}
+
+
+def test_workflow_review_queue_owner_reads_only_own_tenant(client: TestClient) -> None:
+    """A regular tenant user cannot request another organization's review queue."""
+    headers = _headers(client)
+    own = client.get("/api/nova/growth-agent/workflows/review-queue?limit=2", headers=headers)
+    assert own.status_code == 200, own.text
+    assert isinstance(own.json().get("items"), list)
+
+    other = client.get(
+        "/api/nova/growth-agent/workflows/review-queue?organization_id=other-tenant-unknown",
+        headers=headers,
+    )
+    assert other.status_code == 403, other.text
+
+
+def test_workflow_review_queue_limit_is_validated(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.get("/api/nova/growth-agent/workflows/review-queue?limit=101", headers=headers)
+    assert response.status_code == 422
