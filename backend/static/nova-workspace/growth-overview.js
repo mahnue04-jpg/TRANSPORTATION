@@ -8,7 +8,11 @@
   const refresh = byId("growth-agent-refresh");
   if (!summary || !status || !refresh) return;
 
-  function currentToken() {\n    const session = window.AmiCorSession;\n    return session && session.getAccessToken ? session.getAccessToken() : "";\n  }\n  function authHeaders() {
+  function currentToken() {
+    const session = window.AmiCorSession;
+    return session && session.getAccessToken ? session.getAccessToken() : "";
+  }
+  function authHeaders() {
     const session = window.AmiCorSession;
     if (!session || !session.getAccessToken || !session.getAccessToken()) return null;
     if (session.getAuthHeaders) return session.getAuthHeaders();
@@ -24,6 +28,7 @@
   }
   async function load() {
     const headers = authHeaders();
+    const tokenAtStart = currentToken();
     summary.hidden = true;
     if (!headers) { status.textContent = "Sign in to view your Growth Agent activity."; return; }
     refresh.disabled = true;
@@ -35,7 +40,12 @@
         fetchOwner("/conversations", headers),
         fetchOwner("/appointments", headers)
       ]);
-      if (!tokenAtStart || currentToken() !== tokenAtStart) {\n        summary.hidden = true;\n        status.textContent = "Session changed; refresh after signing in.";\n        return;\n      }\n      // Do not substitute fake metrics or treat mock reminders as live sends.
+      if (!tokenAtStart || currentToken() !== tokenAtStart) {
+        summary.hidden = true;
+        status.textContent = "Session changed; refresh after signing in.";
+        return;
+      }
+      // Do not substitute fake metrics or treat mock reminders as live sends.
       const [flags, leads, conversations, appointments] = data;
       if (!Array.isArray(leads.leads) || !Array.isArray(conversations.conversations) ||
           !Array.isArray(appointments.appointments)) throw new Error("Unexpected Growth Agent API response.");
