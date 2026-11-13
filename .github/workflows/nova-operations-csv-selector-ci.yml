@@ -5,7 +5,10 @@ on:
     branches:
       - feat/nova-saved-task-selector-issue-476
       - feat/nova-durable-csv-job-history-20261110
+      - fix/operations-csv-header-formula-guard-20261113
     paths:
+      - "backend/app/core/nova/work_revenue/operations_csv_cleanup.py"
+      - "backend/tests/test_nova_operations_csv_header_formula.py"
       - "backend/app/core/nova/work_revenue/operations_owner_csv_api.py"
       - "backend/tests/test_nova_operations_csv_eligibility.py"
       - "backend/tests/test_nova_operations_csv_http.py"
@@ -76,5 +79,5 @@ jobs:
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
           test -f tests/test_nova_operations_csv_eligibility.py
           test -f tests/test_nova_operations_csv_http.py
-          python -m pytest -v -rs tests/test_nova_operations_csv_eligibility.py tests/test_nova_operations_csv_http.py tests/test_nova_operations_exact_claim_recovery.py tests/test_nova_operations_atomic_completion.py tests/test_nova_operations_csv_runner.py tests/test_nova_operations_csv_offline_bridge.py tests/test_nova_operations_customer_csv_jobs.py tests/test_nova_operations_customer_csv_http.py tests/test_nova_operations_durable_csv_ui_contract.py
+          python -m pytest -v -rs tests/test_nova_operations_csv_eligibility.py tests/test_nova_operations_csv_http.py tests/test_nova_operations_exact_claim_recovery.py tests/test_nova_operations_atomic_completion.py tests/test_nova_operations_csv_runner.py tests/test_nova_operations_csv_header_formula.py tests/test_nova_operations_csv_offline_bridge.py tests/test_nova_operations_customer_csv_jobs.py tests/test_nova_operations_customer_csv_http.py tests/test_nova_operations_durable_csv_ui_contract.py
           echo "CSV selector tests are synthetic eligibility tests only, not an HTTP/staging or customer-data readiness certification." >> "$GITHUB_STEP_SUMMARY"
