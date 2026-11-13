@@ -12,6 +12,10 @@
     const session = window.AmiCorSession;
     return session && session.getAccessToken ? session.getAccessToken() : "";
   }
+  function currentOrganization() {
+    const session = window.AmiCorSession;
+    return session && session.getOrganizationId ? session.getOrganizationId() : null;
+  }
   function authHeaders() {
     const session = window.AmiCorSession;
     if (!session || !session.getAccessToken || !session.getAccessToken()) return null;
@@ -31,6 +35,7 @@
     const request = ++requestId;
     const headers = authHeaders();
     const tokenAtStart = currentToken();
+    const organizationAtStart = currentOrganization();
     summary.hidden = true;
     if (!headers) { status.textContent = "Sign in to view your Growth Agent activity."; return; }
     refresh.disabled = true;
@@ -42,7 +47,8 @@
         fetchOwner("/conversations", headers),
         fetchOwner("/appointments", headers)
       ]);
-      if (request !== requestId || !tokenAtStart || currentToken() !== tokenAtStart) {
+      if (request !== requestId) return;
+      if (!tokenAtStart || currentToken() !== tokenAtStart || currentOrganization() !== organizationAtStart) {
         summary.hidden = true;
         status.textContent = "Session changed; refresh after signing in.";
         return;
@@ -60,7 +66,7 @@
       summary.hidden = false;
       status.textContent = "Owner records loaded. Counts include synthetic demonstrations if present; live deliveries are not inferred.";
     } catch (error) {
-      if (request === requestId && currentToken() === tokenAtStart)
+      if (request === requestId && currentToken() === tokenAtStart && currentOrganization() === organizationAtStart)
         status.textContent = error.message || "Unable to load Growth Agent.";
     } finally {
       if (request === requestId) refresh.disabled = false;
