@@ -632,3 +632,39 @@ def test_existing_synthetic_contact_rejects_real_identity_collision(db):
     db.expire_all()
     assert svc._contact_dict(demo)["is_synthetic_demo"] is True
     assert len(svc.list_leads(org)) == 1
+
+
+def test_widget_rejects_conversation_with_mismatched_synthetic_classification(db):
+    """An old real conversation cannot be reused after the profile becomes synthetic."""
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "org-conversation-classification"
+    payload = {
+        "business_name": "Cedar Ridge",
+        "website": "https://synthetic.example",
+        "timezone": "America/Chicago",
+        "operating_hours": {"mon_fri": "09:00-17:00"},
+        "services": [{"code": "consult", "name": "Consult", "duration_minutes": 30}],
+        "faqs": [{"id": "hours", "question": "Hours?", "keywords": ["hours"], "answer": "9 to 5"}],
+        "contact_email": "owner@synthetic.example",
+        "escalation_settings": {"handoff_on_unknown": True},
+        "is_synthetic_demo": False,
+    }
+    svc.upsert_profile(org, "owner-conv", payload, activate=True)
+    install = svc.create_widget_installation(org, domain="synthetic.example")
+    first = svc.widget_chat(
+        token=install["token"], origin="https://synthetic.example",
+        message="What are your hours?",
+    )
+    assert svc.get_conversation(org, first["conversation_id"])["is_synthetic_demo"] is False
+    payload["is_synthetic_demo"] = True
+    svc.upsert_profile(org, "owner-conv", payload, activate=False)
+    with pytest.raises(GrowthAgentError) as exc:
+        svc.widget_chat(
+            token=install["token"], origin="https://synthetic.example",
+            message="Hello again", conversation_id=first["conversation_id"],
+        )
+    assert exc.value.code == "CONVERSATION_CLASSIFICATION_CONFLICT"
+    db.expire_all()
+    assert svc.get_conversation(org, first["conversation_id"])["is_synthetic_demo"] is False
