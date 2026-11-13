@@ -668,3 +668,51 @@ def test_widget_rejects_conversation_with_mismatched_synthetic_classification(db
     assert exc.value.code == "CONVERSATION_CLASSIFICATION_CONFLICT"
     db.expire_all()
     assert svc.get_conversation(org, first["conversation_id"])["is_synthetic_demo"] is False
+
+
+def test_widget_rejects_cross_installation_conversation_before_contact_creation(db):
+    """A valid token for one site cannot resume another site's chat or create a lead."""
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "org-cross-widget"
+    _activate(svc, org)
+    site_a = svc.create_widget_installation(org, domain="site-a.example")
+    site_b = svc.create_widget_installation(org, domain="site-b.example")
+    first = svc.widget_chat(
+        token=site_a["token"], origin="https://site-a.example",
+        message="What are your hours?",
+    )
+    assert svc.list_leads(org) == []
+    with pytest.raises(GrowthAgentError) as exc:
+        svc.widget_chat(
+            token=site_b["token"], origin="https://site-b.example",
+            message="I would like to book",
+            conversation_id=first["conversation_id"],
+            visitor_name="Must Not Save",
+            visitor_email="must-not-save@example.com",
+            consent_transactional=True,
+        )
+    assert exc.value.code == "CONVERSATION_INSTALLATION_CONFLICT"
+    assert svc.list_leads(org) == []
+    assert len(svc.get_conversation(org, first["conversation_id"])["messages"]) == 2
+
+
+def test_widget_unknown_conversation_id_fails_before_contact_creation(db):
+    """Unknown conversation IDs are rejected instead of silently starting a new chat."""
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "org-unknown-widget-chat"
+    _activate(svc, org)
+    install = svc.create_widget_installation(org, domain="test.example")
+    with pytest.raises(GrowthAgentError) as exc:
+        svc.widget_chat(
+            token=install["token"], origin="https://test.example",
+            message="Hello", conversation_id="not-a-conversation",
+            visitor_name="Must Not Save",
+            visitor_email="no-save@example.com",
+            consent_transactional=True,
+        )
+    assert exc.value.code == "CONVERSATION_NOT_FOUND"
+    assert svc.list_leads(org) == []
