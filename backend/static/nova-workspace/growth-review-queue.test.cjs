@@ -18,7 +18,7 @@ function setup(fetchImpl, token = "", org = "owner-a") {
     "growth-agent-preview-queue-load", "growth-agent-preview-queue-status",
     "growth-agent-preview-queue-list", "growth-agent-preview-detail",
     "growth-agent-preview-detail-status", "growth-agent-preview-detail-steps",
-    "growth-agent-preview-decision-controls", "growth-agent-preview-reject",
+    "growth-agent-preview-decision-controls", "growth-agent-preview-approve", "growth-agent-preview-reject",
     "growth-agent-preview-request-information", "sign-out"
   ].map(id => [id, element()]));
   const window = {
@@ -283,4 +283,58 @@ test("organization switch during decision response clears previous owner preview
   assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
   assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /organization changed/);
   assert.doesNotMatch(ui.elements["growth-agent-preview-queue-status"].textContent, /Owner decision recorded/);
+});
+
+
+test("owner approval requires two clicks and only records approval, never executes", async () => {
+  const requests = [];
+  const ui = setup(async (url, opts) => {
+    requests.push({url, opts});
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"approval-run", workflow_name:"Review",status:"preview",requires_approval:true,dry_run:true}
+    ]);
+    if (url.endsWith("/approval-run")) return {ok:true,status:200,json:async()=>({
+      run_id:"approval-run",status:"preview",requires_approval:true,
+      content_redacted:true,dry_run:true,steps:[]
+    })};
+    if (url.endsWith("/approval-run/decision")) return {ok:true,status:200,json:async()=>({
+      run_id:"approval-run",decision:"approve",status:"approved",
+      execution_performed:false,live_send:false
+    })};
+    throw Error("Unexpected URL");
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const approve = ui.elements["growth-agent-preview-approve"];
+  await approve.listeners.click();
+  assert.equal(requests.length, 2);
+  assert.match(approve.textContent, /Confirm approval/);
+  await approve.listeners.click();
+  assert.equal(requests.length, 3);
+  assert.ok(requests[2].url.endsWith("/approval-run/decision"));
+  assert.equal(requests[2].opts.method, "POST");
+  assert.deepEqual(JSON.parse(requests[2].opts.body), {decision:"approve"});
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /Approved \(record only\)/);
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /No workflow executed or message sent/);
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+});
+
+test("approval refused when session changes before confirmation", async () => {
+  const calls = [];
+  const ui = setup(async (url, opts) => {
+    calls.push({url,opts});
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"approval-run",workflow_name:"Review",status:"preview",requires_approval:true}
+    ]);
+    return {ok:true,status:200,json:async()=>({
+      run_id:"approval-run",status:"preview",requires_approval:true,content_redacted:true,steps:[]
+    })};
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  await ui.elements["growth-agent-preview-approve"].listeners.click();
+  ui.setOrg("changed-org");
+  await ui.elements["growth-agent-preview-approve"].listeners.click();
+  assert.equal(calls.length, 2);
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
 });
