@@ -199,13 +199,13 @@ def test_review_decision_requires_authentication(client: TestClient) -> None:
     assert response.status_code in {401, 403}
 
 
-def test_review_decision_rejects_unsupported_approval(client: TestClient) -> None:
+def test_review_approval_on_missing_run_fails_closed(client: TestClient) -> None:
     headers = _headers(client)
     response = client.post(
         "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
         headers=headers, json={"decision": "approve"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 409
 
 
 def test_review_decision_rejects_cross_tenant_request(client: TestClient) -> None:
