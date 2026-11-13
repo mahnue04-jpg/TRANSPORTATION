@@ -1145,6 +1145,8 @@ class GrowthAgentService:
             raise GrowthAgentError("NOT_FOUND", "Workflow run not found", http_status=404)
         if run.status in {"cancelled", "needs_information"}:
             raise GrowthAgentError("REVIEW_NOT_APPROVED", "Workflow cannot execute after owner rejection or request for information", http_status=409)
+        if not dry_run and (run.status != "approved" or not actor_user_id):
+            raise GrowthAgentError("OWNER_APPROVAL_REQUIRED", "Explicit owner approval is required for non-dry-run workflow execution", http_status=403)
         profile = self._require_profile(org_id)
         wf = self.db.query(GaWorkflowDefinition).filter_by(id=run.workflow_id, organization_id=org_id).one()
         contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one()
@@ -1945,10 +1947,12 @@ class GrowthAgentService:
         decision: str,
         actor_user_id: str | None = None,
     ) -> dict[str, Any]:
-        """Record rejection or request for information. NEVER execute or approve."""
-        if decision not in {"reject", "request_information"}:
-            raise GrowthAgentError("VALIDATION", "Only reject or request_information are supported", http_status=422)
-        outcome = "cancelled" if decision == "reject" else "needs_information"
+        """Atomically record explicit owner approval or hold/rejection; NEVER executes."""
+        if decision not in {"reject", "request_information", "approve"}:
+            raise GrowthAgentError("VALIDATION", "Unsupported owner review decision", http_status=422)
+        if not actor_user_id:
+            raise GrowthAgentError("FORBIDDEN", "Authenticated reviewer required", http_status=403)
+        outcome = {"reject": "cancelled", "request_information": "needs_information", "approve": "approved"}[decision]
         updated = (
             self._org_query(GaWorkflowRun, org_id)
             .filter(GaWorkflowRun.id == run_id)
