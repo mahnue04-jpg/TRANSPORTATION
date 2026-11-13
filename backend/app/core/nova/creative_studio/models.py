@@ -29,7 +29,7 @@ PLATFORMS = (
     "generic",
 )
 
-DURATIONS = (15, 30, 60)
+DURATIONS = (5, 15, 30, 60)
 
 ASSET_KINDS = (
     "script",
