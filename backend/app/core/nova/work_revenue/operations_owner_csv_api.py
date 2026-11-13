@@ -274,6 +274,11 @@ async def create_durable_csv_job(
         if len(content) + len(chunk) > LIMIT_BYTES:
             raise HTTPException(413, "CSV exceeds 1 MB")
         content.extend(chunk)
+    # The owner may revoke or block an assignment while its bytes stream in.
+    # Recheck immediately before reserving a durable job or storing an artifact.
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id,
+    )
     try:
         return durable_csv.submit_review_job(
             db, org=str(owner.organization_id), owner=str(owner.user_id),
