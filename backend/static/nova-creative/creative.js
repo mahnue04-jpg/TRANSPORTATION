@@ -2026,6 +2026,7 @@
       MULTI_SCENE_PROJECT_NOT_SINGLE_SHOT: "This project has multiple scenes. Use a dedicated one-scene project for the first controlled five-second test.",
       FIRST_SCENE_REFERENCE_IMAGE_REQUIRED: "Create and save a matching first-scene reference image.",
       VIDEO_PROVIDER_NOT_AVAILABLE: "Video provider is not ready; check credentials and owner activation.",
+      DURABLE_SHOT_CLAIM_REQUIRED: "A shared durable database claim is needed to prevent duplicate paid video submissions. This staging configuration cannot submit the shot.",
       BUDGET_CONFIRMATION_REQUIRED: "Run the separate price preflight and confirm a budget before paid rendering."
     };
     var lines = [
