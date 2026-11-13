@@ -139,3 +139,54 @@ def test_review_details_are_tenant_scoped_redacted_and_read_only(db):
     with pytest.raises(GrowthAgentError) as completed_error:
         svc.workflow_review_details(org, run["run_id"])
     assert completed_error.value.http_status == 404
+
+
+def test_owner_reject_is_audited_and_blocks_execution(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "review-reject-owner"
+    lead = _seed(svc, org)
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=lead.id)
+    before = db.query(GaDeliveryAttempt).count()
+    result = svc.decide_workflow_review(
+        org, preview["run_id"], decision="reject", actor_user_id="owner-test"
+    )
+    assert result == {
+        "run_id": preview["run_id"], "decision": "reject", "status": "cancelled",
+        "execution_performed": False, "live_send": False,
+    }
+    assert db.query(GaDeliveryAttempt).count() == before
+    assert any(e.action == "workflow.review.reject" and e.entity_id == preview["run_id"]
+               for e in db.query(GaAuditEvent).all())
+    assert svc.list_workflow_review_queue(org) == []
+    with pytest.raises(GrowthAgentError) as denied:
+        svc.approve_and_execute_workflow(org, run_id=preview["run_id"], dry_run=True)
+    assert denied.value.http_status == 409
+    with pytest.raises(GrowthAgentError) as repeated:
+        svc.decide_workflow_review(org, preview["run_id"], decision="reject")
+    assert repeated.value.http_status == 409
+
+
+def test_request_information_blocks_execution_and_cross_tenant_decisions(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org, other = "review-info-owner", "review-other-owner"
+    lead = _seed(svc, org)
+    _seed(svc, other)
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=lead.id)
+    with pytest.raises(GrowthAgentError) as cross:
+        svc.decide_workflow_review(other, preview["run_id"], decision="reject")
+    assert cross.value.http_status == 409
+    result = svc.decide_workflow_review(
+        org, preview["run_id"], decision="request_information", actor_user_id="owner-test"
+    )
+    assert result["status"] == "needs_information"
+    assert result["execution_performed"] is False
+    with pytest.raises(GrowthAgentError) as denied:
+        svc.approve_and_execute_workflow(org, run_id=preview["run_id"], dry_run=True)
+    assert denied.value.http_status == 409
+    with pytest.raises(GrowthAgentError) as bad:
+        svc.decide_workflow_review(org, preview["run_id"], decision="approve")
+    assert bad.value.http_status == 422
