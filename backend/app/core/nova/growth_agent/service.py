@@ -1897,6 +1897,44 @@ class GrowthAgentService:
             "plans": plan_catalog(),
         }
 
+    def list_workflow_review_queue(self, org_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Read-only tenant-scoped workflow previews; no approval is implied."""
+        cap = max(1, min(limit, 100))
+        runs = (
+            self._org_query(GaWorkflowRun, org_id)
+            .filter(GaWorkflowRun.status.in_(("preview", "awaiting_approval")))
+            .order_by(GaWorkflowRun.created_at.desc())
+            .limit(cap)
+            .all()
+        )
+        workflow_ids = {run.workflow_id for run in runs}
+        workflows = {
+            row.id: row for row in self._org_query(GaWorkflowDefinition, org_id)
+            .filter(GaWorkflowDefinition.id.in_(workflow_ids)).all()
+        } if workflow_ids else {}
+        contact_ids = {run.contact_id for run in runs}
+        contacts = {
+            row.id: row for row in self._org_query(GaContact, org_id)
+            .filter(GaContact.id.in_(contact_ids)).all()
+        } if contact_ids else {}
+        output = []
+        for run in runs:
+            wf = workflows.get(run.workflow_id)
+            if wf is None or not wf.requires_approval:
+                continue
+            contact = contacts.get(run.contact_id)
+            output.append({
+                "run_id": run.id,
+                "workflow_code": wf.code,
+                "workflow_name": wf.name,
+                "status": run.status,
+                "requires_approval": True,
+                "dry_run": bool(run.dry_run),
+                "is_synthetic_demo": bool(contact.is_synthetic_demo) if contact else None,
+                "created_at": run.created_at.isoformat() + "Z" if run.created_at else None,
+            })
+        return output
+
     def audit_history(self, org_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = (
             self._org_query(GaAuditEvent, org_id)
