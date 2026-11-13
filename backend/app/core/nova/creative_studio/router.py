@@ -1632,6 +1632,38 @@ def _verified_remote_video_chunks(stream, expected_size: int, sha256: str):
         stream.close()
 
 
+@router.get("/projects/{project_id}/assets/{asset_id}/browser-compatibility")
+def inspect_saved_video_browser_compatibility(
+    project_id: str,
+    asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Read-only, owner-scoped probe of an EXISTING local video, never a new render.
+
+    A remote-only original is not downloaded into the web worker. No path, file
+    bytes, access tokens or raw ffprobe errors are returned to the browser.
+    """
+    _require_owner(user)
+    studio = get_service(db)
+    try:
+        path, media_type, _filename = studio.open_asset_file(
+            user.user_id, project_id, asset_id, part="media"
+        )
+        if media_type != "video/mp4":
+            raise HTTPException(status_code=422, detail="Selected asset is not an MP4.")
+        from app.core.nova.creative_studio.video_import import inspect_existing_video
+        return inspect_existing_video(path)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Saved video could not be inspected safely. Original was not changed.",
+        ) from exc
+
+
 @router.get("/projects/{project_id}/assets/{asset_id}/file")
 def download_asset_file(
     project_id: str,
