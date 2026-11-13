@@ -417,13 +417,20 @@ def first_shot_preflight(
         service = get_service(db)
         service._project_or_404(user.user_id, project_id)
         quote = service.preflight_quote(user.user_id, project_id)
-        return first_shot_readiness(
+        report = first_shot_readiness(
             scenes=service.store.list_scenes(project_id, user.user_id),
             assets=service.store.list_assets(project_id, user.user_id),
             provider_status=video_provider().status(),
             budget_confirmed=quote.get("owner_budget_confirmed") is True,
             media_resolver=_resolve_creative_media_url,
         )
+        # Actual paid submission refuses non-durable stores. Surface the same
+        # gate in the FREE readiness report so owner cannot be misled by READY.
+        from app.core.nova.creative_studio.store import DbCreativeStudioStore
+        if not isinstance(service.store, DbCreativeStudioStore):
+            report["blockers"].append("DURABLE_SHOT_CLAIM_REQUIRED")
+            report["status"] = "BLOCKED"
+        return report
     except CreativeStudioError as exc:
         _raise(exc)
         raise
