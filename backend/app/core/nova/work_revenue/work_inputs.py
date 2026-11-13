@@ -252,8 +252,23 @@ def create_work_input(
     content_type: str,
     content: bytes,
     notes: str | None = None,
+    owner_confirmed_contract: bool = False,
 ) -> dict[str, Any]:
-    get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+    engagement = get_engagement(db, engagement_id, organization_id=organization_id, user=user)
+    if _private_inputs_required():
+        if owner_confirmed_contract is not True:
+            raise NovaWorkError(
+                "Explicit owner confirmation of client data-processing authority required",
+                status_code=403,
+            )
+        if (
+            str(engagement.get("status") or "").upper() != "ACTIVE"
+            or str(engagement.get("blockers") or "").strip()
+        ):
+            raise NovaWorkError(
+                "Active, unblocked client engagement required before work input upload",
+                status_code=409,
+            )
     _validate_file(filename, content_type, content)
     input_id = "NWI-" + uuid4().replace("-", "")[:12].upper()
     digest = hashlib.sha256(content).hexdigest()
