@@ -70,9 +70,9 @@ test("authenticated owner sees real API counts, not fabricated metrics", async (
   assert.equal(calls.length, 4);
   assert.ok(calls.every(x => x.opts.headers.Authorization === "Bearer owner-token"));
   assert.ok(calls.every(x => x.opts.cache === "no-store"));
-  assert.equal(ui.elements["growth-agent-leads"].textContent, "2");
-  assert.equal(ui.elements["growth-agent-conversations"].textContent, "1");
-  assert.equal(ui.elements["growth-agent-appointments"].textContent, "0");
+  assert.equal(ui.elements["growth-agent-leads"].textContent, "2 (2 / 0)");
+  assert.equal(ui.elements["growth-agent-conversations"].textContent, "1 (1 / 0)");
+  assert.equal(ui.elements["growth-agent-appointments"].textContent, "0 (0 / 0)");
   assert.equal(ui.elements["growth-agent-transport"].textContent, "Mock / no live delivery");
   assert.equal(ui.elements["growth-agent-summary"].hidden, false);
 });
@@ -103,7 +103,7 @@ test("sign-out invalidates outstanding responses and hides dashboard", async () 
   for (const item of pending) item.resolve(responseFor(item.url));
   await flush();
   assert.equal(ui.elements["growth-agent-summary"].hidden, true);
-  assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2");
+  assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2 (2 / 0)");
 });
 
 
@@ -117,7 +117,7 @@ test("switching organizations while requests are pending hides the old tenant da
   await flush();
   assert.equal(ui.elements["growth-agent-summary"].hidden, true);
   assert.match(ui.elements["growth-agent-status"].textContent, /Session changed/);
-  assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2");
+  assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2 (2 / 0)");
 });
 
 test("an older failed refresh cannot overwrite a newer successful refresh", async () => {
@@ -132,6 +132,20 @@ test("an older failed refresh cannot overwrite a newer successful refresh", asyn
   for (const item of pending.slice(0, 4)) item.resolve({ ok: false, status: 403 });
   await flush();
   assert.equal(ui.elements["growth-agent-summary"].hidden, false);
-  assert.equal(ui.elements["growth-agent-leads"].textContent, "2");
+  assert.equal(ui.elements["growth-agent-leads"].textContent, "2 (2 / 0)");
   assert.match(ui.elements["growth-agent-status"].textContent, /Owner records loaded/);
+});
+
+test("synthetic leads are labeled separately and never counted as verified clients", async () => {
+  const ui = setup(async url => {
+    if (url.endsWith("/leads")) return ok({ leads: [
+      { id: "real", is_synthetic_demo: false },
+      { id: "demo", is_synthetic_demo: true },
+      { id: "unknown" }
+    ] });
+    return responseFor(url);
+  }, "owner-token");
+  await flush();
+  assert.equal(ui.elements["growth-agent-leads"].textContent, "3 (2 / 1)");
+  assert.match(ui.elements["growth-agent-status"].textContent, /not lifetime totals or confirmed paying customers/);
 });
