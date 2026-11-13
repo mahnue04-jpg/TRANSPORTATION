@@ -240,3 +240,40 @@ def test_owner_can_reject_corrupt_artifact_without_downloading(state):
     rejected = jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=False)
     assert rejected["status"] == "REJECTED"
     assert rejected["delivered"] is False
+
+
+def test_owner_job_history_shows_next_action_without_exposing_private_refs(state):
+    db, store = state
+    job_id = submit(db, request_key="history-action")["job_id"]
+    entries = jobs.list_owned_jobs(db, org="org-a", owner="owner-a")
+    assert len(entries) == 1
+    assert entries[0]["job_id"] == job_id
+    assert entries[0]["next_action"] == "review_output"
+    assert entries[0]["stale_processing"] is False
+    assert entries[0]["delivered"] is False
+    assert "output_ref" not in entries[0]
+    assert "input_sha256" not in entries[0]
+
+
+def test_owner_job_history_marks_expired_processing_as_recoverable(state):
+    from datetime import timedelta
+    db, _ = state
+    stamp = jobs._utc() - timedelta(minutes=30)
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="stale-history", organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-a", request_key="stale-history-key",
+        input_sha256="a" * 64, status="PROCESSING",
+        created_at=stamp, updated_at=stamp,
+    ))
+    db.commit()
+    entries = jobs.list_owned_jobs(db, org="org-a", owner="owner-a")
+    assert entries[0]["stale_processing"] is True
+    assert entries[0]["next_action"] == "recover_stale_job"
+    assert entries[0]["delivered"] is False
+
+
+def test_owner_job_history_preserves_tenant_isolation(state):
+    db, _ = state
+    submit(db, request_key="tenant-a-job")
+    assert jobs.list_owned_jobs(db, org="org-b", owner="owner-a") == []
+    assert jobs.list_owned_jobs(db, org="org-a", owner="owner-b") == []
