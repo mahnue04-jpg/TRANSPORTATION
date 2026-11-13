@@ -238,3 +238,23 @@ def test_postgres_recovery_does_not_rewrite_recent_or_completed_job(postgres):
             db, org="synthetic-org", owner="synthetic-owner", job_id="pg-approved",
         )["status"] == "APPROVED_FOR_DOWNLOAD"
     assert store.put_count == 0
+
+
+def test_postgres_saved_private_artifact_readback_failure_is_not_reviewable(postgres, monkeypatch):
+    """Real PostgreSQL metadata must remain FAILED if private storage readback corrupts."""
+    engine, store = postgres
+    real_retrieve = store.retrieve
+
+    def corrupt_readback(*, storage_ref):
+        content, mime = real_retrieve(storage_ref=storage_ref)
+        return content + b"corruption", mime
+
+    monkeypatch.setattr(store, "retrieve", corrupt_readback)
+    with pytest.raises(csvjobs.CustomerCSVBlocked, match="integrity mismatch"):
+        _submit(engine, "pg-readback-corrupt")
+    with Session(engine) as db:
+        rows = db.execute(
+            sa.select(csvjobs.jobs.c.status, csvjobs.jobs.c.output_ref)
+        ).all()
+        assert rows == [("FAILED", None)]
+    assert store.items == {}
