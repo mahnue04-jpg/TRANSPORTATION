@@ -39,7 +39,7 @@
     pendingDecision = null;
     if (decisionControls) decisionControls.hidden = true;
     if (rejectButton) { rejectButton.textContent = "Reject workflow"; rejectButton.disabled = false; }
-    if (requestInfoButton) { requestInfoButton.textContent = "Request information"; requestInfoButton.disabled = false; }
+    if (requestInfoButton) { requestInfoButton.textContent = "Place on hold — needs information"; requestInfoButton.disabled = false; }
     if (detailSteps) detailSteps.replaceChildren();
     if (detailPanel) detailPanel.hidden = true;
     displayedIdentity = null;
@@ -105,7 +105,7 @@
     if (!pendingDecision || pendingDecision.runId !== candidate.runId || pendingDecision.decision !== decision) {
       pendingDecision = {runId: candidate.runId, decision};
       rejectButton.textContent = decision === "reject" ? "Confirm reject (click again)" : "Reject workflow";
-      requestInfoButton.textContent = decision === "request_information" ? "Confirm request information (click again)" : "Request information";
+      requestInfoButton.textContent = decision === "request_information" ? "Confirm hold (click again)" : "Place on hold — needs information";
       detailStatus.textContent = "Confirm this owner decision by clicking the same button again. Nothing has been changed yet.";
       return;
     }
@@ -135,7 +135,7 @@
           result.execution_performed !== false || result.live_send !== false ||
           result.status !== (decision === "reject" ? "cancelled" : "needs_information"))
         throw new Error("Unexpected decision response. Verify audit history before doing anything else.");
-      clear("Owner decision recorded: " + (decision === "reject" ? "Rejected" : "Information requested") +
+      clear("Owner decision recorded: " + (decision === "reject" ? "Rejected" : "On hold — information needed") +
         ". No workflow executed or message sent. Reload queue to verify.");
     } catch (error) {
       if (generationAtStart === generation && detailAtStart === detailGeneration && sameOwner(identity)) {
@@ -148,7 +148,7 @@
         rejectButton.disabled = false;
         requestInfoButton.disabled = false;
         rejectButton.textContent = "Reject workflow";
-        requestInfoButton.textContent = "Request information";
+        requestInfoButton.textContent = "Place on hold — needs information";
       }
     }
   }
