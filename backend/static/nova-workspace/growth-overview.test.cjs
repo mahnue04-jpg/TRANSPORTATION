@@ -133,7 +133,7 @@ test("an older failed refresh cannot overwrite a newer successful refresh", asyn
   await flush();
   assert.equal(ui.elements["growth-agent-summary"].hidden, false);
   assert.equal(ui.elements["growth-agent-leads"].textContent, "2 (2 / 0)");
-  assert.match(ui.elements["growth-agent-status"].textContent, /Owner records loaded/);
+  assert.match(ui.elements["growth-agent-status"].textContent, /Recent results loaded/);
 });
 
 test("synthetic leads are labeled separately and never counted as verified clients", async () => {
