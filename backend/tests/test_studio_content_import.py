@@ -70,15 +70,31 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     result=response.json(); asset=result['asset']
     assert not result['paid_request_submitted']
     assert not asset['metadata']['publish_ready']
+    assert asset['metadata']['video_codec'] == 'h264'
+    assert asset['metadata']['video_pixel_format'] in {'yuv420p', 'yuvj420p'}
+    assert isinstance(asset['metadata']['video_profile'], str)
+    assert isinstance(asset['metadata']['video_level'], int)
+    assert asset['metadata']['browser_compatibility_warnings'] == []
     download=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file')
     assert download.status_code==200
     assert download.content==data
+    jobs_before=[job.id for job in service.store.list_jobs(pid, 'owner')]
+    assets_before=[row.id for row in service.store.list_assets(pid, 'owner')]
+    inspection=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/browser-compatibility')
+    assert inspection.status_code==200,inspection.text
+    assert inspection.json()['read_only']
+    assert inspection.json()['video_codec']=='h264'
+    assert inspection.json()['duration_seconds'] > 0
+    assert inspection.json()['browser_playback_verified'] is False
+    assert [job.id for job in service.store.list_jobs(pid, 'owner')] == jobs_before
+    assert [row.id for row in service.store.list_assets(pid, 'owner')] == assets_before
     duplicate=client.post(url,files={'file':('again.mp4',data,'video/mp4')})
     assert duplicate.json()['reused']
     assert duplicate.json()['asset']['id']==asset['id']
     assert client.post(url,files={'file':('broken.mp4',b'broken','video/mp4')}).status_code==422
     user.user_id='other'
     assert client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file').status_code==404
+    assert client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/browser-compatibility').status_code==404
     assert client.post(url,files={'file':('other.mp4',data,'video/mp4')}).status_code==404
     app.dependency_overrides.pop(router_module.get_current_user_context)
     assert client.post(url,files={'file':('unauth.mp4',data,'video/mp4')}).status_code in {401,403}

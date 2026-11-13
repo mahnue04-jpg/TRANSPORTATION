@@ -1586,7 +1586,7 @@
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p></div>" : "") + licenseNote + downloadControl + captionControl;
+          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button> <button type=\"button\" class=\"secondary private-video-inspect\">Inspect saved MP4 format (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p><p class=\"hint private-video-inspection\" role=\"status\" aria-live=\"polite\"></p></div>" : "") + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
@@ -1634,6 +1634,47 @@
       var container = video.parentElement && video.parentElement.parentElement;
       var status = container && container.querySelector(".private-video-status");
       var playButton = container && container.querySelector(".private-video-retry");
+      var inspectButton = container && container.querySelector(".private-video-inspect");
+      var inspectStatus = container && container.querySelector(".private-video-inspection");
+      if (inspectButton) inspectButton.addEventListener("click", async function () {
+        if (inspectButton.disabled || projectId !== activeProjectId) return;
+        inspectButton.disabled = true;
+        if (inspectStatus) inspectStatus.textContent = "Inspecting saved MP4 format without changing media…";
+        try {
+          var fileUrl = video.getAttribute("data-private-video-url") || "";
+          if (!/\/file$/.test(fileUrl)) throw new Error("Saved asset path unavailable");
+          var inspectUrl = fileUrl.replace(/\/file$/, "/browser-compatibility");
+          assertDownloadUrlHasNoToken(inspectUrl);
+          var shared = session();
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = shared && typeof shared.authFetch === "function"
+            ? await shared.authFetch(inspectUrl, {method: "GET", headers: headers})
+            : await fetch(inspectUrl, {method: "GET", headers: headers});
+          if (!response.ok) throw new Error("inspection unavailable (HTTP " + response.status + ")");
+          var report = await response.json();
+          if (projectId !== activeProjectId || !$("asset-list").contains(video)) return;
+          var facts = [
+            "Video: " + (report.video_codec || "unknown"),
+            "profile: " + (report.video_profile || "unknown"),
+            "pixels: " + (report.video_pixel_format || "unknown"),
+            "level: " + (report.video_level || "unknown"),
+            "audio: " + (report.audio_codec || "none"),
+            "duration: " + (report.duration_seconds || "unknown") + "s"
+          ];
+          var warnings = Array.isArray(report.browser_compatibility_warnings)
+            ? report.browser_compatibility_warnings : [];
+          if (inspectStatus) inspectStatus.textContent = facts.join(" | ") +
+            (warnings.length ? " | Warnings: " + warnings.join("; ") : " | No common codec incompatibility detected.") +
+            " Original unchanged; browser playback still requires verification.";
+        } catch (err) {
+          if (inspectStatus && projectId === activeProjectId)
+            inspectStatus.textContent = "Inspection unavailable: " + (err && err.message || "unknown error") +
+              ". Original video unchanged.";
+        } finally {
+          inspectButton.disabled = false;
+        }
+      });
       var loading = false;
       function previewStatus(message) {
         if (status) status.textContent = message;
