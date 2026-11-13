@@ -1136,17 +1136,32 @@ class GrowthAgentService:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         key = idempotency_key or f"wf-exec-{run_id}-{dry_run}"
-        cached = self._idempotent_get(org_id, "workflow_execute", key)
-        if cached:
-            return cached
-
         run = self._org_query(GaWorkflowRun, org_id).filter_by(id=run_id).one_or_none()
         if not run:
             raise GrowthAgentError("NOT_FOUND", "Workflow run not found", http_status=404)
         if run.status in {"cancelled", "needs_information"}:
             raise GrowthAgentError("REVIEW_NOT_APPROVED", "Workflow cannot execute after owner rejection or request for information", http_status=409)
-        if not dry_run and (run.status != "approved" or not actor_user_id):
-            raise GrowthAgentError("OWNER_APPROVAL_REQUIRED", "Explicit owner approval is required for non-dry-run workflow execution", http_status=403)
+        if not dry_run:
+            # A queued worker or a fabricated status is never equivalent to owner approval.
+            authorized = (
+                self._org_query(GaAuditEvent, org_id)
+                .filter_by(
+                    action="workflow.review.approve",
+                    entity_type="workflow_run",
+                    entity_id=run_id,
+                )
+                .filter(GaAuditEvent.actor_user_id.isnot(None))
+                .first()
+            )
+            if run.status != "approved" or not actor_user_id or authorized is None:
+                raise GrowthAgentError(
+                    "OWNER_APPROVAL_REQUIRED",
+                    "Explicit owner approval is required for non-dry-run workflow execution",
+                    http_status=403,
+                )
+        cached = self._idempotent_get(org_id, "workflow_execute", key)
+        if cached:
+            return cached
         profile = self._require_profile(org_id)
         wf = self.db.query(GaWorkflowDefinition).filter_by(id=run.workflow_id, organization_id=org_id).one()
         contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one()
