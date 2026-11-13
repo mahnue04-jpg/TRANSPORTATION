@@ -23,3 +23,11 @@ def test_workflow_audit_is_owner_scoped_and_read_only():
     assert 'isSameOwner(state)' in js
     assert 'method: "POST"' not in js
     assert 'method: "PATCH"' not in js
+
+
+def test_visible_audit_clears_after_org_change_or_new_session():
+    js = (STATIC / "growth-audit.js").read_text(encoding="utf-8")
+    assert 'visibleOwner = { token: state.token, org: state.org }' in js
+    assert 'if (visibleOwner && !isSameOwner(visibleOwner))' in js
+    assert 'window.addEventListener("focus", verifyVisibleOwner)' in js
+    assert 'document.addEventListener("visibilitychange", verifyVisibleOwner)' in js
