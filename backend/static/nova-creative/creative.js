@@ -1636,6 +1636,7 @@
       var playButton = container && container.querySelector(".private-video-retry");
       var inspectButton = container && container.querySelector(".private-video-inspect");
       var inspectStatus = container && container.querySelector(".private-video-inspection");
+      var loadedPrivateBlob = null;
       if (inspectButton) inspectButton.addEventListener("click", async function () {
         if (inspectButton.disabled || projectId !== activeProjectId) return;
         inspectButton.disabled = true;
@@ -1667,11 +1668,23 @@
               ", faststart: " + (report.mp4_faststart ? "yes" : "no") +
               ", fragmented: " + (report.mp4_fragmented ? "yes" : "no")
           ];
+          var integrity = "Browser byte integrity: not checked (load saved video first).";
+          if (loadedPrivateBlob && report.source_sha256 && window.crypto && crypto.subtle) {
+            var bytes = await loadedPrivateBlob.arrayBuffer();
+            var digest = await crypto.subtle.digest("SHA-256", bytes);
+            var hex = Array.from(new Uint8Array(digest)).map(function (n) {
+              return n.toString(16).padStart(2, "0");
+            }).join("");
+            var sizeMatches = Number(report.size_bytes) === loadedPrivateBlob.size;
+            integrity = "Browser bytes: " + (sizeMatches && hex === report.source_sha256 ? "MATCH original saved MP4" : "MISMATCH original saved MP4") +
+              " (size " + loadedPrivateBlob.size + " / " + report.size_bytes + ").";
+          }
+          if (projectId !== activeProjectId || !$("asset-list").contains(video)) return;
           var warnings = Array.isArray(report.browser_compatibility_warnings)
             ? report.browser_compatibility_warnings : [];
           if (inspectStatus) inspectStatus.textContent = facts.join(" | ") +
             (warnings.length ? " | Warnings: " + warnings.join("; ") : " | No common codec incompatibility detected.") +
-            " Original unchanged; browser playback still requires verification.";
+            " | " + integrity + " Original unchanged; browser playback still requires verification.";
         } catch (err) {
           if (inspectStatus && projectId === activeProjectId)
             inspectStatus.textContent = "Inspection unavailable: " + (err && err.message || "unknown error") +
@@ -1729,6 +1742,7 @@
           if (!blob.size || (blob.type && !blob.type.startsWith("video/"))) {
             throw new Error("Empty or unsupported private video preview");
           }
+          loadedPrivateBlob = blob;
           var objectUrl = URL.createObjectURL(blob);
           privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;

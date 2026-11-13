@@ -86,6 +86,9 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     assert inspection.json()['video_codec']=='h264'
     assert inspection.json()['duration_seconds'] > 0
     assert inspection.json()['browser_playback_verified'] is False
+    import hashlib
+    assert inspection.json()['source_sha256'] == hashlib.sha256(data).hexdigest()
+    assert inspection.json()['size_bytes'] == len(data)
     assert inspection.json()['mp4_structure_complete'] is True
     assert inspection.json()['mp4_has_ftyp'] is True
     assert inspection.json()['mp4_has_moov'] is True

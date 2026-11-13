@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from pathlib import Path
 import subprocess
@@ -151,7 +152,14 @@ def inspect_existing_video(path: Path) -> dict:
             warnings.append("Video profile may not be supported by Chrome.")
         if audio_codec not in {None, "aac"}:
             warnings.append("Audio codec is not AAC.")
+        # Hash the preserved local file so the browser can verify the bytes
+        # received through its authenticated fetch -> Blob playback path.
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
         return {
+            "source_sha256": digest.hexdigest(),
             "video_codec": video_codec,
             "video_profile": profile,
             "video_pixel_format": pix_fmt,
