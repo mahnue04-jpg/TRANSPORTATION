@@ -70,6 +70,11 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     result=response.json(); asset=result['asset']
     assert not result['paid_request_submitted']
     assert not asset['metadata']['publish_ready']
+    assert asset['metadata']['video_codec'] == 'h264'
+    assert asset['metadata']['video_pixel_format'] in {'yuv420p', 'yuvj420p'}
+    assert isinstance(asset['metadata']['video_profile'], str)
+    assert isinstance(asset['metadata']['video_level'], int)
+    assert asset['metadata']['browser_compatibility_warnings'] == []
     download=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file')
     assert download.status_code==200
     assert download.content==data
