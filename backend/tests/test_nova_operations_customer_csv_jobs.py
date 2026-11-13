@@ -300,7 +300,7 @@ def test_batch_stale_recovery_preview_is_read_only_and_scoped(state):
     assert preview["candidate_job_ids"] == ["stale-a"]
     assert preview["recovered_count"] == 0
     assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="stale-a")["status"] == "PROCESSING"
-    applied = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False)
+    applied = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, expected_job_ids=preview["candidate_job_ids"])
     assert applied["recovered_job_ids"] == ["stale-a"]
     assert applied["recovered_count"] == 1
     assert applied["requires_reupload"] is True
@@ -325,10 +325,12 @@ def test_batch_stale_recovery_is_bounded_and_repeat_safe(state):
     db.commit()
     with pytest.raises(jobs.CustomerCSVBlocked):
         jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", limit=0)
-    first = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2)
+    first = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2, expected_job_ids=["old-0", "old-1"])
     assert first["recovered_count"] == 2
-    second = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2)
+    second = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2, expected_job_ids=["old-2"])
     assert second["recovered_count"] == 1
-    third = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False)
-    assert third["recovered_count"] == 0
-    assert third["requires_reupload"] is False
+    third = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=True)
+    assert third["candidate_count"] == 0
+    with pytest.raises(jobs.CustomerCSVBlocked, match="Exact previewed"):
+        jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, expected_job_ids=[])
+
