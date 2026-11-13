@@ -411,9 +411,21 @@ def process_tabular_source(row: NovaWorkInput) -> dict[str, Any]:
 
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(header)
-    writer.writerows(cleaned_rows)
+    # A customer spreadsheet may contain values that become formulas when
+    # opened in Excel/Sheets. Escape both headers and cells before exporting.
+    def safe_spreadsheet_cell(value: str) -> str:
+        return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
+
+    writer.writerow([safe_spreadsheet_cell(value) for value in header])
+    writer.writerows(
+        [safe_spreadsheet_cell(value) for value in record]
+        for record in cleaned_rows
+    )
     content = output.getvalue().encode("utf-8")
+    if len(content) > MAX_WORK_INPUT_BYTES:
+        raise NovaWorkError(
+            "Generated CSV exceeds the 20 MB output limit", status_code=413,
+        )
 
     validation = {
         "source_filename": row.original_filename,
