@@ -13,6 +13,7 @@
   const detailStatus = get("growth-agent-preview-detail-status");
   const detailSteps = get("growth-agent-preview-detail-steps");
   const decisionControls = get("growth-agent-preview-decision-controls");
+  const approveButton = get("growth-agent-preview-approve");
   const rejectButton = get("growth-agent-preview-reject");
   const requestInfoButton = get("growth-agent-preview-request-information");
   let selected = null;
@@ -38,6 +39,7 @@
     selected = null;
     pendingDecision = null;
     if (decisionControls) decisionControls.hidden = true;
+    if (approveButton) { approveButton.textContent = "Approve (record only)"; approveButton.disabled = false; }
     if (rejectButton) { rejectButton.textContent = "Reject workflow"; rejectButton.disabled = false; }
     if (requestInfoButton) { requestInfoButton.textContent = "Place on hold — needs information"; requestInfoButton.disabled = false; }
     if (detailSteps) detailSteps.replaceChildren();
@@ -82,7 +84,7 @@
       if (request !== detailGeneration || !sameOwner(identity)) return;
       detailSteps.replaceChildren(...nodes);
       selected = {runId, token: identity.token, org: identity.org};
-      if (decisionControls && rejectButton && requestInfoButton) decisionControls.hidden = false;
+      if (decisionControls && approveButton && rejectButton && requestInfoButton) decisionControls.hidden = false;
       detailStatus.textContent = String(data.workflow_name || "Workflow").slice(0, 100) +
         " — " + data.status + " — " + (data.is_synthetic_demo === true ? "DEMO" : "not marked demo") +
         ". Redacted preview only. Nothing approved or sent.";
@@ -93,17 +95,18 @@
   }
 
   async function ownerDecision(decision) {
-    if (decisionBusy || !["reject", "request_information"].includes(decision)) return;
+    if (decisionBusy || !["approve", "reject", "request_information"].includes(decision)) return;
     const identity = owner();
     if (!selected || !sameOwner(selected) || !sameOwner(identity)) {
       clear("Session changed. Reload workflow previews.");
       return;
     }
     const candidate = selected;
-    const actionButton = decision === "reject" ? rejectButton : requestInfoButton;
-    if (!actionButton || !rejectButton || !requestInfoButton || !detailStatus) return;
+    const actionButton = decision === "approve" ? approveButton : (decision === "reject" ? rejectButton : requestInfoButton);
+    if (!actionButton || !approveButton || !rejectButton || !requestInfoButton || !detailStatus) return;
     if (!pendingDecision || pendingDecision.runId !== candidate.runId || pendingDecision.decision !== decision) {
       pendingDecision = {runId: candidate.runId, decision};
+      approveButton.textContent = decision === "approve" ? "Confirm approval (record only)" : "Approve (record only)";
       rejectButton.textContent = decision === "reject" ? "Confirm reject (click again)" : "Reject workflow";
       requestInfoButton.textContent = decision === "request_information" ? "Confirm hold (click again)" : "Place on hold — needs information";
       detailStatus.textContent = "Confirm this owner decision by clicking the same button again. Nothing has been changed yet.";
@@ -111,6 +114,7 @@
     }
     // The second owner click performs an authenticated state transition, never execution or delivery.
     decisionBusy = true;
+    approveButton.disabled = true;
     rejectButton.disabled = true;
     requestInfoButton.disabled = true;
     const generationAtStart = generation;
@@ -135,9 +139,9 @@
       if (generationAtStart !== generation || detailAtStart !== detailGeneration) return;
       if (!result || result.run_id !== candidate.runId || result.decision !== decision ||
           result.execution_performed !== false || result.live_send !== false ||
-          result.status !== (decision === "reject" ? "cancelled" : "needs_information"))
+          result.status !== (decision === "approve" ? "approved" : (decision === "reject" ? "cancelled" : "needs_information")))
         throw new Error("Unexpected decision response. Verify audit history before doing anything else.");
-      clear("Owner decision recorded: " + (decision === "reject" ? "Rejected" : "On hold — information needed") +
+      clear("Owner decision recorded: " + (decision === "approve" ? "Approved (record only)" : (decision === "reject" ? "Rejected" : "On hold — information needed")) +
         ". No workflow executed or message sent. Reload queue to verify.");
     } catch (error) {
       if (generationAtStart === generation && detailAtStart === detailGeneration && sameOwner(identity)) {
@@ -147,13 +151,16 @@
     } finally {
       decisionBusy = false;
       if (generationAtStart === generation && detailAtStart === detailGeneration) {
+        approveButton.disabled = false;
         rejectButton.disabled = false;
         requestInfoButton.disabled = false;
+        approveButton.textContent = "Approve (record only)";
         rejectButton.textContent = "Reject workflow";
         requestInfoButton.textContent = "Place on hold — needs information";
       }
     }
   }
+  if (approveButton) approveButton.addEventListener("click", () => ownerDecision("approve"));
   if (rejectButton) rejectButton.addEventListener("click", () => ownerDecision("reject"));
   if (requestInfoButton) requestInfoButton.addEventListener("click", () => ownerDecision("request_information"));
 
