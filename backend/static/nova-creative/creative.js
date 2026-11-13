@@ -374,6 +374,32 @@
     el.classList.remove("hidden");
     el.classList.toggle("error", !ok);
   }
+  function showCurrentProjectWorkspace(project, focusIt) {
+    var panel = $("studio-project-workspace");
+    if (!panel || !project || !project.id) return;
+    var title = String(project.title || "Untitled project");
+    var heading = $("studio-project-workspace-heading");
+    var status = $("studio-project-workspace-status");
+    if (heading) heading.textContent = "Project created: " + title;
+    if (status) status.textContent = "Saved and selected · " + String(project.duration_target || "unspecified") + " seconds · Project ID " + project.id;
+    panel.classList.remove("hidden");
+    if (focusIt) {
+      panel.scrollIntoView({ behavior: "auto", block: "start" });
+      panel.focus({ preventScroll: true });
+    }
+  }
+
+  var continueProjectButton = $("studio-project-workspace-continue");
+  if (continueProjectButton) {
+    continueProjectButton.addEventListener("click", function () {
+      var brief = $("brief-form");
+      if (!brief) return;
+      brief.scrollIntoView({ behavior: "auto", block: "start" });
+      var topic = $("brief-topic");
+      if (topic && !topic.disabled) topic.focus({ preventScroll: true });
+    });
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -2977,9 +3003,12 @@
         })
       });
       setActiveProjectId(row.id);
-      showBanner("Project created", true);
       await refreshProjects();
       await refreshAssets();
+      if (activeProjectId === row.id) {
+        showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
+        showCurrentProjectWorkspace(row, true);
+      }
     } catch (err) {
       showBanner(err.message || "Project create failed.", false);
     } finally {
