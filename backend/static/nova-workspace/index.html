@@ -26,6 +26,7 @@
 <a data-nova-i18n="Communications" href="/nova/communications">Communications</a>
 <a data-nova-i18n="Government" href="/nova/government">Government</a>
 <a data-nova-i18n="Business" href="/nova/business">Business</a>
+<a href="#growth-agent-overview">Growth Agent</a>
 <a data-nova-i18n="Accounting" href="/nova/accounting">Accounting</a>
 <a data-nova-i18n="Aging" href="/nova/accounting/aging">Aging</a>
 <a data-nova-i18n="Trends" href="/nova/accounting/trends">Trends</a>
@@ -35,6 +36,50 @@
 </nav>
 </header>
 <main class="ws-main">
+<section class="card" id="growth-agent-overview" aria-labelledby="growth-agent-overview-title">
+<h2 id="growth-agent-overview-title">Growth Agent — Owner Overview</h2>
+<p class="hint">Read-only owner view. Values come from this organization's Growth Agent records; synthetic demonstrations must not be mistaken for real customer revenue.</p>
+<p class="hint" id="growth-agent-status" role="status">Sign in to view your Growth Agent activity.</p>
+<div class="dashboard" id="growth-agent-summary" hidden>
+<div class="item"><strong id="growth-agent-leads">—</strong><div class="muted">Leads in recent results (not marked demo / demo)</div></div>
+<div class="item"><strong id="growth-agent-conversations">—</strong><div class="muted">Conversations in recent results (not marked demo / demo)</div></div>
+<div class="item"><strong id="growth-agent-appointments">—</strong><div class="muted">Appointments in recent results (not marked demo / demo)</div></div>
+<div class="item"><strong id="growth-agent-transport">—</strong><div class="muted">Delivery mode</div></div>
+</div>
+<section id="growth-agent-review" hidden aria-labelledby="growth-agent-review-heading">
+<h3 id="growth-agent-review-heading">Conversations needing human review</h3>
+<p class="hint">These are handoffs from recent conversations, not approved actions. Open Growth Agent to review before responding or committing to customer work.</p>
+<p id="growth-agent-review-status" role="status"></p>
+<ul id="growth-agent-review-list"></ul>
+</section>
+<section id="growth-agent-preview-queue" aria-labelledby="growth-agent-preview-queue-heading">
+<h3 id="growth-agent-preview-queue-heading">Workflow previews for owner review</h3>
+<p class="hint">Read-only preview candidates. A preview is not a request already approved, not a message sent, and not evidence of revenue. Approval controls are not active.</p>
+<div class="command-actions"><button id="growth-agent-preview-queue-load" type="button">View workflow previews</button></div>
+<p id="growth-agent-preview-queue-status" role="status">Sign in to view pending previews.</p>
+<ul id="growth-agent-preview-queue-list"></ul>
+<div id="growth-agent-preview-detail" hidden aria-label="Selected workflow preview details">
+<h4>Selected workflow details — read only</h4>
+<p id="growth-agent-preview-detail-status" role="status">Select View details for a workflow.</p>
+<ul id="growth-agent-preview-detail-steps"></ul>
+<div id="growth-agent-preview-decision-controls" class="command-actions" hidden>
+<button type="button" id="growth-agent-preview-approve">Approve (record only)</button>
+<button type="button" id="growth-agent-preview-reject">Reject workflow</button>
+<button type="button" id="growth-agent-preview-request-information">Request information</button>
+</div>
+<p class="hint">Decisions record your choice but do not send messages or execute the workflow. Approval records your authorization but does not execute, send, or charge.</p>
+</div>
+</section>
+<section id="growth-agent-audit" aria-labelledby="growth-agent-audit-heading">
+<h3 id="growth-agent-audit-heading">Workflow activity — owner review</h3>
+<p class="hint">Read-only history of recent workflow events. An event is not proof that a message was delivered or a job approved. No actions are executed here.</p>
+<div class="command-actions"><button id="growth-agent-audit-load" type="button">View recent workflow activity</button></div>
+<p id="growth-agent-audit-status" role="status">Sign in to view workflow activity.</p>
+<ul id="growth-agent-audit-list"></ul>
+</section>
+<div class="command-actions"><button type="button" id="growth-agent-refresh">Refresh Growth Agent</button><a class="button" href="/nova/growth">Open detailed Growth Agent dashboard</a></div>
+<p class="hint">These are counts of returned recent records, not lifetime totals or verified paying customers. Older demo records may lack a demo label. Approval queue and Creative Studio attribution are planned, not connected.</p>
+</section>
 <section class="card language-card">
 <label data-nova-i18n="Screen language" for="screen-language">Screen language</label>
 <select aria-label="Screen language" data-nova-label="Screen language" id="screen-language"><option value="en">English</option><option value="so">Af-Soomaali</option><option value="ar">العربية</option><option value="fr">Français</option><option value="es">Español</option><option value="ja" data-rollout="planned">日本語</option><option value="ko" data-rollout="planned">한국어</option><option value="el" data-rollout="planned">Ελληνικά</option><option value="ru" data-rollout="planned">Русский</option><option value="de" data-rollout="planned">Deutsch</option></select>
@@ -160,5 +205,8 @@
 <script src="/static/nova-workspace/speech.js?v=20261010.1"></script>
 <script src="/static/nova-workspace/workspace.js?v=20261010.1"></script>
 <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>
+<script src="/static/nova-workspace/growth-overview.js?v=20261112.1"></script>
+<script src="/static/nova-workspace/growth-audit.js?v=20261113.1"></script>
+<script src="/static/nova-workspace/growth-review-queue.js?v=20261113.1"></script>
 </body>
 </html>

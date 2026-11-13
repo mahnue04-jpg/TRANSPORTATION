@@ -68,6 +68,10 @@ class WorkflowPreviewIn(OrgScoped):
     conversation_id: str | None = None
 
 
+class WorkflowReviewDecisionIn(OrgScoped):
+    decision: str  # approve (record only) | reject | request_information; never executes
+
+
 class WorkflowExecuteIn(OrgScoped):
     run_id: str
     dry_run: bool = True

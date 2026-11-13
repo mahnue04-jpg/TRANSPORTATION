@@ -1136,13 +1136,32 @@ class GrowthAgentService:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         key = idempotency_key or f"wf-exec-{run_id}-{dry_run}"
-        cached = self._idempotent_get(org_id, "workflow_execute", key)
-        if cached:
-            return cached
-
         run = self._org_query(GaWorkflowRun, org_id).filter_by(id=run_id).one_or_none()
         if not run:
             raise GrowthAgentError("NOT_FOUND", "Workflow run not found", http_status=404)
+        if run.status in {"cancelled", "needs_information"}:
+            raise GrowthAgentError("REVIEW_NOT_APPROVED", "Workflow cannot execute after owner rejection or request for information", http_status=409)
+        if not dry_run:
+            # A queued worker or a fabricated status is never equivalent to owner approval.
+            authorized = (
+                self._org_query(GaAuditEvent, org_id)
+                .filter_by(
+                    action="workflow.review.approve",
+                    entity_type="workflow_run",
+                    entity_id=run_id,
+                )
+                .filter(GaAuditEvent.actor_user_id.isnot(None))
+                .first()
+            )
+            if run.status != "approved" or not actor_user_id or authorized is None:
+                raise GrowthAgentError(
+                    "OWNER_APPROVAL_REQUIRED",
+                    "Explicit owner approval is required for non-dry-run workflow execution",
+                    http_status=403,
+                )
+        cached = self._idempotent_get(org_id, "workflow_execute", key)
+        if cached:
+            return cached
         profile = self._require_profile(org_id)
         wf = self.db.query(GaWorkflowDefinition).filter_by(id=run.workflow_id, organization_id=org_id).one()
         contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one()
@@ -1895,6 +1914,127 @@ class GrowthAgentService:
             "kill_switch": "POST /api/nova/growth-agent/agent {disabled:true}",
             "unit_cost_model": UNIT_COST_MODEL,
             "plans": plan_catalog(),
+        }
+
+    def list_workflow_review_queue(self, org_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Read-only tenant-scoped workflow previews; no approval is implied."""
+        cap = max(1, min(limit, 100))
+        runs = (
+            self._org_query(GaWorkflowRun, org_id)
+            .filter(GaWorkflowRun.status.in_(("preview", "awaiting_approval")))
+            .order_by(GaWorkflowRun.created_at.desc())
+            .limit(cap)
+            .all()
+        )
+        workflow_ids = {run.workflow_id for run in runs}
+        workflows = {
+            row.id: row for row in self._org_query(GaWorkflowDefinition, org_id)
+            .filter(GaWorkflowDefinition.id.in_(workflow_ids)).all()
+        } if workflow_ids else {}
+        contact_ids = {run.contact_id for run in runs}
+        contacts = {
+            row.id: row for row in self._org_query(GaContact, org_id)
+            .filter(GaContact.id.in_(contact_ids)).all()
+        } if contact_ids else {}
+        output = []
+        for run in runs:
+            wf = workflows.get(run.workflow_id)
+            if wf is None or not wf.requires_approval:
+                continue
+            contact = contacts.get(run.contact_id)
+            output.append({
+                "run_id": run.id,
+                "workflow_code": wf.code,
+                "workflow_name": wf.name,
+                "status": run.status,
+                "requires_approval": True,
+                "dry_run": bool(run.dry_run),
+                "is_synthetic_demo": bool(contact.is_synthetic_demo) if contact else None,
+                "created_at": run.created_at.isoformat() + "Z" if run.created_at else None,
+            })
+        return output
+
+    def decide_workflow_review(
+        self,
+        org_id: str,
+        run_id: str,
+        *,
+        decision: str,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically record explicit owner approval or hold/rejection; NEVER executes."""
+        if decision not in {"reject", "request_information", "approve"}:
+            raise GrowthAgentError("VALIDATION", "Unsupported owner review decision", http_status=422)
+        if not actor_user_id:
+            raise GrowthAgentError("FORBIDDEN", "Authenticated reviewer required", http_status=403)
+        outcome = {"reject": "cancelled", "request_information": "needs_information", "approve": "approved"}[decision]
+        updated = (
+            self._org_query(GaWorkflowRun, org_id)
+            .filter(GaWorkflowRun.id == run_id)
+            .filter(GaWorkflowRun.status.in_(("preview", "awaiting_approval")))
+            .filter(
+                GaWorkflowRun.workflow_id.in_(
+                    self.db.query(GaWorkflowDefinition.id)
+                    .filter_by(organization_id=org_id, requires_approval=True)
+                )
+            )
+            .update({"status": outcome}, synchronize_session=False)
+        )
+        if updated != 1:
+            self.db.rollback()
+            raise GrowthAgentError(
+                "REVIEW_CONFLICT",
+                "Workflow is not reviewable, is from another organization, or was already decided",
+                http_status=409,
+            )
+        self.audit(
+            org_id,
+            action="workflow.review." + decision,
+            entity_type="workflow_run",
+            entity_id=run_id,
+            actor_user_id=actor_user_id,
+            summary="Owner review decision recorded: " + decision,
+        )
+        self.db.commit()
+        return {
+            "run_id": run_id,
+            "decision": decision,
+            "status": outcome,
+            "execution_performed": False,
+            "live_send": False,
+        }
+
+    def workflow_review_details(self, org_id: str, run_id: str) -> dict[str, Any]:
+        """Read-only summary of an owner's candidate; never exposes body text or dispatches."""
+        run = self._org_query(GaWorkflowRun, org_id).filter_by(id=run_id).one_or_none()
+        if run is None or run.status not in {"preview", "awaiting_approval"}:
+            raise GrowthAgentError("NOT_FOUND", "Reviewable workflow not found", http_status=404)
+        wf = self._org_query(GaWorkflowDefinition, org_id).filter_by(id=run.workflow_id).one_or_none()
+        if wf is None or not wf.requires_approval:
+            raise GrowthAgentError("NOT_FOUND", "Reviewable workflow not found", http_status=404)
+        contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one_or_none()
+        messages = list((run.preview_json or {}).get("messages") or [])
+        return {
+            "run_id": run.id,
+            "workflow_name": wf.name,
+            "workflow_code": wf.code,
+            "purpose": wf.purpose,
+            "status": run.status,
+            "requires_approval": True,
+            "dry_run": bool(run.dry_run),
+            "is_synthetic_demo": bool(contact.is_synthetic_demo) if contact else None,
+            "step_count": len(messages),
+            "steps": [
+                {
+                    "channel": str(msg.get("channel") or "unknown")[:40],
+                    "scheduled_for_utc": msg.get("scheduled_for_utc"),
+                    "quiet_hours_adjusted": bool(msg.get("quiet_hours_adjusted")),
+                }
+                for msg in messages[:50]
+                if isinstance(msg, dict)
+            ],
+            "content_redacted": True,
+            "execution_performed": False,
         }
 
     def audit_history(self, org_id: str, *, limit: int = 100) -> list[dict[str, Any]]:

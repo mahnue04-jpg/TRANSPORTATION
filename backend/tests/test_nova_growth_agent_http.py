@@ -149,3 +149,99 @@ def test_http_journey_smoke_authenticated(client: TestClient) -> None:
     health = client.get("/api/nova/growth-agent/health", headers=headers)
     assert health.status_code == 200
     assert health.json()["live_flags"]["sms"] is False
+
+
+def test_workflow_review_queue_requires_authentication(client: TestClient) -> None:
+    """Workflow previews must never become a public endpoint."""
+    response = client.get("/api/nova/growth-agent/workflows/review-queue")
+    assert response.status_code in {401, 403}
+
+
+def test_workflow_review_queue_owner_reads_only_own_tenant(client: TestClient) -> None:
+    """A regular tenant user cannot request another organization's review queue."""
+    headers = _headers(client)
+    own = client.get("/api/nova/growth-agent/workflows/review-queue?limit=2", headers=headers)
+    assert own.status_code == 200, own.text
+    assert isinstance(own.json().get("items"), list)
+
+    other = client.get(
+        "/api/nova/growth-agent/workflows/review-queue?organization_id=other-tenant-unknown",
+        headers=headers,
+    )
+    assert other.status_code == 403, other.text
+
+
+def test_workflow_review_queue_limit_is_validated(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.get("/api/nova/growth-agent/workflows/review-queue?limit=101", headers=headers)
+    assert response.status_code == 422
+
+
+def test_workflow_review_detail_requires_authentication(client: TestClient) -> None:
+    response = client.get("/api/nova/growth-agent/workflows/review-queue/not-a-real-run")
+    assert response.status_code in {401, 403}
+
+
+def test_workflow_review_detail_absent_run_does_not_leak(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.get(
+        "/api/nova/growth-agent/workflows/review-queue/not-a-real-run",
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+def test_review_decision_requires_authentication(client: TestClient) -> None:
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        json={"decision": "reject"},
+    )
+    assert response.status_code in {401, 403}
+
+
+def test_review_approval_on_missing_run_fails_closed(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        headers=headers, json={"decision": "approve"},
+    )
+    assert response.status_code == 409
+
+
+def test_review_decision_rejects_cross_tenant_request(client: TestClient) -> None:
+    headers = _headers(client)
+    response = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/nonexistent/decision",
+        headers=headers,
+        json={"decision": "reject", "organization_id": "other-tenant-unknown"},
+    )
+    assert response.status_code == 403
+
+
+def test_workspace_serves_integrated_growth_owner_controls(client: TestClient) -> None:
+    """HTTP delivery smoke for the actual Workspace page and its JS bundles."""
+    page = client.get("/nova/workspace")
+    assert page.status_code == 200, page.text
+    for marker in (
+        'id="growth-agent-overview"',
+        'id="growth-agent-preview-queue"',
+        'id="growth-agent-preview-approve"',
+        'id="growth-agent-preview-reject"',
+        'id="growth-agent-preview-request-information"',
+        'id="growth-agent-audit"',
+    ):
+        assert marker in page.text
+    for filename in ("growth-overview.js", "growth-audit.js", "growth-review-queue.js"):
+        assert f"/static/nova-workspace/{filename}" in page.text
+        asset = client.get(f"/static/nova-workspace/{filename}")
+        assert asset.status_code == 200
+        assert "growth-agent" in asset.text
+
+
+def test_workspace_review_decision_endpoint_does_not_act_without_auth(client: TestClient) -> None:
+    """The actual review-decision route is not a public message/execute endpoint."""
+    res = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/not-real/decision",
+        json={"decision": "approve"},
+    )
+    assert res.status_code in {401, 403}

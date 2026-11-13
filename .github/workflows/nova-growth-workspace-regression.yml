@@ -1,0 +1,40 @@
+name: Growth Agent Workspace isolated regression
+
+on:
+  push:
+    branches:
+      - review/growth-workspace-dashboard-497-20261112
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-workspace-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace-node-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check Workspace overview
+        run: node --check backend/static/nova-workspace/growth-overview.js
+      - name: Run Growth Agent Workspace behavior tests
+        run: node --test backend/static/nova-workspace/growth-overview.test.cjs
+  workspace-python-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install static test dependency only
+        run: python -m pip install pytest
+      - name: Run Workspace Growth integration contract tests
+        run: python -m pytest -q backend/tests/test_nova_workspace_growth_overview.py

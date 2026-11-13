@@ -458,6 +458,7 @@
       });
     }
     await refresh();
+    window.dispatchEvent(new Event("nova:workspace-signed-in"));
     showBanner(t("Signed in. Nova Workspace is available."), true);
   });
   $("sign-out").addEventListener("click", async function () {
