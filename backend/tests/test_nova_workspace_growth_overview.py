@@ -38,3 +38,11 @@ def test_growth_overview_handles_login_and_stale_responses():
     assert "request !== requestId" in growth
     assert "currentToken() === tokenAtStart" in growth
     assert "requestId++" in growth
+
+
+def test_growth_overview_checks_tenant_identity_and_prevents_old_refresh_status():
+    growth = (STATIC / "growth-overview.js").read_text(encoding="utf-8")
+    assert "getOrganizationId" in growth
+    assert "currentOrganization() !== organizationAtStart" in growth
+    assert "currentOrganization() === organizationAtStart" in growth
+    assert "if (request !== requestId) return;" in growth
