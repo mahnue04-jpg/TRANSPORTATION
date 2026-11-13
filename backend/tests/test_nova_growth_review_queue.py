@@ -226,3 +226,52 @@ def test_explicit_owner_approval_records_state_but_does_not_execute(db):
             org, preview["run_id"], decision="approve", actor_user_id="owner-test"
         )
     assert duplicate.value.http_status == 409
+
+
+def test_forged_approved_status_without_owner_audit_cannot_execute(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "forged-approval-owner"
+    contact = _seed(svc, org)
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    db.query(GaWorkflowRun).filter_by(id=preview["run_id"]).update({"status": "approved"})
+    db.commit()
+    before = db.query(GaDeliveryAttempt).count()
+    with pytest.raises(GrowthAgentError) as denied:
+        svc.approve_and_execute_workflow(
+            org, run_id=preview["run_id"], dry_run=False,
+            actor_user_id="owner-test", idempotency_key="unauthorized-execution",
+        )
+    assert denied.value.code == "OWNER_APPROVAL_REQUIRED"
+    assert denied.value.http_status == 403
+    assert db.query(GaDeliveryAttempt).count() == before
+
+
+def test_prior_cached_execution_does_not_bypass_new_rejection(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "cache-replay-owner"
+    contact = _seed(svc, org)
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    approved = svc.decide_workflow_review(
+        org, preview["run_id"], decision="approve", actor_user_id="owner-test",
+    )
+    assert approved["execution_performed"] is False
+    first = svc.approve_and_execute_workflow(
+        org, run_id=preview["run_id"], dry_run=False,
+        actor_user_id="owner-test", idempotency_key="approved-once",
+    )
+    assert first["live_send"] is False
+    # Simulate a later hold/revocation before a cached response is reused.
+    db.query(GaWorkflowRun).filter_by(id=preview["run_id"]).update({"status": "cancelled"})
+    db.commit()
+    before = db.query(GaDeliveryAttempt).count()
+    with pytest.raises(GrowthAgentError) as denied:
+        svc.approve_and_execute_workflow(
+            org, run_id=preview["run_id"], dry_run=False,
+            actor_user_id="owner-test", idempotency_key="approved-once",
+        )
+    assert denied.value.http_status == 409
+    assert db.query(GaDeliveryAttempt).count() == before
