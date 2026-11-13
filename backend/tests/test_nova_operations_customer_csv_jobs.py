@@ -196,7 +196,7 @@ def test_review_does_not_claim_approval_if_conditional_update_loses_race(state, 
     from types import SimpleNamespace
 
     db, _ = state
-    job_id = submit(db, request_key="review-race")
+    job_id = submit(db, request_key="review-race")["job_id"]
     original_execute = db.execute
 
     def simulate_lost_review_transition(statement, *args, **kwargs):
