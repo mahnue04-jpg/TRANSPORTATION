@@ -54,6 +54,12 @@ The owner panel now includes Find business candidates as well as selected-source
 
 The independent API acceptance queried the same public Minnesota business search with a four-result limit, fetched four primary pages and downloaded the Operations CSV. A duplicate request reused the result. A new Python process reopened and downloaded it with integrity checks. Its synthetic authentication override is explicitly recorded in the evidence. The separate eight-candidate run and four-candidate API run overlap; do not add them together.
 
+## Review packaging and control verification
+
+Draft GitHub review #508 isolates Botora's changes against a dedicated review base at 7d65bb05. The original uploaded branch contains earlier development history and must not be merged directly to main as a Botora-only production release. This review does not authorize deployment.
+
+Four JavaScript control tests passed in an isolated Node VM with synthetic DOM and HTTP fixtures: signed-out users make no request; retry preserves request identity; a late search response cannot restore records/download after sign-out; provider failure unlocks controls without fabricating output. These complement the 12 Python checks. They are not an interactive browser or hosted-owner-authentication test.
+
 ## Reproduce in development
 
 From the repository root with its Python dependencies installed:
