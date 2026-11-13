@@ -164,7 +164,7 @@ def test_owner_reject_is_audited_and_blocks_execution(db):
         svc.approve_and_execute_workflow(org, run_id=preview["run_id"], dry_run=True)
     assert denied.value.http_status == 409
     with pytest.raises(GrowthAgentError) as repeated:
-        svc.decide_workflow_review(org, preview["run_id"], decision="reject")
+        svc.decide_workflow_review(org, preview["run_id"], decision="reject", actor_user_id="owner-test")
     assert repeated.value.http_status == 409
 
 
@@ -177,7 +177,7 @@ def test_request_information_blocks_execution_and_cross_tenant_decisions(db):
     _seed(svc, other)
     preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=lead.id)
     with pytest.raises(GrowthAgentError) as cross:
-        svc.decide_workflow_review(other, preview["run_id"], decision="reject")
+        svc.decide_workflow_review(other, preview["run_id"], decision="reject", actor_user_id="owner-test")
     assert cross.value.http_status == 409
     result = svc.decide_workflow_review(
         org, preview["run_id"], decision="request_information", actor_user_id="owner-test"
