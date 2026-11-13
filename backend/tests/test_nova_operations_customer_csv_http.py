@@ -186,6 +186,7 @@ def test_assignment_revoked_during_upload_never_reserves_job(harness, monkeypatc
     assert store.objects == {}
     # The task became blocked before processing, so no job may be created.
     eng["status"] = "ACTIVE"
+    monkeypatch.setattr(api.service, "get_engagement", lambda *args, **kwargs: eng)
     response = client.get("/api/nova/work/operations/durable/jobs")
     assert response.status_code == 200
     assert response.json()["jobs"] == []
