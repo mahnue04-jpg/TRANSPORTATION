@@ -11,11 +11,13 @@ function setup(fetchImpl, token = "", org = "owner-a") {
   function element() { return {
     textContent: "", disabled: false, children: [], listeners: {},
     addEventListener(key, cb) { this.listeners[key] = cb; },
-    replaceChildren(...items) { this.children = items; }
+    replaceChildren(...items) { this.children = items; },
+    appendChild(item) { this.children.push(item); }
   }; }
   const elements = Object.fromEntries([
     "growth-agent-preview-queue-load", "growth-agent-preview-queue-status",
-    "growth-agent-preview-queue-list", "sign-out"
+    "growth-agent-preview-queue-list", "growth-agent-preview-detail",
+    "growth-agent-preview-detail-status", "growth-agent-preview-detail-steps", "sign-out"
   ].map(id => [id, element()]));
   const window = {
     AmiCorSession: {
@@ -52,7 +54,7 @@ test("owner gets only reviewable candidates, with no approve/send action", async
   const ui = setup(async (url, options) => {
     requests.push({url, options});
     return ok([
-      { workflow_name: "<script>alert(1)</script>", status: "preview", requires_approval: true, is_synthetic_demo: true, dry_run: true },
+      { run_id: "run-demo-1", workflow_name: "<script>alert(1)</script>", status: "preview", requires_approval: true, is_synthetic_demo: true, dry_run: true },
       { workflow_name: "Completed", status: "completed", requires_approval: true },
       { workflow_name: "No approval needed", status: "preview", requires_approval: false }
     ]);
@@ -94,4 +96,47 @@ test("visible preview list clears when session changes after display", async () 
   ui.setToken("new-session-token");
   ui.listeners.focus();
   assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+});
+
+
+test("owner can view redacted workflow details without posting or executing", async () => {
+  const requests = [];
+  const ui = setup(async (url, opts) => {
+    requests.push({ url, opts });
+    if (url.endsWith("/review-queue?limit=50")) return ok([
+      {run_id: "run-1", workflow_name: "Inquiry acknowledgment", status: "preview", requires_approval: true, is_synthetic_demo: true, dry_run: true}
+    ]);
+    if (url.endsWith("/review-queue/run-1")) return {
+      ok: true, status: 200, json: async () => ({
+        run_id: "run-1", workflow_name: "Inquiry acknowledgment", status: "preview",
+        requires_approval: true, content_redacted: true, is_synthetic_demo: true,
+        steps: [{channel: "email", scheduled_for_utc: "2026-11-13T18:00:00Z", quiet_hours_adjusted: false}]
+      })
+    };
+    throw Error("Unexpected fetch");
+  }, "session-token");
+  await ui.click();
+  const item = ui.elements["growth-agent-preview-queue-list"].children[0];
+  assert.equal(item.children.length, 1);
+  await item.children[0].listeners.click();
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(entry => entry.opts.method === undefined));
+  assert.equal(ui.elements["growth-agent-preview-detail-steps"].children.length, 1);
+  assert.match(ui.elements["growth-agent-preview-detail-status"].textContent, /Nothing approved or sent/);
+});
+
+test("unredacted or mismatched workflow detail responses are rejected", async () => {
+  const ui = setup(async url => {
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"run-1", workflow_name:"Example", status:"preview", requires_approval:true}
+    ]);
+    return {ok:true,status:200,json:async()=>({
+      run_id:"other-run", status:"preview", requires_approval:true,
+      content_redacted:false, steps:[{channel:"email"}]
+    })};
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  assert.equal(ui.elements["growth-agent-preview-detail-steps"].children.length, 0);
+  assert.match(ui.elements["growth-agent-preview-detail-status"].textContent, /Unexpected or stale/);
 });
