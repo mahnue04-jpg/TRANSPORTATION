@@ -9,6 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, "growth-overview.js"), "utf8
 
 function setup(fetchImpl, initialToken = "") {
   let token = initialToken;
+  let org = "test-org";
   const elements = {};
   const listeners = {};
   for (const id of [
@@ -23,6 +24,7 @@ function setup(fetchImpl, initialToken = "") {
   }
   const session = {
     getAccessToken: () => token,
+    getOrganizationId: () => org,
     getAuthHeaders: () => ({ Authorization: "Bearer " + token })
   };
   const window = {
@@ -35,7 +37,7 @@ function setup(fetchImpl, initialToken = "") {
     console
   };
   vm.runInNewContext(source, context, { filename: "growth-overview.js" });
-  return { elements, listeners, setToken(v) { token = v; } };
+  return { elements, listeners, setToken(v) { token = v; }, setOrg(v) { org = v; } };
 }
 
 const ok = (value) => ({ ok: true, status: 200, async json() { return value; } });
@@ -102,4 +104,34 @@ test("sign-out invalidates outstanding responses and hides dashboard", async () 
   await flush();
   assert.equal(ui.elements["growth-agent-summary"].hidden, true);
   assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2");
+});
+
+
+test("switching organizations while requests are pending hides the old tenant data", async () => {
+  const pending = [];
+  const ui = setup(url => new Promise(resolve => pending.push({ url, resolve })), "owner-token");
+  await flush();
+  assert.equal(pending.length, 4);
+  ui.setOrg("another-org");
+  for (const item of pending) item.resolve(responseFor(item.url));
+  await flush();
+  assert.equal(ui.elements["growth-agent-summary"].hidden, true);
+  assert.match(ui.elements["growth-agent-status"].textContent, /Session changed/);
+  assert.notEqual(ui.elements["growth-agent-leads"].textContent, "2");
+});
+
+test("an older failed refresh cannot overwrite a newer successful refresh", async () => {
+  const pending = [];
+  const ui = setup(url => new Promise(resolve => pending.push({ url, resolve })), "owner-token");
+  await flush();
+  ui.listeners.focus();
+  await flush();
+  assert.equal(pending.length, 8);
+  for (const item of pending.slice(4)) item.resolve(responseFor(item.url));
+  await flush();
+  for (const item of pending.slice(0, 4)) item.resolve({ ok: false, status: 403 });
+  await flush();
+  assert.equal(ui.elements["growth-agent-summary"].hidden, false);
+  assert.equal(ui.elements["growth-agent-leads"].textContent, "2");
+  assert.match(ui.elements["growth-agent-status"].textContent, /Owner records loaded/);
 });
