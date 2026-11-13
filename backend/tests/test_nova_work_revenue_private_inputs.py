@@ -188,3 +188,38 @@ def test_tabular_csv_export_rejects_output_larger_than_client_limit(monkeypatch,
     with pytest.raises(NovaWorkError, match="output limit") as exc:
         work_inputs.process_tabular_source(row)
     assert exc.value.status_code == 413
+
+
+def test_authorized_active_customer_input_round_trip_in_synthetic_private_store(monkeypatch):
+    """Owner-gated intake writes one private object and returns verifiable bytes."""
+    class FakeSession:
+        def __init__(self):
+            self.records = []
+        def add(self, row):
+            self.records.append(row)
+        def commit(self):
+            pass
+        def refresh(self, row):
+            pass
+
+    store = SyntheticStore()
+    db = FakeSession()
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    monkeypatch.setenv("PLATFORM_OPS_DOCUMENT_STORAGE", "s3_private")
+    monkeypatch.setattr(work_inputs, "S3PrivateDocumentStorage", lambda: store)
+    monkeypatch.setattr(work_inputs, "get_engagement", lambda *args, **kwargs: {
+        "status": "ACTIVE", "blockers": None,
+    })
+    monkeypatch.setattr(work_inputs, "_record_audit", lambda *args, **kwargs: None)
+    raw = b"Name\nAda\nAda\n"
+    saved = work_inputs.create_work_input(
+        db, "eng", organization_id="org",
+        user=SimpleNamespace(user_id="owner"),
+        filename="client.csv", content_type="text/csv", content=raw,
+        owner_confirmed_contract=True,
+    )
+    assert saved["file_size"] == len(raw)
+    assert len(db.records) == 1
+    assert db.records[0].storage_ref.startswith("s3-private:")
+    assert work_inputs.read_work_input_bytes(db.records[0]) == raw
+    assert len(store.data) == 1
