@@ -84,3 +84,32 @@ async def test_generated_audio_permission_does_not_expand_other_routes():
 
     response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path='/dispatch')), call_next)
     assert 'blob:' not in response.headers['Content-Security-Policy']
+
+
+@pytest.mark.parametrize('path', ['/nova/creative', '/nova/creative/'])
+@pytest.mark.asyncio
+async def test_creative_studio_blob_video_allowed_without_remote_media_sources(path):
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        return SimpleNamespace(headers={})
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
+    policy = response.headers['Content-Security-Policy']
+    assert "media-src 'self' blob:;" in policy
+    assert "connect-src 'self';" in policy
+    assert "frame-ancestors 'self';" in policy
+    assert "https:" not in policy
+    assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+
+
+@pytest.mark.parametrize('path', ['/dispatch', '/nova/government', '/api/nova/creative/projects'])
+@pytest.mark.asyncio
+async def test_studio_blob_media_exception_is_not_global(path):
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        return SimpleNamespace(headers={})
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
+    assert "blob:" not in response.headers['Content-Security-Policy']
