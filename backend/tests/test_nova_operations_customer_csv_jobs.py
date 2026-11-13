@@ -189,3 +189,23 @@ def test_runtime_guard_remains_default_off(monkeypatch):
             jobs.require_runtime(db)
         assert denied.value.code == 503
     engine.dispose()
+
+
+def test_review_does_not_claim_approval_if_conditional_update_loses_race(state, monkeypatch):
+    """A zero-row state transition must fail rather than falsely approve."""
+    from types import SimpleNamespace
+
+    db, _ = state
+    job_id = submit(db, request_key="review-race")
+    original_execute = db.execute
+
+    def simulate_lost_review_transition(statement, *args, **kwargs):
+        if isinstance(statement, jobs.sa.sql.dml.Update):
+            return SimpleNamespace(rowcount=0)
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", simulate_lost_review_transition)
+    with pytest.raises(jobs.CustomerCSVBlocked, match="review state changed"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    monkeypatch.setattr(db, "execute", original_execute)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
