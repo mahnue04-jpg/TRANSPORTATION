@@ -232,17 +232,37 @@ def list_owned_jobs(
         .order_by(jobs.c.created_at.desc(), jobs.c.id.desc())
         .limit(limit)
     ).mappings().all()
-    return [
-        {
+    cutoff = _utc() - timedelta(minutes=15)
+    visible = []
+    for row in rows:
+        updated_at = row["updated_at"]
+        # SQLite fixtures may return naive timestamps; real PostgreSQL uses
+        # timezone-aware values. Treat any naive value as UTC, not local time.
+        updated_utc = (
+            updated_at.replace(tzinfo=timezone.utc)
+            if updated_at.tzinfo is None else updated_at.astimezone(timezone.utc)
+        )
+        status = row["status"]
+        stale = status == "PROCESSING" and updated_utc < cutoff
+        next_action = {
+            "PROCESSING": "recover_stale_job" if stale else "check_status",
+            "AWAITING_REVIEW": "review_output",
+            "APPROVED_FOR_DOWNLOAD": "download_approved_output",
+            "FAILED": "inspect_failure_and_resubmit",
+            "REJECTED": "no_action",
+        }.get(status, "inspect_status")
+        visible.append({
             "job_id": row["id"],
             "engagement_id": row["engagement_id"],
             "task_id": row["task_id"],
-            "status": row["status"],
+            "status": status,
             "created_at": row["created_at"].isoformat(),
-            "updated_at": row["updated_at"].isoformat(),
-        }
-        for row in rows
-    ]
+            "updated_at": updated_at.isoformat(),
+            "stale_processing": stale,
+            "next_action": next_action,
+            "delivered": False,
+        })
+    return visible
 
 
 def review_job(
