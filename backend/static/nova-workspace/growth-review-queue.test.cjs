@@ -17,7 +17,9 @@ function setup(fetchImpl, token = "", org = "owner-a") {
   const elements = Object.fromEntries([
     "growth-agent-preview-queue-load", "growth-agent-preview-queue-status",
     "growth-agent-preview-queue-list", "growth-agent-preview-detail",
-    "growth-agent-preview-detail-status", "growth-agent-preview-detail-steps", "sign-out"
+    "growth-agent-preview-detail-status", "growth-agent-preview-detail-steps",
+    "growth-agent-preview-decision-controls", "growth-agent-preview-reject",
+    "growth-agent-preview-request-information", "sign-out"
   ].map(id => [id, element()]));
   const window = {
     AmiCorSession: {
@@ -139,4 +141,90 @@ test("unredacted or mismatched workflow detail responses are rejected", async ()
   await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
   assert.equal(ui.elements["growth-agent-preview-detail-steps"].children.length, 0);
   assert.match(ui.elements["growth-agent-preview-detail-status"].textContent, /Unexpected or stale/);
+});
+
+test("Reject requires two owner clicks and never executes a workflow", async () => {
+  const requests = [];
+  const ui = setup(async (url, opts) => {
+    requests.push({url, opts});
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"reject-run", workflow_name:"Review", status:"preview", requires_approval:true}
+    ]);
+    if (url.endsWith("/reject-run")) return {
+      ok:true, status:200, json:async()=>({
+        run_id:"reject-run", workflow_name:"Review", status:"preview",
+        requires_approval:true, content_redacted:true, steps:[]
+      })
+    };
+    if (url.endsWith("/reject-run/decision")) return {
+      ok:true, status:200, json:async()=>({
+        run_id:"reject-run", status:"cancelled", decision:"reject",
+        execution_performed:false, live_send:false
+      })
+    };
+    throw Error("Unexpected URL");
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const reject = ui.elements["growth-agent-preview-reject"];
+  await reject.listeners.click();
+  assert.equal(requests.length, 2, "first click is confirmation only");
+  assert.match(reject.textContent, /Confirm reject/);
+  await reject.listeners.click();
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].opts.method, "POST");
+  assert.deepEqual(JSON.parse(requests[2].opts.body), {decision:"reject"});
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /Owner decision recorded/);
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+});
+
+test("Request information uses non-executing decision endpoint and stays tenant scoped", async () => {
+  const requests = [];
+  const ui = setup(async (url, opts) => {
+    requests.push({url,opts});
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"info-run", workflow_name:"Review", status:"preview", requires_approval:true}
+    ]);
+    if (url.endsWith("/info-run")) return {
+      ok:true, status:200, json:async()=>({
+        run_id:"info-run", workflow_name:"Review", status:"preview",
+        requires_approval:true, content_redacted:true, steps:[]
+      })
+    };
+    if (url.endsWith("/info-run/decision")) return {
+      ok:true,status:200,json:async()=>({
+        run_id:"info-run", status:"needs_information",decision:"request_information",
+        execution_performed:false, live_send:false
+      })
+    };
+    throw Error("Unexpected URL");
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const info = ui.elements["growth-agent-preview-request-information"];
+  await info.listeners.click();
+  assert.equal(requests.length, 2);
+  await info.listeners.click();
+  assert.equal(requests.length, 3);
+  assert.deepEqual(JSON.parse(requests[2].opts.body), {decision:"request_information"});
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /Information requested/);
+});
+
+test("changed organization blocks owner decision before POST", async () => {
+  const requests = [];
+  const ui = setup(async (url, opts) => {
+    requests.push({url, opts});
+    if (url.endsWith("?limit=50")) return ok([
+      {run_id:"run-1",workflow_name:"Review",status:"preview",requires_approval:true}
+    ]);
+    return {ok:true,status:200,json:async()=>({
+      run_id:"run-1",status:"preview",requires_approval:true,content_redacted:true,steps:[]
+    })};
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  ui.setOrg("other-org");
+  await ui.elements["growth-agent-preview-reject"].listeners.click();
+  assert.equal(requests.length, 2);
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
 });
