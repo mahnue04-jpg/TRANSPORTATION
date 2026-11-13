@@ -155,3 +155,36 @@ def test_browser_upload_and_authenticated_file_retrieval_contract():
     assert "owner_confirmed_contract=" in api
     assert "await file.read(work_inputs.MAX_WORK_INPUT_BYTES + 1)" in api
     assert "work_inputs.read_work_input_bytes(row)" in api
+
+
+def test_real_customer_tabular_csv_cleans_duplicates_and_blocks_formulas(monkeypatch, tmp_path):
+    """Protected CSV exports remain usable and require review, not delivery."""
+    import csv
+    import io
+
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "development")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    raw = b"=HYPERLINK(A1),Name\n=1+1,Ada\n=1+1,Ada\n"
+    path = tmp_path / "source.csv"
+    path.write_bytes(raw)
+    row = _row(str(path), raw)
+    row.original_filename = "source.csv"
+    result = work_inputs.process_tabular_source(row)
+    records = list(csv.reader(io.StringIO(result["content"].decode("utf-8"))))
+    assert records == [["'=HYPERLINK(A1)", "Name"], ["'=1+1", "Ada"]]
+    assert result["validation"]["duplicate_rows_removed"] == 1
+    assert result["validation"]["validated"] is True
+
+
+def test_tabular_csv_export_rejects_output_larger_than_client_limit(monkeypatch, tmp_path):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "development")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    raw = b"Name\n=1\n"
+    path = tmp_path / "small.csv"
+    path.write_bytes(raw)
+    row = _row(str(path), raw)
+    row.original_filename = "small.csv"
+    monkeypatch.setattr(work_inputs, "MAX_WORK_INPUT_BYTES", len(raw))
+    with pytest.raises(NovaWorkError, match="output limit") as exc:
+        work_inputs.process_tabular_source(row)
+    assert exc.value.status_code == 413
