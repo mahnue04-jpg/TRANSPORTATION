@@ -467,7 +467,9 @@ def test_create_project_ux_static_contract(client: TestClient):
     assert 'id="project-title" name="title" required' not in html
     js = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
     assert "Project title is required." in js
-    assert 'showBanner("Project created"' in js
+    assert 'showBanner("Project created and opened: "' in js
+    assert 'showCurrentProjectWorkspace(row, true, true)' in js
+    assert 'id="studio-project-workspace"' in html
     assert "createBtn.disabled = true" in js
     assert "createBtn.disabled = false" in js
     assert "await refreshProjects()" in js
