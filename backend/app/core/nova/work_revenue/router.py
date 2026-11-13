@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
@@ -606,13 +606,21 @@ def get_work_input_file(
             organization_id=_resolve_org(user, organization_id),
             user=user,
         )
-        stored = work_inputs.input_file_path(row)
-        if stored is None:
-            raise HTTPException(status_code=404, detail="Work input file is not stored")
-        return FileResponse(
-            path=str(stored),
+        content = work_inputs.read_work_input_bytes(row)
+        # No direct storage path or public object URL is ever exposed.
+        safe_name = "".join(
+            ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_"
+            for ch in (row.original_filename or "work-input")
+        )[:180] or "work-input"
+        return Response(
+            content=content,
             media_type=row.content_type or "application/octet-stream",
-            filename=row.original_filename,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Cache-Control": "private, no-store",
+                "Pragma": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     except service.NovaWorkError as exc:
         _raise(exc)
