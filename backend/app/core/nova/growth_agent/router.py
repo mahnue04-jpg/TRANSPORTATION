@@ -303,7 +303,7 @@ def workflow_review_decision(
     user: UserContext = Depends(require_growth_owner),
     svc: GrowthAgentService = Depends(_svc),
 ) -> dict[str, Any]:
-    """Fail-closed owner rejection or request for information; no approval or send."""
+    """Owner decision only; records approval/hold/rejection without execution or send."""
     try:
         return svc.decide_workflow_review(
             _org(user, body.organization_id),
