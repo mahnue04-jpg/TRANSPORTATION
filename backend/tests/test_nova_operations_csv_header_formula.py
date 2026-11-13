@@ -54,7 +54,7 @@ def test_offline_runner_stores_escaped_header_for_owner_review(tmp_path):
         ensure_schema(db)
         prepared = prepare_csv_job(
             db, tenant_id="synthetic-tenant", request_id="header-security",
-            raw_csv="=SUM(A1:A2),Name\\n=2+2,Ana\\n",
+            raw_csv="=SUM(A1:A2),Name\n=2+2,Ana\n",
             now=100,
         )
         review_state, stored_csv = read_review_artifact(
