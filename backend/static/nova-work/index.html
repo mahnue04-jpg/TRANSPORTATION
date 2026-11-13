@@ -95,6 +95,29 @@
       </div>
     </section>
 
+    <section class="command-card" id="prospect-review-panel" aria-label="Prospect source review" hidden>
+      <h2>Botora prospect preparation</h2>
+      <p class="hint">Find business candidates, review their public source pages and prepare an Operations review copy. Relevant workflows do not establish buying interest.</p>
+      <form id="prospect-discovery-form">
+        <label for="prospect-discovery-query">Which businesses should Nova research?</label>
+        <input id="prospect-discovery-query" type="text" minlength="10" maxlength="300" required placeholder="Minnesota travel agency custom travel consultation contact" />
+        <button type="submit">Find business candidates</button>
+      </form>
+      <h3>Or review selected sources</h3>
+      <form id="prospect-review-form">
+        <label for="prospect-review-sources">Official business source pages, one per line</label>
+        <textarea id="prospect-review-sources" rows="5" required placeholder="Business name | https://official-source-page"></textarea>
+        <button type="submit">Review sources and prepare prospect records</button>
+      </form>
+      <div class="command-actions">
+        <button type="button" id="prospect-review-resume" class="secondary">Resume saved review</button>
+        <button type="button" id="prospect-review-download" class="secondary" disabled>Download Operations review copy</button>
+      </div>
+      <p id="prospect-review-status" aria-live="polite">No assignment has run.</p>
+      <p class="hint">Introduction handoff stays on hold until the contract, campaign approval, launch authorization and prospect permission are complete.</p>
+      <div id="prospect-review-records"></div>
+    </section>
+
     <section class="command-card" aria-label="Creative image generation">
       <h2>Nova Creative Image Generator</h2>
       <p class="hint">Work &amp; Revenue uses the same owner-controlled Nova Creative Studio image engine. Generate branded proposal graphics, social creatives, client-support visuals, and other supported work assets without duplicating providers or credentials.</p>
@@ -441,5 +464,6 @@
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-work/work.js"></script>
   <script src="/static/nova-work/operations-csv.js"></script>
+  <script src="/static/nova-work/prospect-review.js"></script>
 </body>
 </html>

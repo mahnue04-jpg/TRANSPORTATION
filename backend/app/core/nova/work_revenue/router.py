@@ -1529,3 +1529,6 @@ router.include_router(nova_work_v2_router)
 
 from app.core.nova.work_revenue.operations_owner_csv_api import router as owner_csv_router
 router.include_router(owner_csv_router)
+
+from app.core.nova.work_revenue.prospect_review_api import router as prospect_review_router
+router.include_router(prospect_review_router)
