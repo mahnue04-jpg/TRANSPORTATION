@@ -334,3 +334,60 @@ def test_batch_stale_recovery_is_bounded_and_repeat_safe(state):
     with pytest.raises(jobs.CustomerCSVBlocked, match="Exact previewed"):
         jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, expected_job_ids=[])
 
+
+
+def test_durable_job_requires_private_readback_before_review(state, monkeypatch):
+    """A store returning altered bytes cannot claim a reviewable deliverable."""
+    db, store = state
+
+    class TamperingStore:
+        def store(self, **kwargs):
+            result = store.store(**kwargs)
+            store.objects[result[1]] = b"tampered after upload"
+            return result
+
+        def retrieve(self, *, storage_ref):
+            return store.retrieve(storage_ref=storage_ref)
+
+        def delete(self, *, storage_ref):
+            store.delete(storage_ref=storage_ref)
+
+    monkeypatch.setattr(jobs, "_store", lambda: TamperingStore())
+    with pytest.raises(jobs.CustomerCSVBlocked, match="integrity mismatch"):
+        submit(db, request_key="tampered-before-review")
+    rows = db.execute(jobs.sa.select(jobs.jobs.c.status, jobs.jobs.c.output_ref)).all()
+    assert rows == [("FAILED", None)]
+    assert store.objects == {}
+
+
+def test_durable_job_fails_if_private_readback_unavailable(state, monkeypatch):
+    """A successful PUT without retrievable bytes is not completion."""
+    db, store = state
+
+    class UnreadableStore:
+        def store(self, **kwargs):
+            return store.store(**kwargs)
+
+        def retrieve(self, *, storage_ref):
+            raise RuntimeError("synthetic storage read failure")
+
+        def delete(self, *, storage_ref):
+            store.delete(storage_ref=storage_ref)
+
+    monkeypatch.setattr(jobs, "_store", lambda: UnreadableStore())
+    with pytest.raises(jobs.CustomerCSVBlocked, match="cannot be verified"):
+        submit(db, request_key="readback-failure")
+    assert db.execute(jobs.sa.select(jobs.jobs.c.status)).scalar_one() == "FAILED"
+    assert store.objects == {}
+
+
+def test_durable_idempotency_replays_verified_artifact_without_second_write(state):
+    """Verified review output is still only written once per request key."""
+    db, store = state
+    original = submit(db, request_key="readback-replay")
+    assert original["status"] == "AWAITING_REVIEW"
+    assert len(store.objects) == 1
+    replay = submit(db, request_key="readback-replay")
+    assert replay["replayed"] is True
+    assert replay["job_id"] == original["job_id"]
+    assert len(store.objects) == 1
