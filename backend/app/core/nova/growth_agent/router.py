@@ -269,6 +269,17 @@ def handoff(
         raise
 
 
+@router.get("/workflows/review-queue")
+def workflow_review_queue(
+    organization_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Read-only reviewable workflows; listing never approves or executes."""
+    return {"items": svc.list_workflow_review_queue(_org(user, organization_id), limit=limit)}
+
+
 @router.post("/workflows/preview")
 def workflow_preview(
     body: WorkflowPreviewIn,
