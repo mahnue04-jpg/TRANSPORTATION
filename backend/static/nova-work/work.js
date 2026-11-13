@@ -525,8 +525,12 @@
           "<button type=\"button\" class=\"secondary\" data-invoice-prep=\"" + escapeHtml(row.engagement_id) + "\">Prepare Invoice Support</button>" +
           "<div class=\"muted\">Creates an internal draft only. Nothing is sent or charged.</div></div></div>"
         : "";
-      var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
-        ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
+      var canAttach = (row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)) ||
+        (row.source !== "nova_autonomous" && row.status === "ACTIVE" && !row.blockers);
+      var runControl = canAttach
+        ? (row.source === "nova_autonomous"
+            ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>"
+            : "<div class=\"muted\">Authorized client-file intake: processing and delivery still require separate owner review.</div>") +
           "<div class=\"work-input-box\">" +
           "<label>Work Inputs <input type=\"file\" data-work-input-file=\"" + escapeHtml(row.engagement_id) +
           "\" accept=\".csv,.xlsx,.txt,.json,.pdf,.docx\" /></label>" +
