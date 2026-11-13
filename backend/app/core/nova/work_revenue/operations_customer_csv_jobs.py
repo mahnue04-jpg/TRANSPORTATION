@@ -206,6 +206,74 @@ def recover_stale_job(
             "requires_new_request_key": True, "delivered": False}
 
 
+
+def recover_owned_stale_jobs(
+    db: Session, *, org: str, owner: str, dry_run: bool = True,
+    limit: int = 25,
+) -> dict:
+    """Preview or mark a bounded set of this owner's stale jobs FAILED.
+
+    Does not replay input, delete objects, deliver files or incur provider costs.
+    Every mutation is conditional on ownership, PROCESSING state and age, so
+    live/completed jobs cannot be overwritten by a stale recovery snapshot.
+    The owner must explicitly opt into a non-dry-run call at the HTTP layer.
+    """
+    require_runtime(db)
+    if not isinstance(org, str) or not org.strip() or not isinstance(owner, str) or not owner.strip():
+        raise CustomerCSVBlocked("Specific organization and owner required", 403)
+    if type(dry_run) is not bool:
+        raise CustomerCSVBlocked("Boolean dry_run required", 400)
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise CustomerCSVBlocked("Recovery limit must be between 1 and 50", 400)
+    cutoff = _utc() - timedelta(minutes=15)
+    query = (
+        sa.select(jobs.c.id)
+        .where(
+            jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner,
+            jobs.c.status == "PROCESSING",
+            jobs.c.updated_at < cutoff,
+        )
+        .order_by(jobs.c.updated_at.asc(), jobs.c.id.asc())
+        .limit(limit)
+    )
+    try:
+        # Lock eligible records on PostgreSQL when changing state. The UPDATE
+        # predicate below is independently conditional for concurrency safety.
+        if not dry_run and db.get_bind().dialect.name == "postgresql":
+            query = query.with_for_update(skip_locked=True)
+        ids = list(db.execute(query).scalars().all())
+        if dry_run:
+            db.rollback()
+            return {
+                "dry_run": True, "candidate_job_ids": ids, "candidate_count": len(ids),
+                "recovered_job_ids": [], "recovered_count": 0,
+                "requires_reupload": False, "delivered": False,
+            }
+        recovered = []
+        for job_id in ids:
+            updated = db.execute(
+                sa.update(jobs).where(
+                    jobs.c.id == job_id,
+                    jobs.c.organization_id == org,
+                    jobs.c.owner_user_id == owner,
+                    jobs.c.status == "PROCESSING",
+                    jobs.c.updated_at < cutoff,
+                ).values(status="FAILED", updated_at=_utc())
+            )
+            if updated.rowcount == 1:
+                recovered.append(job_id)
+        db.commit()
+        return {
+            "dry_run": False, "candidate_job_ids": ids, "candidate_count": len(ids),
+            "recovered_job_ids": recovered, "recovered_count": len(recovered),
+            "requires_reupload": bool(recovered), "delivered": False,
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
 def job_status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     require_runtime(db)
     row = _owned(db, job_id, org, owner)
