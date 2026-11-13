@@ -1061,7 +1061,9 @@
         (isIsolatedStudioPreview() && !on) ? "block" : "none";
     }
     $("login-form").classList.add("hidden");
-    $("session-meta").textContent = on ? "Signed in · Creative Studio" : "Sign in to use Creative Studio.";
+    var toggle = $("sign-in-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", "false");
+    $("session-meta").textContent = on ? "Signed in · Creative Studio. Your saved projects can now be loaded." : "Not signed in. Use your Creative Studio staging account to view saved projects.";
   }
   function renderOutput(data) {
     $("output").textContent = JSON.stringify(data, null, 2);
@@ -2809,7 +2811,11 @@
     });
   }
   $("sign-in-toggle").addEventListener("click", function () {
-    $("login-form").classList.toggle("hidden");
+    var form = $("login-form");
+    form.classList.toggle("hidden");
+    this.setAttribute("aria-expanded", String(!form.classList.contains("hidden")));
+    $("studio-login-feedback").textContent = form.classList.contains("hidden") ? "" : "Enter the credentials for this Studio staging environment; the production password is not shared.";
+    if (!form.classList.contains("hidden")) $("login-email").focus();
   });
   $("sign-out").addEventListener("click", function () {
     setToken("");
@@ -2821,6 +2827,13 @@
   });
   $("login-form").addEventListener("submit", async function (event) {
     event.preventDefault();
+    var submit = $("studio-login-submit");
+    var feedback = $("studio-login-feedback");
+    if (submit.disabled) return;
+    submit.disabled = true;
+    submit.textContent = "Signing in…";
+    feedback.textContent = "Checking this staging account. No project or video changes are being made.";
+    $("session-meta").textContent = "Checking Studio account…";
     try {
       var body = await api("/api/auth/login", {
         method: "POST",
@@ -2846,10 +2859,20 @@
       }
       setToken(body.access_token || "");
       setSignedIn(true); // hide Sign in immediately; only Sign out while session is active
+      feedback.textContent = "";
+      $("login-password").value = "";
       showBanner("Signed in. Creative Studio session is ready.", true);
-      boot();
+      await boot();
     } catch (err) {
-      showBanner(err.message, false);
+      setSignedIn(false);
+      feedback.textContent = err.message || "Sign-in failed. Check the account for this staging environment.";
+      $("session-meta").textContent = "Not signed in. Check the error below and try again.";
+      $("login-form").classList.remove("hidden");
+      $("sign-in-toggle").setAttribute("aria-expanded", "true");
+      showBanner(feedback.textContent, false);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Continue to Creative Studio";
     }
   });
   var amicorDefaults = {
