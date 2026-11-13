@@ -374,6 +374,32 @@
     el.classList.remove("hidden");
     el.classList.toggle("error", !ok);
   }
+  function showCurrentProjectWorkspace(project, focusIt, createdNow) {
+    var panel = $("studio-project-workspace");
+    if (!panel || !project || !project.id) return;
+    var title = String(project.title || "Untitled project");
+    var heading = $("studio-project-workspace-heading");
+    var status = $("studio-project-workspace-status");
+    if (heading) heading.textContent = (createdNow ? "Project created: " : "Current project: ") + title;
+    if (status) status.textContent = "Saved and selected · " + String(project.duration_target || "unspecified") + " seconds · Project ID " + project.id;
+    panel.classList.remove("hidden");
+    if (focusIt) {
+      panel.scrollIntoView({ behavior: "auto", block: "start" });
+      panel.focus({ preventScroll: true });
+    }
+  }
+
+  var continueProjectButton = $("studio-project-workspace-continue");
+  if (continueProjectButton) {
+    continueProjectButton.addEventListener("click", function () {
+      var brief = $("brief-form");
+      if (!brief) return;
+      brief.scrollIntoView({ behavior: "auto", block: "start" });
+      var topic = $("brief-topic");
+      if (topic && !topic.disabled) topic.focus({ preventScroll: true });
+    });
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -1119,6 +1145,12 @@
       });
     }
     updateActiveProjectLabel();
+    var activeRow = rows.find(function (row) { return row.id === activeProjectId; });
+    if (activeRow) {
+      showCurrentProjectWorkspace(activeRow, false, false);
+    } else if ($("studio-project-workspace")) {
+      $("studio-project-workspace").classList.add("hidden");
+    }
     return rows;
   }
   async function refreshBrands() {
@@ -2976,10 +3008,17 @@
           brand_profile_id: activeBrandId
         })
       });
+      // The POST already succeeded. Always open the new project immediately,
+      // even if a later list/assets refresh temporarily fails.
       setActiveProjectId(row.id);
-      showBanner("Project created", true);
-      await refreshProjects();
-      await refreshAssets();
+      showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
+      showCurrentProjectWorkspace(row, true, true);
+      try {
+        await refreshProjects();
+        await refreshAssets();
+      } catch (refreshErr) {
+        showBanner("Project saved: " + row.title + ". Project details did not fully reload; select it in Project history if needed.", true);
+      }
     } catch (err) {
       showBanner(err.message || "Project create failed.", false);
     } finally {

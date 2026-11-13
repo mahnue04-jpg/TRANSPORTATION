@@ -254,6 +254,16 @@
       </form>
     </section>
 
+    <section class="card hidden" id="studio-project-workspace" aria-label="Current project workspace" tabindex="-1" role="region">
+      <h2 id="studio-project-workspace-heading">Your project is ready</h2>
+      <p id="studio-project-workspace-status" role="status">Project saved and selected.</p>
+      <p class="hint">Next: fill in the Content Brief below, save it, and generate the one-scene storyboard. No video render or charge starts when you create a project.</p>
+      <div class="actions">
+        <button type="button" id="studio-project-workspace-continue">Continue to Content Brief</button>
+        <a href="#studio-project-history" class="button secondary">Browse saved projects</a>
+      </div>
+    </section>
+
     <section class="card" aria-label="Content brief">
       <h2>2. Content Brief</h2>
       <form id="brief-form" class="grid">
@@ -464,7 +474,7 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=five-second-project-20261112"></script>
+  <script src="/static/nova-creative/creative.js?v=project-open-after-create-20261113"></script>
   <script src="/static/nova-creative/calendar.js?v=20261108"></script>
 </body>
 </html>
