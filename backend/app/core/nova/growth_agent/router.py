@@ -280,6 +280,21 @@ def workflow_review_queue(
     return {"items": svc.list_workflow_review_queue(_org(user, organization_id), limit=limit)}
 
 
+@router.get("/workflows/review-queue/{run_id}")
+def workflow_review_queue_details(
+    run_id: str,
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Read-only redacted owner preview; no execute path."""
+    try:
+        return svc.workflow_review_details(_org(user, organization_id), run_id)
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
 @router.post("/workflows/preview")
 def workflow_preview(
     body: WorkflowPreviewIn,
