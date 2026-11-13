@@ -7,7 +7,11 @@
   const list = get("growth-agent-preview-queue-list");
   if (!button || !status || !list) return;
   let generation = 0;
+  let detailGeneration = 0;
   let displayedIdentity = null;
+  const detailPanel = get("growth-agent-preview-detail");
+  const detailStatus = get("growth-agent-preview-detail-status");
+  const detailSteps = get("growth-agent-preview-detail-steps");
   function owner() {
     const session = window.AmiCorSession;
     const token = session && session.getAccessToken ? session.getAccessToken() : "";
@@ -24,9 +28,54 @@
   function clear(message) {
     generation++;
     list.replaceChildren();
+    detailGeneration++;
+    if (detailSteps) detailSteps.replaceChildren();
+    if (detailPanel) detailPanel.hidden = true;
     displayedIdentity = null;
     status.textContent = message;
   }
+  async function viewDetails(runId) {
+    const identity = owner();
+    const request = ++detailGeneration;
+    if (!identity.headers || !detailPanel || !detailStatus || !detailSteps) return;
+    detailSteps.replaceChildren();
+    detailPanel.hidden = false;
+    detailStatus.textContent = "Loading redacted workflow details…";
+    try {
+      const response = await fetch(
+        "/api/nova/growth-agent/workflows/review-queue/" + encodeURIComponent(runId),
+        { headers: identity.headers, credentials: "same-origin", cache: "no-store" }
+      );
+      if (request !== detailGeneration || !sameOwner(identity)) return;
+      if (response.status === 401) throw new Error("Sign in again.");
+      if (response.status === 403) throw new Error("Access denied.");
+      if (response.status === 404) throw new Error("Workflow no longer available for review.");
+      if (!response.ok) throw new Error("Workflow details unavailable.");
+      const data = await response.json();
+      if (request !== detailGeneration || !sameOwner(identity)) return;
+      if (!data || data.run_id !== runId || data.content_redacted !== true ||
+          data.requires_approval !== true || !Array.isArray(data.steps) ||
+          !["preview", "awaiting_approval"].includes(data.status))
+        throw new Error("Unexpected or stale workflow details.");
+      const nodes = data.steps.slice(0, 50).map((step, i) => {
+        const node = document.createElement("li");
+        node.textContent = "Step " + (i + 1) + ": " +
+          String(step.channel || "unknown").slice(0, 40) +
+          (step.scheduled_for_utc ? " — " + String(step.scheduled_for_utc).slice(0, 35) : "") +
+          (step.quiet_hours_adjusted ? " (quiet hours adjusted)" : "");
+        return node;
+      });
+      if (request !== detailGeneration || !sameOwner(identity)) return;
+      detailSteps.replaceChildren(...nodes);
+      detailStatus.textContent = String(data.workflow_name || "Workflow").slice(0, 100) +
+        " — " + data.status + " — " + (data.is_synthetic_demo === true ? "DEMO" : "not marked demo") +
+        ". Redacted preview only. Nothing approved or sent.";
+    } catch (err) {
+      if (request === detailGeneration && sameOwner(identity))
+        detailStatus.textContent = err.message || "Unable to load workflow details.";
+    }
+  }
+
   async function loadQueue() {
     clear("Loading workflow previews…");
     const request = generation;
@@ -57,6 +106,11 @@
         const demo = entry.is_synthetic_demo === true ? "DEMO" : "not marked demo";
         node.textContent = name + " — " + entry.status + " — " + demo +
           (entry.dry_run === true ? " — dry run" : " — mode not confirmed");
+        const detailButton = document.createElement("button");
+        detailButton.type = "button";
+        detailButton.textContent = "View details";
+        detailButton.addEventListener("click", () => viewDetails(String(entry.run_id || "")));
+        node.appendChild(detailButton);
         nodes.push(node);
       }
       if (request !== generation || !sameOwner(identity)) return;
