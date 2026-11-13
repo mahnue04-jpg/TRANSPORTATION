@@ -55,6 +55,7 @@ jobs:
           python -m pytest -q tests/test_nova_workspace_growth_overview.py tests/test_nova_workspace_growth_audit.py
           python -m pytest -q tests/test_nova_growth_review_queue.py
           python -m pytest -q tests/test_nova_growth_agent_http.py -k "workflow_review_queue or review_decision"
+          python -m pytest -q tests/test_nova_growth_agent_http.py -k "workspace_serves_integrated_growth or workspace_review_decision"
 
   backend-diagnostic:
     runs-on: ubuntu-latest
