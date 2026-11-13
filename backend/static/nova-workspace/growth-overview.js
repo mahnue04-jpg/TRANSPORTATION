@@ -37,6 +37,7 @@
     const tokenAtStart = currentToken();
     const organizationAtStart = currentOrganization();
     summary.hidden = true;
+    if (byId("growth-agent-review")) byId("growth-agent-review").hidden = true;
     if (!headers) { status.textContent = "Sign in to view your Growth Agent activity."; return; }
     refresh.disabled = true;
     status.textContent = "Loading organization-scoped Growth Agent records…";
@@ -68,6 +69,29 @@
       const live = flags.flags || {};
       byId("growth-agent-transport").textContent =
         live.REAL_SMS_SEND || live.REAL_EMAIL_SEND ? "Live transport enabled" : "Mock / no live delivery";
+      // Read-only human handoffs. Use textContent to prevent HTML injection from user subjects.
+      const reviewPanel = byId("growth-agent-review");
+      const reviewList = byId("growth-agent-review-list");
+      const reviewStatus = byId("growth-agent-review-status");
+      if (reviewPanel && reviewList && reviewStatus) {
+        reviewList.replaceChildren();
+        const handoffs = conversations.conversations.filter(row =>
+          row.handler === "human" || row.status === "handed_off"
+        );
+        for (const handoff of handoffs.slice(0, 10)) {
+          const item = document.createElement("li");
+          const subject = document.createElement("span");
+          subject.textContent = (handoff.subject || "Conversation requires human attention").slice(0, 150);
+          const flag = document.createElement("span");
+          flag.textContent = handoff.is_synthetic_demo === true ? " — DEMO" : " — not marked demo";
+          item.append(subject, flag);
+          reviewList.appendChild(item);
+        }
+        reviewStatus.textContent = handoffs.length
+          ? handoffs.length + " handoff(s) in recent results. Review in Growth Agent."
+          : "No human handoffs in recent results.";
+        reviewPanel.hidden = false;
+      }
       summary.hidden = false;
       status.textContent = "Recent results loaded. Counts show total (not marked demo / marked demo). They are not lifetime totals or confirmed paying customers.";
     } catch (error) {
@@ -84,6 +108,7 @@
   byId("sign-out")?.addEventListener("click", () => {
     requestId++;
     summary.hidden = true;
+    if (byId("growth-agent-review")) byId("growth-agent-review").hidden = true;
     status.textContent = "Sign in to view your Growth Agent activity.";
   });
   load();
