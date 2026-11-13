@@ -57,14 +57,19 @@
       const [flags, leads, conversations, appointments] = data;
       if (!Array.isArray(leads.leads) || !Array.isArray(conversations.conversations) ||
           !Array.isArray(appointments.appointments)) throw new Error("Unexpected Growth Agent API response.");
-      byId("growth-agent-leads").textContent = String(leads.leads.length);
-      byId("growth-agent-conversations").textContent = String(conversations.conversations.length);
-      byId("growth-agent-appointments").textContent = String(appointments.appointments.length);
+      function counts(rows) {
+        const knownDemo = rows.filter(row => row.is_synthetic_demo === true).length;
+        const notMarkedDemo = rows.length - knownDemo;
+        return String(rows.length) + " (" + String(notMarkedDemo) + " / " + String(knownDemo) + ")";
+      }
+      byId("growth-agent-leads").textContent = counts(leads.leads);
+      byId("growth-agent-conversations").textContent = counts(conversations.conversations);
+      byId("growth-agent-appointments").textContent = counts(appointments.appointments);
       const live = flags.flags || {};
       byId("growth-agent-transport").textContent =
         live.REAL_SMS_SEND || live.REAL_EMAIL_SEND ? "Live transport enabled" : "Mock / no live delivery";
       summary.hidden = false;
-      status.textContent = "Owner records loaded. Counts include synthetic demonstrations if present; live deliveries are not inferred.";
+      status.textContent = "Recent results loaded. Counts show total (not marked demo / marked demo). They are not lifetime totals or confirmed paying customers.";
     } catch (error) {
       if (request === requestId && currentToken() === tokenAtStart && currentOrganization() === organizationAtStart)
         status.textContent = error.message || "Unable to load Growth Agent.";
