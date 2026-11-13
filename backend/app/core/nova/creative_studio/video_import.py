@@ -36,5 +36,18 @@ def validate_video(path: Path, *, max_duration_seconds: int = 120, allow_silent:
             "-threads", "1", "-f", "null", "-"], capture_output=True, check=True, timeout=45 if max_duration_seconds <= 120 else 240)
     except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Choose a fully playable H.264/AAC MP4 with audio within the permitted duration.") from exc
+    # Decodable H.264 is not necessarily decodable by a web browser. A
+    # common failure is 10-bit/4:2:2/4:4:4 H.264. Report the source properties
+    # to the authenticated project owner; do not alter or delete the original.
+    pixel_format = str(video.get("pix_fmt") or "").lower()
+    profile = str(video.get("profile") or "")
+    level = int(video.get("level") or 0)
+    browser_warnings = []
+    if pixel_format and pixel_format not in {"yuv420p", "yuvj420p"}:
+        browser_warnings.append("Video pixel format may be unsupported by Chrome.")
+    if profile.lower() in {"high 10", "high 4:2:2", "high 4:4:4 predictive"}:
+        browser_warnings.append("Video H.264 profile may be unsupported by Chrome.")
     return {"duration_seconds": duration, "width": width, "height": height,
-            "video_codec": "h264", "audio_codec": "aac" if audio else None, "decode_verified": True}
+            "video_codec": "h264", "audio_codec": "aac" if audio else None, "decode_verified": True,
+            "video_profile": profile, "video_pixel_format": pixel_format,
+            "video_level": level, "browser_compatibility_warnings": browser_warnings}
