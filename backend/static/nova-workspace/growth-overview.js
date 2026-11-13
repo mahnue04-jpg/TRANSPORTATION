@@ -26,7 +26,9 @@
     if (!response.ok) throw new Error("Growth Agent data could not be loaded (HTTP " + response.status + ").");
     return response.json();
   }
+  let requestId = 0;
   async function load() {
+    const request = ++requestId;
     const headers = authHeaders();
     const tokenAtStart = currentToken();
     summary.hidden = true;
@@ -40,7 +42,7 @@
         fetchOwner("/conversations", headers),
         fetchOwner("/appointments", headers)
       ]);
-      if (!tokenAtStart || currentToken() !== tokenAtStart) {
+      if (request !== requestId || !tokenAtStart || currentToken() !== tokenAtStart) {
         summary.hidden = true;
         status.textContent = "Session changed; refresh after signing in.";
         return;
@@ -58,16 +60,18 @@
       summary.hidden = false;
       status.textContent = "Owner records loaded. Counts include synthetic demonstrations if present; live deliveries are not inferred.";
     } catch (error) {
-      status.textContent = error.message || "Unable to load Growth Agent.";
+      if (request === requestId && currentToken() === tokenAtStart)
+        status.textContent = error.message || "Unable to load Growth Agent.";
     } finally {
-      refresh.disabled = false;
+      if (request === requestId) refresh.disabled = false;
     }
   }
   refresh.addEventListener("click", load);
   window.addEventListener("focus", () => { if (authHeaders()) load(); });
   // The main Workspace sign-in flow updates the shared session; follow that event.
-  byId("login-form")?.addEventListener("submit", () => setTimeout(load, 700));
+  window.addEventListener("nova:workspace-signed-in", load);
   byId("sign-out")?.addEventListener("click", () => {
+    requestId++;
     summary.hidden = true;
     status.textContent = "Sign in to view your Growth Agent activity.";
   });
