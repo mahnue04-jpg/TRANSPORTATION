@@ -216,3 +216,32 @@ def test_review_decision_rejects_cross_tenant_request(client: TestClient) -> Non
         json={"decision": "reject", "organization_id": "other-tenant-unknown"},
     )
     assert response.status_code == 403
+
+
+def test_workspace_serves_integrated_growth_owner_controls(client: TestClient) -> None:
+    """HTTP delivery smoke for the actual Workspace page and its JS bundles."""
+    page = client.get("/nova/workspace")
+    assert page.status_code == 200, page.text
+    for marker in (
+        'id="growth-agent-overview"',
+        'id="growth-agent-preview-queue"',
+        'id="growth-agent-preview-approve"',
+        'id="growth-agent-preview-reject"',
+        'id="growth-agent-preview-request-information"',
+        'id="growth-agent-audit"',
+    ):
+        assert marker in page.text
+    for filename in ("growth-overview.js", "growth-audit.js", "growth-review-queue.js"):
+        assert f"/static/nova-workspace/{filename}" in page.text
+        asset = client.get(f"/static/nova-workspace/{filename}")
+        assert asset.status_code == 200
+        assert "growth-agent" in asset.text
+
+
+def test_workspace_review_decision_endpoint_does_not_act_without_auth(client: TestClient) -> None:
+    """The actual review-decision route is not a public message/execute endpoint."""
+    res = client.post(
+        "/api/nova/growth-agent/workflows/review-queue/not-real/decision",
+        json={"decision": "approve"},
+    )
+    assert res.status_code in {401, 403}
