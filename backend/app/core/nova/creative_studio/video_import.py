@@ -51,3 +51,60 @@ def validate_video(path: Path, *, max_duration_seconds: int = 120, allow_silent:
             "video_codec": "h264", "audio_codec": "aac" if audio else None, "decode_verified": True,
             "video_profile": profile, "video_pixel_format": pixel_format,
             "video_level": level, "browser_compatibility_warnings": browser_warnings}
+
+
+def inspect_existing_video(path: Path) -> dict:
+    """Inspect an existing private local MP4 without modifying it or starting a render.
+
+    The path comes from the owner-authorized Studio asset resolver. Return only
+    bounded technical metadata, not paths, filenames, raw tool output or bytes.
+    """
+    if not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_VIDEO_BYTES:
+        raise ValueError("Saved MP4 is not available within inspection limits.")
+    common = ["-protocol_whitelist", "file,pipe", "-enable_drefs", "0",
+              "-use_absolute_path", "0", "-f", "mov"]
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", *common, "-i", str(path),
+             "-show_streams", "-show_format", "-of", "json"],
+            capture_output=True, check=True, timeout=20,
+        )
+        info = json.loads(result.stdout)
+        streams = info.get("streams") or []
+        videos = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audios = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        if len(videos) != 1 or len(audios) > 1:
+            raise ValueError("Unexpected MP4 stream layout.")
+        video = videos[0]
+        audio = audios[0] if audios else None
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if not math.isfinite(duration) or not 0 < duration <= 600:
+            raise ValueError("Invalid MP4 duration.")
+        video_codec = str(video.get("codec_name") or "")
+        audio_codec = str(audio.get("codec_name") or "") if audio else None
+        profile = str(video.get("profile") or "")[:80]
+        pix_fmt = str(video.get("pix_fmt") or "")[:32]
+        level = int(video.get("level") or 0)
+        warnings = []
+        if video_codec != "h264":
+            warnings.append("Video codec is not H.264.")
+        if pix_fmt.lower() not in {"yuv420p", "yuvj420p"}:
+            warnings.append("Video pixel format may not be supported by Chrome.")
+        if profile.lower() in {"high 10", "high 4:2:2", "high 4:4:4 predictive"}:
+            warnings.append("Video profile may not be supported by Chrome.")
+        if audio_codec not in {None, "aac"}:
+            warnings.append("Audio codec is not AAC.")
+        return {
+            "video_codec": video_codec,
+            "video_profile": profile,
+            "video_pixel_format": pix_fmt,
+            "video_level": level,
+            "audio_codec": audio_codec,
+            "duration_seconds": round(duration, 3),
+            "size_bytes": path.stat().st_size,
+            "browser_compatibility_warnings": warnings,
+            "read_only": True,
+            "browser_playback_verified": False,
+        }
+    except (OSError, subprocess.SubprocessError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Saved MP4 cannot be safely inspected.") from exc
