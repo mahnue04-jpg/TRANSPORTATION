@@ -1660,7 +1660,12 @@
             "pixels: " + (report.video_pixel_format || "unknown"),
             "level: " + (report.video_level || "unknown"),
             "audio: " + (report.audio_codec || "none"),
-            "duration: " + (report.duration_seconds || "unknown") + "s"
+            "duration: " + (report.duration_seconds || "unknown") + "s",
+            "MP4 atoms: " + (report.mp4_structure_complete ? "complete" : "incomplete") +
+              ", moov: " + (report.mp4_has_moov ? "yes" : "no") +
+              ", mdat: " + (report.mp4_has_mdat ? "yes" : "no") +
+              ", faststart: " + (report.mp4_faststart ? "yes" : "no") +
+              ", fragmented: " + (report.mp4_fragmented ? "yes" : "no")
           ];
           var warnings = Array.isArray(report.browser_compatibility_warnings)
             ? report.browser_compatibility_warnings : [];
