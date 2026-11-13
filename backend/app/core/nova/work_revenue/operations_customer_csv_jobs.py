@@ -254,6 +254,11 @@ def review_job(
     row = _owned(db, job_id, org, owner, lock=True)
     if row["status"] != "AWAITING_REVIEW":
         raise CustomerCSVBlocked("Job is not awaiting owner review")
+    if approve:
+        # Check the original private artifact before recording approval. A
+        # missing/corrupt object must remain AWAITING_REVIEW, not approved.
+        # This does not replace the checksum check performed again at download.
+        download_review(db, org=org, owner=owner, job_id=job_id)
     status = "APPROVED_FOR_DOWNLOAD" if approve else "REJECTED"
     try:
         changed = db.execute(sa.update(jobs).where(
