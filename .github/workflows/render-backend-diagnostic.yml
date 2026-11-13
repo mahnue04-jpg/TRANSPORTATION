@@ -65,6 +65,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Work & Revenue UI syntax
+        run: node --check static/nova-work/work.js
       - name: Install backend requirements
         run: |
           python -m pip install --upgrade pip
