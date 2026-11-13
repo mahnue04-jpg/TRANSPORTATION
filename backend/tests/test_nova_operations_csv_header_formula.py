@@ -40,3 +40,28 @@ def test_safe_csv_preserves_headers_and_deduplication():
     rows = list(csv.reader(io.StringIO(result.cleaned_csv, newline="")))
     assert rows == [["Name", "Email"], ["Ana", "a@example.com"]]
     assert result.duplicate_rows_removed == 1
+
+
+def test_offline_runner_stores_escaped_header_for_owner_review(tmp_path):
+    """Verify the durable *offline fixture* handoff never stores active formulas."""
+    import sqlite3
+    from app.core.nova.work_revenue.operations_job_queue import ensure_schema
+    from app.core.nova.work_revenue.operations_csv_runner import prepare_csv_job
+    from app.core.nova.work_revenue.operations_artifact_review import read_review_artifact
+
+    db = sqlite3.connect(tmp_path / "header-security.sqlite")
+    try:
+        ensure_schema(db)
+        prepared = prepare_csv_job(
+            db, tenant_id="synthetic-tenant", request_id="header-security",
+            raw_csv="=SUM(A1:A2),Name\\n=2+2,Ana\\n",
+            now=100,
+        )
+        review_state, stored_csv = read_review_artifact(
+            db, tenant_id="synthetic-tenant", job_id=prepared.job_id,
+        )
+        assert review_state == "awaiting_review"
+        rows = list(csv.reader(io.StringIO(stored_csv, newline="")))
+        assert rows == [["'=SUM(A1:A2)", "Name"], ["'=2+2", "Ana"]]
+    finally:
+        db.close()
