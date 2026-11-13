@@ -122,7 +122,8 @@ def test_first_client_authorized_input_to_review_survives_process_restart(
     job_id = created["job_id"]
 
     # 3. Simulate a restart: dispose DB pool and reconstruct engine + store.
-    db_url = str(engine.url)
+    # SQLAlchemy URL.__str__ redacts passwords; retain the URL object to reconnect.
+    db_url = engine.url
     engine.dispose()
     restarted_engine = sa.create_engine(db_url, pool_size=2, max_overflow=0)
     try:
