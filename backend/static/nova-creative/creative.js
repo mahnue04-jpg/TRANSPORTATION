@@ -2884,7 +2884,12 @@
     var imageAspect = $("image-aspect");
     var presenterOutput = $("presenter-output-preset");
     var duration = $("project-duration");
-    if (preset === "social_square") {
+    if (preset === "five_second_test") {
+      if (platform) platform.value = "TikTok";
+      if (imageAspect) imageAspect.value = "9:16";
+      if (presenterOutput) presenterOutput.value = "9:16";
+      if (duration) duration.value = "5";
+    } else if (preset === "social_square") {
       if (platform) platform.value = "Instagram";
       if (imageAspect) imageAspect.value = "1:1";
       if (presenterOutput) presenterOutput.value = "1:1";
