@@ -26,6 +26,7 @@ from app.core.nova.growth_agent.schemas import (
     WorkerTickIn,
     WorkflowExecuteIn,
     WorkflowPreviewIn,
+    WorkflowReviewDecisionIn,
 )
 from app.core.nova.growth_agent.service import GrowthAgentService
 from app.core.nova.growth_agent.tenant import require_growth_owner, resolve_org
@@ -290,6 +291,26 @@ def workflow_review_queue_details(
     """Read-only redacted owner preview; no execute path."""
     try:
         return svc.workflow_review_details(_org(user, organization_id), run_id)
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
+@router.post("/workflows/review-queue/{run_id}/decision")
+def workflow_review_decision(
+    run_id: str,
+    body: WorkflowReviewDecisionIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Fail-closed owner rejection or request for information; no approval or send."""
+    try:
+        return svc.decide_workflow_review(
+            _org(user, body.organization_id),
+            run_id,
+            decision=body.decision,
+            actor_user_id=user.user_id,
+        )
     except GrowthAgentError as exc:
         _handle(exc)
         raise
