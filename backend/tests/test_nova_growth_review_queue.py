@@ -1,0 +1,107 @@
+"""Isolated integration checks for the read-only Growth Agent review queue."""
+from __future__ import annotations
+
+import os
+
+os.environ["NOVA_GROWTH_AGENT_ENABLED"] = "true"
+os.environ["NOVA_GROWTH_AGENT_DEMO_MODE"] = "true"
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.nova.growth_agent.models import GaWorkflowRun, GaWorkflowDefinition, GaDeliveryAttempt, GaAuditEvent
+from app.core.nova.growth_agent.service import GrowthAgentService
+from app.core.nova.growth_agent.schema_ensure import ensure_growth_agent_schema
+from app.db.session import Base
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    ensure_growth_agent_schema(bind=engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed(svc, org):
+    svc.upsert_profile(
+        org, "owner-test",
+        {
+            "business_name": "Test Office",
+            "website": "https://example.test",
+            "timezone": "America/Chicago",
+            "operating_hours": {"mon_fri": "09:00-17:00"},
+            "services": [{"code": "consult", "name": "Consultation", "duration_minutes": 30}],
+            "faqs": [{"id": "hours", "question": "Hours?", "answer": "9 to 5"}],
+            "contact_email": "owner@example.test",
+            "handoff_phone": "+15555550101",
+        },
+        activate=True,
+    )
+    contact = svc._upsert_contact(
+        org, name="Test Lead", email="lead-" + org + "@example.test",
+        consent_transactional=True, consent_marketing=False, channel="email", source="synthetic_test",
+    )
+    svc.db.commit()
+    return contact
+
+
+def test_preview_queue_is_tenant_scoped_read_only_and_excludes_completed(db):
+    svc = GrowthAgentService(db)
+    first, second = "owner-org-1", "owner-org-2"
+    lead_a = _seed(svc, first)
+    lead_b = _seed(svc, second)
+    before_a = svc.preview_workflow(first, workflow_code="inquiry_ack", contact_id=lead_a.id)
+    before_b = svc.preview_workflow(second, workflow_code="inquiry_ack", contact_id=lead_b.id)
+
+    audit_count = db.query(GaAuditEvent).count()
+    delivery_count = db.query(GaDeliveryAttempt).count()
+    rows = svc.list_workflow_review_queue(first)
+    assert any(row["run_id"] == before_a["run_id"] for row in rows)
+    assert not any(row["run_id"] == before_b["run_id"] for row in rows)
+    assert all(row["requires_approval"] is True for row in rows)
+    assert all(row["status"] in ("preview", "awaiting_approval") for row in rows)
+    assert db.query(GaAuditEvent).count() == audit_count
+    assert db.query(GaDeliveryAttempt).count() == delivery_count
+
+    db.query(GaWorkflowRun).filter_by(id=before_a["run_id"]).update({"status": "completed"})
+    db.commit()
+    assert not any(row["run_id"] == before_a["run_id"] for row in svc.list_workflow_review_queue(first))
+
+
+def test_nonapproval_workflows_are_excluded_and_preview_details_are_not_leaked(db):
+    svc = GrowthAgentService(db)
+    org = "owner-org-3"
+    contact = _seed(svc, org)
+    run = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    workflow = db.query(GaWorkflowDefinition).filter_by(organization_id=org, code="inquiry_ack").one()
+    workflow.requires_approval = False
+    db.commit()
+    assert all(row["run_id"] != run["run_id"] for row in svc.list_workflow_review_queue(org))
+
+    workflow.requires_approval = True
+    db.commit()
+    rows = svc.list_workflow_review_queue(org)
+    found = next(row for row in rows if row["run_id"] == run["run_id"])
+    assert set(found) == {
+        "run_id", "workflow_code", "workflow_name", "status", "requires_approval",
+        "dry_run", "is_synthetic_demo", "created_at",
+    }
+    assert not any("message" in key or "email" in key or "token" in key for key in found)
+
+
+def test_queue_limit_is_bounded(db):
+    svc = GrowthAgentService(db)
+    org = "owner-org-4"
+    contact = _seed(svc, org)
+    for _ in range(3):
+        svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    assert len(svc.list_workflow_review_queue(org, limit=2)) <= 2
+    assert len(svc.list_workflow_review_queue(org, limit=0)) <= 1
