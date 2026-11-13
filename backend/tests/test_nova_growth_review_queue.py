@@ -42,6 +42,7 @@ def _seed(svc, org):
             "faqs": [{"id": "hours", "question": "Hours?", "answer": "9 to 5"}],
             "contact_email": "owner@example.test",
             "handoff_phone": "+15555550101",
+            "escalation_settings": {"handoff_on_unknown": True},
         },
         activate=True,
     )
