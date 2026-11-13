@@ -247,3 +247,40 @@ test("request-information decision reports hold rather than customer outreach", 
   assert.match(message, /No workflow executed or message sent/);
   assert.doesNotMatch(message, /Information requested/);
 });
+
+
+test("decision conflict clears stale owner controls and does not claim approval", async () => {
+  const ui = setup(async url => {
+    if (url.endsWith("?limit=50")) return ok([{run_id:"conflict-1",workflow_name:"Review",status:"preview",requires_approval:true}]);
+    if (url.endsWith("/conflict-1")) return {ok:true,status:200,json:async()=>({run_id:"conflict-1",status:"preview",requires_approval:true,content_redacted:true,steps:[]})};
+    return {ok:false,status:409};
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const reject = ui.elements["growth-agent-preview-reject"];
+  await reject.listeners.click();
+  await reject.listeners.click();
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /decision conflict/i);
+  assert.doesNotMatch(ui.elements["growth-agent-preview-queue-status"].textContent, /Owner decision recorded/);
+});
+
+test("organization switch during decision response clears previous owner preview", async () => {
+  let resolveDecision;
+  const ui = setup(async url => {
+    if (url.endsWith("?limit=50")) return ok([{run_id:"switch-1",workflow_name:"Review",status:"preview",requires_approval:true}]);
+    if (url.endsWith("/switch-1")) return {ok:true,status:200,json:async()=>({run_id:"switch-1",status:"preview",requires_approval:true,content_redacted:true,steps:[]})};
+    return new Promise(resolve => { resolveDecision = resolve; });
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const reject = ui.elements["growth-agent-preview-reject"];
+  await reject.listeners.click();
+  const pending = reject.listeners.click();
+  ui.setOrg("another-owner");
+  resolveDecision({ok:true,status:200,json:async()=>({run_id:"switch-1",status:"cancelled",decision:"reject",execution_performed:false,live_send:false})});
+  await pending;
+  assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /organization changed/);
+  assert.doesNotMatch(ui.elements["growth-agent-preview-queue-status"].textContent, /Owner decision recorded/);
+});
