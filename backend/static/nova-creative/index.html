@@ -6,7 +6,20 @@
   <title>AMICOR Nova Creative Studio</title>
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
-  <link rel="stylesheet" href="/static/nova-creative/creative.css" />
+  <link rel="stylesheet" href="/static/nova-creative/creative.css" />\n<style>
+/* Minimal fallback when a staging stylesheet is delayed or blocked. */
+#studio-account {max-width:980px;margin:16px auto;padding:20px;border:1px solid #d9d0c1;border-radius:12px;background:#fffdf8;color:#1c1914;font:16px/1.45 "Segoe UI",Arial,sans-serif}
+#studio-account .hidden {display:none!important}
+#studio-account .actions {display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+#studio-account form.grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;max-width:850px;margin-top:14px}
+#studio-account form.grid > p, #studio-account form.grid > button {grid-column:1/-1}
+#studio-account label {display:flex;flex-direction:column;gap:4px}
+#studio-account input[type="email"],#studio-account input[type="password"],#studio-account input[type="text"] {width:100%;padding:10px;border:1px solid #a8a29e;border-radius:6px;box-sizing:border-box}
+#studio-account label:has(input[type="checkbox"]) {flex-direction:row;align-items:center}
+#studio-account button {cursor:pointer;padding:10px 14px;border-radius:6px}
+#studio-account button:disabled {cursor:wait;opacity:.65}
+</style>
+
 </head>
 <body>
   <header class="studio-header">
@@ -49,10 +62,10 @@
       <div class="actions"><a class="button" href="/nova/one-minute-demo">Open the 60-second full-body demo</a></div>
     </section>
 
-    <section class="card" aria-label="Sign in">
-      <p id="session-meta" class="hint">Sign in to use Creative Studio.</p>
+    <section class="card" aria-label="Studio account" id="studio-account">
+      <h2>Studio account</h2>\n      <p id="session-meta" class="hint" role="status" aria-live="polite">Checking Creative Studio sign-in…</p>
       <div class="actions">
-        <button type="button" id="sign-in-toggle" class="secondary">Sign in</button>
+        <button type="button" id="sign-in-toggle" class="secondary" aria-controls="login-form" aria-expanded="false">Use existing staging account</button>
         <button type="button" id="sign-out" class="secondary hidden">Sign out</button>
       </div>
       <div id="staging-register-panel" style="display:none; margin-top:16px;">
@@ -70,7 +83,7 @@
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
         <label><input type="checkbox" class="studio-password-visibility" data-target="login-password" /> Show password</label>
         <p class="hint">Staging uses separate test accounts. Your production password may not work here. Forgot your test password? Create a new disposable test account with a different test email; never reuse your production password.</p>
-        <button type="submit">Sign in</button>
+        <button type="submit" id="studio-login-submit">Continue to Creative Studio</button>\n        <p id="studio-login-feedback" class="hint" role="status" aria-live="polite"></p>
       </form>
     </section>
 
