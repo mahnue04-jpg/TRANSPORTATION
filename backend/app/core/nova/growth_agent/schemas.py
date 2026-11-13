@@ -69,7 +69,7 @@ class WorkflowPreviewIn(OrgScoped):
 
 
 class WorkflowReviewDecisionIn(OrgScoped):
-    decision: str  # reject | request_information; approval is intentionally unavailable
+    decision: str  # approve (record only) | reject | request_information; never executes
 
 
 class WorkflowExecuteIn(OrgScoped):
