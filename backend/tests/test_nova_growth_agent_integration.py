@@ -588,3 +588,47 @@ def test_setup_refresh_does_not_clobber_unsaved_owner_edits():
     assert "refreshLeads()" in refresh_body
     assert "refreshSavedSetup()" not in refresh_body
     assert "Promise.all([refreshAll(), refreshSavedSetup()])" in script
+
+
+def test_existing_real_contact_rejects_synthetic_identity_collision(db):
+    """A demo chat cannot reuse or relabel a genuine CRM identity."""
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "org-classification-conflict"
+    real = svc._upsert_contact(
+        org, name="Existing Real", email="shared@example.com",
+        consent_transactional=True, is_synthetic_demo=False,
+    )
+    db.commit()
+    with pytest.raises(GrowthAgentError) as exc:
+        svc._upsert_contact(
+            org, name="Demo Impersonator", email="shared@example.com",
+            consent_transactional=True, is_synthetic_demo=True,
+        )
+    assert exc.value.code == "CONTACT_CLASSIFICATION_CONFLICT"
+    db.expire_all()
+    assert svc._contact_dict(real)["is_synthetic_demo"] is False
+    assert len(svc.list_leads(org)) == 1
+
+
+def test_existing_synthetic_contact_rejects_real_identity_collision(db):
+    """A real workflow cannot silently turn a synthetic contact into a real lead."""
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "org-classification-conflict-reverse"
+    demo = svc._upsert_contact(
+        org, name="Existing Demo", email="shared@example.com",
+        consent_transactional=True, is_synthetic_demo=True,
+    )
+    db.commit()
+    with pytest.raises(GrowthAgentError) as exc:
+        svc._upsert_contact(
+            org, name="Real Incoming", email="shared@example.com",
+            consent_transactional=True, is_synthetic_demo=False,
+        )
+    assert exc.value.code == "CONTACT_CLASSIFICATION_CONFLICT"
+    db.expire_all()
+    assert svc._contact_dict(demo)["is_synthetic_demo"] is True
+    assert len(svc.list_leads(org)) == 1
