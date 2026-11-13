@@ -53,6 +53,58 @@ def validate_video(path: Path, *, max_duration_seconds: int = 120, allow_silent:
             "video_level": level, "browser_compatibility_warnings": browser_warnings}
 
 
+def inspect_mp4_boxes(path: Path) -> dict:
+    """Bounded read-only inspection of MP4 top-level atom boundaries.
+
+    Only headers are read; payloads are skipped by seeking. This is structural
+    evidence, not proof that the browser can decode individual frames.
+    """
+    total = path.stat().st_size
+    position = 0
+    names = []
+    complete = True
+    with path.open("rb") as source:
+        while position < total and len(names) < 10000:
+            source.seek(position)
+            header = source.read(8)
+            if len(header) != 8:
+                complete = False
+                break
+            size = int.from_bytes(header[:4], "big")
+            atom = header[4:8]
+            if size == 1:
+                extended = source.read(8)
+                if len(extended) != 8:
+                    complete = False
+                    break
+                size = int.from_bytes(extended, "big")
+                minimum = 16
+            elif size == 0:
+                size = total - position
+                minimum = 8
+            else:
+                minimum = 8
+            if size < minimum or position + size > total:
+                complete = False
+                break
+            if atom in {b"ftyp", b"moov", b"mdat", b"moof", b"sidx"}:
+                names.append(atom.decode("ascii"))
+            position += size
+    if position != total:
+        complete = False
+    has_moov = "moov" in names
+    has_mdat = "mdat" in names
+    moov_first = has_moov and has_mdat and names.index("moov") < names.index("mdat")
+    return {
+        "mp4_structure_complete": complete,
+        "mp4_has_ftyp": "ftyp" in names,
+        "mp4_has_moov": has_moov,
+        "mp4_has_mdat": has_mdat,
+        "mp4_faststart": moov_first,
+        "mp4_fragmented": "moof" in names,
+    }
+
+
 def inspect_existing_video(path: Path) -> dict:
     """Inspect an existing private local MP4 without modifying it or starting a render.
 
@@ -85,7 +137,12 @@ def inspect_existing_video(path: Path) -> dict:
         profile = str(video.get("profile") or "")[:80]
         pix_fmt = str(video.get("pix_fmt") or "")[:32]
         level = int(video.get("level") or 0)
+        boxes = inspect_mp4_boxes(path)
         warnings = []
+        if not boxes["mp4_structure_complete"] or not boxes["mp4_has_moov"] or not boxes["mp4_has_mdat"]:
+            warnings.append("MP4 container structure is incomplete or missing required atoms.")
+        if not boxes["mp4_faststart"]:
+            warnings.append("MP4 metadata is not before media data; streaming playback may be less reliable.")
         if video_codec != "h264":
             warnings.append("Video codec is not H.264.")
         if pix_fmt.lower() not in {"yuv420p", "yuvj420p"}:
@@ -102,6 +159,7 @@ def inspect_existing_video(path: Path) -> dict:
             "audio_codec": audio_codec,
             "duration_seconds": round(duration, 3),
             "size_bytes": path.stat().st_size,
+            **boxes,
             "browser_compatibility_warnings": warnings,
             "read_only": True,
             "browser_playback_verified": False,
