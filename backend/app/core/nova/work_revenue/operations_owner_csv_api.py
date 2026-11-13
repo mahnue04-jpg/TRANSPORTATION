@@ -7,6 +7,7 @@ This is NOT a generalized customer upload or delivery service.
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
@@ -53,8 +54,11 @@ def _csv_task_scope(task: dict) -> bool:
         str(task.get(field) or "").strip().lower()
         for field in ("title", "description", "deliverable")
     )
+    # Word boundaries avoid accidentally authorizing work from incidental
+    # substrings such as "nocsv" or "csvless". This remains a label-based
+    # filter, NOT proof that a client contract authorizes file processing.
     return any(
-        label in description
+        re.search(r"(?<![a-z0-9_])" + re.escape(label) + r"(?![a-z0-9_])", description)
         for label in (
             "csv", "spreadsheet cleanup", "spreadsheet cleaning",
             "data cleanup", "data cleaning", "data validation",
