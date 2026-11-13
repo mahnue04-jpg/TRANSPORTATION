@@ -124,13 +124,15 @@
           body: JSON.stringify({decision})
         }
       );
-      if (generationAtStart !== generation || detailAtStart !== detailGeneration || !sameOwner(identity)) return;
+      if (!sameOwner(identity)) { clear("Session or organization changed. Reload previews."); return; }
+      if (generationAtStart !== generation || detailAtStart !== detailGeneration) return;
       if (response.status === 401) throw new Error("Sign in again.");
       if (response.status === 403) throw new Error("Access denied.");
-      if (response.status === 409) throw new Error("Workflow decision conflict. Reload before retrying.");
+      if (response.status === 409) { clear("Workflow decision conflict. Reload previews before trying again."); return; }
       if (!response.ok) throw new Error("Decision could not be recorded. Reload before retrying.");
       const result = await response.json();
-      if (generationAtStart !== generation || detailAtStart !== detailGeneration || !sameOwner(identity)) return;
+      if (!sameOwner(identity)) { clear("Session or organization changed. Reload previews."); return; }
+      if (generationAtStart !== generation || detailAtStart !== detailGeneration) return;
       if (!result || result.run_id !== candidate.runId || result.decision !== decision ||
           result.execution_performed !== false || result.live_send !== false ||
           result.status !== (decision === "reject" ? "cancelled" : "needs_information"))
