@@ -65,11 +65,17 @@ def test_budget_confirmation_blocks_when_paid_not_allowed(monkeypatch):
     )
     quote = svc.preflight_quote("owner-344", project["id"])
     assert quote["paid_render_allowed"] is False
+    acknowledgement = svc.confirm_render_budget(
+        "owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=quote["estimated_total_usd"]
+    )
+    assert acknowledgement["budget_confirmation"]["confirmed"] is True
+    assert svc.preflight_quote("owner-344", project["id"])["owner_budget_confirmed"] is True
+    # Recording owner intent must never activate a provider with unknown funds.
     try:
-        svc.confirm_render_budget("owner-344", project["id"], confirmed=True, acknowledged_estimate_usd=1.0)
-        assert False, "expected PAID_RENDER_BLOCKED"
+        svc.require_budget_confirmation_for_paid("owner-344", project["id"])
+        assert False, "expected PROVIDER_FUNDING_UNVERIFIED"
     except CreativeStudioError as exc:
-        assert exc.code == "PAID_RENDER_BLOCKED"
+        assert exc.code == "PROVIDER_FUNDING_UNVERIFIED"
 
 
 def test_export_rejects_slideshow_as_commercial_ready():
@@ -237,3 +243,95 @@ def test_local_motion_path_exists_for_gated_providers():
     assert "local_motion_not_slideshow" in source
     assert "burn_captions_and_cta_fade" in source
     assert "getamicor.com" in source
+
+def test_voice_budget_guard_does_not_use_fal_balance(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_KLING_LIVE_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CREATIVE_VIDEO_PROVIDER", "fal")
+    monkeypatch.setenv("FAL_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("NOVA_CREATIVE_OWNER_REPORTED_FAL_BALANCE_USD", "-3.16")
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("voice-owner-344", {
+        "title": "Voice budget guard test", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    svc.confirm_render_budget("voice-owner-344", pid, confirmed=True, acknowledged_estimate_usd=2.04)
+    # This authorizes the voice path only; it does not call the provider.
+    svc.require_budget_confirmation_for_paid("voice-owner-344", pid, provider="voice")
+    try:
+        svc.require_budget_confirmation_for_paid("voice-owner-344", pid)
+        assert False, "fal-dependent general paid render should remain blocked"
+    except CreativeStudioError as exc:
+        assert exc.code == "PROVIDER_FUNDING_UNVERIFIED"
+
+def test_budget_acknowledgement_requires_matching_quote():
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("quote-owner-344", {
+        "title": "Quote validation", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("quote-owner-344", pid)
+    for amount in (None, quote["estimated_total_usd"] + 1.0):
+        try:
+            svc.confirm_render_budget("quote-owner-344", pid, confirmed=True, acknowledged_estimate_usd=amount)
+            assert False, "expected BUDGET_QUOTE_CHANGED"
+        except CreativeStudioError as exc:
+            assert exc.code == "BUDGET_QUOTE_CHANGED"
+    assert svc.preflight_quote("quote-owner-344", pid)["owner_budget_confirmed"] is False
+    result = svc.confirm_render_budget(
+        "quote-owner-344", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    assert result["budget_confirmation"]["confirmed"] is True
+
+def test_voice_guard_rejects_project_quote_above_approved_amount(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("quote-guard-owner", {
+        "title": "Budget guard regression", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("quote-guard-owner", pid)
+    svc.confirm_render_budget(
+        "quote-guard-owner", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    # Model an increased preflight quote after approval without calling providers.
+    original = svc.preflight_quote
+    def increased_quote(owner_id, project_id):
+        revised = dict(original(owner_id, project_id))
+        revised["estimated_total_usd"] += 1.0
+        return revised
+    monkeypatch.setattr(svc, "preflight_quote", increased_quote)
+    try:
+        svc.require_budget_confirmation_for_paid("quote-guard-owner", pid, provider="voice")
+        assert False, "expected BUDGET_REAPPROVAL_REQUIRED"
+    except CreativeStudioError as exc:
+        assert exc.code == "BUDGET_REAPPROVAL_REQUIRED"
+
+def test_voice_budget_guard_blocks_repeat_job_without_provider_call(monkeypatch):
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_LIVE_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-a-real-key")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project("repeat-voice-owner", {
+        "title": "Repeat request guard", "project_type": "short_video",
+        "platform": "TikTok", "duration_target": 30,
+    })
+    pid = project["id"]
+    quote = svc.preflight_quote("repeat-voice-owner", pid)
+    svc.confirm_render_budget(
+        "repeat-voice-owner", pid, confirmed=True,
+        acknowledged_estimate_usd=quote["estimated_total_usd"],
+    )
+    svc._start_job("repeat-voice-owner", pid, "voice")
+    try:
+        svc.require_budget_confirmation_for_paid("repeat-voice-owner", pid, provider="voice")
+        assert False, "expected VOICE_REQUEST_ALREADY_RECORDED"
+    except CreativeStudioError as exc:
+        assert exc.code == "VOICE_REQUEST_ALREADY_RECORDED"

@@ -711,7 +711,7 @@ def generate_presenter_voice(
     _require_owner(user)
     try:
         service = get_service(db)
-        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id, provider="voice")
         result = service.request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
         result["presenter_script"] = payload.script
         return result
