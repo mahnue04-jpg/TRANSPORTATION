@@ -12,6 +12,7 @@ function setup(fetchImpl, initialToken = "", initialOrg = "org-a") {
   let token = initialToken;
   let org = initialOrg;
   const listeners = {};
+  const documentListeners = {};
   const makeElement = () => ({
     textContent: "", disabled: false, children: [], events: {},
     addEventListener(type, fn) { this.events[type] = fn; },
@@ -32,13 +33,14 @@ function setup(fetchImpl, initialToken = "", initialOrg = "org-a") {
   };
   const document = {
     getElementById(id) { return elements[id] || null; },
-    createElement() { return makeElement(); }
+    createElement() { return makeElement(); },
+    addEventListener(type, fn) { documentListeners[type] = fn; }
   };
   let callCount = 0;
   const fetch = (...args) => { callCount++; return fetchImpl(...args); };
   vm.runInNewContext(source, { window, document, fetch, console }, { filename: "growth-audit.js" });
   return {
-    elements, listeners, getCallCount: () => callCount,
+    elements, listeners, documentListeners, getCallCount: () => callCount,
     setToken(value) { token = value; }, setOrg(value) { org = value; },
     click() { return elements["growth-agent-audit-load"].events.click(); },
     signOut() { return elements["sign-out"].events.click(); }
@@ -101,5 +103,25 @@ test("switching organization while request is pending never displays other tenan
   ui.setOrg("org-b");
   respond(ok([{ action: "workflow.preview", summary: "Wrong tenant" }]));
   await operation;
+  assert.equal(ui.elements["growth-agent-audit-list"].children.length, 0);
+});
+
+
+test("already visible tenant history clears on focus after owner switches organization", async () => {
+  const ui = setup(async () => ok([{action:"workflow.preview", summary:"Org A only"}]), "token-a", "org-a");
+  await ui.click();
+  assert.equal(ui.elements["growth-agent-audit-list"].children.length, 1);
+  ui.setOrg("org-b");
+  ui.listeners.focus();
+  assert.equal(ui.elements["growth-agent-audit-list"].children.length, 0);
+  assert.match(ui.elements["growth-agent-audit-status"].textContent, /organization changed/);
+});
+
+test("already visible history clears after identity change on tab visibility", async () => {
+  const ui = setup(async () => ok([{action:"workflow.preview", summary:"Private"}]), "token-a", "org-a");
+  await ui.click();
+  assert.equal(ui.elements["growth-agent-audit-list"].children.length, 1);
+  ui.setToken("token-b");
+  ui.documentListeners.visibilitychange();
   assert.equal(ui.elements["growth-agent-audit-list"].children.length, 0);
 });
