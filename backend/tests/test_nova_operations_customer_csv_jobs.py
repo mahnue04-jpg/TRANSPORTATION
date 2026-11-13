@@ -189,3 +189,205 @@ def test_runtime_guard_remains_default_off(monkeypatch):
             jobs.require_runtime(db)
         assert denied.value.code == 503
     engine.dispose()
+
+
+def test_review_does_not_claim_approval_if_conditional_update_loses_race(state, monkeypatch):
+    """A zero-row state transition must fail rather than falsely approve."""
+    from types import SimpleNamespace
+
+    db, _ = state
+    job_id = submit(db, request_key="review-race")["job_id"]
+    original_execute = db.execute
+
+    def simulate_lost_review_transition(statement, *args, **kwargs):
+        if isinstance(statement, jobs.sa.sql.dml.Update):
+            return SimpleNamespace(rowcount=0)
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", simulate_lost_review_transition)
+    with pytest.raises(jobs.CustomerCSVBlocked, match="review state changed"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    monkeypatch.setattr(db, "execute", original_execute)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_cannot_approve_corrupt_private_artifact(state):
+    """Corrupted output is never recorded as approved or delivered."""
+    db, store = state
+    job_id = submit(db, request_key="corrupt-approval")["job_id"]
+    key = next(iter(store.objects))
+    store.objects[key] = b"corrupted synthetic output"
+    with pytest.raises(jobs.CustomerCSVBlocked, match="integrity"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_cannot_approve_missing_private_artifact(state):
+    """Deleted private output must fail closed before approval."""
+    db, store = state
+    job_id = submit(db, request_key="missing-approval")["job_id"]
+    store.objects.clear()
+    with pytest.raises(jobs.CustomerCSVBlocked, match="unavailable"):
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_can_reject_corrupt_artifact_without_downloading(state):
+    """Owner must still be able to reject an unsafe output."""
+    db, store = state
+    job_id = submit(db, request_key="reject-corrupt")["job_id"]
+    store.objects.clear()
+    rejected = jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=False)
+    assert rejected["status"] == "REJECTED"
+    assert rejected["delivered"] is False
+
+
+def test_owner_job_history_shows_next_action_without_exposing_private_refs(state):
+    db, store = state
+    job_id = submit(db, request_key="history-action")["job_id"]
+    entries = jobs.list_owned_jobs(db, org="org-a", owner="owner-a")
+    assert len(entries) == 1
+    assert entries[0]["job_id"] == job_id
+    assert entries[0]["next_action"] == "review_output"
+    assert entries[0]["stale_processing"] is False
+    assert entries[0]["delivered"] is False
+    assert "output_ref" not in entries[0]
+    assert "input_sha256" not in entries[0]
+
+
+def test_owner_job_history_marks_expired_processing_as_recoverable(state):
+    from datetime import timedelta
+    db, _ = state
+    stamp = jobs._utc() - timedelta(minutes=30)
+    db.execute(jobs.sa.insert(jobs.jobs).values(
+        id="stale-history", organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-a", request_key="stale-history-key",
+        input_sha256="a" * 64, status="PROCESSING",
+        created_at=stamp, updated_at=stamp,
+    ))
+    db.commit()
+    entries = jobs.list_owned_jobs(db, org="org-a", owner="owner-a")
+    assert entries[0]["stale_processing"] is True
+    assert entries[0]["next_action"] == "recover_stale_job"
+    assert entries[0]["delivered"] is False
+
+
+def test_owner_job_history_preserves_tenant_isolation(state):
+    db, _ = state
+    submit(db, request_key="tenant-a-job")
+    assert jobs.list_owned_jobs(db, org="org-b", owner="owner-a") == []
+    assert jobs.list_owned_jobs(db, org="org-a", owner="owner-b") == []
+
+
+def test_batch_stale_recovery_preview_is_read_only_and_scoped(state):
+    from datetime import timedelta
+    db, _ = state
+    old = jobs._utc() - timedelta(minutes=30)
+    for job_id, org, owner, status in [
+        ("stale-a", "org-a", "owner-a", "PROCESSING"),
+        ("stale-other-org", "org-b", "owner-a", "PROCESSING"),
+        ("stale-other-owner", "org-a", "owner-b", "PROCESSING"),
+        ("already-reviewed", "org-a", "owner-a", "AWAITING_REVIEW"),
+    ]:
+        db.execute(jobs.sa.insert(jobs.jobs).values(
+            id=job_id, organization_id=org, owner_user_id=owner,
+            engagement_id="eng", task_id="task", request_key=job_id,
+            input_sha256="a" * 64, status=status,
+            created_at=old, updated_at=old,
+        ))
+    db.commit()
+    preview = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=True)
+    assert preview["candidate_job_ids"] == ["stale-a"]
+    assert preview["recovered_count"] == 0
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="stale-a")["status"] == "PROCESSING"
+    applied = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, expected_job_ids=preview["candidate_job_ids"])
+    assert applied["recovered_job_ids"] == ["stale-a"]
+    assert applied["recovered_count"] == 1
+    assert applied["requires_reupload"] is True
+    assert applied["delivered"] is False
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="stale-a")["status"] == "FAILED"
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id="already-reviewed")["status"] == "AWAITING_REVIEW"
+    assert jobs.job_status(db, org="org-b", owner="owner-a", job_id="stale-other-org")["status"] == "PROCESSING"
+    assert jobs.job_status(db, org="org-a", owner="owner-b", job_id="stale-other-owner")["status"] == "PROCESSING"
+
+
+def test_batch_stale_recovery_is_bounded_and_repeat_safe(state):
+    from datetime import timedelta
+    db, _ = state
+    old = jobs._utc() - timedelta(minutes=40)
+    for n in range(3):
+        db.execute(jobs.sa.insert(jobs.jobs).values(
+            id=f"old-{n}", organization_id="org-a", owner_user_id="owner-a",
+            engagement_id="eng", task_id="task", request_key=f"old-{n}",
+            input_sha256="b" * 64, status="PROCESSING",
+            created_at=old, updated_at=old,
+        ))
+    db.commit()
+    with pytest.raises(jobs.CustomerCSVBlocked):
+        jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", limit=0)
+    first = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2, expected_job_ids=["old-0", "old-1"])
+    assert first["recovered_count"] == 2
+    second = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, limit=2, expected_job_ids=["old-2"])
+    assert second["recovered_count"] == 1
+    third = jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=True)
+    assert third["candidate_count"] == 0
+    with pytest.raises(jobs.CustomerCSVBlocked, match="Exact previewed"):
+        jobs.recover_owned_stale_jobs(db, org="org-a", owner="owner-a", dry_run=False, expected_job_ids=[])
+
+
+
+def test_durable_job_requires_private_readback_before_review(state, monkeypatch):
+    """A store returning altered bytes cannot claim a reviewable deliverable."""
+    db, store = state
+
+    class TamperingStore:
+        def store(self, **kwargs):
+            result = store.store(**kwargs)
+            store.objects[result[1]] = b"tampered after upload"
+            return result
+
+        def retrieve(self, *, storage_ref):
+            return store.retrieve(storage_ref=storage_ref)
+
+        def delete(self, *, storage_ref):
+            store.delete(storage_ref=storage_ref)
+
+    monkeypatch.setattr(jobs, "_store", lambda: TamperingStore())
+    with pytest.raises(jobs.CustomerCSVBlocked, match="integrity mismatch"):
+        submit(db, request_key="tampered-before-review")
+    rows = db.execute(jobs.sa.select(jobs.jobs.c.status, jobs.jobs.c.output_ref)).all()
+    assert rows == [("FAILED", None)]
+    assert store.objects == {}
+
+
+def test_durable_job_fails_if_private_readback_unavailable(state, monkeypatch):
+    """A successful PUT without retrievable bytes is not completion."""
+    db, store = state
+
+    class UnreadableStore:
+        def store(self, **kwargs):
+            return store.store(**kwargs)
+
+        def retrieve(self, *, storage_ref):
+            raise RuntimeError("synthetic storage read failure")
+
+        def delete(self, *, storage_ref):
+            store.delete(storage_ref=storage_ref)
+
+    monkeypatch.setattr(jobs, "_store", lambda: UnreadableStore())
+    with pytest.raises(jobs.CustomerCSVBlocked, match="cannot be verified"):
+        submit(db, request_key="readback-failure")
+    assert db.execute(jobs.sa.select(jobs.jobs.c.status)).scalar_one() == "FAILED"
+    assert store.objects == {}
+
+
+def test_durable_idempotency_replays_verified_artifact_without_second_write(state):
+    """Verified review output is still only written once per request key."""
+    db, store = state
+    original = submit(db, request_key="readback-replay")
+    assert original["status"] == "AWAITING_REVIEW"
+    assert len(store.objects) == 1
+    replay = submit(db, request_key="readback-replay")
+    assert replay["replayed"] is True
+    assert replay["job_id"] == original["job_id"]
+    assert len(store.objects) == 1

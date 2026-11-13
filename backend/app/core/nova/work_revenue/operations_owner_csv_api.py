@@ -7,6 +7,7 @@ This is NOT a generalized customer upload or delivery service.
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
@@ -53,8 +54,11 @@ def _csv_task_scope(task: dict) -> bool:
         str(task.get(field) or "").strip().lower()
         for field in ("title", "description", "deliverable")
     )
+    # Word boundaries avoid accidentally authorizing work from incidental
+    # substrings such as "nocsv" or "csvless". This remains a label-based
+    # filter, NOT proof that a client contract authorizes file processing.
     return any(
-        label in description
+        re.search(r"(?<![a-z0-9_])" + re.escape(label) + r"(?![a-z0-9_])", description)
         for label in (
             "csv", "spreadsheet cleanup", "spreadsheet cleaning",
             "data cleanup", "data cleaning", "data validation",
@@ -270,6 +274,11 @@ async def create_durable_csv_job(
         if len(content) + len(chunk) > LIMIT_BYTES:
             raise HTTPException(413, "CSV exceeds 1 MB")
         content.extend(chunk)
+    # The owner may revoke or block an assignment while its bytes stream in.
+    # Recheck immediately before reserving a durable job or storing an artifact.
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id,
+    )
     try:
         return durable_csv.submit_review_job(
             db, org=str(owner.organization_id), owner=str(owner.user_id),
@@ -310,6 +319,53 @@ def durable_csv_owned_history(
             raise
         visible.append(entry)
     return {"jobs": visible, "count": len(visible), "owner_only": True}
+
+
+@router.post("/durable/jobs/recover-stale-batch")
+async def owner_batch_recover_stale_csv_jobs(
+    request: Request,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-initiated preview or safe failure recovery; never replay files."""
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "Valid JSON required") from exc
+    if not isinstance(payload, dict) or type(payload.get("apply", False)) is not bool:
+        raise HTTPException(400, "Boolean apply required")
+    apply = payload.get("apply", False)
+    limit = payload.get("limit", 25)
+    if type(limit) is not int or not 1 <= limit <= 25:
+        raise HTTPException(400, "Recovery limit must be 1 to 25")
+    if apply and owner_action != "recover-previewed-stale-jobs":
+        raise HTTPException(403, "Explicit owner recovery action required")
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    owner_id = str(getattr(owner, "user_id", "") or "").strip()
+    if not org or org.lower() == "global" or not owner_id:
+        raise HTTPException(403, "Specific authenticated owner required")
+    try:
+        preview = durable_csv.recover_owned_stale_jobs(
+            db, org=org, owner=owner_id, dry_run=True, limit=limit,
+        )
+        for job_id in preview["candidate_job_ids"]:
+            data = durable_csv.job_status(db, org=org, owner=owner_id, job_id=job_id)
+            _check_saved_csv_assignment(
+                db, owner=owner, engagement_id=data["engagement_id"],
+                task_id=data["task_id"],
+            )
+        if not apply:
+            return preview
+        expected = payload.get("expected_job_ids")
+        if expected != preview["candidate_job_ids"]:
+            raise HTTPException(409, "Recovery preview changed; refresh before applying")
+        return durable_csv.recover_owned_stale_jobs(
+            db, org=org, owner=owner_id, dry_run=False, limit=limit,
+            expected_job_ids=expected,
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
 
 
 @router.get("/durable/jobs/{job_id}")

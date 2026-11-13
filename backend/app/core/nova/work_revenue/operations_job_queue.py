@@ -114,6 +114,18 @@ def claim_job(
     # BEGIN IMMEDIATE serializes claims across independent SQLite connections.
     db.execute("BEGIN IMMEDIATE")
     try:
+        # An exhausted job may crash on its final leased attempt. It must
+        # become visibly FAILED once that lease expires, not remain RUNNING
+        # indefinitely while being ineligible for any future claim.
+        db.execute(
+            """UPDATE nova_operations_offline_jobs
+               SET state='failed', lease_until=NULL, lease_token=NULL,
+                   last_error_code='MAX_ATTEMPTS_EXHAUSTED'
+               WHERE tenant_id=? AND state='running'
+                 AND attempts>=max_attempts AND lease_until<=?
+                 AND (? IS NULL OR job_id=?)""",
+            (tenant_id, now, job_id, job_id),
+        )
         row = db.execute(
             """SELECT job_id, kind, input_sha256, attempts
                FROM nova_operations_offline_jobs

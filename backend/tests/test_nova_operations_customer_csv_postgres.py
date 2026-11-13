@@ -148,3 +148,113 @@ def test_postgres_concurrent_duplicate_key_creates_one_artifact(postgres):
     with Session(engine) as db:
         count = db.execute(sa.select(sa.func.count()).select_from(csvjobs.jobs)).scalar_one()
         assert count == 1
+
+
+def test_postgres_stale_recovery_preview_and_exact_owner_apply(postgres):
+    """Real PostgreSQL: bounded recovery never changes another owner's jobs."""
+    from datetime import timedelta
+
+    engine, store = postgres
+    old = csvjobs._utc() - timedelta(minutes=35)
+    with Session(engine) as db:
+        for job_id, organization, owner, status in (
+            ("pg-stale-owner", "synthetic-org", "synthetic-owner", "PROCESSING"),
+            ("pg-stale-neighbor", "synthetic-org", "another-owner", "PROCESSING"),
+            ("pg-stale-other-org", "other-org", "synthetic-owner", "PROCESSING"),
+            ("pg-reviewed", "synthetic-org", "synthetic-owner", "AWAITING_REVIEW"),
+        ):
+            db.execute(sa.insert(csvjobs.jobs).values(
+                id=job_id, organization_id=organization, owner_user_id=owner,
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                request_key=job_id, input_sha256="a" * 64,
+                status=status, created_at=old, updated_at=old,
+            ))
+        db.commit()
+
+    # Separate sessions model a browser preview followed by a later action.
+    with Session(engine) as db:
+        preview = csvjobs.recover_owned_stale_jobs(
+            db, org="synthetic-org", owner="synthetic-owner", dry_run=True,
+        )
+        assert preview["candidate_job_ids"] == ["pg-stale-owner"]
+        assert preview["recovered_count"] == 0
+        assert preview["delivered"] is False
+    with Session(engine) as db:
+        with pytest.raises(csvjobs.CustomerCSVBlocked, match="preview changed"):
+            csvjobs.recover_owned_stale_jobs(
+                db, org="synthetic-org", owner="synthetic-owner",
+                dry_run=False, expected_job_ids=["different-job"],
+            )
+        applied = csvjobs.recover_owned_stale_jobs(
+            db, org="synthetic-org", owner="synthetic-owner",
+            dry_run=False, expected_job_ids=preview["candidate_job_ids"],
+        )
+        assert applied["recovered_job_ids"] == ["pg-stale-owner"]
+        assert applied["delivered"] is False
+        assert applied["requires_reupload"] is True
+    with Session(engine) as db:
+        rows = dict(db.execute(sa.select(csvjobs.jobs.c.id, csvjobs.jobs.c.status)).all())
+        assert rows["pg-stale-owner"] == "FAILED"
+        assert rows["pg-stale-neighbor"] == "PROCESSING"
+        assert rows["pg-stale-other-org"] == "PROCESSING"
+        assert rows["pg-reviewed"] == "AWAITING_REVIEW"
+    assert store.put_count == 0
+
+
+def test_postgres_recovery_does_not_rewrite_recent_or_completed_job(postgres):
+    """Real PostgreSQL: current lease and saved deliverable remain untouched."""
+    from datetime import timedelta
+
+    engine, store = postgres
+    old = csvjobs._utc() - timedelta(minutes=40)
+    recent = csvjobs._utc() - timedelta(minutes=2)
+    with Session(engine) as db:
+        for job_id, status, stamp in (
+            ("pg-current", "PROCESSING", recent),
+            ("pg-approved", "APPROVED_FOR_DOWNLOAD", old),
+        ):
+            db.execute(sa.insert(csvjobs.jobs).values(
+                id=job_id, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                request_key=job_id, input_sha256="b" * 64,
+                status=status, created_at=stamp, updated_at=stamp,
+            ))
+        db.commit()
+    with Session(engine) as db:
+        preview = csvjobs.recover_owned_stale_jobs(
+            db, org="synthetic-org", owner="synthetic-owner", dry_run=True,
+        )
+        assert preview["candidate_job_ids"] == []
+        with pytest.raises(csvjobs.CustomerCSVBlocked, match="Exact previewed"):
+            csvjobs.recover_owned_stale_jobs(
+                db, org="synthetic-org", owner="synthetic-owner",
+                dry_run=False, expected_job_ids=[],
+            )
+        assert csvjobs.job_status(
+            db, org="synthetic-org", owner="synthetic-owner", job_id="pg-current",
+        )["status"] == "PROCESSING"
+        assert csvjobs.job_status(
+            db, org="synthetic-org", owner="synthetic-owner", job_id="pg-approved",
+        )["status"] == "APPROVED_FOR_DOWNLOAD"
+    assert store.put_count == 0
+
+
+def test_postgres_saved_private_artifact_readback_failure_is_not_reviewable(postgres, monkeypatch):
+    """Real PostgreSQL metadata must remain FAILED if private storage readback corrupts."""
+    engine, store = postgres
+    real_retrieve = store.retrieve
+
+    def corrupt_readback(*, storage_ref):
+        content, mime = real_retrieve(storage_ref=storage_ref)
+        return content + b"corruption", mime
+
+    monkeypatch.setattr(store, "retrieve", corrupt_readback)
+    with pytest.raises(csvjobs.CustomerCSVBlocked, match="integrity mismatch"):
+        _submit(engine, "pg-readback-corrupt")
+    with Session(engine) as db:
+        rows = db.execute(
+            sa.select(csvjobs.jobs.c.status, csvjobs.jobs.c.output_ref)
+        ).all()
+        assert rows == [("FAILED", None)]
+    assert store.items == {}

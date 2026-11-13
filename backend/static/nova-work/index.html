@@ -100,6 +100,16 @@
           </label>
           <button type="button" id="operations-durable-history-open" class="secondary" disabled>Reopen selected job</button>
           <p class="hint" id="operations-durable-history-result" aria-live="polite">Nothing has been loaded.</p>
+          <div class="command-card" aria-label="Recover stalled Operations jobs">
+            <h3>Recover stalled CSV jobs</h3>
+            <p class="hint">First preview your authorized jobs stuck processing for more than 15 minutes. Applying recovery marks only the exact previewed jobs FAILED; it never restarts, resends or delivers a client file. Failed work requires a fresh owner-authorized upload.</p>
+            <div class="command-actions">
+              <button type="button" class="secondary" id="operations-recovery-preview">Preview stalled jobs</button>
+              <button type="button" class="secondary" id="operations-recovery-apply" disabled>Mark previewed jobs failed</button>
+            </div>
+            <label><input type="checkbox" id="operations-recovery-confirm" /> I reviewed the preview and understand this action marks stalled jobs failed without reprocessing or delivering them.</label>
+            <p class="hint" id="operations-recovery-result" aria-live="polite">No recovery preview has been requested.</p>
+          </div>
         </div>
         <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>

@@ -166,3 +166,103 @@ def test_saved_history_is_hidden_after_assignment_revocation(harness):
     assert history.status_code == 200
     assert history.json()["jobs"] == []
     assert client.get(f"/api/nova/work/operations/durable/jobs/{job_id}").status_code == 409
+
+
+def test_assignment_revoked_during_upload_never_reserves_job(harness, monkeypatch):
+    """Recheck task authorization after reading input, before writing storage."""
+    client, eng, store, _ = harness
+    checks = {"count": 0}
+
+    def changing_engagement(*args, **kwargs):
+        checks["count"] += 1
+        if checks["count"] >= 2:
+            eng["status"] = "BLOCKED"
+        return eng
+
+    monkeypatch.setattr(api.service, "get_engagement", changing_engagement)
+    response = create(client, key="revoked-during-upload")
+    assert response.status_code == 409
+    assert checks["count"] >= 2
+    assert store.objects == {}
+    # The task became blocked before processing, so no job may be created.
+    eng["status"] = "ACTIVE"
+    monkeypatch.setattr(api.service, "get_engagement", lambda *args, **kwargs: eng)
+    response = client.get("/api/nova/work/operations/durable/jobs")
+    assert response.status_code == 200
+    assert response.json()["jobs"] == []
+
+
+def test_http_review_rejects_tampered_artifact(harness):
+    """Owner approval must not claim success for corrupt saved CSV output."""
+    client, _, store, _ = harness
+    job_id = create(client, key="http-tamper-approval").json()["job_id"]
+    key = next(iter(store.objects))
+    store.objects[key] = b"corrupt synthetic CSV"
+    response = client.post(
+        f"/api/nova/work/operations/durable/jobs/{job_id}/review",
+        json={"approve": True},
+    )
+    assert response.status_code == 503
+    assert client.get(f"/api/nova/work/operations/durable/jobs/{job_id}").json()["status"] == "AWAITING_REVIEW"
+
+
+def test_owner_preview_then_explicit_batch_stale_recovery(harness):
+    """Never mutate during preview; exact selection and owner header required."""
+    from datetime import timedelta
+    client, eng, _, _ = harness
+    from app.core.nova.work_revenue import operations_customer_csv_jobs as csv_jobs
+    from app.db.session import get_db
+
+    # Use the same isolated test database connection supplied to the route.
+    db_provider = client.app.dependency_overrides[get_db]
+    with next(db_provider()) as db:
+        old = csv_jobs._utc() - timedelta(minutes=30)
+        db.execute(csv_jobs.sa.insert(csv_jobs.jobs).values(
+            id="stale-http", organization_id="org-a", owner_user_id="owner-a",
+            engagement_id="eng-a", task_id="task-a", request_key="stale-http-key",
+            input_sha256="a" * 64, status="PROCESSING",
+            created_at=old, updated_at=old,
+        ))
+        db.commit()
+
+    endpoint = "/api/nova/work/operations/durable/jobs/recover-stale-batch"
+    preview = client.post(endpoint, json={"apply": False})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["candidate_job_ids"] == ["stale-http"]
+    assert preview.json()["recovered_count"] == 0
+    assert client.get("/api/nova/work/operations/durable/jobs/stale-http").json()["status"] == "PROCESSING"
+
+    denied = client.post(endpoint, json={"apply": True, "expected_job_ids": ["stale-http"]})
+    assert denied.status_code == 403
+    wrong = client.post(endpoint, headers={"X-Nova-Owner-Action": "recover-previewed-stale-jobs"},
+                        json={"apply": True, "expected_job_ids": ["wrong-job"]})
+    assert wrong.status_code == 409
+
+    applied = client.post(endpoint, headers={"X-Nova-Owner-Action": "recover-previewed-stale-jobs"},
+                          json={"apply": True, "expected_job_ids": ["stale-http"]})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["recovered_job_ids"] == ["stale-http"]
+    assert applied.json()["delivered"] is False
+    assert client.get("/api/nova/work/operations/durable/jobs/stale-http").json()["status"] == "FAILED"
+
+
+def test_batch_recovery_blocks_revoked_engagement(harness):
+    from datetime import timedelta
+    client, eng, _, _ = harness
+    from app.core.nova.work_revenue import operations_customer_csv_jobs as csv_jobs
+    from app.db.session import get_db
+
+    db_provider = client.app.dependency_overrides[get_db]
+    with next(db_provider()) as db:
+        old = csv_jobs._utc() - timedelta(minutes=30)
+        db.execute(csv_jobs.sa.insert(csv_jobs.jobs).values(
+            id="revoked-stale", organization_id="org-a", owner_user_id="owner-a",
+            engagement_id="eng-a", task_id="task-a", request_key="revoked-stale-key",
+            input_sha256="a" * 64, status="PROCESSING",
+            created_at=old, updated_at=old,
+        ))
+        db.commit()
+    eng["status"] = "BLOCKED"
+    result = client.post("/api/nova/work/operations/durable/jobs/recover-stale-batch",
+                         json={"apply": False})
+    assert result.status_code == 409

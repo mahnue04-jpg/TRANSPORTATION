@@ -146,6 +146,18 @@ def submit_review_job(
         storage_ref = saved[1]
         if saved[2] != len(result.cleaned_csv.encode("utf-8")):
             raise CustomerCSVBlocked("Artifact size mismatch", 503)
+        # A successful object-store PUT acknowledgement is insufficient.
+        # Read the private artifact back before telling the owner it is ready;
+        # corrupted, truncated or missing objects must never enter review.
+        try:
+            verified_bytes, _ = _store().retrieve(storage_ref=storage_ref)
+        except Exception as exc:
+            raise CustomerCSVBlocked("Saved private artifact cannot be verified", 503) from exc
+        if (
+            len(verified_bytes) != len(result.cleaned_csv.encode("utf-8"))
+            or hashlib.sha256(verified_bytes).hexdigest() != result.output_sha256
+        ):
+            raise CustomerCSVBlocked("Saved private artifact integrity mismatch", 503)
         finalized = db.execute(sa.update(jobs).where(
             jobs.c.id == job_id, jobs.c.status == "PROCESSING",
         ).values(
@@ -206,6 +218,85 @@ def recover_stale_job(
             "requires_new_request_key": True, "delivered": False}
 
 
+
+def recover_owned_stale_jobs(
+    db: Session, *, org: str, owner: str, dry_run: bool = True,
+    limit: int = 25, expected_job_ids: list[str] | None = None,
+) -> dict:
+    """Preview or mark a bounded set of this owner's stale jobs FAILED.
+
+    Does not replay input, delete objects, deliver files or incur provider costs.
+    Every mutation is conditional on ownership, PROCESSING state and age, so
+    live/completed jobs cannot be overwritten by a stale recovery snapshot.
+    The owner must explicitly opt into a non-dry-run call at the HTTP layer.
+    """
+    require_runtime(db)
+    if not isinstance(org, str) or not org.strip() or not isinstance(owner, str) or not owner.strip():
+        raise CustomerCSVBlocked("Specific organization and owner required", 403)
+    if type(dry_run) is not bool:
+        raise CustomerCSVBlocked("Boolean dry_run required", 400)
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise CustomerCSVBlocked("Recovery limit must be between 1 and 50", 400)
+    if not dry_run:
+        if (
+            not isinstance(expected_job_ids, list)
+            or not expected_job_ids
+            or len(expected_job_ids) > limit
+            or any(not isinstance(item, str) or not item or len(item) > 36 for item in expected_job_ids)
+            or len(set(expected_job_ids)) != len(expected_job_ids)
+        ):
+            raise CustomerCSVBlocked("Exact previewed job IDs required for recovery", 409)
+    cutoff = _utc() - timedelta(minutes=15)
+    query = (
+        sa.select(jobs.c.id)
+        .where(
+            jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner,
+            jobs.c.status == "PROCESSING",
+            jobs.c.updated_at < cutoff,
+        )
+        .order_by(jobs.c.updated_at.asc(), jobs.c.id.asc())
+        .limit(limit)
+    )
+    try:
+        # Lock eligible records on PostgreSQL when changing state. The UPDATE
+        # predicate below is independently conditional for concurrency safety.
+        if not dry_run and db.get_bind().dialect.name == "postgresql":
+            query = query.with_for_update(skip_locked=True)
+        ids = list(db.execute(query).scalars().all())
+        if dry_run:
+            db.rollback()
+            return {
+                "dry_run": True, "candidate_job_ids": ids, "candidate_count": len(ids),
+                "recovered_job_ids": [], "recovered_count": 0,
+                "requires_reupload": False, "delivered": False,
+            }
+        if ids != expected_job_ids:
+            raise CustomerCSVBlocked("Recovery preview changed; refresh before applying", 409)
+        recovered = []
+        for job_id in ids:
+            updated = db.execute(
+                sa.update(jobs).where(
+                    jobs.c.id == job_id,
+                    jobs.c.organization_id == org,
+                    jobs.c.owner_user_id == owner,
+                    jobs.c.status == "PROCESSING",
+                    jobs.c.updated_at < cutoff,
+                ).values(status="FAILED", updated_at=_utc())
+            )
+            if updated.rowcount == 1:
+                recovered.append(job_id)
+        db.commit()
+        return {
+            "dry_run": False, "candidate_job_ids": ids, "candidate_count": len(ids),
+            "recovered_job_ids": recovered, "recovered_count": len(recovered),
+            "requires_reupload": bool(recovered), "delivered": False,
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
 def job_status(db: Session, *, org: str, owner: str, job_id: str) -> dict:
     require_runtime(db)
     row = _owned(db, job_id, org, owner)
@@ -232,17 +323,37 @@ def list_owned_jobs(
         .order_by(jobs.c.created_at.desc(), jobs.c.id.desc())
         .limit(limit)
     ).mappings().all()
-    return [
-        {
+    cutoff = _utc() - timedelta(minutes=15)
+    visible = []
+    for row in rows:
+        updated_at = row["updated_at"]
+        # SQLite fixtures may return naive timestamps; real PostgreSQL uses
+        # timezone-aware values. Treat any naive value as UTC, not local time.
+        updated_utc = (
+            updated_at.replace(tzinfo=timezone.utc)
+            if updated_at.tzinfo is None else updated_at.astimezone(timezone.utc)
+        )
+        status = row["status"]
+        stale = status == "PROCESSING" and updated_utc < cutoff
+        next_action = {
+            "PROCESSING": "recover_stale_job" if stale else "check_status",
+            "AWAITING_REVIEW": "review_output",
+            "APPROVED_FOR_DOWNLOAD": "download_approved_output",
+            "FAILED": "inspect_failure_and_resubmit",
+            "REJECTED": "no_action",
+        }.get(status, "inspect_status")
+        visible.append({
             "job_id": row["id"],
             "engagement_id": row["engagement_id"],
             "task_id": row["task_id"],
-            "status": row["status"],
+            "status": status,
             "created_at": row["created_at"].isoformat(),
-            "updated_at": row["updated_at"].isoformat(),
-        }
-        for row in rows
-    ]
+            "updated_at": updated_at.isoformat(),
+            "stale_processing": stale,
+            "next_action": next_action,
+            "delivered": False,
+        })
+    return visible
 
 
 def review_job(
@@ -254,12 +365,26 @@ def review_job(
     row = _owned(db, job_id, org, owner, lock=True)
     if row["status"] != "AWAITING_REVIEW":
         raise CustomerCSVBlocked("Job is not awaiting owner review")
+    if approve:
+        # Check the original private artifact before recording approval. A
+        # missing/corrupt object must remain AWAITING_REVIEW, not approved.
+        # This does not replace the checksum check performed again at download.
+        download_review(db, org=org, owner=owner, job_id=job_id)
     status = "APPROVED_FOR_DOWNLOAD" if approve else "REJECTED"
-    db.execute(sa.update(jobs).where(
-        jobs.c.id == job_id, jobs.c.organization_id == org,
-        jobs.c.owner_user_id == owner, jobs.c.status == "AWAITING_REVIEW",
-    ).values(status=status, reviewer_user_id=owner, updated_at=_utc()))
-    db.commit()
+    try:
+        changed = db.execute(sa.update(jobs).where(
+            jobs.c.id == job_id, jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner, jobs.c.status == "AWAITING_REVIEW",
+        ).values(status=status, reviewer_user_id=owner, updated_at=_utc()))
+        # SELECT FOR UPDATE protects PostgreSQL transactions, while this
+        # conditional rowcount check also prevents stale state from being
+        # reported as approved if a concurrent update changed the record.
+        if changed.rowcount != 1:
+            raise CustomerCSVBlocked("CSV review state changed; refresh the job", 409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"job_id": job_id, "status": status, "delivered": False}
 
 

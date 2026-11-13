@@ -47,3 +47,45 @@ def test_expired_lease_is_reclaimed_for_same_idempotent_request(tmp_path):
     assert result.job_id == job_id
     assert get_job_state(restarted, tenant_id="tenant-a", job_id=job_id) == "completed"
     restarted.close()
+
+
+def test_expired_final_attempt_becomes_failed_after_restart(tmp_path):
+    path = tmp_path / "exhausted.db"
+    digest = hashlib.sha256(b"fixture").hexdigest()
+    db = sqlite3.connect(path)
+    ensure_schema(db)
+    job_id = enqueue_job(
+        db, tenant_id="tenant-a", idempotency_key="last-attempt",
+        kind="csv_cleanup", input_sha256=digest, max_attempts=1,
+    )
+    claim = claim_job(db, tenant_id="tenant-a", now=100, lease_seconds=30, job_id=job_id)
+    assert claim is not None
+    db.close()
+
+    recovered = sqlite3.connect(path)
+    assert claim_job(recovered, tenant_id="tenant-a", now=129, job_id=job_id) is None
+    assert get_job_state(recovered, tenant_id="tenant-a", job_id=job_id) == "running"
+    assert claim_job(recovered, tenant_id="tenant-a", now=130, job_id=job_id) is None
+    assert get_job_state(recovered, tenant_id="tenant-a", job_id=job_id) == "failed"
+    code = recovered.execute(
+        "SELECT last_error_code FROM nova_operations_offline_jobs WHERE job_id=?",
+        (job_id,),
+    ).fetchone()[0]
+    assert code == "MAX_ATTEMPTS_EXHAUSTED"
+    recovered.close()
+
+
+def test_expired_exhausted_reconciliation_preserves_other_tenant(tmp_path):
+    db = sqlite3.connect(tmp_path / "tenant.db")
+    ensure_schema(db)
+    digest = hashlib.sha256(b"fixture").hexdigest()
+    other_job = enqueue_job(
+        db, tenant_id="tenant-b", idempotency_key="other", kind="csv_cleanup",
+        input_sha256=digest, max_attempts=1,
+    )
+    assert claim_job(db, tenant_id="tenant-b", now=100, lease_seconds=10, job_id=other_job)
+    assert claim_job(db, tenant_id="tenant-a", now=200) is None
+    assert get_job_state(db, tenant_id="tenant-b", job_id=other_job) == "running"
+    assert claim_job(db, tenant_id="tenant-b", now=200, job_id=other_job) is None
+    assert get_job_state(db, tenant_id="tenant-b", job_id=other_job) == "failed"
+    db.close()

@@ -228,6 +228,90 @@
     });
   }
 
+  const recoveryPreviewButton = document.getElementById("operations-recovery-preview");
+  const recoveryApplyButton = document.getElementById("operations-recovery-apply");
+  const recoveryConfirm = document.getElementById("operations-recovery-confirm");
+  const recoveryStatus = document.getElementById("operations-recovery-result");
+  let recoveryPreview = null;
+  let recoveryBusy = false;
+
+  function clearRecoveryPreview() {
+    recoveryPreview = null;
+    if (recoveryApplyButton) recoveryApplyButton.disabled = true;
+    if (recoveryConfirm) recoveryConfirm.checked = false;
+  }
+
+  if (recoveryPreviewButton && recoveryApplyButton && recoveryConfirm && recoveryStatus) {
+    recoveryConfirm.addEventListener("change", function () {
+      recoveryApplyButton.disabled = recoveryBusy || !recoveryPreview ||
+        !recoveryPreview.length || !recoveryConfirm.checked;
+    });
+    recoveryPreviewButton.addEventListener("click", async function () {
+      if (recoveryBusy) return;
+      clearRecoveryPreview();
+      const auth = scopedAuthHeaders();
+      if (!(auth.Authorization || auth.authorization)) {
+        recoveryStatus.textContent = "Sign in as the AMICOR owner first.";
+        return;
+      }
+      recoveryBusy = true;
+      recoveryPreviewButton.disabled = true;
+      recoveryStatus.textContent = "Checking authorized stalled jobs...";
+      try {
+        const response = await fetch("/api/nova/work/operations/durable/jobs/recover-stale-batch", {
+          method: "POST", credentials: "same-origin",
+          headers: Object.assign({}, auth, {"Content-Type": "application/json"}),
+          body: JSON.stringify({apply: false, limit: 25})
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        const data = await response.json();
+        const ids = Array.isArray(data.candidate_job_ids) ? data.candidate_job_ids : [];
+        recoveryPreview = ids;
+        recoveryStatus.textContent = ids.length
+          ? ids.length + " stalled job(s) eligible for failure recovery. Review carefully, check the confirmation box, then apply."
+          : "No authorized stalled jobs found. No changes made.";
+      } catch (err) {
+        clearRecoveryPreview();
+        recoveryStatus.textContent = err.message || "Recovery preview unavailable.";
+      } finally {
+        recoveryBusy = false;
+        recoveryPreviewButton.disabled = false;
+      }
+    });
+    recoveryApplyButton.addEventListener("click", async function () {
+      if (recoveryBusy || !recoveryConfirm.checked || !recoveryPreview || !recoveryPreview.length) return;
+      const selected = recoveryPreview.slice();
+      clearRecoveryPreview();
+      recoveryBusy = true;
+      recoveryPreviewButton.disabled = true;
+      recoveryStatus.textContent = "Applying recovery only to the previewed stalled jobs...";
+      try {
+        const auth = scopedAuthHeaders();
+        if (!(auth.Authorization || auth.authorization)) {
+          throw new Error("Sign in as the AMICOR owner first.");
+        }
+        const response = await fetch("/api/nova/work/operations/durable/jobs/recover-stale-batch", {
+          method: "POST", credentials: "same-origin",
+          headers: Object.assign({}, auth, {
+            "Content-Type": "application/json",
+            "X-Nova-Owner-Action": "recover-previewed-stale-jobs"
+          }),
+          body: JSON.stringify({apply: true, limit: 25, expected_job_ids: selected})
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        const data = await response.json();
+        recoveryStatus.textContent = String(data.recovered_count || 0) +
+          " stalled job(s) marked FAILED. No customer files restarted or delivered; inspect failures and reupload with new authorization.";
+      } catch (err) {
+        recoveryStatus.textContent = (err.message || "Recovery failed.") +
+          " Refresh the preview before any retry.";
+      } finally {
+        recoveryBusy = false;
+        recoveryPreviewButton.disabled = false;
+      }
+    });
+  }
+
   if (scoped && scopedStatus) {
     scoped.addEventListener("submit", async function (event) {
       event.preventDefault();

@@ -64,15 +64,25 @@ def clean_csv_text(
         raise SpreadsheetInputError("Invalid CSV structure") from exc
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(columns)
-    # Guard formula injection in CSV exports consumed by spreadsheet applications.
+    # Spreadsheet applications also evaluate formulas in the header row.
+    # Escape headers and values consistently; CSV quoting alone is insufficient.
+    def safe_spreadsheet_cell(value: str) -> str:
+        return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
+
+    writer.writerow(tuple(safe_spreadsheet_cell(column) for column in columns))
     for row in rows:
-        writer.writerow(tuple("'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value for value in row))
+        writer.writerow(tuple(safe_spreadsheet_cell(value) for value in row))
     cleaned = out.getvalue()
+    cleaned_bytes = cleaned.encode("utf-8")
+    # Escaping and CSV quoting can make output larger than the accepted input.
+    # The private-review download endpoint enforces the same byte limit; fail
+    # before storing an artifact that its owner could never retrieve.
+    if len(cleaned_bytes) > max_bytes:
+        raise SpreadsheetInputError("Cleaned CSV exceeds output size limit")
     return CleanupResult(
         cleaned_csv=cleaned,
         input_sha256=hashlib.sha256(encoded).hexdigest(),
-        output_sha256=hashlib.sha256(cleaned.encode("utf-8")).hexdigest(),
+        output_sha256=hashlib.sha256(cleaned_bytes).hexdigest(),
         input_rows=input_rows,
         output_rows=len(rows),
         duplicate_rows_removed=duplicates,
