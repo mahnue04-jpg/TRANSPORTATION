@@ -138,3 +138,18 @@ def test_unrelated_nova_work_is_not_authorized_as_csv_cleanup():
 def test_explicit_spreadsheet_cleanup_task_can_be_selected():
     assert _eligible_task(task(title="Spreadsheet cleanup"), set())
     assert _eligible_task(task(title="Process supplied CSV"), set())
+
+
+def test_csv_label_must_be_a_separate_word_not_part_of_another_term():
+    # The previous substring filter incorrectly accepted unrelated task labels.
+    assert not _eligible_task(task(title="CSVless content editing"), set())
+    assert not _eligible_task(task(title="nocsv administrative review"), set())
+    assert not _eligible_task(task(title="Reconcile nocsv records"), set())
+    assert _eligible_task(task(title="CSV cleanup for approved records"), set())
+    assert _eligible_task(task(title="Clean customer-data.csv"), set())
+
+
+def test_scoped_task_must_still_be_supervised_and_active():
+    # A recognized CSV label alone is never sufficient.
+    assert not _eligible_task(task(title="CSV cleanup", review_required=False), set())
+    assert not _eligible_task(task(title="CSV cleanup", blocked_reason="Contract pending"), set())
