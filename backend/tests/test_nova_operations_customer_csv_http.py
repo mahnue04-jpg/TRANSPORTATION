@@ -166,3 +166,26 @@ def test_saved_history_is_hidden_after_assignment_revocation(harness):
     assert history.status_code == 200
     assert history.json()["jobs"] == []
     assert client.get(f"/api/nova/work/operations/durable/jobs/{job_id}").status_code == 409
+
+
+def test_assignment_revoked_during_upload_never_reserves_job(harness, monkeypatch):
+    """Recheck task authorization after reading input, before writing storage."""
+    client, eng, store, _ = harness
+    checks = {"count": 0}
+
+    def changing_engagement(*args, **kwargs):
+        checks["count"] += 1
+        if checks["count"] >= 2:
+            eng["status"] = "BLOCKED"
+        return eng
+
+    monkeypatch.setattr(api.service, "get_engagement", changing_engagement)
+    response = create(client, key="revoked-during-upload")
+    assert response.status_code == 409
+    assert checks["count"] >= 2
+    assert store.objects == {}
+    # The task became blocked before processing, so no job may be created.
+    eng["status"] = "ACTIVE"
+    response = client.get("/api/nova/work/operations/durable/jobs")
+    assert response.status_code == 200
+    assert response.json()["jobs"] == []
