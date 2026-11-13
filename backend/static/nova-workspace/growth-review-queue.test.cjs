@@ -207,7 +207,7 @@ test("Request information uses non-executing decision endpoint and stays tenant 
   await info.listeners.click();
   assert.equal(requests.length, 3);
   assert.deepEqual(JSON.parse(requests[2].opts.body), {decision:"request_information"});
-  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /Information requested/);
+  assert.match(ui.elements["growth-agent-preview-queue-status"].textContent, /On hold — information needed/);
 });
 
 test("changed organization blocks owner decision before POST", async () => {
@@ -227,4 +227,23 @@ test("changed organization blocks owner decision before POST", async () => {
   await ui.elements["growth-agent-preview-reject"].listeners.click();
   assert.equal(requests.length, 2);
   assert.equal(ui.elements["growth-agent-preview-queue-list"].children.length, 0);
+});
+
+
+test("request-information decision reports hold rather than customer outreach", async () => {
+  const ui = setup(async (url) => {
+    if (url.endsWith("?limit=50")) return ok([{run_id:"hold-1",workflow_name:"Review",status:"preview",requires_approval:true}]);
+    if (url.endsWith("/hold-1")) return {ok:true,status:200,json:async()=>({run_id:"hold-1",status:"preview",requires_approval:true,content_redacted:true,steps:[]})};
+    return {ok:true,status:200,json:async()=>({run_id:"hold-1",status:"needs_information",decision:"request_information",execution_performed:false,live_send:false})};
+  }, "session-token");
+  await ui.click();
+  await ui.elements["growth-agent-preview-queue-list"].children[0].children[0].listeners.click();
+  const info = ui.elements["growth-agent-preview-request-information"];
+  assert.match(info.textContent, /Place on hold/);
+  await info.listeners.click();
+  await info.listeners.click();
+  const message = ui.elements["growth-agent-preview-queue-status"].textContent;
+  assert.match(message, /On hold/);
+  assert.match(message, /No workflow executed or message sent/);
+  assert.doesNotMatch(message, /Information requested/);
 });
