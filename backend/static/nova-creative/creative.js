@@ -3002,12 +3002,16 @@
           brand_profile_id: activeBrandId
         })
       });
+      // The POST already succeeded. Always open the new project immediately,
+      // even if a later list/assets refresh temporarily fails.
       setActiveProjectId(row.id);
-      await refreshProjects();
-      await refreshAssets();
-      if (activeProjectId === row.id) {
-        showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
-        showCurrentProjectWorkspace(row, true);
+      showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
+      showCurrentProjectWorkspace(row, true);
+      try {
+        await refreshProjects();
+        await refreshAssets();
+      } catch (refreshErr) {
+        showBanner("Project saved: " + row.title + ". Project details did not fully reload; select it in Project history if needed.", true);
       }
     } catch (err) {
       showBanner(err.message || "Project create failed.", false);
