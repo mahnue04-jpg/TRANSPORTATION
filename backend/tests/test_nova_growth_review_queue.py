@@ -188,5 +188,41 @@ def test_request_information_blocks_execution_and_cross_tenant_decisions(db):
         svc.approve_and_execute_workflow(org, run_id=preview["run_id"], dry_run=True)
     assert denied.value.http_status == 409
     with pytest.raises(GrowthAgentError) as bad:
+        svc.decide_workflow_review(org, preview["run_id"], decision="approve", actor_user_id="owner-test")
+    assert bad.value.http_status == 409
+
+
+def test_explicit_owner_approval_records_state_but_does_not_execute(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org = "review-approve-owner"
+    contact = _seed(svc, org)
+    preview = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
+    before_attempts = db.query(GaDeliveryAttempt).count()
+    with pytest.raises(GrowthAgentError) as anonymous:
         svc.decide_workflow_review(org, preview["run_id"], decision="approve")
-    assert bad.value.http_status == 422
+    assert anonymous.value.http_status == 403
+    with pytest.raises(GrowthAgentError) as no_approval:
+        svc.approve_and_execute_workflow(
+            org, run_id=preview["run_id"], dry_run=False, actor_user_id="owner-test"
+        )
+    assert no_approval.value.http_status == 403
+
+    result = svc.decide_workflow_review(
+        org, preview["run_id"], decision="approve", actor_user_id="owner-test"
+    )
+    assert result == {
+        "run_id": preview["run_id"], "decision": "approve", "status": "approved",
+        "execution_performed": False, "live_send": False,
+    }
+    assert db.query(GaDeliveryAttempt).count() == before_attempts
+    assert any(
+        event.action == "workflow.review.approve" and event.entity_id == preview["run_id"]
+        for event in db.query(GaAuditEvent).all()
+    )
+    with pytest.raises(GrowthAgentError) as duplicate:
+        svc.decide_workflow_review(
+            org, preview["run_id"], decision="approve", actor_user_id="owner-test"
+        )
+    assert duplicate.value.http_status == 409
