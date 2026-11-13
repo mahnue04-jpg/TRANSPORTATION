@@ -374,13 +374,13 @@
     el.classList.remove("hidden");
     el.classList.toggle("error", !ok);
   }
-  function showCurrentProjectWorkspace(project, focusIt) {
+  function showCurrentProjectWorkspace(project, focusIt, createdNow) {
     var panel = $("studio-project-workspace");
     if (!panel || !project || !project.id) return;
     var title = String(project.title || "Untitled project");
     var heading = $("studio-project-workspace-heading");
     var status = $("studio-project-workspace-status");
-    if (heading) heading.textContent = "Project created: " + title;
+    if (heading) heading.textContent = (createdNow ? "Project created: " : "Current project: ") + title;
     if (status) status.textContent = "Saved and selected · " + String(project.duration_target || "unspecified") + " seconds · Project ID " + project.id;
     panel.classList.remove("hidden");
     if (focusIt) {
@@ -1145,6 +1145,12 @@
       });
     }
     updateActiveProjectLabel();
+    var activeRow = rows.find(function (row) { return row.id === activeProjectId; });
+    if (activeRow) {
+      showCurrentProjectWorkspace(activeRow, false, false);
+    } else if ($("studio-project-workspace")) {
+      $("studio-project-workspace").classList.add("hidden");
+    }
     return rows;
   }
   async function refreshBrands() {
@@ -3006,7 +3012,7 @@
       // even if a later list/assets refresh temporarily fails.
       setActiveProjectId(row.id);
       showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
-      showCurrentProjectWorkspace(row, true);
+      showCurrentProjectWorkspace(row, true, true);
       try {
         await refreshProjects();
         await refreshAssets();
