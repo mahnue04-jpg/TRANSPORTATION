@@ -78,12 +78,16 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     download=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file')
     assert download.status_code==200
     assert download.content==data
+    jobs_before=[job.id for job in service.store.list_jobs(pid, 'owner')]
+    assets_before=[row.id for row in service.store.list_assets(pid, 'owner')]
     inspection=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/browser-compatibility')
     assert inspection.status_code==200,inspection.text
     assert inspection.json()['read_only']
     assert inspection.json()['video_codec']=='h264'
     assert inspection.json()['duration_seconds'] > 0
     assert inspection.json()['browser_playback_verified'] is False
+    assert [job.id for job in service.store.list_jobs(pid, 'owner')] == jobs_before
+    assert [row.id for row in service.store.list_assets(pid, 'owner')] == assets_before
     duplicate=client.post(url,files={'file':('again.mp4',data,'video/mp4')})
     assert duplicate.json()['reused']
     assert duplicate.json()['asset']['id']==asset['id']
