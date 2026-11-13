@@ -68,6 +68,10 @@ class WorkflowPreviewIn(OrgScoped):
     conversation_id: str | None = None
 
 
+class WorkflowReviewDecisionIn(OrgScoped):
+    decision: str  # reject | request_information; approval is intentionally unavailable
+
+
 class WorkflowExecuteIn(OrgScoped):
     run_id: str
     dry_run: bool = True
