@@ -44,6 +44,37 @@ jobs:
           tests/test_nova_multi_source_discovery.py
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
 
+  work-revenue-private-inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TESTING: "true"
+      APP_ENV: development
+      AMICOR_ENVIRONMENT: development
+      DATABASE_URL: sqlite:///./test_nova_private_inputs_ci.db
+      NOVA_WORK_INPUT_S3_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Test private customer-input storage boundaries
+        run: |
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
+          python -m pytest -q -rs tests/test_nova_work_revenue_private_inputs.py
+          echo "Synthetic private store only. This is not live S3 or real customer acceptance evidence." >> "$GITHUB_STEP_SUMMARY"
+
   operations-csv-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 25
