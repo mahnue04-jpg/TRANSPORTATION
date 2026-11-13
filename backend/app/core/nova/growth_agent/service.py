@@ -723,6 +723,14 @@ class GrowthAgentService:
             )
         safe_name = _strip_html(name).strip() if name else None
         if existing:
+            # A hashed identity may belong to an existing real or demo contact.
+            # Do not silently relabel or merge across that trust boundary.
+            if bool(existing.is_synthetic_demo) != bool(is_synthetic_demo):
+                raise GrowthAgentError(
+                    "CONTACT_CLASSIFICATION_CONFLICT",
+                    "Existing contact has a different synthetic-demo classification",
+                    http_status=409,
+                )
             contact = existing
             if safe_name and not contact.display_name:
                 contact.display_name = safe_name
