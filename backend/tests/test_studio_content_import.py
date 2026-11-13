@@ -106,3 +106,26 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     assert client.post(url,files={'file':('other.mp4',data,'video/mp4')}).status_code==404
     app.dependency_overrides.pop(router_module.get_current_user_context)
     assert client.post(url,files={'file':('unauth.mp4',data,'video/mp4')}).status_code in {401,403}
+
+
+
+def test_free_first_shot_preflight_reports_non_durable_store_without_paid_request(studio, monkeypatch):
+    service, pid = studio
+    router_module = importlib.import_module('app.core.nova.creative_studio.router')
+    app = FastAPI()
+    app.include_router(router_module.router)
+    monkeypatch.setattr(router_module, 'get_service', lambda db: service)
+    user = SimpleNamespace(user_id='owner', email='studio-test@example.invalid')
+    app.dependency_overrides[router_module.get_current_user_context] = lambda: user
+    app.dependency_overrides[router_module.require_nova_access] = lambda: None
+    app.dependency_overrides[router_module.get_db] = lambda: None
+    response = TestClient(app).get('/api/nova/creative/projects/' + pid + '/first-shot-readiness')
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert report['status'] == 'BLOCKED'
+    assert 'DURABLE_SHOT_CLAIM_REQUIRED' in report['blockers']
+    assert report['generation_submitted'] is False
+    assert report['provider_charge_incurred'] is False
+    user.user_id = 'other'
+    denied = TestClient(app).get('/api/nova/creative/projects/' + pid + '/first-shot-readiness')
+    assert denied.status_code == 404
