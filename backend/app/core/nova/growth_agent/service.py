@@ -1143,6 +1143,8 @@ class GrowthAgentService:
         run = self._org_query(GaWorkflowRun, org_id).filter_by(id=run_id).one_or_none()
         if not run:
             raise GrowthAgentError("NOT_FOUND", "Workflow run not found", http_status=404)
+        if run.status in {"cancelled", "needs_information"}:
+            raise GrowthAgentError("REVIEW_NOT_APPROVED", "Workflow cannot execute after owner rejection or request for information", http_status=409)
         profile = self._require_profile(org_id)
         wf = self.db.query(GaWorkflowDefinition).filter_by(id=run.workflow_id, organization_id=org_id).one()
         contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one()
@@ -1934,6 +1936,54 @@ class GrowthAgentService:
                 "created_at": run.created_at.isoformat() + "Z" if run.created_at else None,
             })
         return output
+
+    def decide_workflow_review(
+        self,
+        org_id: str,
+        run_id: str,
+        *,
+        decision: str,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record rejection or request for information. NEVER execute or approve."""
+        if decision not in {"reject", "request_information"}:
+            raise GrowthAgentError("VALIDATION", "Only reject or request_information are supported", http_status=422)
+        outcome = "cancelled" if decision == "reject" else "needs_information"
+        updated = (
+            self._org_query(GaWorkflowRun, org_id)
+            .filter(GaWorkflowRun.id == run_id)
+            .filter(GaWorkflowRun.status.in_(("preview", "awaiting_approval")))
+            .filter(
+                GaWorkflowRun.workflow_id.in_(
+                    self.db.query(GaWorkflowDefinition.id)
+                    .filter_by(organization_id=org_id, requires_approval=True)
+                )
+            )
+            .update({"status": outcome}, synchronize_session=False)
+        )
+        if updated != 1:
+            self.db.rollback()
+            raise GrowthAgentError(
+                "REVIEW_CONFLICT",
+                "Workflow is not reviewable, is from another organization, or was already decided",
+                http_status=409,
+            )
+        self.audit(
+            org_id,
+            action="workflow.review." + decision,
+            entity_type="workflow_run",
+            entity_id=run_id,
+            actor_user_id=actor_user_id,
+            summary="Owner review decision recorded: " + decision,
+        )
+        self.db.commit()
+        return {
+            "run_id": run_id,
+            "decision": decision,
+            "status": outcome,
+            "execution_performed": False,
+            "live_send": False,
+        }
 
     def workflow_review_details(self, org_id: str, run_id: str) -> dict[str, Any]:
         """Read-only summary of an owner's candidate; never exposes body text or dispatches."""
