@@ -5,6 +5,47 @@ const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/creative.js', 'utf8');
 const polling = source.slice(source.indexOf('  async function waitForScene('), source.indexOf('  async function waitForFinalPromo('));
 
+test('presenter voice follows the selected provider and never aliases the local stock voice', () => {
+  const selector = {options: [{value: 'shimmer'}, {value: 'coral'}, {value: 'nova'}], value: 'coral', dataset: {},
+    appendChild(option) { this.options.push(option); }};
+  const hint = {textContent: 'External narration instructions', dataset: {}};
+  const elements = {'presenter-voice': selector, 'presenter-voice-hint': hint};
+  const ctx = vm.createContext({$: id => elements[id], document: {createElement() {
+    return {remove() { selector.options = selector.options.filter(o => o !== this);
+      if (selector.value === this.value) selector.value = selector.options[0].value; }};
+  }}});
+  vm.runInContext(source.slice(source.indexOf('  function configurePresenterVoice('), source.indexOf('  async function refreshProviders(')), ctx);
+  const local = [{kind: 'voice', provider_id: 'nova_local_voice', status: 'AVAILABLE'}];
+  ctx.configurePresenterVoice(local);
+  ctx.configurePresenterVoice(local);
+  assert.equal(selector.value, 'af_heart');
+  assert.equal(selector.options.filter(o => o.value === 'af_heart').length, 1);
+  assert.ok(selector.options.filter(o => o.value !== 'af_heart').every(o => o.disabled));
+  assert.match(hint.textContent, /approved pronunciation/);
+  ctx.configurePresenterVoice([{kind: 'voice', provider_id: 'openai_voice'}]);
+  assert.equal(selector.value, 'coral');
+  assert.equal(selector.options.some(o => o.value === 'af_heart'), false);
+  assert.ok(selector.options.every(o => !o.disabled));
+  assert.equal(hint.textContent, 'External narration instructions');
+});
+
+test('blocked or failed presenter narration shows its actual provider error', async () => {
+  for (const status of ['CONFIG_REQUIRED', 'DISABLED', 'ERROR']) {
+    const notices = [];
+    const ctx = vm.createContext({activeProjectId: 'selected',
+      presenterPayload: () => ({script: 'Hello AMICOR', voice: 'af_heart', captions: true}),
+      api: async () => ({provider: {status, message: 'Exact provider reason'}}),
+      showBanner: (message, ok) => notices.push({message, ok}),
+      renderOutput: () => {}, refreshAssets: async () => {},
+    });
+    vm.runInContext(source.slice(source.indexOf('  async function runPresenterAction('), source.indexOf('  var presenterMode =')), ctx);
+    const button = {disabled: false};
+    await ctx.runPresenterAction('voice', button);
+    assert.deepEqual(notices.at(-1), {message: 'Exact provider reason', ok: false});
+    assert.equal(button.disabled, false);
+  }
+});
+
 test('saved motion failures render the provider reason safely after a project reload', async () => {
   const elements = {'asset-list': {innerHTML: ''}};
   const ctx = vm.createContext({

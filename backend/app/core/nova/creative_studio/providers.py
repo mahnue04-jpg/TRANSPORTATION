@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import base64
 import json
 import os
@@ -81,31 +80,9 @@ def _resolve_creative_media_url(value: str | None) -> Path | None:
         return backend_root / raw.lstrip("/")
     return None
 
-AVAILABLE = "AVAILABLE"
-CONFIG_REQUIRED = "CONFIG_REQUIRED"
-DISABLED = "DISABLED"
-ERROR = "ERROR"
+from .provider_types import ProviderStatus, AVAILABLE, CONFIG_REQUIRED, DISABLED, ERROR
 
 IMAGE_ASPECTS = ("1:1", "4:5", "9:16", "16:9")
-
-
-@dataclass
-class ProviderStatus:
-    provider_id: str
-    kind: str
-    status: str
-    message: str
-    configured: bool = False
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "provider_id": self.provider_id,
-            "kind": self.kind,
-            "status": self.status,
-            "message": self.message,
-            "configured": self.configured,
-        }
-
 
 class ImageGenerationProvider(Protocol):
     provider_id: str
@@ -564,6 +541,19 @@ class RunwayVideoProvider:
         }
 
 
+class UnsupportedVoiceProvider:
+    provider_id = "unsupported_voice"
+
+    def status(self) -> ProviderStatus:
+        return ProviderStatus(self.provider_id, "voice", CONFIG_REQUIRED,
+                              "Select a supported voice provider; no paid fallback will be used.")
+
+    def generate(self, **kwargs) -> dict[str, Any]:
+        state = self.status()
+        return {"status": state.status, "message": state.message,
+                "url": None, "asset_generated": False}
+
+
 class OpenAIVoiceProvider:
     provider_id = "openai_voice"
 
@@ -612,6 +602,10 @@ class OpenAIVoiceProvider:
                 "asset_generated": False,
             }
         model = str(os.getenv("NOVA_CREATIVE_VOICE_MODEL") or "gpt-4o-mini-tts").strip()
+        if voice == "af_heart":
+            return {"status": CONFIG_REQUIRED,
+                    "message": "Nova Voice requires the local voice provider; no external voice was substituted.",
+                    "script": clean, "url": None, "asset_generated": False}
         voice = resolve_studio_voice(voice, presenter=presenter)
         speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
         if presenter and model.startswith("gpt-4o-mini-tts"):
@@ -929,6 +923,12 @@ def video_provider() -> VideoGenerationProvider:
 
 
 def voice_provider() -> VoiceGenerationProvider:
+    selected = str(os.getenv("NOVA_CREATIVE_VOICE_PROVIDER") or "").strip().lower()
+    if selected == "nova_local":
+        from app.core.nova.creative_studio.local_voice_provider import NovaLocalVoiceProvider
+        return NovaLocalVoiceProvider()
+    if selected not in {"", "openai", "openai_voice"}:
+        return UnsupportedVoiceProvider()
     return OpenAIVoiceProvider()
 
 

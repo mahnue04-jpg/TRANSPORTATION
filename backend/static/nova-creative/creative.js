@@ -781,8 +781,38 @@
   function renderOutput(data) {
     $("output").textContent = JSON.stringify(data, null, 2);
   }
+  function configurePresenterVoice(providers) {
+    var selector = $("presenter-voice");
+    if (!selector) return;
+    var local = (providers || []).some(function (row) {
+      return row.kind === "voice" && row.provider_id === "nova_local_voice";
+    });
+    var option = Array.from(selector.options).find(function (row) { return row.value === "af_heart"; });
+    var hint = $("presenter-voice-hint");
+    if (hint && !hint.dataset.externalText) hint.dataset.externalText = hint.textContent;
+    if (local) {
+      if (selector.value && selector.value !== "af_heart") selector.dataset.externalVoice = selector.value;
+      if (!option) {
+        option = document.createElement("option");
+        option.value = "af_heart";
+        option.textContent = "Nova Voice · approved local voice";
+        selector.appendChild(option);
+      }
+      Array.from(selector.options).forEach(function (row) { row.disabled = row.value !== "af_heart"; });
+      selector.value = "af_heart";
+      if (hint) hint.textContent = "Nova Voice uses the approved pronunciation and checks timed captions against this exact recording. Review playback before using it in a presenter video. Generate again after changing the script.";
+    } else {
+      var wasLocal = selector.value === "af_heart" || !selector.value;
+      if (option) option.remove();
+      Array.from(selector.options).forEach(function (row) { row.disabled = false; });
+      if (wasLocal) selector.value = selector.dataset.externalVoice || "coral";
+      if (hint) hint.textContent = hint.dataset.externalText;
+    }
+  }
+
   async function refreshProviders() {
     var guards = await api("/api/nova/creative/guardrails");
+    configurePresenterVoice(guards.providers);
     var bits = (guards.providers || []).map(function (row) {
       return row.kind + ": " + row.status + " — " + row.message;
     });
@@ -1198,7 +1228,9 @@
     if ($("presenter-motion-style") && production.motion_style) $("presenter-motion-style").value = production.motion_style;
     if ($("presenter-framing") && production.framing) $("presenter-framing").value = production.framing;
     if ($("presenter-output-preset") && production.output_preset) $("presenter-output-preset").value = production.output_preset;
-    if ($("presenter-voice") && production.voice) $("presenter-voice").value = production.voice;
+    if ($("presenter-voice") && production.voice && Array.from($("presenter-voice").options).some(function (option) {
+      return option.value === production.voice && !option.disabled;
+    })) $("presenter-voice").value = production.voice;
     if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
@@ -2275,8 +2307,8 @@
       });
       renderOutput(body);
       var status = body && (body.status || (body.provider && body.provider.status));
-      if (status === "CONFIG_REQUIRED") {
-        showBanner(body.message || "Talking presenter provider must be connected before lip-synced preview generation.", false);
+      if (["CONFIG_REQUIRED", "DISABLED", "ERROR"].indexOf(status) >= 0) {
+        showBanner(body.message || (body.provider && body.provider.message) || "Presenter generation is not ready. Review the provider status.", false);
       } else {
         showBanner(body.message || messages[kind][1], true);
       }

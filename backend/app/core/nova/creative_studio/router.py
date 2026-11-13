@@ -196,7 +196,7 @@ class ProjectUpdateIn(BaseModel):
     motion_style: str | None = Field(default=None, pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str | None = Field(default=None, pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str | None = Field(default=None, pattern="^(9:16|1:1|16:9)$")
-    voice: str | None = Field(default=None, pattern="^(coral|nova|shimmer)$")
+    voice: str | None = Field(default=None, pattern="^(coral|nova|shimmer|af_heart)$")
     image_aspect: str | None = Field(default=None, pattern="^(1:1|4:5|9:16|16:9)$")
     captions: bool | None = None
 
@@ -322,13 +322,13 @@ class PresenterIn(BaseModel):
     motion_style: str = Field(default="calm_professional", pattern="^(calm_professional|friendly_explainer|energetic_promo)$")
     framing: str = Field(default="close_up", pattern="^(close_up|waist_up|full_frame)$")
     output_preset: str = Field(default="9:16", pattern="^(9:16|1:1|16:9)$")
-    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer)$")
+    voice: str = Field(default="shimmer", pattern="^(coral|nova|shimmer|af_heart)$")
     captions: bool = False
 
 
 class CloudPresenterFinalizeIn(BaseModel):
     script: str = Field(min_length=1, max_length=600)
-    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer)$")
+    voice: str = Field(default="coral", pattern="^(coral|nova|shimmer|af_heart)$")
     captions: bool = True
 
 
@@ -667,8 +667,7 @@ def generate_voice(
     _require_owner(user)
     try:
         service = get_service(db)
-        service.require_budget_confirmation_for_paid(user.user_id, project_id)
-        return service.request_voice_generation(user.user_id, project_id)
+        return service.request_voice_generation(user.user_id, project_id, enforce_paid_budget=True)
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -711,13 +710,73 @@ def generate_presenter_voice(
     _require_owner(user)
     try:
         service = get_service(db)
-        service.require_budget_confirmation_for_paid(user.user_id, project_id)
-        result = service.request_voice_generation(user.user_id, project_id, script=payload.script, voice=payload.voice, presenter=payload.captions)
+        result = service.request_voice_generation(
+            user.user_id, project_id, script=payload.script, voice=payload.voice,
+            presenter=payload.captions or payload.voice == "af_heart", enforce_paid_budget=True,
+        )
         result["presenter_script"] = payload.script
         return result
     except CreativeStudioError as exc:
         _raise(exc)
         raise
+
+
+def _caption_presenter_output(video_url: str, cues: list[dict], *, output_preset: str | None = None):
+    """Retain downloaded lip-sync output if local caption rendering is blocked."""
+    from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+    from app.core.nova.creative_studio.presenter_media import caption_presenter
+    metadata = {"original_video_url": video_url, "caption_cues": cues}
+    source_video = None
+    parent_url = video_url.rsplit('/', 1)[0]
+    try:
+        source_video = _resolve_creative_media_url(video_url)
+        if source_video is None:
+            raise RuntimeError("Presenter media path could not be resolved for caption rendering.")
+        options = {"output_preset": output_preset} if output_preset is not None else {}
+        captioned, subtitles = caption_presenter(source_video, cues, **options)
+        metadata.update(captions_burned_in=True, subtitle_url=parent_url + '/' + subtitles.name)
+        return parent_url + '/' + captioned.name, metadata
+    except (RuntimeError, OSError) as exc:
+        # Caption generation writes the sidecar before encoding. Keep a paid
+        # provider's downloaded video when capacity is insufficient for burn-in.
+        reason = str(exc) if isinstance(exc, RuntimeError) else "Presenter caption files could not be saved."
+        logger.warning("Presenter caption render skipped; preserving provider video: %s", reason)
+        subtitle_url = None
+        try:
+            if source_video is not None and source_video.with_suffix('.srt').is_file():
+                subtitle_url = parent_url + '/' + source_video.with_suffix('.srt').name
+        except OSError:
+            pass
+        metadata.update(captions_burned_in=False, captions_sidecar_ready=bool(subtitle_url),
+                        subtitle_url=subtitle_url, caption_render_error=reason)
+        return video_url, metadata
+
+
+def _matching_presenter_narration(assets, script: str, voice: str, *, captions: bool):
+    """Keep the selected voice even when captions are hidden in the video."""
+    for asset in reversed(assets):
+        result = (asset.metadata or {}).get("provider_result") or {}
+        if (asset.kind != "audio" or str(asset.status or "").upper() != "GENERATED"
+                or not asset.url or str(asset.content or "").strip() != script.strip()
+                or result.get("voice") != voice):
+            continue
+        if (captions or voice == "af_heart") and (
+                result.get("presenter_audio_version") != 2 or not result.get("caption_cues")):
+            continue
+        if voice == "af_heart" and (
+                result.get("presenter_narration_ready") is not True
+                or result.get("caption_alignment") is not True):
+            continue
+        return asset
+    return None
+
+
+def _require_local_presenter_narration(assets, script: str, voice: str):
+    if voice == "af_heart" and _matching_presenter_narration(assets, script, voice, captions=True) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Generate Presenter Voice first for this script and Nova Voice selection. Prepared local narration is required before presenter rendering.",
+        )
 
 
 @router.post("/projects/{project_id}/presenter/cloud-finalize")
@@ -727,7 +786,7 @@ def finalize_full_body_presenter_in_cloud(
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Lip-sync and caption a generated full-body presenter without local FFmpeg."""
+    """Cloud lip-sync, then native local captions or the external caption stage."""
     _require_owner(user)
     service = get_service(db)
     try:
@@ -738,6 +797,7 @@ def finalize_full_body_presenter_in_cloud(
     try:
         service._project_or_404(user.user_id, project_id)
         assets = service.store.list_assets(project_id, user.user_id)
+        _require_local_presenter_narration(assets, payload.script, payload.voice)
 
         source = next((
             asset for asset in reversed(assets)
@@ -750,14 +810,7 @@ def finalize_full_body_presenter_in_cloud(
         if source is None:
             raise HTTPException(status_code=422, detail="Generate and review one full-body presenter motion clip first.")
 
-        audio = next((
-            asset for asset in reversed(assets)
-            if asset.kind == "audio"
-            and str(asset.status or "").upper() == "GENERATED"
-            and asset.url
-            and str(asset.content or "").strip() == payload.script.strip()
-            and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
-        ), None)
+        audio = _matching_presenter_narration(assets, payload.script, payload.voice, captions=False)
         if audio is None:
             voice_result = service.request_voice_generation(
                 user.user_id,
@@ -844,8 +897,36 @@ def finalize_full_body_presenter_in_cloud(
             if asset.kind == "presenter_video"
             and (asset.metadata or {}).get("cloud_stage") == "captioned"
             and (asset.metadata or {}).get("source_lipsync_asset_id") == lip_asset.id
+            and (payload.voice != "af_heart" or (asset.metadata or {}).get("native_captions") is True)
             and str(asset.status or "").upper() in {"GENERATED", "PROCESSING"}
         ), None)
+
+        if payload.voice == "af_heart":
+            if caption_asset is None or str(caption_asset.status or "").upper() != "GENERATED":
+                cues = audio.metadata["provider_result"]["caption_cues"]
+                preset = (source.metadata or {}).get("output_preset") or "16:9"
+                caption_url, caption_metadata = _caption_presenter_output(lip_asset.url, cues, output_preset=preset)
+                complete = caption_metadata["captions_burned_in"] is True
+                caption_asset = service._save_text_asset(
+                    owner_id=user.user_id, project_id=project_id, kind="presenter_video",
+                    title="Full-body presenter with Nova Voice native captions", content=payload.script,
+                    status="GENERATED" if complete else "ERROR", url=caption_url,
+                    metadata={**caption_metadata, "cloud_stage": "captioned", "native_captions": True,
+                              "presenter_mode": "full_body", "output_preset": preset,
+                              "motion_style": (source.metadata or {}).get("motion_style") or "friendly_explainer",
+                              "framing": (source.metadata or {}).get("framing") or "full_frame",
+                              "voice": payload.voice, "source_presenter_asset_id": source.id,
+                              "source_audio_asset_id": audio.id, "source_lipsync_asset_id": lip_asset.id,
+                              "paid_caption_provider_calls": False, "publish_ready": False,
+                              "quality_state": "OWNER_REVIEW_READY" if complete else "CAPTIONS_REQUIRED"},
+                )
+            complete = str(caption_asset.status or "").upper() == "GENERATED"
+            return {
+                "status": "GENERATED" if complete else "ERROR", "stage": "complete" if complete else "captions",
+                "message": ("Presenter lip-sync and Nova Voice native captions are ready for owner review."
+                            if complete else "Lip-synced video is saved, but caption burn-in is incomplete. No paid transcription was requested. Retry caption finalization when rendering capacity is available."),
+                "asset": caption_asset.as_dict(), "url": caption_asset.url,
+            }
 
         if caption_asset is None or str(caption_asset.status or "").upper() != "GENERATED":
             resume = None
@@ -888,7 +969,7 @@ def finalize_full_body_presenter_in_cloud(
         return {
             "status": "GENERATED",
             "stage": "complete",
-            "message": "Full-body Genova has Coral narration, cloud lip-sync, and burned-in captions. Ready for owner review.",
+            "message": "Full-body Genova has the selected narration, cloud lip-sync, and burned-in captions. Ready for owner review.",
             "asset": caption_asset.as_dict(),
             "url": caption_asset.url,
         }
@@ -909,6 +990,9 @@ def prepare_talking_presenter_preview(
     try:
         service._project_or_404(user.user_id, project_id)
         service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        _require_local_presenter_narration(
+            service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+        )
         presenter_meta = {
             "presenter_style": payload.presenter_style,
             "presenter_mode": payload.presenter_mode,
@@ -976,19 +1060,13 @@ def prepare_talking_presenter_preview(
             presenter_image = genova_images[-1]
             # Reuse a reviewed Studio narration only when it matches the exact
             # current script. Changed scripts must not speak stale audio.
-            narration = [
-                asset for asset in service.store.list_assets(project_id, user.user_id)
-                if asset.kind == "audio" and asset.url
-                and str(asset.status or "").upper() == "GENERATED"
-                and str(asset.content or "").strip() == payload.script.strip()
-                and (not payload.captions or (
-                    (asset.metadata or {}).get('provider_result', {}).get('voice') == payload.voice
-                    and (asset.metadata or {}).get('provider_result', {}).get('caption_cues')
-                    and (asset.metadata or {}).get('provider_result', {}).get('presenter_audio_version') == 2
-                ))
-            ]
+            narration_asset = _matching_presenter_narration(
+                service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+                captions=payload.captions,
+            )
+            narration = [narration_asset] if narration_asset is not None else []
             if payload.captions and not narration:
-                raise HTTPException(status_code=422, detail="Generate Presenter Voice first for this script and voice. This prepares louder narration and timed captions before rendering.")
+                raise HTTPException(status_code=422, detail="Generate Presenter Voice first for this script and voice. This prepares narration and timed captions before rendering.")
             presenter_args = {"presenter_image_url": str(presenter_image.url), "script": payload.script}
             if narration:
                 presenter_args["audio_url"] = str(narration[-1].url)
@@ -1139,15 +1217,11 @@ def prepare_talking_presenter_preview(
         status = str(result.get("status") or CONFIG_REQUIRED)
         generated_url = str(result.get("url") or "").strip() if result.get("asset_generated") else None
         body_lipsync_applied = False
-        if generated_url and payload.presenter_mode in {"half_body", "full_body"} and payload.captions:
-            narration_asset = next((
-                asset for asset in reversed(service.store.list_assets(project_id, user.user_id))
-                if asset.kind == "audio"
-                and asset.url
-                and str(asset.status or "").upper() == "GENERATED"
-                and str(asset.content or "").strip() == payload.script.strip()
-                and (asset.metadata or {}).get("provider_result", {}).get("voice") == payload.voice
-            ), None)
+        if generated_url and payload.presenter_mode in {"half_body", "full_body"} and (payload.captions or payload.voice == "af_heart"):
+            narration_asset = _matching_presenter_narration(
+                service.store.list_assets(project_id, user.user_id), payload.script, payload.voice,
+                captions=payload.voice == "af_heart",
+            )
             if narration_asset is None:
                 voice_result = service.request_voice_generation(
                     user.user_id,
@@ -1207,57 +1281,19 @@ def prepare_talking_presenter_preview(
                 elif status == "PROCESSING":
                     presenter_meta["body_lipsync"] = False
                     generated_url = None
-        if generated_url and payload.presenter_mode == 'head' and payload.captions:
-            from app.core.nova.creative_studio.providers import _resolve_creative_media_url
-            from app.core.nova.creative_studio.presenter_media import caption_presenter
-            cues = narration[-1].metadata['provider_result']['caption_cues']
-            original_generated_url = generated_url
-            presenter_meta.update({
-                'original_video_url': original_generated_url,
-                'caption_cues': cues,
-                'voice': payload.voice,
-            })
-            try:
-                source_video = _resolve_creative_media_url(original_generated_url)
-                if source_video is None:
-                    raise RuntimeError("Presenter media path could not be resolved for caption rendering.")
-                captioned, subtitles = caption_presenter(source_video, cues)
-                presenter_meta.update({
-                    'captions_burned_in': True,
-                    'subtitle_url': original_generated_url.rsplit('/', 1)[0] + '/' + subtitles.name,
-                })
-                generated_url = original_generated_url.rsplit('/', 1)[0] + '/' + captioned.name
-            except RuntimeError as exc:
-                # D-ID has already produced and Nova has already downloaded the
-                # new lip-synced presenter. If local FFmpeg caption rendering is
-                # blocked by memory headroom, preserve that new video instead of
-                # failing the request and leaving the UI on a stale older asset.
-                #
-                # caption_presenter writes the SRT before starting the encoder,
-                # so website/demo playback can still expose timed captions as a
-                # sidecar even when burn-in cannot run on the 512 MiB service.
-                logger.warning("Presenter caption render skipped; preserving provider video: %s", exc)
-                sidecar_subtitle_url = None
-                try:
-                    if source_video is not None:
-                        subtitle_path = source_video.with_suffix('.srt')
-                        if subtitle_path.is_file():
-                            sidecar_subtitle_url = (
-                                original_generated_url.rsplit('/', 1)[0] + '/' + subtitle_path.name
-                            )
-                except Exception:
-                    sidecar_subtitle_url = None
-                presenter_meta.update({
-                    'captions_burned_in': False,
-                    'captions_sidecar_ready': bool(sidecar_subtitle_url),
-                    'subtitle_url': sidecar_subtitle_url,
-                    'caption_render_error': str(exc),
-                })
-                generated_url = original_generated_url
+        native_body_captions = body_lipsync_applied and payload.voice == "af_heart"
+        if generated_url and payload.captions and (payload.presenter_mode == 'head' or native_body_captions):
+            caption_audio = narration_asset if native_body_captions else narration[-1]
+            cues = caption_audio.metadata['provider_result']['caption_cues']
+            generated_url, caption_metadata = _caption_presenter_output(
+                generated_url, cues,
+                output_preset=payload.output_preset if native_body_captions else None,
+            )
+            presenter_meta.update(caption_metadata, voice=payload.voice)
         provider_watermark_free = bool(result.get("watermark_free", False))
         provider_id = str(result.get("provider") or provider_name or "").strip().lower() if payload.presenter_mode == "head" else str(result.get("provider") or "").strip().lower()
-        # Body-motion video has no narration/lip-sync adapter and still needs
-        # visual review of actual head-to-toe movement before final delivery.
+        # Body video still needs visual review of actual movement and lip-sync
+        # before final delivery, even when native captions are complete.
         captions_ready = (
             (not payload.captions)
             or presenter_meta.get('captions_burned_in') is True

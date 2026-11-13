@@ -51,11 +51,25 @@ def video_provider_live_enabled() -> bool:
 
 def voice_provider_configured() -> bool:
     """Reuse the existing OpenAI server credential for speech generation."""
+    selected = str(os.getenv("NOVA_CREATIVE_VOICE_PROVIDER") or "").strip().lower()
+    if selected == "nova_local":
+        from pathlib import Path
+        from .voice_readiness import check
+        model_dir = str(os.getenv("NOVA_LOCAL_VOICE_MODEL_DIR") or "").strip()
+        return bool(model_dir and Path(model_dir).is_absolute()
+                    and check(Path(model_dir))["ready_to_attempt_offline_inference"])
+    if selected not in {"", "openai", "openai_voice"}:
+        return False
     return bool(str(os.getenv("OPENAI_API_KEY") or "").strip())
 
 
 def voice_provider_live_enabled() -> bool:
     """Credentials alone never activate cost-bearing voice generation."""
+    selected = str(os.getenv("NOVA_CREATIVE_VOICE_PROVIDER") or "").strip().lower()
+    if selected == "nova_local":
+        return _env_true("NOVA_LOCAL_VOICE_ENABLED")
+    if selected not in {"", "openai", "openai_voice"}:
+        return False
     return _env_true("NOVA_CREATIVE_VOICE_LIVE_ENABLED")
 
 
