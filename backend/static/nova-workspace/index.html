@@ -52,6 +52,13 @@
 <p id="growth-agent-review-status" role="status"></p>
 <ul id="growth-agent-review-list"></ul>
 </section>
+<section id="growth-agent-preview-queue" aria-labelledby="growth-agent-preview-queue-heading">
+<h3 id="growth-agent-preview-queue-heading">Workflow previews for owner review</h3>
+<p class="hint">Read-only preview candidates. A preview is not a request already approved, not a message sent, and not evidence of revenue. Approval controls are not active.</p>
+<div class="command-actions"><button id="growth-agent-preview-queue-load" type="button">View workflow previews</button></div>
+<p id="growth-agent-preview-queue-status" role="status">Sign in to view pending previews.</p>
+<ul id="growth-agent-preview-queue-list"></ul>
+</section>
 <section id="growth-agent-audit" aria-labelledby="growth-agent-audit-heading">
 <h3 id="growth-agent-audit-heading">Workflow activity — owner review</h3>
 <p class="hint">Read-only history of recent workflow events. An event is not proof that a message was delivered or a job approved. No actions are executed here.</p>
@@ -189,5 +196,6 @@
 <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>
 <script src="/static/nova-workspace/growth-overview.js?v=20261112.1"></script>
 <script src="/static/nova-workspace/growth-audit.js?v=20261113.1"></script>
+<script src="/static/nova-workspace/growth-review-queue.js?v=20261113.1"></script>
 </body>
 </html>
