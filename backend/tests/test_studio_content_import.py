@@ -129,3 +129,47 @@ def test_free_first_shot_preflight_reports_non_durable_store_without_paid_reques
     user.user_id = 'other'
     denied = TestClient(app).get('/api/nova/creative/projects/' + pid + '/first-shot-readiness')
     assert denied.status_code == 404
+
+
+
+def test_five_second_project_builds_exact_one_scene_without_paid_media(studio):
+    from app.core.nova.creative_studio.generation import assemble_short_video
+    service, original_pid = studio
+    original = service.get_project('owner', original_pid)
+    new_project = service.create_project('owner', {
+        'title': 'AMICOR First 5-Second Movie Test',
+        'project_type': 'short_video',
+        'platform': 'TikTok',
+        'duration_target': 5,
+        'objective': 'One original five-second moving presenter scene',
+    })
+    assert new_project['duration_target'] == 5
+    assert service.get_project('owner', original_pid)['project']['duration_target'] == original['project']['duration_target']
+    planned = assemble_short_video(
+        topic='AMICOR first motion acceptance',
+        audience='general audience', platform='TikTok', duration_target=5,
+        style='professional', tone='friendly', cta='',
+        reviewed_script='Welcome to AMICOR Nova!',
+    )
+    assert len(planned['scenes']) == 1
+    scene = planned['scenes'][0]
+    assert scene['duration_seconds'] == 5.0
+    assert scene['voiceover_text'] == 'Welcome to AMICOR Nova!'
+    assert 'step' in scene['visual_prompt']
+    assert planned['media_generated'] is False
+    assert planned['video_provider_status'] == 'CONFIG_REQUIRED'
+
+
+def test_five_second_target_does_not_change_legacy_storyboard_durations():
+    from app.core.nova.creative_studio.generation import assemble_short_video
+    def build(duration):
+        return assemble_short_video(
+            topic='AMICOR operations', audience='small business owners',
+            platform='TikTok', duration_target=duration, style='clean social',
+            tone='friendly', cta='Visit getamicor.com',
+        )
+    for duration, count in [(15, 3), (30, 6), (60, 6)]:
+        result = build(duration)
+        assert len(result['scenes']) == count
+        assert sum(s['duration_seconds'] for s in result['scenes']) == pytest.approx(duration)
+        assert result['media_generated'] is False
