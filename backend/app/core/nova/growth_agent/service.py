@@ -1935,6 +1935,39 @@ class GrowthAgentService:
             })
         return output
 
+    def workflow_review_details(self, org_id: str, run_id: str) -> dict[str, Any]:
+        """Read-only summary of an owner's candidate; never exposes body text or dispatches."""
+        run = self._org_query(GaWorkflowRun, org_id).filter_by(id=run_id).one_or_none()
+        if run is None or run.status not in {"preview", "awaiting_approval"}:
+            raise GrowthAgentError("NOT_FOUND", "Reviewable workflow not found", http_status=404)
+        wf = self._org_query(GaWorkflowDefinition, org_id).filter_by(id=run.workflow_id).one_or_none()
+        if wf is None or not wf.requires_approval:
+            raise GrowthAgentError("NOT_FOUND", "Reviewable workflow not found", http_status=404)
+        contact = self._org_query(GaContact, org_id).filter_by(id=run.contact_id).one_or_none()
+        messages = list((run.preview_json or {}).get("messages") or [])
+        return {
+            "run_id": run.id,
+            "workflow_name": wf.name,
+            "workflow_code": wf.code,
+            "purpose": wf.purpose,
+            "status": run.status,
+            "requires_approval": True,
+            "dry_run": bool(run.dry_run),
+            "is_synthetic_demo": bool(contact.is_synthetic_demo) if contact else None,
+            "step_count": len(messages),
+            "steps": [
+                {
+                    "channel": str(msg.get("channel") or "unknown")[:40],
+                    "scheduled_for_utc": msg.get("scheduled_for_utc"),
+                    "quiet_hours_adjusted": bool(msg.get("quiet_hours_adjusted")),
+                }
+                for msg in messages[:50]
+                if isinstance(msg, dict)
+            ],
+            "content_redacted": True,
+            "execution_performed": False,
+        }
+
     def audit_history(self, org_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = (
             self._org_query(GaAuditEvent, org_id)
