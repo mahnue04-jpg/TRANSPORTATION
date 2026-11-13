@@ -106,3 +106,36 @@ def test_queue_limit_is_bounded(db):
         svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=contact.id)
     assert len(svc.list_workflow_review_queue(org, limit=2)) <= 2
     assert len(svc.list_workflow_review_queue(org, limit=0)) <= 1
+
+
+def test_review_details_are_tenant_scoped_redacted_and_read_only(db):
+    from app.core.nova.growth_agent.errors import GrowthAgentError
+
+    svc = GrowthAgentService(db)
+    org, other = "review-detail-owner", "review-detail-other"
+    lead = _seed(svc, org)
+    _seed(svc, other)
+    run = svc.preview_workflow(org, workflow_code="inquiry_ack", contact_id=lead.id)
+    before_audits = db.query(GaAuditEvent).count()
+    before_attempts = db.query(GaDeliveryAttempt).count()
+    detail = svc.workflow_review_details(org, run["run_id"])
+    assert detail["run_id"] == run["run_id"]
+    assert detail["content_redacted"] is True
+    assert detail["execution_performed"] is False
+    assert detail["requires_approval"] is True
+    assert detail["step_count"] >= 1
+    assert len(detail["steps"]) >= 1
+    assert all(set(step).issubset({"channel", "scheduled_for_utc", "quiet_hours_adjusted"}) for step in detail["steps"])
+    assert "messages" not in detail and "contact_id" not in detail
+    assert "body_preview" not in repr(detail)
+    assert db.query(GaAuditEvent).count() == before_audits
+    assert db.query(GaDeliveryAttempt).count() == before_attempts
+    with pytest.raises(GrowthAgentError) as other_error:
+        svc.workflow_review_details(other, run["run_id"])
+    assert other_error.value.http_status == 404
+
+    db.query(GaWorkflowRun).filter_by(id=run["run_id"]).update({"status": "completed"})
+    db.commit()
+    with pytest.raises(GrowthAgentError) as completed_error:
+        svc.workflow_review_details(org, run["run_id"])
+    assert completed_error.value.http_status == 404
