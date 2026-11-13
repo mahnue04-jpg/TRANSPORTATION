@@ -140,3 +140,18 @@ def test_production_client_upload_rejects_blocked_or_inactive_engagement(monkeyp
                 content=b"Name\nAda\n", owner_confirmed_contract=True,
             )
         assert error.value.status_code == 409
+
+
+def test_browser_upload_and_authenticated_file_retrieval_contract():
+    """Static wiring check; deployed browser and real customer auth remain separate gates."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "static" / "nova-work" / "work.js").read_text(encoding="utf-8")
+    api = (root / "app" / "core" / "nova" / "work_revenue" / "router.py").read_text(encoding="utf-8")
+    assert "data-work-input-authorized" in js
+    assert 'headers["X-Nova-Client-Authorization"] = "owner-confirmed-client-processing-authority"' in js
+    assert "if (!ownerConfirmed)" in js
+    assert 'alias="X-Nova-Client-Authorization"' in api
+    assert "owner_confirmed_contract=" in api
+    assert "await file.read(work_inputs.MAX_WORK_INPUT_BYTES + 1)" in api
+    assert "work_inputs.read_work_input_bytes(row)" in api
