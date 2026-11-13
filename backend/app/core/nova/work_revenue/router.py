@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -552,6 +552,7 @@ async def upload_work_input(
     engagement_id: str,
     file: UploadFile = File(...),
     notes: str | None = Form(None),
+    client_authorization: str | None = Header(default=None, alias="X-Nova-Client-Authorization"),
     organization_id: str | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
@@ -567,6 +568,9 @@ async def upload_work_input(
             content_type=file.content_type or "application/octet-stream",
             content=content,
             notes=notes,
+            owner_confirmed_contract=(
+                client_authorization == "owner-confirmed-client-processing-authority"
+            ),
         )
     except service.NovaWorkError as exc:
         _raise(exc)
