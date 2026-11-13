@@ -541,6 +541,34 @@ class GrowthAgentService:
         if not safe_message:
             raise GrowthAgentError("VALIDATION", "message is required")
 
+        # Validate any requested conversation before creating contacts or
+        # recording consent. A token for a different widget cannot resume it.
+        conv = None
+        if conversation_id:
+            conv = (
+                self._org_query(GaConversation, org_id)
+                .filter_by(id=conversation_id)
+                .one_or_none()
+            )
+            if conv is None:
+                raise GrowthAgentError(
+                    "CONVERSATION_NOT_FOUND",
+                    "Conversation not found for this organization",
+                    http_status=404,
+                )
+            if conv.widget_installation_id != installation.id:
+                raise GrowthAgentError(
+                    "CONVERSATION_INSTALLATION_CONFLICT",
+                    "Conversation belongs to a different widget installation",
+                    http_status=403,
+                )
+            if bool(conv.is_synthetic_demo) != bool(profile.is_synthetic_demo):
+                raise GrowthAgentError(
+                    "CONVERSATION_CLASSIFICATION_CONFLICT",
+                    "Conversation synthetic-demo classification conflicts with this business profile",
+                    http_status=409,
+                )
+
         contact = None
         if visitor_email or visitor_name:
             if not (consent_transactional or consent_marketing):
@@ -558,19 +586,6 @@ class GrowthAgentService:
                 is_synthetic_demo=bool(profile.is_synthetic_demo),
             )
 
-        conv = None
-        if conversation_id:
-            conv = (
-                self._org_query(GaConversation, org_id)
-                .filter_by(id=conversation_id)
-                .one_or_none()
-            )
-        if conv is not None and bool(conv.is_synthetic_demo) != bool(profile.is_synthetic_demo):
-            raise GrowthAgentError(
-                "CONVERSATION_CLASSIFICATION_CONFLICT",
-                "Conversation synthetic-demo classification conflicts with this business profile",
-                http_status=409,
-            )
         if conv is None:
             conv = GaConversation(
                 id=_id(),
