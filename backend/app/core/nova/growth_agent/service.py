@@ -565,6 +565,12 @@ class GrowthAgentService:
                 .filter_by(id=conversation_id)
                 .one_or_none()
             )
+        if conv is not None and bool(conv.is_synthetic_demo) != bool(profile.is_synthetic_demo):
+            raise GrowthAgentError(
+                "CONVERSATION_CLASSIFICATION_CONFLICT",
+                "Conversation synthetic-demo classification conflicts with this business profile",
+                http_status=409,
+            )
         if conv is None:
             conv = GaConversation(
                 id=_id(),
