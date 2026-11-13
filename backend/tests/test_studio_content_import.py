@@ -145,6 +145,19 @@ def test_five_second_project_builds_exact_one_scene_without_paid_media(studio):
     })
     assert new_project['duration_target'] == 5
     assert service.get_project('owner', original_pid)['project']['duration_target'] == original['project']['duration_target']
+    service.create_brief('owner', {
+        'project_id': new_project['id'],
+        'topic': 'AMICOR first motion acceptance',
+        'audience': 'general audience',
+        'style': 'professional',
+        'cta': 'Welcome to AMICOR Nova!',
+        'duration_target': 5,
+    })
+    saved = service.generate_storyboard('owner', new_project['id'])
+    assert len(saved['scenes']) == 1
+    assert saved['scenes'][0]['duration_seconds'] == 5.0
+    assert not any(row['kind'] == 'video' for row in saved['assets'])
+    assert service.get_project('owner', original_pid)['project']['duration_target'] == 30
     planned = assemble_short_video(
         topic='AMICOR first motion acceptance',
         audience='general audience', platform='TikTok', duration_target=5,
