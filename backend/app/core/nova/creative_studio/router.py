@@ -207,6 +207,33 @@ def _require_owner(user: UserContext) -> None:
     raise HTTPException(status_code=403, detail="Nova Creative Studio access required")
 
 
+def _fal_diagnostic_owner_emails() -> set[str]:
+    """Allowlist for the fal pricing diagnostic only.
+
+    Uses the same configured owner source as other owner surfaces. Pytest seed
+    accounts are not added, and a signed-in Studio user is not treated as an
+    owner. ``_require_owner`` is unchanged for the rest of Creative Studio.
+    """
+    configured = str(os.getenv("NOVA_V3_OWNER_EMAILS") or "").strip()
+    if configured:
+        return {item.strip().lower() for item in configured.split(",") if item.strip()}
+    return {
+        str(grant.get("email") or "").strip().lower()
+        for grant in OPERATOR_ACCOUNT_GRANTS
+        if str(grant.get("email") or "").strip()
+    }
+
+
+def _require_fal_diagnostic_owner(user: UserContext) -> None:
+    email = str(getattr(user, "email", "") or "").strip().lower()
+    if email and email in _fal_diagnostic_owner_emails():
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Fal diagnostic is restricted to the configured owner allowlist.",
+    )
+
+
 def _raise(exc: CreativeStudioError) -> None:
     raise HTTPException(status_code=exc.http_status, detail={"code": exc.code, "message": exc.message})
 
@@ -392,7 +419,7 @@ def fal_first_shot_diagnostic_endpoint(
     user: UserContext = Depends(get_current_user_context),
 ) -> dict[str, Any]:
     """Read-only account-pricing probe; no generation or financial mutation."""
-    _require_owner(user)
+    _require_fal_diagnostic_owner(user)
     from app.core.nova.creative_studio.fal_diagnostic import fal_first_shot_diagnostic
     return fal_first_shot_diagnostic()
 
