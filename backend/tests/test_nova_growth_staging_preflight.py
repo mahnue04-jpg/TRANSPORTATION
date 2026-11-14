@@ -66,3 +66,15 @@ def test_query_parameters_denied():
     env = good_env()
     env["DATABASE_URL"] += "?sslmode=disable"
     assert not validate(env)[0]
+
+
+def test_background_mock_worker_denied():
+    env = good_env()
+    env["NOVA_GROWTH_AGENT_BACKGROUND_WORKER"] = "true"
+    assert not validate(env)[0]
+
+
+def test_retention_scheduler_denied():
+    env = good_env()
+    env["NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED"] = "true"
+    assert not validate(env)[0]
