@@ -14,6 +14,8 @@ from app.core.nova.growth_agent.staging_preflight import validate
 
 def build_uvicorn_argv(environment: dict[str, str]) -> list[str]:
     """Validate without side effects, then construct a fixed local server command."""
+    if environment.get("NOVA_GA_ISOLATED_SKIP_DB_BOOTSTRAP", "").strip().lower() != "true":
+        raise ValueError("Isolated staging bootstrap bypass must be explicitly enabled")
     ok, reason = validate(environment)
     if not ok:
         raise ValueError(reason)
