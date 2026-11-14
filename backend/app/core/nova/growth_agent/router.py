@@ -173,6 +173,16 @@ def widget_chat(
         raise
 
 
+@router.get("/counts")
+def workspace_counts(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Owner-only exact counts scoped to the authenticated organization; no contact PII."""
+    return {"counts": svc.workspace_counts(_org(user, organization_id))}
+
+
 @router.get("/leads")
 def list_leads(
     organization_id: str | None = None,
