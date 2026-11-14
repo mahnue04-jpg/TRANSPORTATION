@@ -21,6 +21,12 @@ Inspection of `backend/app/main.py` at PR #517 head shows `lifespan()` calls `in
 
 **Added mandatory release gate:** audit startup, deferred initialization, and lifecycle worker behavior on the exact release candidate; disable optional worker/retention flags; verify in a disposable restored staging clone whether the full lifespan mutates schemas or records. If code changes are needed, review separately without weakening production startup. Establish an explicit, evidence-backed rollback plan. Until then, no service restart or deploy against the current persistent staging database.
 
+## Deferred initialization verified in code (2026-11-14)
+
+`backend/app/deployment/background_startup.py` confirms that `run_deferred_platform_startup()` invokes `Base.metadata.create_all`, payment table ensures, operational bootstrap, and `health_isf_service.init_sample_data(db)` when `runtime_environment` is anything other than `production` / `prod` (or the sample-data flag is enabled). **The proposed `APP_ENV=staging` configuration therefore does not prevent sample-data seeding or schema writes on a normal startup.** As of this review there is no verified no-write application-lifespan mode; do not claim one.
+
+The isolated preflight now rejects enabled Growth mock worker and retention scheduler flags, but that only prevents those two optional components. It does not control platform initialization. A safe next engineering slice is an **isolated startup-mode design review** for the Growth-only staging service, with tests proving existing production behavior unchanged and no schema/bootstrap/sample seed calls on a restored disposable clone. Do not enable such a mode against the current staging DB until explicit owner review and approval.
+
 ## Blocking gates, in order
 1. **Recoverability:** Confirm an export of the exact current database, safely stored and access-controlled; perform a *separate disposable restore* verification before any change that could touch persistent records. Evidence must include restored schema and a limited synthetic read/write/rollback check without sensitive data in the report. A valid archive listing alone is not a tested restoration.
 2. **Non-mutating boot path:** Propose and review a start command that only performs startup validation against the existing persistent staging DB, **without schema migrations or tests that write data**. Run migration and PostgreSQL integration tests only in CI/disposable DB with unique synthetic credentials. Review exact SHA and DB identity assertions.
