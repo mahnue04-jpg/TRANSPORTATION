@@ -73,7 +73,8 @@ def test_completed_task_handoff_preserves_job_and_recovers_without_new_render(mo
                                       'provider': 'fal_kling_video', 'brief': {'scene_index': 1}}})
     project = SimpleNamespace(id='project', title='Film', objective='Motion', platform='YouTube',
                               project_type='short_video', metadata={'first_shot_paid_claim': {
-                                  'reference_image_asset_id': 'image-1', 'state': 'POST_ATTEMPTED'}})
+                                  'reference_image_asset_id': 'image-1', 'state': 'POST_ATTEMPTED',
+                                  'max_cost_usd': 0.5}})
     class Store:
         def list_assets(self, *a): return [image, pending]
         def list_scenes(self, *a): return [SimpleNamespace(index=1, heading='Scene', visual_prompt='Walk', description='')]
@@ -87,6 +88,8 @@ def test_completed_task_handoff_preserves_job_and_recovers_without_new_render(mo
     monkeypatch.setattr(archive.storage, 'verify_bucket_ready', lambda: None)
     def generate(*, brief):
         assert brief['resume_task_id'] == 'same-task'
+        assert brief['controlled_first_shot'] is True
+        assert brief['max_cost_usd'] == 0.5
         return {'status': 'GENERATED', 'task_id': 'same-task', 'url': '/saved.mp4',
                 'asset_generated': True, 'provider': 'fal_kling_video', 'brief': brief}
     provider = SimpleNamespace(provider_id='fal_kling_video', status=lambda: SimpleNamespace(status='AVAILABLE'), generate=generate)

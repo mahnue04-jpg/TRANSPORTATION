@@ -695,6 +695,8 @@ class FirstShotSubmitIn(BaseModel):
     # Explicit action approval distinct from viewing a nonbillable quote.
     confirm_paid_generation: bool = False
     reference_image_asset_id: str = Field(min_length=1, max_length=160)
+    # Required explicit per-shot limit, separate from the planning estimate.
+    max_cost_usd: float = Field(gt=0, le=1, allow_inf_nan=False)
 
 
 @router.post("/projects/{project_id}/generate/first-shot")
@@ -789,6 +791,7 @@ def generate_first_shot(
                 "id": claim_id,
                 "reference_image_asset_id": payload.reference_image_asset_id,
                 "state": "RESERVED",
+                "max_cost_usd": payload.max_cost_usd,
             }
             if not service.store.compare_and_swap_project_metadata(
                 project_id, user.user_id, current_meta, reserved_meta

@@ -1195,6 +1195,10 @@ class CreativeStudioService(ShortDramaMixin):
                     "persist_task_before_poll": background,
                     "scene_index": scene_index,
                     "scene_heading": scene.heading,
+                    # Read the limit from the durable owner-approved claim,
+                    # never from mutable project settings or a client brief.
+                    "controlled_first_shot": single_shot_reference_id is not None,
+                    "max_cost_usd": claim.get("max_cost_usd") if single_shot_reference_id is not None else None,
                 }
             )
         except Exception as exc:

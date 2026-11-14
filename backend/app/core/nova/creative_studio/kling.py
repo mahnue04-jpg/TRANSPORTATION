@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from decimal import Decimal, InvalidOperation
 
 from app.core.nova.creative_studio.flags import video_provider_live_enabled
 from app.core.nova.creative_studio.providers import (
@@ -52,7 +53,8 @@ class FalKlingVideoProvider(RunwayVideoProvider):
             raise _SafeKlingError("Invalid fal queue URL.")
         req = urllib.request.Request(url, method=method,
             data=json.dumps(payload).encode() if payload is not None else None,
-            headers={"Authorization": f"Key {self._key()}", "Content-Type": "application/json"})
+            headers={"Authorization": f"Key {self._key()}", "Content-Type": "application/json",
+                     "X-Fal-No-Retry": "1", "x-app-fal-disable-fallback": "true"})
         try:
             with urllib.request.build_opener(_NoRedirect()).open(req, timeout=45) as response:
                 return json.loads(response.read().decode())
@@ -64,6 +66,53 @@ class FalKlingVideoProvider(RunwayVideoProvider):
             raise _SafeKlingError(reasons.get(exc.code, f"fal request failed (HTTP {exc.code})")) from None
         except (urllib.error.URLError, TimeoutError):
             raise _SafeKlingError("fal connection interrupted; do not resubmit until queue usage is checked.") from None
+
+    def _first_shot_price(self, max_cost_usd):
+        """Check current account pricing immediately before a controlled POST.
+
+        This is a submission price guard, not a provider billing guarantee.
+        Unknown pricing, billing units, or limits must never authorize spend.
+        No redirects, generated media, account purchases, or balance guesses.
+        """
+        try:
+            if isinstance(max_cost_usd, bool):
+                raise ValueError
+            limit = Decimal(str(max_cost_usd))
+            if not limit.is_finite() or not Decimal('0') < limit <= Decimal('1'):
+                raise ValueError
+        except (InvalidOperation, ValueError, TypeError):
+            raise _SafeKlingError("An explicit five-second spending limit of at most $1 is required.") from None
+        url = 'https://api.fal.ai/v1/models/pricing?' + urllib.parse.urlencode({'endpoint_id': MODEL})
+        req = urllib.request.Request(url, method='GET', headers={
+            'Authorization': f'Key {self._key()}', 'Accept': 'application/json',
+        })
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=15) as response:
+                data = json.loads(response.read(65537).decode())
+            prices = data['prices']
+            if not isinstance(prices, list) or len(prices) != 1 or data.get('has_more') is True:
+                raise ValueError
+            price = prices[0]
+            if price['endpoint_id'] != MODEL or price['currency'] != 'USD':
+                raise ValueError
+            unit = price['unit']
+            quantity = {'second': 5, 'seconds': 5, 'video': 1, 'videos': 1}.get(unit)
+            if quantity is None or isinstance(price['unit_price'], bool):
+                raise ValueError
+            unit_price = Decimal(str(price['unit_price']))
+            if not unit_price.is_finite() or unit_price <= 0:
+                raise ValueError
+        except (OSError, ValueError, TypeError, KeyError, InvalidOperation, AttributeError):
+            raise _SafeKlingError("Current five-second USD pricing could not be verified. No video request was sent.") from None
+        # Divide the short approved limit by 1 or 5 (both exact in decimal),
+        # avoiding rounding an unusually precise over-limit rate down to $1.
+        if unit_price > limit / quantity:
+            raise _SafeKlingError("Current five-second price exceeds the approved spending limit. No video request was sent.")
+        total = unit_price * quantity
+        return {'endpoint_id': MODEL, 'currency': 'USD', 'unit': unit,
+                'unit_price': str(unit_price), 'quantity': quantity,
+                'checked_cost_usd': str(total), 'max_cost_usd': str(limit),
+                'provider_billing_guaranteed': False}
 
     def _encode_task(self, response):
         task = {key: response.get(key) for key in ("request_id", "status_url", "response_url")}
@@ -104,6 +153,8 @@ class FalKlingVideoProvider(RunwayVideoProvider):
                 image = self._prompt_image_value(brief.get("prompt_image_url"))
                 if not image:
                     raise _SafeKlingError("Nova could not load source artwork for Kling.")
+                if brief.get('controlled_first_shot') is True:
+                    result['submission_price_check'] = self._first_shot_price(brief.get('max_cost_usd'))
                 submitted = self._request_json("POST", QUEUE + MODEL, payload={
                     "prompt": str(brief.get("prompt_text") or brief.get("objective") or "Cinematic scene")[:2500],
                     "image_url": image, "duration": "5",
