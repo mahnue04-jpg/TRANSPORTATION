@@ -298,6 +298,13 @@ jobs:
       - name: Run Nova Work & Revenue regression
         env:
           DATABASE_URL: sqlite:///./test_nova_work_revenue_ci.db
+          # Existing legacy-file tests model development, never customer production.
+          # Production fail-closed gates are exercised independently by
+          # tests/test_nova_work_revenue_private_inputs.py.
+          APP_ENV: development
+          AMICOR_ENVIRONMENT: development
+          ENVIRONMENT: development
+          NOVA_WORK_INPUT_S3_ENABLED: "false"
           AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
         run: |
           set -e
