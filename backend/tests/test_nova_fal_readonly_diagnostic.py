@@ -1,6 +1,8 @@
 """Offline regression tests: no real provider requests, credentials or charges."""
 import io
 import json
+import socket
+import ssl
 import urllib.error
 
 import pytest
@@ -58,7 +60,9 @@ def test_success_is_read_only_and_does_not_claim_submission_permission(probe):
     (401, "FAL_AUTH_REJECTED"),
     (402, "FAL_ACCOUNT_PAYMENT_REQUIRED"),
     (403, "FAL_ACCESS_DENIED"),
-    (302, "FAL_PRICING_HTTP_ERROR"),
+    (302, "FAL_PRICING_REDIRECT_BLOCKED"),
+    (404, "FAL_PRICING_ENDPOINT_NOT_FOUND"),
+    (429, "FAL_PRICING_RATE_LIMITED"),
     (500, "FAL_PRICING_HTTP_ERROR"),
 ])
 def test_http_failure_fails_closed(probe, code, blocker):
@@ -105,7 +109,9 @@ def test_malformed_json_and_oversized_body_fail_closed(probe, monkeypatch):
             calls.append((request.get_method(), request.full_url, kwargs))
             return io.BytesIO(self.body)
 
-    for raw, blocker in [(b"not-json", "FAL_PRICING_UNAVAILABLE"),
+    for raw, blocker in [(b"not-json", "FAL_PRICING_INVALID_JSON"),
+                         (b"", "FAL_PRICING_EMPTY_RESPONSE"),
+                         (b"\\xff", "FAL_PRICING_INVALID_ENCODING"),
                          (b"x" * 65537, "PRICING_RESPONSE_TOO_LARGE")]:
         monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *a: Opener(raw))
         report = mod.fal_first_shot_diagnostic()
@@ -123,7 +129,7 @@ def test_timeout_is_unverified(probe, monkeypatch):
 
     monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *a: TimeoutOpener())
     report = mod.fal_first_shot_diagnostic()
-    assert "FAL_PRICING_UNAVAILABLE" in report["blockers"]
+    assert "FAL_PRICING_TIMEOUT" in report["blockers"]
     assert "private-test-credential" not in json.dumps(report)
 
 
@@ -146,3 +152,38 @@ def test_nonmatching_model_and_unknown_unit_are_never_authorized(probe):
         assert report["model_authorized"] == "UNVERIFIED"
         assert report["price_status"] == "UNVERIFIED"
         assert not report["provider_request_submitted"]
+
+
+@pytest.mark.parametrize("exc,blocker", [
+    (urllib.error.URLError(socket.gaierror(-2, "private-test-credential")),
+     "FAL_PRICING_DNS_FAILURE"),
+    (urllib.error.URLError(ssl.SSLError("private-test-credential")),
+     "FAL_PRICING_TLS_FAILURE"),
+    (urllib.error.URLError(socket.timeout("private-test-credential")),
+     "FAL_PRICING_TIMEOUT"),
+    (urllib.error.URLError(ConnectionError("private-test-credential")),
+     "FAL_PRICING_NETWORK_FAILURE"),
+    (urllib.error.URLError("private-test-credential"),
+     "FAL_PRICING_TRANSPORT_FAILURE"),
+])
+def test_transport_error_safely_categorized(probe, monkeypatch, exc, blocker):
+    run, _ = probe
+
+    class FailingOpener:
+        def open(self, request, **kwargs):
+            assert request.get_method() == "GET"
+            raise exc
+
+    monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *args: FailingOpener())
+    report = mod.fal_first_shot_diagnostic()
+    assert report["blockers"] == [blocker]
+    assert report["price_status"] == "UNVERIFIED"
+    assert report["key_authenticated"] == "UNVERIFIED"
+    assert "private-test-credential" not in json.dumps(report)
+
+
+def test_valid_json_wrong_top_level_is_safe_schema_failure(probe):
+    run, _ = probe
+    report = run([])
+    assert report["blockers"] == ["FAL_PRICING_INVALID_SCHEMA"]
+    assert report["provider_request_submitted"] is False
