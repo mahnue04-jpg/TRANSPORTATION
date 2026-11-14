@@ -20,4 +20,8 @@ test("UI does not claim unimplemented approvals or handoff", () => {
   assert.match(js, /not proof of live delivery/);
   assert.match(js, /Unexpected API format/);
   assert.match(js, /Access denied/);
+  assert.match(js, /Leads returned \(not a total\)/);
+  assert.match(js, /Conversations returned \(not a total\)/);
+  assert.match(js, /Appointments returned \(maximum 50, not a total\)/);
+  assert.match(js, /Lists may be capped/);
 });
