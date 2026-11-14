@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from app.core.nova.creative_studio.kling import MODEL, _NoRedirect
+from app.core.nova.creative_studio.kling import MODEL, _NoRedirect, fal_key_format_valid
 
 
 def fal_first_shot_diagnostic() -> dict:
@@ -38,6 +38,9 @@ def fal_first_shot_diagnostic() -> dict:
         result["blockers"].append("FAL_KEY_MISSING")
         return result
     result["key_present"] = True
+    if not fal_key_format_valid(key):
+        result["blockers"].append("FAL_KEY_INVALID_FORMAT")
+        return result
     url = "https://api.fal.ai/v1/models/pricing?" + urllib.parse.urlencode({"endpoint_id": MODEL})
     req = urllib.request.Request(url, method="GET", headers={
         "Authorization": "Key " + key, "Accept": "application/json",
@@ -83,6 +86,9 @@ def fal_first_shot_diagnostic() -> dict:
         return result
     except OSError:
         result["blockers"].append("FAL_PRICING_NETWORK_FAILURE")
+        return result
+    except (ValueError, UnicodeError):
+        result["blockers"].append("FAL_PRICING_REQUEST_INVALID")
         return result
     if len(raw) > 65536:
         result["blockers"].append("PRICING_RESPONSE_TOO_LARGE")

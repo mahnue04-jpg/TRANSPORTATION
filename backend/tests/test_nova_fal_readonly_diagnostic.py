@@ -187,3 +187,37 @@ def test_valid_json_wrong_top_level_is_safe_schema_failure(probe):
     report = run([])
     assert report["blockers"] == ["FAL_PRICING_INVALID_SCHEMA"]
     assert report["provider_request_submitted"] is False
+
+
+@pytest.mark.parametrize("key", [
+    "private\ntest-key", "private\rtest-key", "private\ttest-key",
+    "private test-key", "private\x01test-key", "private\u200btest-key",
+    '"private-test-key"', "'private-test-key'", "Key private-test-key",
+])
+def test_malformed_credential_never_opens_connection(probe, monkeypatch, key):
+    run, calls = probe
+    monkeypatch.setenv("FAL_KEY", key)
+    report = run(response([price()]))
+    assert report["key_present"] is True
+    assert report["blockers"] == ["FAL_KEY_INVALID_FORMAT"]
+    assert report["key_authenticated"] == report["price_status"] == "UNVERIFIED"
+    assert calls == []
+    assert "private" not in json.dumps(report)
+
+
+def test_outer_copy_whitespace_is_trimmed(probe, monkeypatch):
+    run, calls = probe
+    monkeypatch.setenv("FAL_KEY", " \r\nprivate-test-key\n ")
+    assert run(response([price()]))["price_status"] == "VERIFIED_FOR_PRICING_API"
+    assert len(calls) == 1
+
+
+def test_request_value_error_is_sanitized(probe, monkeypatch):
+    class InvalidRequest:
+        def open(self, *args, **kwargs):
+            raise ValueError("private-test-credential")
+
+    monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *a: InvalidRequest())
+    report = mod.fal_first_shot_diagnostic()
+    assert report["blockers"] == ["FAL_PRICING_REQUEST_INVALID"]
+    assert "private" not in json.dumps(report)
