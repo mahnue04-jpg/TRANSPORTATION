@@ -78,3 +78,17 @@ def test_retention_scheduler_denied():
     env = good_env()
     env["NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED"] = "true"
     assert not validate(env)[0]
+
+
+def test_ambiguous_safety_flag_denied():
+    env = good_env()
+    env["NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED"] = "maybe"
+    assert not validate(env)[0]
+
+
+def test_safety_flags_accept_explicit_off_values():
+    for off in ("false", "0", "no", "off"):
+        env = good_env()
+        env["NOVA_GROWTH_AGENT_BACKGROUND_WORKER"] = off
+        env["NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED"] = off
+        assert validate(env)[0]
