@@ -161,6 +161,12 @@
       <p class="hint">Select an existing project, then check its first storyboard scene, matching source image,
         video provider and budget status. This does not generate video, activate paid providers,
         confirm a budget or prove acting quality. The existing Generate action is separate.</p>
+      <div class="card" aria-label="fal connection diagnostic">
+        <h3>fal/Kling connection check (free)</h3>
+        <p class="hint">Checks only the configured server-side key against fal's pricing API. Does not enable video, submit a shot, buy credits, or establish account balance or model-generation permission.</p>
+        <button type="button" class="secondary" id="run-fal-diagnostic">Check fal connection (free)</button>
+        <div class="hint" id="fal-diagnostic-result" role="status" aria-live="polite">Not checked. No provider request submitted.</div>
+      </div>
       <div id="first-shot-readiness-status" class="hint" role="status" aria-live="polite">Select a project to check the first shot.</div>
       <div class="actions wrap">
         <button type="button" id="run-first-shot-readiness" class="secondary">Check first shot (free)</button>

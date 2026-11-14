@@ -387,6 +387,16 @@ class BudgetConfirmIn(BaseModel):
     quote_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
+@router.get("/fal-first-shot-diagnostic")
+def fal_first_shot_diagnostic_endpoint(
+    user: UserContext = Depends(get_current_user_context),
+) -> dict[str, Any]:
+    """Read-only account-pricing probe; no generation or financial mutation."""
+    _require_owner(user)
+    from app.core.nova.creative_studio.fal_diagnostic import fal_first_shot_diagnostic
+    return fal_first_shot_diagnostic()
+
+
 @router.get("/projects/{project_id}/preflight")
 def project_preflight_quote(
     project_id: str,

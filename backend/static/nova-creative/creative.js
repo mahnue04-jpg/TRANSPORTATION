@@ -2091,6 +2091,37 @@
     refreshFirstShotSubmitButton();
   }
 
+  var falDiagnosticBtn = $("run-fal-diagnostic");
+  if (falDiagnosticBtn) {
+    falDiagnosticBtn.addEventListener("click", async function () {
+      var result = $("fal-diagnostic-result");
+      falDiagnosticBtn.disabled = true;
+      if (result) result.textContent = "Checking fal pricing API connection without generating video...";
+      try {
+        var report = await api("/api/nova/creative/fal-first-shot-diagnostic");
+        if (result) {
+          var lines = [
+            "Server credential present: " + (report.key_present ? "yes" : "no"),
+            "Pricing API authentication: " + String(report.key_authenticated || "UNVERIFIED"),
+            "Model generation permission: " + String(report.model_authorized || "UNVERIFIED"),
+            "Account balance: " + String(report.account_balance || "UNVERIFIED"),
+            "Five-second pricing: " + (report.price_status === "VERIFIED_FOR_PRICING_API"
+              ? "$" + String(report.price_usd_five_seconds) + " USD (pricing API only)"
+              : "UNVERIFIED"),
+            "Blockers: " + ((report.blockers || []).join(", ") || "none reported"),
+            "No video generated, no purchase submitted."
+          ];
+          result.textContent = lines.join("\n");
+          result.style.whiteSpace = "pre-line";
+        }
+      } catch (err) {
+        if (result) result.textContent = (err.message || "Read-only connection check failed.") + " No paid generation submitted.";
+      } finally {
+        falDiagnosticBtn.disabled = false;
+      }
+    });
+  }
+
   var firstShotReadinessBtn = $("run-first-shot-readiness");
   if (firstShotReadinessBtn) {
     firstShotReadinessBtn.addEventListener("click", async function () {
