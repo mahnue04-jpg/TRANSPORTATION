@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException
 
-from app.auth import UserContext, get_current_user_context
+from app.auth import (
+    ROLE_ADMIN,
+    ROLE_SUPER_ADMIN_SUPPORT,
+    UserContext,
+    get_current_user_context,
+    require_any_role,
+)
 from app.core.nova.growth_agent.errors import CrossTenantError, FeatureDisabledError, TenantRequiredError
 from app.core.nova.growth_agent.flags import growth_agent_enabled
-from app.core.nova.router import require_nova_access
 from app.core.nova.service import NovaCoreService
 
 
@@ -32,17 +37,20 @@ def resolve_org(
 
 def require_growth_owner(
     user: UserContext = Depends(get_current_user_context),
-    _role_gate=Depends(require_nova_access),
+    _role_gate=Depends(require_any_role(ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT)),
 ) -> UserContext:
-    """Authenticated Nova user; surface still gated by NOVA_GROWTH_AGENT_ENABLED.
+    """Admin-level Nova session required for Growth Agent management APIs.
 
-    Role gate uses require_nova_access (returns ORM User). Identity for handlers
-    comes from get_current_user_context so callers get UserContext.user_id.
+    The role dependency validates active JWT/authorized roles against the DB.
+    A defense-in-depth check on UserContext.role also denies role mismatch.
+    This does not authorize external sends, paid services or production rollout.
     """
     if not growth_agent_enabled():
         raise HTTPException(status_code=404, detail="Growth Agent is disabled")
-    if not user.organization_id and not user.user_id:
-        raise HTTPException(status_code=403, detail="Authenticated owner required")
+    if user.role not in {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT}:
+        raise HTTPException(status_code=403, detail="Growth Agent owner role required")
+    if not user.user_id or not user.organization_id:
+        raise HTTPException(status_code=403, detail="Growth Agent tenant and owner required")
     return user
 
 
