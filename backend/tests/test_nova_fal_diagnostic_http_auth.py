@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +31,29 @@ STUDIO_SEED_EMAILS = frozenset({
     "provider@amicor.local",
 })
 
-if not os.environ.get("DATABASE_URL", "").startswith("sqlite:////tmp/"):
+_PERSISTENT_SQLITE_NAMES = frozenset({
+    "chat.db",
+    "pilot_a2_clean.db",
+    "pilot_a3_clean.db",
+    "pilot_a4_clean.db",
+    "stage7_priorityA_validation.db",
+})
+
+
+def _is_disposable_sqlite(url: str) -> bool:
+    """Allow pytest's chat_test database and explicit /tmp SQLite files only."""
+    if not url.startswith("sqlite:///"):
+        return False
+    path = url[len("sqlite:///"):]
+    name = Path(path).name
+    if name in _PERSISTENT_SQLITE_NAMES:
+        return False
+    if name.startswith("chat_test_") and name.endswith(".db"):
+        return True
+    return path.startswith("/tmp/") and name.endswith(".db")
+
+
+if not _is_disposable_sqlite(os.environ.get("DATABASE_URL", "")):
     raise RuntimeError("Refusing to run diagnostic auth tests without a disposable SQLite DATABASE_URL")
 
 
@@ -73,6 +96,15 @@ def fal_calls(monkeypatch):
 
     monkeypatch.setattr(diagnostic.urllib.request, "build_opener", lambda *args, **kwargs: Opener())
     return calls
+
+
+def test_database_guard_accepts_suite_db_and_rejects_persistent_files():
+    assert _is_disposable_sqlite("sqlite:////home/runner/work/repo/backend/data/chat_test_1.db")
+    assert _is_disposable_sqlite("sqlite:////tmp/fal-diag-disposable/first-shot.db")
+    assert not _is_disposable_sqlite("sqlite:////home/runner/work/repo/backend/app/chat.db")
+    assert not _is_disposable_sqlite("sqlite:////tmp/pilot_a2_clean.db")
+    assert not _is_disposable_sqlite("postgresql://db.example/studio")
+    assert not _is_disposable_sqlite("")
 
 
 def test_explicit_allowlist_is_exact_and_normalized(monkeypatch):
