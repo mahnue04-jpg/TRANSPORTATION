@@ -69,9 +69,17 @@ def omit_casting_tables(tables):
     Disposable tests may create them with Table.create on an isolated engine.
     Production schema changes stay on the explicit Alembic revisions.
     """
+    growth_locked = any(
+        os.getenv(name, "").strip().lower() in {"production", "prod"}
+        for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")
+    )
     return [
         table for table in tables
         if not str(getattr(table, "name", "")).startswith("nova_casting_")
+        and not (
+            growth_locked
+            and str(getattr(table, "name", "")).startswith("nova_ga_")
+        )
     ]
 
 

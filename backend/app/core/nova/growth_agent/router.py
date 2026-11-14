@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.auth import UserContext
@@ -12,6 +13,8 @@ from app.core.nova.growth_agent.errors import GrowthAgentError
 from app.core.nova.growth_agent.flags import live_flags, widget_public_enabled
 from app.core.nova.growth_agent.demo import run_synthetic_demo
 from app.core.nova.growth_agent.schemas import (
+    CampaignCreateIn,
+    CampaignStateIn,
     AgentStateIn,
     AvailabilityIn,
     BookIn,
@@ -163,6 +166,7 @@ def widget_chat(
             origin=origin or embed_origin or request.headers.get("Referer"),
             message=body.message,
             conversation_id=body.conversation_id,
+            campaign_id=body.campaign_id,
             visitor_name=body.visitor_name,
             visitor_email=body.visitor_email,
             consent_marketing=body.consent_marketing,
@@ -575,3 +579,54 @@ def synthetic_demo(
     except GrowthAgentError as exc:
         _handle(exc)
         raise
+
+
+@router.get("/campaign-projects")
+def campaign_projects(user: UserContext = Depends(require_growth_owner), svc: GrowthAgentService = Depends(_svc)):
+    from app.core.nova.growth_agent.campaigns import CampaignService
+    try:
+        _org(user, None)
+        return {"projects": CampaignService(svc).projects(user.user_id)}
+    except GrowthAgentError as exc:
+        _handle(exc)
+
+
+@router.get("/campaigns")
+def campaigns(user: UserContext = Depends(require_growth_owner), svc: GrowthAgentService = Depends(_svc)):
+    from app.core.nova.growth_agent.campaigns import CampaignService
+    try:
+        return {"campaigns": CampaignService(svc).list(_org(user, None), user.user_id)}
+    except GrowthAgentError as exc:
+        _handle(exc)
+
+
+@router.post("/campaigns")
+def create_campaign(body: CampaignCreateIn, user: UserContext = Depends(require_growth_owner), svc: GrowthAgentService = Depends(_svc)):
+    from app.core.nova.growth_agent.campaigns import CampaignService
+    try:
+        return CampaignService(svc).create(_org(user, body.organization_id), user.user_id, body.model_dump())
+    except GrowthAgentError as exc:
+        _handle(exc)
+
+
+@router.patch("/campaigns/{campaign_id}")
+def campaign_state(campaign_id: str, body: CampaignStateIn, user: UserContext = Depends(require_growth_owner), svc: GrowthAgentService = Depends(_svc)):
+    from app.core.nova.growth_agent.campaigns import CampaignService
+    try:
+        return CampaignService(svc).set_state(_org(user, body.organization_id), user.user_id,
+                                              campaign_id, body.active, body.content_approved)
+    except GrowthAgentError as exc:
+        _handle(exc)
+
+
+@router.get("/campaigns/{campaign_id}/visit", response_class=HTMLResponse)
+def campaign_visit(campaign_id: str, request: Request, svc: GrowthAgentService = Depends(_svc)):
+    from app.core.nova.growth_agent.campaigns import CampaignService
+    try:
+        return HTMLResponse(CampaignService(svc).landing(campaign_id, str(request.base_url)), headers={
+            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+        })
+    except GrowthAgentError as exc:
+        _handle(exc)

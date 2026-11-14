@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AMICOR synthetic website chat test</title>
+  <style>
+    body { font: 18px/1.5 system-ui,sans-serif; max-width: 760px; margin: 48px auto; padding: 20px; color: #17304a; }
+    label,input,button { display: block; margin: 16px 0; }
+    input { width: 95%; padding: 12px; font: inherit; }
+    button { padding: 12px 24px; font: inherit; cursor: pointer; }
+    aside { border-left: 5px solid #c07000; padding: 16px; background: #fff5df; }
+  </style>
+</head>
+<body>
+  <h1>AMICOR synthetic website journey</h1>
+  <aside>Staging evaluation only. Use fictional names and emails ending in .invalid.
+    Do not enter customer data, production tokens or owner passwords here.</aside>
+  <p>This page loads the actual website chat widget. Booking and reminder approval
+    happen in the <a href="/nova/growth" target="_blank" rel="noopener">owner dashboard</a>.</p>
+  <ol>
+    <li>Sign in to the staging dashboard, configure the synthetic business and activate it.</li>
+    <li>Create a widget installation for <strong id="hostname"></strong>.</li>
+    <li>Paste its installation token below. Choose transactional consent and ask an approved FAQ in the chat.</li>
+    <li>Review the resulting CRM contact in the owner dashboard, book a slot, then preview and approve a mock reminder.</li>
+  </ol>
+  <form id="install">
+    <label for="token">Staging widget installation token</label>
+    <input id="token" required autocomplete="off" spellcheck="false">
+    <button id="load" type="submit">Load website chat</button>
+  </form>
+  <p id="status" role="status"></p>
+  <script>
+    document.getElementById('hostname').textContent = window.location.hostname;
+    document.getElementById('install').addEventListener('submit', function (event) {
+      event.preventDefault();
+      const token = document.getElementById('token').value.trim();
+      if (!token) return;
+      const script = document.createElement('script');
+      script.src = '/static/nova-growth/widget.js';
+      script.setAttribute('data-amicor-growth-token', token);
+      script.onload = function () {
+        document.getElementById('token').value = '';
+        document.getElementById('status').textContent = 'Widget loaded. Open “Chat with us” below. All delivery must remain mock.';
+      };
+      script.onerror = function () {
+        document.getElementById('load').disabled = false;
+        document.getElementById('status').textContent = 'Widget failed to load; check the staging service.';
+      };
+      document.getElementById('load').disabled = true;
+      document.body.appendChild(script);
+    });
+  </script>
+</body>
+</html>

@@ -39,10 +39,23 @@ class WidgetCreateIn(OrgScoped):
     branding: dict[str, Any] = Field(default_factory=dict)
 
 
+class CampaignCreateIn(OrgScoped):
+    studio_project_id: str = Field(min_length=1, max_length=48)
+    widget_token: str = Field(min_length=1, max_length=2000)
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class CampaignStateIn(OrgScoped):
+    active: bool
+    content_approved: bool = False
+
+
 class WidgetChatIn(BaseModel):
     token: str
     message: str
     conversation_id: str | None = None
+    campaign_id: str | None = Field(default=None, max_length=36)
     visitor_name: str | None = None
     visitor_email: str | None = None
     consent_marketing: bool = False

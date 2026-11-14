@@ -5,11 +5,16 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, cursor/nova-growth-agent-mvp-1565]
     paths:
       - "backend/app/core/nova/growth_agent/**"
+      - "backend/app/startup.py"
+      - "backend/app/db/session.py"
+      - "backend/tests/test_startup_signal_chaining.py"
       - "backend/static/nova-growth/**"
-      - "backend/migrations/versions/20261112_nova_growth_agent.py"
+      - "backend/migrations/versions/20261112_nova_growth_agent*.py"
+      - "backend/migrations/versions/20261114_nova_ga_campaigns.py"
+      - "backend/static/nova-creative/**"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
@@ -68,7 +73,9 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
-            tests/test_nova_growth_agent_worker_retention.py
+            tests/test_nova_growth_agent_worker_retention.py \
+            tests/test_nova_growth_agent_campaigns.py \
+            tests/test_startup_signal_chaining.py
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
