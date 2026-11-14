@@ -167,3 +167,18 @@ def test_http_journey_smoke_authenticated(client: TestClient) -> None:
     health = client.get("/api/nova/growth-agent/health", headers=headers)
     assert health.status_code == 200
     assert health.json()["live_flags"]["sms"] is False
+
+
+def test_counts_endpoint_owner_only_and_pii_free(client: TestClient) -> None:
+    path = "/api/nova/growth-agent/counts"
+    assert client.get(path).status_code in {401, 403}
+    denied = client.get(path, headers=_headers(client, "dispatcher@amicor.local"))
+    assert denied.status_code == 403
+    response = client.get(path, headers=_headers(client))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body) == {"counts"}
+    assert set(body["counts"]) == {"leads", "conversations", "appointments"}
+    assert all(type(value) is int and value >= 0 for value in body["counts"].values())
+    assert "email" not in response.text.lower()
+    assert "display_name" not in response.text
