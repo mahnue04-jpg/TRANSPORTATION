@@ -40,6 +40,14 @@ pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_URL" "$backup_
 
 **The example deletes the temporary dump on process exit**; production-quality evidence preservation requires an approved encrypted backup destination and retention schedule. A successful restore should be followed by *read-only* comparisons of schema revisions, non-sensitive table counts, and a synthetic owner-scoped application smoke check on the isolated clone. Avoid posting row values. Do not run schema migrations or sample seeding on the source.
 
+## Preflight compatibility blocker — restored-clone app test
+
+The existing `staging_preflight.py` intentionally hard-pins the **current** staging host `dpg-dbqv7mmtlv9c73d7tnb0-a` and database name `nova_ga_490_dispos`. Consequently, simply setting `DATABASE_URL` to the restored disposable database will be **rejected** by `staging_start.py` and the isolated `lifespan` gate. This is the correct fail-closed behavior, but it means the documented *restored-clone application smoke test* is **not executable using that launcher as written**.
+
+Before any restored-clone application test, independently approve the disposable destination identity and review a **separate clone-specific, exact-identity allowlist** limited to that destination. Do not modify the current staging host pin, set the clone URL to the existing staging database, bypass the guard, or use a production database. First verify the dump/restore data read-only on the clone; application startup tests must follow their own review/approval and must not be mistaken for a source-database recovery test. No clone-specific startup code is authorized by this runbook.
+
+When using native `pg_dump` and `pg_restore`, supply **libpq-compatible** PostgreSQL connection URLs (`postgres://` or `postgresql://`), not SQLAlchemy's `postgresql+psycopg2://` dialect prefix. Convert only within an approved secret-handling process, without printing connection strings.
+
 ## Acceptance evidence (record without secrets or customer data)
 - Source service/DB identifiers, source backup timestamp, tool versions, encrypted archive location/retention owner.
 - Confirmation that the dump had no errors, manifest was readable, restore finished with no errors.
