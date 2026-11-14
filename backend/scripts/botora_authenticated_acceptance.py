@@ -91,6 +91,8 @@ else:
     fd=os.open(root/'private-session.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     with os.fdopen(fd,'w') as f:json.dump({'token':token,'job_id':job},f)
 headers={'Authorization':'Bearer '+token}
+listing=client.get(base+'/jobs',headers=headers)
+assert listing.status_code==200 and any(r['job_id']==job for r in listing.json()['jobs']),'Saved assignment was not discoverable after fresh sign-in'
 saved=client.get(base+'/jobs/'+job,headers=headers)
 assert saved.status_code==200,'Signed saved-job retrieval failed'
 download=client.get(base+'/jobs/'+job+'/review.csv',headers=headers)
@@ -117,7 +119,7 @@ for endpoint in ['/preparation','/work-package.zip']:
 (root/'operations-auth-work-package.zip').write_bytes(package.content)
 evidence={'authentication':'REAL_LOCAL_JWT_LOGIN_WITH_DISPOSABLE_TEST_USERS','dependency_overrides':False,
           'application':'app.main:app','app_lifespan_started':False,'transport':'LOOPBACK_HTTP_SEPARATE_SERVER_PROCESS' if args.network else 'IN_PROCESS_HTTP_NOT_HOSTED',
-          'package_download_verified':True,'preparation_verified':True,'package_non_owner_denied':True,
+          'saved_job_list_verified':True,'package_download_verified':True,'preparation_verified':True,'package_non_owner_denied':True,
           'package_anonymous_denied':True,'draft_count':len(queue['drafts']),
           'database':'ISOLATED_LOCAL_SQLITE_TEST_ONLY','job_id':job,'download_status':download.status_code,
           'review_status':saved.json()['owner_review'],'fresh_process_saved_job_verified':args.resume,'fresh_owner_login_on_resume':args.resume,

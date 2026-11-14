@@ -68,3 +68,13 @@ test('work package download requests the owned job and stays disabled without ou
   await h.el('prospect-review-package').listeners.click();
   assert.ok(h.calls.some(c=>c.url.endsWith('/jobs/'+result.job_id+'/work-package.zip')));
 });
+test('saved reviews can be discovered and resumed without browser session history',async()=>{
+  const h=setup(url=>response(url.endsWith('readiness')?{enabled:true}:url.endsWith('/jobs')?{jobs:[{job_id:result.job_id,businesses:['Synthetic business'],record_count:1}],unavailable_count:0}:result));
+  await flush();await h.el('prospect-review-refresh').listeners.click();
+  assert.equal(h.el('prospect-review-saved').children.length,2);
+  h.el('prospect-review-saved').value=result.job_id;
+  await h.el('prospect-review-resume').listeners.click();
+  assert.equal(h.el('prospect-review-records').children.length,1);
+  h.events['amicor:session-invalid']();
+  assert.equal(h.el('prospect-review-saved').children.length,0);
+});

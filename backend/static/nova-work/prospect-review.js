@@ -6,6 +6,8 @@
   const discoveryForm = document.getElementById("prospect-discovery-form");
   const status = document.getElementById("prospect-review-status");
   const results = document.getElementById("prospect-review-records");
+  const savedReviews = document.getElementById("prospect-review-saved");
+  const refresh = document.getElementById("prospect-review-refresh");
   const resume = document.getElementById("prospect-review-resume");
   const download = document.getElementById("prospect-review-download");
   const workPackage = document.getElementById("prospect-review-package");
@@ -44,11 +46,11 @@
     });
     try{sessionStorage.setItem("nova-prospect-review-job",job);}catch (_){}
   }
-  function lock(value){busy=value;form.querySelector('button[type="submit"]').disabled=value;discoveryForm.querySelector('button[type="submit"]').disabled=value;resume.disabled=value;download.disabled=value||!job;workPackage.disabled=value||!job;}
+  function lock(value){busy=value;refresh.disabled=value;savedReviews.disabled=value;form.querySelector('button[type="submit"]').disabled=value;discoveryForm.querySelector('button[type="submit"]').disabled=value;resume.disabled=value;download.disabled=value||!job;workPackage.disabled=value||!job;}
   async function available(){
     sessionEpoch += 1;
     const epoch = sessionEpoch;
-    panel.hidden=true;results.replaceChildren();job="";download.disabled=true;workPackage.disabled=true;
+    panel.hidden=true;results.replaceChildren();savedReviews.replaceChildren();savedReviews.value="";job="";download.disabled=true;workPackage.disabled=true;
     try {const r=await request("readiness");const data=await r.json();if(epoch===sessionEpoch)panel.hidden=!data.enabled;} catch (_) {}
   }
   form.addEventListener("submit",async function(event){
@@ -87,8 +89,9 @@
   resume.addEventListener("click",async function(){
     if(busy)return;
     const epoch=sessionEpoch;
-    try {job=sessionStorage.getItem("nova-prospect-review-job")||"";}catch (_){}
-    if(!job){status.textContent="No saved review is recorded in this browser session.";return;}
+    job=savedReviews.value||"";
+    if(!job){try {job=sessionStorage.getItem("nova-prospect-review-job")||"";}catch (_){}}
+    if(!job){status.textContent="Choose Find my saved reviews, then select an assignment to resume.";return;}
     lock(true);
     try{const r=await request("jobs/"+encodeURIComponent(job));const data=await r.json();if(epoch===sessionEpoch)show(data);}
     catch(error){results.replaceChildren();job="";status.textContent=error.message;}finally{lock(false);}
@@ -104,6 +107,16 @@
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){status.textContent=error.message;}finally{lock(false);}
   });
+  refresh.addEventListener("click",async function(){
+    if(busy)return;const epoch=sessionEpoch;lock(true);
+    try{
+      const r=await request("jobs");const data=await r.json();if(epoch!==sessionEpoch)return;
+      savedReviews.replaceChildren();savedReviews.value="";
+      const placeholder=document.createElement("option");placeholder.value="";placeholder.textContent="Choose a saved review";savedReviews.appendChild(placeholder);
+      data.jobs.forEach(function(item){const option=document.createElement("option");option.value=item.job_id;option.textContent=item.businesses.join(", ")+" ("+item.record_count+" records; "+item.job_id.slice(0,8)+")";savedReviews.appendChild(option);});
+      status.textContent=data.jobs.length+" saved reviews found. Select one and choose Resume. "+data.unavailable_count+" unavailable or incomplete reviews excluded.";
+    }catch(error){if(epoch===sessionEpoch)status.textContent=error.message;}finally{lock(false);}
+  });
   workPackage.addEventListener("click",async function(){
     if(!job||busy)return;lock(true);const epoch=sessionEpoch;
     try{
@@ -115,6 +128,6 @@
     }catch(error){status.textContent=error.message;}finally{lock(false);}
   });
   window.addEventListener("amicor:session-recovered",available);
-  window.addEventListener("amicor:session-invalid",function(){sessionEpoch+=1;panel.hidden=true;results.replaceChildren();job="";});
+  window.addEventListener("amicor:session-invalid",function(){sessionEpoch+=1;panel.hidden=true;results.replaceChildren();savedReviews.replaceChildren();savedReviews.value="";job="";});
   available();
 })();

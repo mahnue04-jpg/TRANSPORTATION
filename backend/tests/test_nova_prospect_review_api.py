@@ -81,3 +81,20 @@ def test_search_provider_failure_does_not_create_ready_job(harness,monkeypatch):
     monkeypatch.setattr(api,'run_discovery',failed)
     body={'request_key':'discovery-001','query':'travel agencies Minnesota'}
     assert client.post('/prospect-review/discover',json=body,headers={'X-Nova-Owner-Action':'discover-public-business-candidates'}).status_code==503
+
+
+def test_saved_list_survives_client_reset_and_excludes_other_owner_and_corruption(harness,monkeypatch):
+    app,client,who=harness
+    monkeypatch.setattr(research,'fetch_source',lambda *a:(b'fixture','<p>Custom travel consultation</p>'))
+    job=client.post('/prospect-review/jobs',json=request(),headers=HEADERS).json()['job_id']
+    fresh=TestClient(app)
+    listing=fresh.get('/prospect-review/jobs')
+    assert listing.status_code==200 and listing.json()['jobs'][0]['job_id']==job
+    assert listing.json()['jobs'][0]['owner_review']=='PENDING'
+    who['owner']='other-owner'
+    assert fresh.get('/prospect-review/jobs').json()['jobs']==[]
+    who['owner']='owner-a'
+    directory,_=api.saved_job(SimpleNamespace(organization_id='test-org',user_id='owner-a'),job)
+    (directory/'operations-review.csv').write_text('corrupt')
+    result=fresh.get('/prospect-review/jobs').json()
+    assert result['jobs']==[] and result['unavailable_count']==1

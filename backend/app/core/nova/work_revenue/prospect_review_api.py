@@ -143,6 +143,24 @@ def create_job(body:Assignment,owner:UserContext=Depends(require_work_revenue_ow
     return view(job_id,m)
 
 
+@router.get('/jobs')
+def list_saved_jobs(owner:UserContext=Depends(require_work_revenue_owner)):
+    bucket=owner_root(owner)
+    jobs=[];unavailable=0
+    for directory in sorted(bucket.iterdir(),key=lambda p:p.name)[:2000]:
+        if not re.fullmatch(r'[a-f0-9]{32}',directory.name):continue
+        try:
+            _,manifest=saved_job(owner,directory.name)
+            jobs.append({'job_id':directory.name,'record_count':len(manifest['records']),
+                         'businesses':[r['business'] for r in manifest['records'][:3]],
+                         'owner_review':'PENDING','outreach_sent':0})
+        except HTTPException:
+            unavailable+=1
+        if len(jobs)>=100:break
+    return {'jobs':jobs,'unavailable_count':unavailable,'limit':100,
+            'storage':'ISOLATED_LOCAL_FILES_NOT_VERIFIED_HOSTED_STORAGE'}
+
+
 @router.get('/jobs/{job_id}')
 def get_job(job_id:str,owner:UserContext=Depends(require_work_revenue_owner)):
     _,m=saved_job(owner,job_id)
