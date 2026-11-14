@@ -49,8 +49,6 @@ def test_disabled_remains_not_found(monkeypatch):
 
 
 def test_owner_route_dependency_is_admin_only():
-    from app.auth import require_any_role
-    dependency = tenant.require_growth_owner.__defaults__
     # Ensure the actual FastAPI dependency is not the broad require_nova_access.
     import inspect
     from fastapi.params import Depends
@@ -59,4 +57,8 @@ def test_owner_route_dependency_is_admin_only():
     assert isinstance(gate, Depends)
     assert gate.dependency is not None
     assert gate.dependency.__name__ == "_dependency"
-    # Role enforcement behavior is additionally exercised by auth RBAC suite.
+    # Verify the role restriction in the dependency closure, not just its name.
+    closure = gate.dependency.__closure__ or ()
+    scopes = [cell.cell_contents for cell in closure]
+    assert {ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT} in scopes
+    # Full JWT/session authorization is also covered by auth RBAC regressions.
