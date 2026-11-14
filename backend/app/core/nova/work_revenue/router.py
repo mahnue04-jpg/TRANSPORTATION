@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.auth import OPERATOR_ACCOUNT_GRANTS, UserContext, get_current_user_context
@@ -552,12 +552,17 @@ async def upload_work_input(
     engagement_id: str,
     file: UploadFile = File(...),
     notes: str | None = Form(None),
+    client_authorization: str | None = Header(default=None, alias="X-Nova-Client-Authorization"),
     organization_id: str | None = None,
     user: UserContext = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     try:
-        content = await file.read()
+        # Never read an arbitrarily large customer upload into memory.
+        # One extra byte distinguishes an accepted file from an oversized one.
+        content = await file.read(work_inputs.MAX_WORK_INPUT_BYTES + 1)
+        if len(content) > work_inputs.MAX_WORK_INPUT_BYTES:
+            raise service.NovaWorkError("Work input exceeds the 20 MB limit", status_code=413)
         return work_inputs.create_work_input(
             db,
             engagement_id,
@@ -567,6 +572,9 @@ async def upload_work_input(
             content_type=file.content_type or "application/octet-stream",
             content=content,
             notes=notes,
+            owner_confirmed_contract=(
+                client_authorization == "owner-confirmed-client-processing-authority"
+            ),
         )
     except service.NovaWorkError as exc:
         _raise(exc)
@@ -606,13 +614,21 @@ def get_work_input_file(
             organization_id=_resolve_org(user, organization_id),
             user=user,
         )
-        stored = work_inputs.input_file_path(row)
-        if stored is None:
-            raise HTTPException(status_code=404, detail="Work input file is not stored")
-        return FileResponse(
-            path=str(stored),
+        content = work_inputs.read_work_input_bytes(row)
+        # No direct storage path or public object URL is ever exposed.
+        safe_name = "".join(
+            ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_"
+            for ch in (row.original_filename or "work-input")
+        )[:180] or "work-input"
+        return Response(
+            content=content,
             media_type=row.content_type or "application/octet-stream",
-            filename=row.original_filename,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}"',
+                "Cache-Control": "private, no-store",
+                "Pragma": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     except service.NovaWorkError as exc:
         _raise(exc)

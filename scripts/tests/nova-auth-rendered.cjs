@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+// Keep the timeout bounded while allowing slower shared CI runners to exit.
+const chromeTimeoutMs = 60000;
 const root = path.join(__dirname, '../..');
 const browser = process.env.CHROME_BIN || '/usr/bin/google-chrome';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-auth-render-'));
@@ -43,9 +45,33 @@ try {
         .replace('</body>', '<script>' + fixture + '</script><script>' + source + '</script><script>' + check + '</script></body>');
       const file = path.join(tmp, pageName + '-' + signedIn + '.html');
       fs.writeFileSync(file, html);
-      const dom = execFileSync(browser, ['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
-        '--no-first-run','--virtual-time-budget=1500','--dump-dom','file://' + file + (signedIn ? '?signin=1' : '')],
-        {encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+      // Every render gets a disposable Chrome profile. This avoids shared
+      // profile locks and reduces background tasks that can delay exit.
+      const profile = path.join(tmp, 'chrome-profile-' + pageName + '-' + signedIn);
+      let dom;
+      try {
+        dom = execFileSync(browser, [
+          '--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
+          '--disable-background-networking','--disable-extensions','--disable-component-update',
+          '--no-default-browser-check','--no-first-run','--no-proxy-server',
+          '--user-data-dir=' + profile,
+          '--virtual-time-budget=1500','--dump-dom',
+          'file://' + file + (signedIn ? '?signin=1' : '')
+        ], {encoding:'utf8',timeout:chromeTimeoutMs,maxBuffer:8*1024*1024,stdio:['ignore','pipe','pipe']});
+      } catch (error) {
+        // An ETIMEDOUT is NOT a passing render, even if Chrome wrote a DOM.
+        // Preserve a brief diagnostic without dumping page content or tokens.
+        const stdout = String(error.stdout || '');
+        const stderr = String(error.stderr || '');
+        const rendered = /<output id="auth-render-result" data-result="pass">/.test(stdout);
+        const timedOut = error.code === 'ETIMEDOUT';
+        throw new Error(
+          'Chrome rendered-auth check failed for ' + pageName + ' signedIn=' + signedIn +
+          ' timeout=' + chromeTimeoutMs + 'ms timedOut=' + timedOut +
+          ' passMarkerPresent=' + rendered + ' stderrTail=' + stderr.slice(-1200),
+          {cause:error}
+        );
+      }
       assert.match(dom, /<output id="auth-render-result" data-result="pass">/, pageName + ' signedIn=' + signedIn);
       console.log('PASS rendered ' + pageName + ' signedIn=' + signedIn);
     }

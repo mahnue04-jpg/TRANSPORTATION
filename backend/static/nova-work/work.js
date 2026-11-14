@@ -73,13 +73,15 @@
     }
     return body;
   }
-  async function uploadWorkInput(engagementId, file) {
+  async function uploadWorkInput(engagementId, file, ownerConfirmed) {
+    if (!ownerConfirmed) throw new Error("Confirm client data-processing authorization before uploading.");
     if (!file) throw new Error("Choose a source file first.");
     var form = new FormData();
     form.append("file", file);
     var headers = {};
     if (session() && session().getAuthHeaders) Object.assign(headers, session().getAuthHeaders());
     else if (token()) headers.Authorization = "Bearer " + token();
+    headers["X-Nova-Client-Authorization"] = "owner-confirmed-client-processing-authority";
     var response;
     try {
       response = await fetch(
@@ -523,11 +525,16 @@
           "<button type=\"button\" class=\"secondary\" data-invoice-prep=\"" + escapeHtml(row.engagement_id) + "\">Prepare Invoice Support</button>" +
           "<div class=\"muted\">Creates an internal draft only. Nothing is sent or charged.</div></div></div>"
         : "";
-      var runControl = row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)
-        ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>" +
+      var canAttach = (row.source === "nova_autonomous" && !["COMPLETE", "ARCHIVED", "CLOSED", "CANCELLED"].includes(row.status)) ||
+        (row.source !== "nova_autonomous" && row.status === "ACTIVE" && !row.blockers);
+      var runControl = canAttach
+        ? (row.source === "nova_autonomous"
+            ? "<div class=\"command-actions\">" + actionButton("autonomous-run", row.engagement_id, "Run Autonomous Work") + "</div>"
+            : "<div class=\"muted\">Authorized client-file intake: processing and delivery still require separate owner review.</div>") +
           "<div class=\"work-input-box\">" +
           "<label>Work Inputs <input type=\"file\" data-work-input-file=\"" + escapeHtml(row.engagement_id) +
           "\" accept=\".csv,.xlsx,.txt,.json,.pdf,.docx\" /></label>" +
+          "<label><input type=\"checkbox\" data-work-input-authorized=\"" + escapeHtml(row.engagement_id) + "\" /> I confirm AMICOR is authorized to process this input. Real client work requires an active, unblocked engagement and proper contract authority.</label>" +
           "<button type=\"button\" class=\"secondary\" data-work-input-upload=\"" + escapeHtml(row.engagement_id) + "\">Attach Source Data</button>" +
           "<div class=\"muted\">Supported: CSV, XLSX, TXT, JSON, PDF, DOCX · max 20 MB · internal only.</div>" +
           "<div data-work-input-list=\"" + escapeHtml(row.engagement_id) + "\">Loading Work Inputs...</div></div>" +
@@ -1203,7 +1210,9 @@
       var file = fileInput && fileInput.files ? fileInput.files[0] : null;
       try {
         setWorkActionStatus(engagementId, "Uploading source data...", true);
-        var uploaded = await uploadWorkInput(engagementId, file);
+        var authorizationBox = document.querySelector("[data-work-input-authorized=\"" + engagementId + "\"]");
+        var uploaded = await uploadWorkInput(engagementId, file, !!(authorizationBox && authorizationBox.checked));
+        if (authorizationBox) authorizationBox.checked = false;
         setWorkActionStatus(
           engagementId,
           "SOURCE DATA ATTACHED · " + uploaded.original_filename + " · " + uploaded.file_size + " bytes · run autonomous work again.",
