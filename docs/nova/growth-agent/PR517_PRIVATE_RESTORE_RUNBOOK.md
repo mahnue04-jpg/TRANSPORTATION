@@ -11,6 +11,16 @@ This is not deployment authorization and does not prove a backup exists.
 - Connected Render tools currently have metadata and read-only SQL but **no backup/export/restore action**. Existing database backup availability and restorable state are **not verified**.
 - GitHub CI verifies a **different synthetic** pg_dump → pg_restore fixture on disposable databases; this is NOT evidence of a real staging backup.
 
+## Newly identified dashboard export option — not executed (2026-11-14)
+
+Render's public documentation describes an on-demand logical backup option in **database Dashboard → Recovery → Create export**, typically retained for seven days. This may provide a backup without permitting external SQL connections or provision of any additional service. **Availability for this exact database plan is not yet confirmed by a logged-in dashboard view.** Verify availability, export limits, retention, and any displayed costs before triggering it. This is a separate operation from a point-in-time restore, which can create a **new billable** instance.
+
+**Read-only preparation step:** In Saye's workspace, select only database `nova-ga-490-dispos` (`dpg-dbqv7mmtlv9c73d7tnb0-a`) and inspect **Recovery**. Confirm whether `Create export` is offered, whether an existing logical export is listed, and any fee/warnings. Do **not** click `Create export` or `Restore Database` as part of read-only preparation. Avoid showing or sharing connection strings. Report only availability, timestamp and policy/cost notices.
+
+Sources (Render official public documentation, verify the current dashboard): https://render.com/docs/postgresql-backups and https://render.com/articles/how-to-backup-and-restore-postgresql-databases .
+
+If approved later, creating an export does not itself prove recoverability: independently restore a copy to a separately authorized disposable database, then verify schema/counts and sample workflows. Keep the real source database untouched.
+
 ## Preconditions (hard stop unless all satisfied)
 1. Explicit owner authorization to export the identified staging data through a private internal Render connection and to restore it **only into a separately approved isolated disposable destination**. If provisioning incurs costs, stop and obtain a separate price approval.
 2. Approved private execution identity with access confined to the specific staging database, not production. Never add `0.0.0.0/0` to a database allowlist or put credentials in GitHub, logs, tickets, or chat.
