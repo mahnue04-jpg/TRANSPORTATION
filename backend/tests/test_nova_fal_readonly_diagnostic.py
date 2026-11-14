@@ -111,7 +111,7 @@ def test_malformed_json_and_oversized_body_fail_closed(probe, monkeypatch):
 
     for raw, blocker in [(b"not-json", "FAL_PRICING_INVALID_JSON"),
                          (b"", "FAL_PRICING_EMPTY_RESPONSE"),
-                         (b"\\xff", "FAL_PRICING_INVALID_ENCODING"),
+                         (bytes([0xFF]), "FAL_PRICING_INVALID_ENCODING"),
                          (b"x" * 65537, "PRICING_RESPONSE_TOO_LARGE")]:
         monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *a: Opener(raw))
         report = mod.fal_first_shot_diagnostic()
