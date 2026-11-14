@@ -28,23 +28,23 @@
     setMessage("Checking Growth Agent read-only status...");
     try {
       // No customer names, emails, messages or addresses displayed in this introductory panel.
+      // Totals come from SQL counts. List endpoints are page-capped and are not totals.
       var responses = await Promise.all([
         fetchReadOnly("health", auth),
-        fetchReadOnly("leads", auth),
-        fetchReadOnly("conversations", auth),
-        fetchReadOnly("appointments", auth)
+        fetchReadOnly("counts", auth)
       ]);
-      // Defensive shape checks: a response must not be interpreted as zero if its collection is missing.
-      if (!Array.isArray(responses[1].leads) ||
-          !Array.isArray(responses[2].conversations) ||
-          !Array.isArray(responses[3].appointments)) {
+      var counts = responses[1] || {};
+      // Defensive shape checks: a response must not be interpreted as zero if its totals are missing.
+      if (!Number.isInteger(counts.leads) ||
+          !Number.isInteger(counts.conversations) ||
+          !Number.isInteger(counts.appointments)) {
         throw new Error("Unexpected API format; no counts shown.");
       }
       // Only counts are rendered. No hidden customer data is written to HTML.
       setMessage("Growth Agent API reachable (not proof of live delivery).\n" +
-        "Leads: " + responses[1].leads.length + "\n" +
-        "Conversations: " + responses[2].conversations.length + "\n" +
-        "Appointments: " + responses[3].appointments.length + "\n" +
+        "Leads: " + counts.leads + "\n" +
+        "Conversations: " + counts.conversations + "\n" +
+        "Appointments: " + counts.appointments + "\n" +
         "Source: authenticated API response. No actions sent.\n" +
         "Owner approvals and Operations handoff: not connected.");
     } catch (error) {

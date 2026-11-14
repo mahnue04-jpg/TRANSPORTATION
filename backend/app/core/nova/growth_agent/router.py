@@ -66,6 +66,15 @@ def health(
     return svc.health(_org(user, organization_id))
 
 
+@router.get("/counts")
+def record_counts(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    return svc.record_counts(_org(user, organization_id))
+
+
 @router.get("/plans")
 def plans(user: UserContext = Depends(require_growth_owner)) -> dict[str, Any]:
     from app.core.nova.growth_agent.commercial import plan_catalog

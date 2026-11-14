@@ -16,7 +16,7 @@ os.environ["NOVA_GROWTH_AGENT_DEMO_MODE"] = "true"
 
 from app.core.nova.growth_agent.demo import run_synthetic_demo
 from app.core.nova.growth_agent.errors import ConsentRequiredError, DoubleBookError
-from app.core.nova.growth_agent.models import GaContact, GaDeliveryAttempt
+from app.core.nova.growth_agent.models import GaAppointment, GaContact, GaConversation, GaDeliveryAttempt
 from app.core.nova.growth_agent.schema_ensure import ensure_growth_agent_schema
 from app.core.nova.growth_agent.service import GrowthAgentService
 from app.db.session import Base
@@ -430,3 +430,34 @@ def test_cross_tenant_query_isolation(db):
         svc.get_conversation("org-b", "missing")
     # Contact from A must not appear when listing B
     assert all(l["id"] != contact.id for l in svc.list_leads("org-b"))
+
+
+def test_record_counts_are_uncapped_org_totals(db):
+    org = "org-counts"
+    other = "org-other"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for i in range(201):
+        db.add(GaContact(id=f"lead-{i}", organization_id=org, dedupe_fingerprint=f"fp-{i}"))
+    for i in range(101):
+        db.add(GaConversation(id=f"conv-{i}", organization_id=org))
+    for i in range(51):
+        start = now + timedelta(minutes=i)
+        db.add(
+            GaAppointment(
+                id=f"appt-{i}",
+                organization_id=org,
+                contact_id="lead-0",
+                service_id=f"svc-{i}",
+                starts_at_utc=start,
+                ends_at_utc=start + timedelta(minutes=30),
+                idempotency_key=f"idem-{i}",
+            )
+        )
+    db.add(GaContact(id="other-lead", organization_id=other, dedupe_fingerprint="other-fp"))
+    db.commit()
+    svc = GrowthAgentService(db)
+    assert svc.record_counts(org) == {"leads": 201, "conversations": 101, "appointments": 51}
+    assert len(svc.list_leads(org)) == 200
+    assert len(svc.list_conversations(org)) == 100
+    assert len(svc.list_appointments(org)) == 50
+    assert svc.record_counts(other) == {"leads": 1, "conversations": 0, "appointments": 0}

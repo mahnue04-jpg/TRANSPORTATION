@@ -1832,6 +1832,14 @@ class GrowthAgentService:
             "is_attribution": False,
         }
 
+    def record_counts(self, org_id: str) -> dict[str, int]:
+        """Org-wide totals. List endpoints are page-capped and are not totals."""
+        return {
+            "leads": self._org_query(GaContact, org_id).count(),
+            "conversations": self._org_query(GaConversation, org_id).count(),
+            "appointments": self._org_query(GaAppointment, org_id).count(),
+        }
+
     def health(self, org_id: str) -> dict[str, Any]:
         profile = self._profile(org_id)
         failed = (

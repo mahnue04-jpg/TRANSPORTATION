@@ -21,3 +21,9 @@ test("UI does not claim unimplemented approvals or handoff", () => {
   assert.match(js, /Unexpected API format/);
   assert.match(js, /Access denied/);
 });
+test("status totals come from uncapped counts, not capped list lengths", () => {
+  assert.match(js, /fetchReadOnly\("counts"/);
+  assert.match(js, /Number\.isInteger\(counts\.leads\)/);
+  assert.doesNotMatch(js, /\.length/);
+  assert.doesNotMatch(js, /fetchReadOnly\("(leads|conversations|appointments)"/);
+});
