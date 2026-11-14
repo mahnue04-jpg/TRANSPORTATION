@@ -11,6 +11,9 @@ on:
       - "backend/tests/test_nova_creative_first_shot_storage.py"
       - "backend/app/core/nova/creative_studio/long_form_assembly.py"
       - "backend/app/core/nova/creative_studio/router.py"
+      - "backend/app/core/nova/creative_studio/kling.py"
+      - "backend/tests/test_nova_first_shot_spending_limit.py"
+      - "backend/tests/test_nova_kling_provider.py"
       - "backend/tests/test_nova_creative_first_shot_readiness.py"
       - "backend/tests/test_nova_creative_single_shot_worker.py"
       - "backend/tests/test_nova_creative_single_shot_db_claim.py"
@@ -50,6 +53,8 @@ jobs:
         working-directory: backend
         run: |
           python -m pytest -q \
+            tests/test_nova_first_shot_spending_limit.py \
+            tests/test_nova_kling_provider.py \
             tests/test_nova_creative_first_shot_readiness.py \
             tests/test_nova_creative_first_shot_storage.py \
             tests/test_nova_creative_single_shot_worker.py \
