@@ -30,23 +30,20 @@
       // No customer names, emails, messages or addresses displayed in this introductory panel.
       var responses = await Promise.all([
         fetchReadOnly("health", auth),
-        fetchReadOnly("leads", auth),
-        fetchReadOnly("conversations", auth),
-        fetchReadOnly("appointments", auth)
+        fetchReadOnly("counts", auth)
       ]);
-      // Defensive shape checks: a response must not be interpreted as zero if its collection is missing.
-      if (!Array.isArray(responses[1].leads) ||
-          !Array.isArray(responses[2].conversations) ||
-          !Array.isArray(responses[3].appointments)) {
+      var counts = responses[1] && responses[1].counts;
+      if (!counts || !["leads", "conversations", "appointments"].every(function (key) {
+        return Number.isSafeInteger(counts[key]) && counts[key] >= 0;
+      })) {
         throw new Error("Unexpected API format; no counts shown.");
       }
-      // Only counts are rendered. No hidden customer data is written to HTML.
+      // Aggregated tenant-scoped counts only: no personal contact records fetched.
       setMessage("Growth Agent API reachable (not proof of live delivery).\n" +
-        "Leads returned (not a total): " + responses[1].leads.length + "\n" +
-        "Conversations returned (not a total): " + responses[2].conversations.length + "\n" +
-        "Appointments returned (maximum 50, not a total): " + responses[3].appointments.length + "\n" +
-        "Lists may be capped; no organization-wide totals are claimed.\n" +
-        "Source: authenticated API response. No actions sent.\n" +
+        "Total leads: " + counts.leads + "\n" +
+        "Total conversations: " + counts.conversations + "\n" +
+        "Total appointments: " + counts.appointments + "\n" +
+        "Source: authenticated tenant-scoped summary API. No actions sent.\n" +
         "Owner approvals and Operations handoff: not connected.");
     } catch (error) {
       setMessage("Growth Agent unavailable for this review. " +
