@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import secrets
 
-p=argparse.ArgumentParser();p.add_argument('--directory',required=True);p.add_argument('--resume',action='store_true');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--directory',required=True);p.add_argument('--resume',action='store_true');p.add_argument('--network',action='store_true');args=p.parse_args()
 root=Path(args.directory).resolve()
 if args.resume:
     if not root.is_dir():raise RuntimeError('Existing isolated acceptance directory required')
@@ -34,12 +34,38 @@ from app.main import app
 from app.auth import ensure_auth_schema,seed_default_users
 from app.db.session import init_platform_db
 
-client=TestClient(app)
+if args.network:
+    import atexit
+    import socket
+    import subprocess
+    import sys
+    import time
+    import httpx
+    listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(64)
+    port=listener.getsockname()[1]
+    server=subprocess.Popen([sys.executable,'-m','uvicorn','app.main:app','--fd',str(listener.fileno()),'--lifespan','off','--no-access-log','--log-level','critical'],pass_fds=(listener.fileno(),),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    listener.close()
+    def stop_server():
+        server.terminate()
+        try:server.wait(timeout=5)
+        except subprocess.TimeoutExpired:server.kill();server.wait()
+    atexit.register(stop_server)
+    client=httpx.Client(base_url='http://127.0.0.1:'+str(port),timeout=90,trust_env=False)
+    for attempt in range(100):
+        if server.poll() is not None:raise RuntimeError('Isolated HTTP process exited')
+        try:
+            client.get('/api/nova/work/prospect-review/readiness');break
+        except httpx.TransportError:time.sleep(.1)
+    else:raise RuntimeError('Isolated HTTP server did not become reachable')
+else:client=TestClient(app)
 assert not app.dependency_overrides,'Authentication overrides must not be present'
 base='/api/nova/work/prospect-review'
 if args.resume:
     private=json.loads((root/'private-session.json').read_text())
-    token=private['token'];job=private['job_id']
+    job=private['job_id']
+    login=client.post('/api/auth/login',json={'email':'admin@amicor.local','password':credentials['password']})
+    assert login.status_code==200,'Fresh owner sign-in for saved assignment failed'
+    token=login.json()['access_token']
 else:
     init_platform_db();ensure_auth_schema();seed_default_users()
     denied=client.get(base+'/readiness')
@@ -70,13 +96,35 @@ assert saved.status_code==200,'Signed saved-job retrieval failed'
 download=client.get(base+'/jobs/'+job+'/review.csv',headers=headers)
 assert download.status_code==200 and b'Osiris Tours' in download.content,'Signed download failed'
 (root/'operations-auth-review.csv').write_bytes(download.content)
+prepared=client.get(base+'/jobs/'+job+'/preparation',headers=headers)
+assert prepared.status_code==200,'Owner preparation failed'
+queue=prepared.json()
+assert queue['owner_approval']=='PENDING' and queue['messages_sent']==0
+assert all(d['can_send'] is False for d in queue['drafts'])
+package=client.get(base+'/jobs/'+job+'/work-package.zip',headers=headers)
+assert package.status_code==200 and package.headers['cache-control']=='no-store'
+from io import BytesIO
+from zipfile import ZipFile
+with ZipFile(BytesIO(package.content)) as bundle:
+    assert set(bundle.namelist())=={'prospects.csv','outreach-queue.json','README.txt','backup-manifest.json'}
+    assert json.loads(bundle.read('outreach-queue.json'))==queue
+other=client.post('/api/auth/login',json={'email':'dispatcher@amicor.local','password':credentials['password']})
+assert other.status_code==200
+other_headers={'Authorization':'Bearer '+other.json()['access_token']}
+for endpoint in ['/preparation','/work-package.zip']:
+    assert client.get(base+'/jobs/'+job+endpoint,headers=other_headers).status_code==403
+    assert client.get(base+'/jobs/'+job+endpoint).status_code in {401,403}
+(root/'operations-auth-work-package.zip').write_bytes(package.content)
 evidence={'authentication':'REAL_LOCAL_JWT_LOGIN_WITH_DISPOSABLE_TEST_USERS','dependency_overrides':False,
-          'application':'app.main:app','app_lifespan_started':False,'transport':'IN_PROCESS_HTTP_NOT_HOSTED',
+          'application':'app.main:app','app_lifespan_started':False,'transport':'LOOPBACK_HTTP_SEPARATE_SERVER_PROCESS' if args.network else 'IN_PROCESS_HTTP_NOT_HOSTED',
+          'package_download_verified':True,'preparation_verified':True,'package_non_owner_denied':True,
+          'package_anonymous_denied':True,'draft_count':len(queue['drafts']),
           'database':'ISOLATED_LOCAL_SQLITE_TEST_ONLY','job_id':job,'download_status':download.status_code,
-          'review_status':saved.json()['owner_review'],'fresh_process_token_and_output_verified':args.resume,
+          'review_status':saved.json()['owner_review'],'fresh_process_saved_job_verified':args.resume,'fresh_owner_login_on_resume':args.resume,
           'production_verified':False,'hosted_storage_verified':False,'outreach_sent':0}
 if not args.resume:evidence.update({'anonymous_denied':True,'non_owner_read_denied':True,'non_owner_download_denied':True,'retry_reused_result':True})
 else:
     old=json.loads((root/'acceptance.json').read_text());evidence={**old,**evidence}
+evidence.pop('fresh_process_token_and_output_verified',None)
 (root/'acceptance.json').write_text(json.dumps(evidence,indent=2))
 print(json.dumps(evidence,indent=2))

@@ -86,3 +86,9 @@ Operations now prepares personalized review-only outreach messages and qualifica
 The owner API exposes preparation and a portable ZIP of the Operations CSV, draft queue, explanatory README and checksum receipt. The UI offers that package download after an owned job completes. Recovery validates expected filenames, bounded sizes and checksums and preserves pending approvals. A separate Python process restored three drafts/four holds successfully. The package covers review outputs, not source HTML, job/auth databases or hosted persistence. Checksums detect accidental changes; they are not an authenticated signature.
 
 Validation: 15 focused Python checks and 5 synthetic JavaScript control checks pass. No prospect messages were sent. Agreement signing, approval of exact materials, owner launch authorization and verified business contact/channel remain gates. Full hosted/browser/autonomous acceptance remains outstanding.
+
+## Separate HTTP server and renewed-session recovery
+
+The actual application ran in a separate Uvicorn process bound only to loopback, with the isolated SQLite database and disposable credentials. The acceptance client used real HTTP and a fresh password login. It retrieved the previous saved Osiris assignment, generated one review-only draft and downloaded a matching package. Anonymous and non-owner preparation/package requests were denied. The server was stopped after the run. Application lifespan hooks were explicitly off; no hosted/browser/cloud recovery claim is made.
+
+An initial attempt with the old saved session failed. Recovery now explicitly signs in again instead of assuming a saved token remains valid indefinitely. This test demonstrates saved-job retrieval after fresh authentication, not old-token validity. Evidence contains no credentials, tokens or database contents. No messages were sent.
