@@ -7,6 +7,8 @@ Never targets shared/production databases — callers must pass a disposable URL
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -57,28 +59,15 @@ def pg_engine():
     assert PG_URL
     _assert_disposable_url(PG_URL)
     eng = create_engine(PG_URL, pool_pre_ping=True)
-    from app.core.nova.growth_agent.schema_ensure import ensure_growth_agent_schema
-
-    # Prefer Alembic when the disposable DB can follow the migration chain;
-    # always finish with additive ORM ensure for the latest tables.
-    alembic_ok = False
-    if os.path.exists("alembic.ini"):
-        try:
-            from alembic import command
-            from alembic.config import Config
-
-            cfg = Config("alembic.ini")
-            cfg.set_main_option("sqlalchemy.url", PG_URL)
-            command.upgrade(cfg, "20261112_nova_ga_retention")
-            alembic_ok = True
-        except Exception as exc:  # noqa: BLE001
-            # Isolated disposable DBs may not have the full prior chain.
-            print(f"alembic upgrade skipped on disposable DB: {exc}")
-    ensured = ensure_growth_agent_schema(bind=eng)
-    assert ensured.get("skipped") is False
-    assert "nova_ga_retention_schedule_runs" in ensured.get("present", [])
-    # Stash for assertions in migration test.
-    eng._nova_ga_alembic_ok = alembic_ok  # type: ignore[attr-defined]
+    # migrations/env.py replaces the Config URL from app.db.session. Use a
+    # fresh process with the explicitly checked disposable URL, and fail if
+    # Alembic fails. ORM create_all must never mask migration failures.
+    migration_env = dict(os.environ, DATABASE_URL=PG_URL)
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "20261114_nova_ga_campaigns"],
+        env=migration_env,
+        check=True,
+    )
     yield eng
     eng.dispose()
 
@@ -119,6 +108,8 @@ def _activate(svc, org: str):
 
 def test_pg_migrations_tables_present(pg_engine):
     with pg_engine.connect() as conn:
+        revisions = set(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
+        assert "20261114_nova_ga_campaigns" in revisions
         tables = {
             r[0]
             for r in conn.execute(
@@ -133,6 +124,7 @@ def test_pg_migrations_tables_present(pg_engine):
     assert "nova_ga_rate_limit_counters" in tables
     assert "nova_ga_worker_heartbeats" in tables
     assert "nova_ga_retention_schedule_runs" in tables
+    assert "nova_ga_campaigns" in tables
 
 
 def test_pg_concurrent_worker_claims(Session, db, monkeypatch):
@@ -177,8 +169,7 @@ def test_pg_concurrent_worker_claims(Session, db, monkeypatch):
         .count()
     )
     # Each job completed at most once across workers.
-    assert sent == total_processed or sent >= 1
-    assert sent <= 6
+    assert sent == total_processed == 6
     still_running = (
         db.query(GaDeliveryAttempt)
         .filter_by(organization_id=org, status="running")

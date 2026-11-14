@@ -42,6 +42,7 @@ OPTIONAL_VARS: dict[str, str] = {
 # ── Runtime state ─────────────────────────────────────────────────────────────
 _startup_report: dict = {} # type: ignore
 _shutdown_requested: bool = False
+_previous_shutdown_handlers: dict = {}
 
 
 def is_shutdown_requested() -> bool:
@@ -53,12 +54,18 @@ def _handle_shutdown(signum: int, frame) -> None: # type: ignore
     global _shutdown_requested
     _shutdown_requested = True
     logger.info("Shutdown signal received (signal %s) — draining requests…", signum)
+    previous = _previous_shutdown_handlers.get(signum)
+    if callable(previous) and previous is not _handle_shutdown:
+        previous(signum, frame)
 
 
 def register_shutdown_handlers() -> None:
     """Register SIGTERM and SIGINT handlers for graceful shutdown."""
-    signal.signal(signal.SIGTERM, _handle_shutdown) # type: ignore
-    signal.signal(signal.SIGINT,  _handle_shutdown) # type: ignore
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous = signal.getsignal(signum)
+        if previous is not _handle_shutdown:
+            _previous_shutdown_handlers[signum] = previous
+        signal.signal(signum, _handle_shutdown) # type: ignore
     logger.info("Shutdown handlers registered (SIGTERM, SIGINT).")
 
 
