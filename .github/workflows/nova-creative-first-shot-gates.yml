@@ -14,6 +14,7 @@ on:
       - "backend/app/core/nova/creative_studio/kling.py"
       - "backend/tests/test_nova_first_shot_spending_limit.py"
       - "backend/tests/test_nova_fal_readonly_diagnostic.py"
+      - "backend/tests/test_nova_fal_diagnostic_http_auth.py"
       - "backend/app/core/nova/creative_studio/fal_diagnostic.py"
       - "backend/tests/test_nova_kling_provider.py"
       - "backend/tests/test_nova_creative_first_shot_readiness.py"
@@ -57,6 +58,7 @@ jobs:
           python -m pytest -q \
             tests/test_nova_first_shot_spending_limit.py \
             tests/test_nova_fal_readonly_diagnostic.py \
+            tests/test_nova_fal_diagnostic_http_auth.py \
             tests/test_nova_kling_provider.py \
             tests/test_nova_creative_first_shot_readiness.py \
             tests/test_nova_creative_first_shot_storage.py \
