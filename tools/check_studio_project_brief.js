@@ -28,7 +28,7 @@ function setup() {
     activeProjectId: null, activeProjectRevision: 0, briefProjectId: null,
     presenterScriptProjectId: null, presenterSavedScriptValue: null, activeProjectKey: 'project',
     $: id => fields[id], localStorage: { setItem() {}, removeItem() {} },
-    updateActiveProjectLabel() {}, renderPreflight() {}, renderProductionReadiness() {},
+    updateActiveProjectLabel() {}, renderPreflight() {}, renderProductionReadiness() {}, clearFirstShotPreview() {},
     api: async (url, options) => { calls.push({url, payload: JSON.parse(options.body)}); return {}; },
     showBanner: (...args) => messages.push(args), renderOutput: row => outputs.push(row),
   });

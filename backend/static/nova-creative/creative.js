@@ -4,6 +4,13 @@
   var activeProjectId = localStorage.getItem(activeProjectKey) || null;
   var activeBrandId = null;
   var projectRowsCache = [];
+  // Keep authenticated blob-backed MP4 previews alive until the asset list is
+  // replaced. Revoking at loadeddata can make Chrome's controls stay at 0:00.
+  var privateVideoPreviewUrls = [];
+  function clearPrivateVideoPreviewUrls() {
+    privateVideoPreviewUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    privateVideoPreviewUrls = [];
+  }
   var activeProjectRevision = 0;
   var presenterScriptProjectId = null;
   var presenterSavedScriptValue = null;
@@ -34,6 +41,23 @@
         if ($(id)) $(id).disabled = true;
       });
       renderPreflight(null);
+      // Inline UI reset keeps isolated legacy project-switching tests intact.
+      currentFirstShotReport = null;
+      currentFirstShotProject = null;
+      if ($("first-shot-explicit-approval")) {
+        $("first-shot-explicit-approval").checked = false;
+        $("first-shot-explicit-approval").disabled = true;
+      }
+      if ($("first-shot-max-cost")) $("first-shot-max-cost").value = "";
+      if ($("submit-first-shot")) $("submit-first-shot").disabled = true;
+      if ($("first-shot-approval-summary")) {
+        $("first-shot-approval-summary").textContent = "Check this project's first shot before any paid submission.";
+      }
+      clearFirstShotPreview();
+      if ($("first-shot-job-result")) $("first-shot-job-result").textContent = "No first-shot job checked for this project yet.";
+      if ($("first-shot-readiness-status")) {
+        $("first-shot-readiness-status").textContent = "Select a project to check the first shot.";
+      }
     }
     activeProjectId = next;
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
@@ -351,6 +375,32 @@
     el.classList.remove("hidden");
     el.classList.toggle("error", !ok);
   }
+  function showCurrentProjectWorkspace(project, focusIt, createdNow) {
+    var panel = $("studio-project-workspace");
+    if (!panel || !project || !project.id) return;
+    var title = String(project.title || "Untitled project");
+    var heading = $("studio-project-workspace-heading");
+    var status = $("studio-project-workspace-status");
+    if (heading) heading.textContent = (createdNow ? "Project created: " : "Current project: ") + title;
+    if (status) status.textContent = "Saved and selected · " + String(project.duration_target || "unspecified") + " seconds · Project ID " + project.id;
+    panel.classList.remove("hidden");
+    if (focusIt) {
+      panel.scrollIntoView({ behavior: "auto", block: "start" });
+      panel.focus({ preventScroll: true });
+    }
+  }
+
+  var continueProjectButton = $("studio-project-workspace-continue");
+  if (continueProjectButton) {
+    continueProjectButton.addEventListener("click", function () {
+      var brief = $("brief-form");
+      if (!brief) return;
+      brief.scrollIntoView({ behavior: "auto", block: "start" });
+      var topic = $("brief-topic");
+      if (topic && !topic.disabled) topic.focus({ preventScroll: true });
+    });
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -1096,6 +1146,12 @@
       });
     }
     updateActiveProjectLabel();
+    var activeRow = rows.find(function (row) { return row.id === activeProjectId; });
+    if (activeRow) {
+      showCurrentProjectWorkspace(activeRow, false, false);
+    } else if ($("studio-project-workspace")) {
+      $("studio-project-workspace").classList.add("hidden");
+    }
     return rows;
   }
   async function refreshBrands() {
@@ -1465,6 +1521,7 @@
 
   async function refreshAssets() {
     if (!activeProjectId) {
+      clearPrivateVideoPreviewUrls();
       $("asset-list").innerHTML = "<p class=\"hint\">Select a project.</p>";
       refreshDrama(null);
       renderProductionReadiness(null);
@@ -1493,6 +1550,7 @@
     if ($("image-aspect") && production.image_aspect) $("image-aspect").value = production.image_aspect;
     refreshDrama(detail);
     renderProductionReadiness(detail);
+    clearPrivateVideoPreviewUrls();
     $("asset-list").innerHTML = (detail.assets || []).map(function (row) {
       var media = "";
       var mediaAvailable = row.media_available !== false;
@@ -1561,7 +1619,7 @@
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + licenseNote + downloadControl + captionControl;
+          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button> <button type=\"button\" class=\"secondary private-video-inspect\">Inspect saved MP4 format (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p><p class=\"hint private-video-inspection\" role=\"status\" aria-live=\"polite\"></p></div>" : "") + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
@@ -1606,7 +1664,100 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list [data-private-video-url]"), function (video) {
       var projectId = activeProjectId;
-      (async function () {
+      var container = video.parentElement && video.parentElement.parentElement;
+      var status = container && container.querySelector(".private-video-status");
+      var playButton = container && container.querySelector(".private-video-retry");
+      var inspectButton = container && container.querySelector(".private-video-inspect");
+      var inspectStatus = container && container.querySelector(".private-video-inspection");
+      var loadedPrivateBlob = null;
+      if (inspectButton) inspectButton.addEventListener("click", async function () {
+        if (inspectButton.disabled || projectId !== activeProjectId) return;
+        inspectButton.disabled = true;
+        if (inspectStatus) inspectStatus.textContent = "Inspecting saved MP4 format without changing media…";
+        try {
+          var fileUrl = video.getAttribute("data-private-video-url") || "";
+          if (!/\/file$/.test(fileUrl)) throw new Error("Saved asset path unavailable");
+          var inspectUrl = fileUrl.replace(/\/file$/, "/browser-compatibility");
+          assertDownloadUrlHasNoToken(inspectUrl);
+          var shared = session();
+          var headers = {};
+          if (token()) headers.Authorization = "Bearer " + token();
+          var response = shared && typeof shared.authFetch === "function"
+            ? await shared.authFetch(inspectUrl, {method: "GET", headers: headers})
+            : await fetch(inspectUrl, {method: "GET", headers: headers});
+          if (!response.ok) throw new Error("inspection unavailable (HTTP " + response.status + ")");
+          var report = await response.json();
+          if (projectId !== activeProjectId || !$("asset-list").contains(video)) return;
+          var facts = [
+            "Video: " + (report.video_codec || "unknown"),
+            "profile: " + (report.video_profile || "unknown"),
+            "pixels: " + (report.video_pixel_format || "unknown"),
+            "level: " + (report.video_level || "unknown"),
+            "audio: " + (report.audio_codec || "none"),
+            "duration: " + (report.duration_seconds || "unknown") + "s",
+            "MP4 atoms: " + (report.mp4_structure_complete ? "complete" : "incomplete") +
+              ", moov: " + (report.mp4_has_moov ? "yes" : "no") +
+              ", mdat: " + (report.mp4_has_mdat ? "yes" : "no") +
+              ", faststart: " + (report.mp4_faststart ? "yes" : "no") +
+              ", fragmented: " + (report.mp4_fragmented ? "yes" : "no")
+          ];
+          var integrity = "Browser byte integrity: not checked (load saved video first).";
+          if (loadedPrivateBlob && report.source_sha256 && window.crypto && crypto.subtle) {
+            var bytes = await loadedPrivateBlob.arrayBuffer();
+            var digest = await crypto.subtle.digest("SHA-256", bytes);
+            var hex = Array.from(new Uint8Array(digest)).map(function (n) {
+              return n.toString(16).padStart(2, "0");
+            }).join("");
+            var sizeMatches = Number(report.size_bytes) === loadedPrivateBlob.size;
+            integrity = "Browser bytes: " + (sizeMatches && hex === report.source_sha256 ? "MATCH original saved MP4" : "MISMATCH original saved MP4") +
+              " (size " + loadedPrivateBlob.size + " / " + report.size_bytes + ").";
+          }
+          if (projectId !== activeProjectId || !$("asset-list").contains(video)) return;
+          var warnings = Array.isArray(report.browser_compatibility_warnings)
+            ? report.browser_compatibility_warnings : [];
+          if (inspectStatus) inspectStatus.textContent = facts.join(" | ") +
+            (warnings.length ? " | Warnings: " + warnings.join("; ") : " | No common codec incompatibility detected.") +
+            " | " + integrity + " Original unchanged; browser playback still requires verification.";
+        } catch (err) {
+          if (inspectStatus && projectId === activeProjectId)
+            inspectStatus.textContent = "Inspection unavailable: " + (err && err.message || "unknown error") +
+              ". Original video unchanged.";
+        } finally {
+          inspectButton.disabled = false;
+        }
+      });
+      var loading = false;
+      function previewStatus(message) {
+        if (status) status.textContent = message;
+      }
+      video.addEventListener("loadedmetadata", function () {
+        previewStatus("Video ready: " + (isFinite(video.duration) ? Math.round(video.duration) + " seconds" : "duration unknown") + ". Press Play.");
+      });
+      video.addEventListener("error", function () {
+        var mediaError = video.error;
+        var mediaCode = mediaError && mediaError.code;
+        var descriptions = {
+          1: "playback was aborted",
+          2: "a network error interrupted media loading",
+          3: "the browser failed to decode the video",
+          4: "the media format or source is unsupported"
+        };
+        var cause = descriptions[mediaCode] || "an unknown media error occurred";
+        previewStatus("Saved MP4 playback failed: " + cause + " (media code " +
+          (mediaCode || "none") + ", network state " + video.networkState +
+          ", ready state " + video.readyState +
+          "). Your original remains saved; Download AI video is still available.");
+      });
+      async function loadPrivatePreview(startPlayback) {
+        if (loading) return;
+        // A normal click can start playback without refetching an already-loaded blob.
+        if (startPlayback && video.src && video.readyState >= 1) {
+          try { await video.play(); } catch (err) { if (!video.error) previewStatus("Playback request failed (" + (err && err.name || "unknown") + "). Your saved original remains available for download."); }
+          return;
+        }
+        loading = true;
+        if (playButton) playButton.disabled = true;
+        previewStatus("Loading saved MP4 securely…");
         try {
           var path = video.getAttribute("data-private-video-url");
           assertDownloadUrlHasNoToken(path);
@@ -1616,19 +1767,36 @@
           var response = shared && typeof shared.authFetch === "function"
             ? await shared.authFetch(path, {method: "GET", headers: headers})
             : await fetch(path, {method: "GET", headers: headers});
-          if (!response.ok || !(response.headers.get("content-type") || "").startsWith("video/")) {
-            throw new Error("Private video preview unavailable");
-          }
+          var mediaType = response.headers && response.headers.get("content-type") || "";
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          if (!mediaType.startsWith("video/")) throw new Error("Unexpected media content type");
           var blob = await response.blob();
           if (activeProjectId !== projectId || !$("asset-list").contains(video)) return;
+          if (!blob.size || (blob.type && !blob.type.startsWith("video/"))) {
+            throw new Error("Empty or unsupported private video preview");
+          }
+          loadedPrivateBlob = blob;
           var objectUrl = URL.createObjectURL(blob);
+          privateVideoPreviewUrls.push(objectUrl);
           video.src = objectUrl;
-          video.addEventListener("loadeddata", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
-          video.addEventListener("error", function () { URL.revokeObjectURL(objectUrl); }, {once: true});
+          video.load();
+          // Do not revoke the blob after loadeddata: playback and seeking still need it.
+          previewStatus("MP4 received (" + Math.round(blob.size / 1024) + " KB). Loading video metadata…");
+          if (startPlayback) {
+            try { await video.play(); } catch (err) {
+              if (!video.error) previewStatus("MP4 received, but playback request failed (" + (err && err.name || "unknown") + "). Your saved original remains available for download.");
+            }
+          }
         } catch (err) {
+          previewStatus("Preview unavailable (" + (err && err.message || "media error") + "). The protected Download AI video button remains available.");
           video.setAttribute("aria-label", "Private preview unavailable; use authenticated Download button");
+        } finally {
+          loading = false;
+          if (playButton) playButton.disabled = false;
         }
-      })();
+      }
+      if (playButton) playButton.addEventListener("click", function () { loadPrivatePreview(true); });
+      loadPrivatePreview(false);
     });
     Array.prototype.forEach.call(document.querySelectorAll("#asset-list .presenter-caption-video"), function (video) {
       var caption = video.parentElement && video.parentElement.querySelector(".presenter-live-caption");
@@ -1847,6 +2015,336 @@
       }
     }
     throw new Error("Final promo is still rendering. Refresh this page in a minute to check the finished video.");
+  }
+
+  var currentFirstShotReport = null;
+  var currentFirstShotProject = null;
+  var firstShotSubmitting = false;
+
+  function resetFirstShotSubmission() {
+    currentFirstShotReport = null;
+    currentFirstShotProject = null;
+    var approval = $("first-shot-explicit-approval");
+    var submit = $("submit-first-shot");
+    var summary = $("first-shot-approval-summary");
+    if (approval) { approval.checked = false; approval.disabled = true; }
+    if (submit) submit.disabled = true;
+    if (summary) summary.textContent = "The controlled five-second render is not authorized. Check the first shot and confirm its specific cost first.";
+  }
+
+  function refreshFirstShotSubmitButton() {
+    var approval = $("first-shot-explicit-approval");
+    var submit = $("submit-first-shot");
+    if (!submit) return;
+    var maximum = Number($("first-shot-max-cost") && $("first-shot-max-cost").value);
+    submit.disabled = firstShotSubmitting || !approval || !approval.checked
+      || !Number.isFinite(maximum) || maximum <= 0 || maximum > 1
+      || !currentFirstShotReport || currentFirstShotReport.status !== "READY_TO_REQUEST"
+      || !currentFirstShotReport.reference_image_asset_id
+      || !latestPreflight || latestPreflight.owner_budget_confirmed !== true
+      || currentFirstShotProject !== activeProjectId;
+  }
+
+  function renderFirstShotReadiness(report) {
+    var el = $("first-shot-readiness-status");
+    if (!el) return;
+    if (!report) {
+      resetFirstShotSubmission();
+      el.textContent = "Select a project to check the first shot.";
+      return;
+    }
+    var blockers = Array.isArray(report.blockers) ? report.blockers : [];
+    var explanations = {
+      STORYBOARD_REQUIRED: "Create the storyboard for this project.",
+      FIRST_SCENE_PROMPT_REQUIRED: "Add visual direction to the first scene.",
+      FIRST_SCENE_NOT_FIVE_SECONDS: "Set the first storyboard shot to exactly five seconds.",
+      MULTI_SCENE_PROJECT_NOT_SINGLE_SHOT: "This project has multiple scenes. Use a dedicated one-scene project for the first controlled five-second test.",
+      FIRST_SCENE_REFERENCE_IMAGE_REQUIRED: "Create and save a matching first-scene reference image.",
+      VIDEO_PROVIDER_NOT_AVAILABLE: "Video provider is not ready; check credentials and owner activation.",
+      DURABLE_SHOT_CLAIM_REQUIRED: "A shared durable database claim is needed to prevent duplicate paid video submissions. This staging configuration cannot submit the shot.",
+      BUDGET_CONFIRMATION_REQUIRED: "Run the separate price preflight and confirm a budget before paid rendering."
+    };
+    var lines = [
+      "Shot target: 5 seconds (provider duration not yet verified)",
+      "Readiness: " + String(report.status || "UNKNOWN"),
+      "Provider: " + String(report.provider_status || "UNKNOWN"),
+      "Generation started: NO · Charges made by this check: NONE"
+    ];
+    if (!blockers.length) lines.push("All reported preconditions are met. Use the separately owner-gated Generate action; this does not verify finished footage.");
+    blockers.forEach(function (code) {
+      lines.push("Needs attention: " + (explanations[code] || String(code)));
+    });
+    el.innerHTML = lines.map(function (line) {
+      return "<div>" + escapeHtml(line) + "</div>";
+    }).join("");
+    var approval = $("first-shot-explicit-approval");
+    var summary = $("first-shot-approval-summary");
+    var ready = report.status === "READY_TO_REQUEST" && blockers.length === 0
+      && !!report.reference_image_asset_id && report.scene_count === 1
+      && !!latestPreflight && latestPreflight.owner_budget_confirmed === true;
+    if (approval) { approval.checked = false; approval.disabled = !ready; }
+    if (summary) summary.textContent = ready
+      ? "Reference image: " + String(report.reference_image_asset_id)
+        + ". Project planning estimate: $" + String(latestPreflight.estimated_total_usd)
+        + " USD (may include more than one service). Verify the exact one-shot provider price before approval."
+      : "Paid submission blocked. Resolve the listed issues, run and confirm this project\u0027s price preflight, then check the shot again.";
+    refreshFirstShotSubmitButton();
+  }
+
+  var falDiagnosticBtn = $("run-fal-diagnostic");
+  if (falDiagnosticBtn) {
+    falDiagnosticBtn.addEventListener("click", async function () {
+      var result = $("fal-diagnostic-result");
+      falDiagnosticBtn.disabled = true;
+      if (result) result.textContent = "Checking fal pricing API connection without generating video...";
+      try {
+        var report = await api("/api/nova/creative/fal-first-shot-diagnostic");
+        if (result) {
+          var lines = [
+            "Server credential present: " + (report.key_present ? "yes" : "no"),
+            "Pricing API authentication: " + String(report.key_authenticated || "UNVERIFIED"),
+            "Model generation permission: " + String(report.model_authorized || "UNVERIFIED"),
+            "Account balance: " + String(report.account_balance || "UNVERIFIED"),
+            "Five-second pricing: " + (report.price_status === "VERIFIED_FOR_PRICING_API"
+              ? "$" + String(report.price_usd_five_seconds) + " USD (pricing API only)"
+              : "UNVERIFIED"),
+            "Blockers: " + ((report.blockers || []).join(", ") || "none reported"),
+            "No video generated, no purchase submitted."
+          ];
+          result.textContent = lines.join("\n");
+          result.style.whiteSpace = "pre-line";
+        }
+      } catch (err) {
+        if (result) result.textContent = (err.message || "Read-only connection check failed.") + " No paid generation submitted.";
+      } finally {
+        falDiagnosticBtn.disabled = false;
+      }
+    });
+  }
+
+  var firstShotReadinessBtn = $("run-first-shot-readiness");
+  if (firstShotReadinessBtn) {
+    firstShotReadinessBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project before checking its first video shot.", false);
+        return;
+      }
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
+      firstShotReadinessBtn.disabled = true;
+      var status = $("first-shot-readiness-status");
+      if (status) status.textContent = "Checking first-shot requirements without provider submission...";
+      try {
+        var report = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/first-shot-readiness");
+        if (projectId !== activeProjectId || revision !== activeProjectRevision) return;
+        currentFirstShotReport = report;
+        currentFirstShotProject = projectId;
+        renderFirstShotReadiness(report);
+      } catch (err) {
+        if (projectId === activeProjectId && revision === activeProjectRevision && status) {
+          status.textContent = err.message || "First-shot readiness could not be checked.";
+        }
+      } finally {
+        firstShotReadinessBtn.disabled = false;
+      }
+    });
+  }
+
+  var firstShotApproval = $("first-shot-explicit-approval");
+  if (firstShotApproval) firstShotApproval.addEventListener("change", refreshFirstShotSubmitButton);
+  if ($("first-shot-max-cost")) $("first-shot-max-cost").addEventListener("input", refreshFirstShotSubmitButton);
+  var singleShotSubmit = $("submit-first-shot");
+  if (singleShotSubmit) {
+    singleShotSubmit.addEventListener("click", async function () {
+      var report = currentFirstShotReport;
+      var projectId = activeProjectId;
+      var revision = activeProjectRevision;
+      if (firstShotSubmitting || !projectId || currentFirstShotProject !== projectId ||
+          !report || report.status !== "READY_TO_REQUEST" ||
+          !report.reference_image_asset_id || !firstShotApproval || !firstShotApproval.checked) {
+        showBanner("Run the free readiness check and explicitly approve the selected shot.", false);
+        return;
+      }
+      // The backend revalidates all requirements and holds the shared SQL claim.
+      var limitInput = $("first-shot-max-cost");
+      var maxCost = Number(limitInput && limitInput.value);
+      if (!Number.isFinite(maxCost) || maxCost <= 0 || maxCost > 1) {
+        showBanner("Enter the approved maximum price, greater than $0 and no more than $1.", false);
+        return;
+      }
+      firstShotSubmitting = true;
+      refreshFirstShotSubmitButton();
+      var resultBox = $("first-shot-submit-status");
+      if (resultBox) resultBox.textContent = "Submitting the single authorized video request...";
+      try {
+        var response = await api("/api/nova/creative/projects/" + encodeURIComponent(projectId) + "/generate/first-shot", {
+          method: "POST",
+          body: JSON.stringify({
+            confirm_paid_generation: true,
+            max_cost_usd: maxCost,
+            reference_image_asset_id: report.reference_image_asset_id
+          })
+        });
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
+        if (resultBox) resultBox.textContent =
+          "Single-shot job queued: " + String((response.job || {}).id || "unknown")
+          + ". Check saved jobs and assets for the result. Do not resubmit.";
+        currentFirstShotReport = null;
+        if (firstShotApproval) { firstShotApproval.checked = false; firstShotApproval.disabled = true; }
+        showBanner("One controlled shot queued. No automatic retry or further shots.", true);
+      } catch (err) {
+        if (activeProjectId !== projectId || activeProjectRevision !== revision) return;
+        if (resultBox) resultBox.textContent = (err.message || "Unable to submit.")
+          + " If a provider request may have started, reconcile the saved job before trying again.";
+        if (firstShotApproval) { firstShotApproval.checked = false; firstShotApproval.disabled = true; }
+        currentFirstShotReport = null;
+      } finally {
+        firstShotSubmitting = false;
+        refreshFirstShotSubmitButton();
+      }
+    });
+  }
+
+  var firstShotPreviewUrl = null;
+  function clearFirstShotPreview() {
+    if (firstShotPreviewUrl) {
+      URL.revokeObjectURL(firstShotPreviewUrl);
+      firstShotPreviewUrl = null;
+    }
+  }
+
+  function renderFirstShotJobResult(detail, selectedProject) {
+    var el = $("first-shot-job-result");
+    if (!el) return;
+    clearFirstShotPreview();
+    el.replaceChildren();
+    if (!detail || !selectedProject) {
+      el.textContent = "Select a project to check its saved first-shot job.";
+      return;
+    }
+    var jobs = (detail.jobs || []).filter(function (row) {
+      return row.kind === "first_shot_video";
+    });
+    if (!jobs.length) {
+      el.textContent = "No controlled five-second shot has been submitted for this project.";
+      return;
+    }
+    // An existing controlled job is never an invitation to generate another.
+    // Make the owner review the current job instead of leaving a stale
+    // approval checkbox enabled on this project.
+    currentFirstShotReport = null;
+    var approvalBox = $("first-shot-explicit-approval");
+    if (approvalBox) { approvalBox.checked = false; approvalBox.disabled = true; }
+    refreshFirstShotSubmitButton();
+    var job = jobs[0];
+    var status = String(job.status || "UNKNOWN").toUpperCase();
+    var line = document.createElement("div");
+    line.textContent = "Controlled shot " + String(job.id || "") + " — " + status
+      + ". " + String(job.message || "");
+    el.appendChild(line);
+    var linkedIds = Array.isArray(job.result_asset_ids) ? job.result_asset_ids : [];
+    var video = (detail.assets || []).find(function (asset) {
+      // Provider CDN URLs can be previewable but are not necessarily present
+      // in Nova's authenticated file endpoint. Offer secure playback only for
+      // files persisted under Nova-controlled storage.
+      var url = String(asset.url || "");
+      var ownedStorage = url.indexOf("/media/nova-creative/") === 0
+        || url.indexOf("private-studio-s3://") === 0;
+      return linkedIds.indexOf(asset.id) >= 0 && asset.kind === "video"
+        && asset.status === "GENERATED" && ownedStorage
+        && asset.media_available === true;
+    });
+    if (status !== "GENERATED" || !video) {
+      var note = document.createElement("div");
+      note.textContent = status === "GENERATED"
+        ? "Job completed but no verified saved MP4 is available. Check protected storage before approving the shot."
+        : (status === "ERROR" || status === "FAILED"
+          ? "Review the saved job and provider usage. Do not submit again automatically."
+          : "No completed verified video yet. This status check does not start or retry generation.");
+      el.appendChild(note);
+      return;
+    }
+    var link = document.createElement("button");
+    link.type = "button";
+    link.className = "secondary";
+    link.textContent = "Download saved five-second shot";
+    link.addEventListener("click", async function () {
+      link.disabled = true;
+      try {
+        await downloadProtectedAsset(
+          "/api/nova/creative/projects/" + encodeURIComponent(selectedProject)
+          + "/assets/" + encodeURIComponent(video.id) + "/file",
+          "nova-five-second-shot.mp4"
+        );
+        showBanner("Saved video downloaded. Review actual motion and mobile playback before approval.", true);
+      } catch (err) {
+        showBanner(err.message || "Saved shot download failed.", false);
+      } finally {
+        link.disabled = false;
+      }
+    });
+    el.appendChild(link);
+    var play = document.createElement("button");
+    play.type = "button";
+    play.className = "secondary";
+    play.textContent = "Play saved five-second shot securely";
+    play.addEventListener("click", async function () {
+      var projectAtClick = activeProjectId;
+      var revisionAtClick = activeProjectRevision;
+      if (projectAtClick !== selectedProject) return;
+      play.disabled = true;
+      try {
+        var clip = await fetchProtectedStudioVideo(selectedProject, video.id);
+        if (projectAtClick !== activeProjectId ||
+            revisionAtClick !== activeProjectRevision || !el.isConnected) return;
+        clearFirstShotPreview();
+        var preview = document.createElement("video");
+        preview.controls = true;
+        preview.playsInline = true;
+        preview.preload = "metadata";
+        preview.style.width = "100%";
+        preview.style.maxWidth = "640px";
+        preview.setAttribute("aria-label", "Saved five-second Nova Creative Studio video");
+        firstShotPreviewUrl = URL.createObjectURL(clip);
+        preview.src = firstShotPreviewUrl;
+        el.appendChild(preview);
+        showBanner("Video loaded. Inspect movement, continuity and playback before accepting the shot.", true);
+      } catch (err) {
+        if (projectAtClick === activeProjectId)
+          showBanner(err.message || "Protected video preview unavailable.", false);
+      } finally {
+        play.disabled = false;
+      }
+    });
+    el.appendChild(play);
+    var note = document.createElement("div");
+    note.textContent = "Saved MP4 available; review in the project asset gallery. Technical availability does not prove natural acting or smooth phone playback.";
+    el.appendChild(note);
+  }
+
+  var firstShotResultBtn = $("first-shot-check-result");
+  if (firstShotResultBtn) {
+    firstShotResultBtn.addEventListener("click", async function () {
+      if (!activeProjectId) {
+        showBanner("Select a project to check its first-shot result.", false);
+        return;
+      }
+      var selected = activeProjectId;
+      var revision = activeProjectRevision;
+      firstShotResultBtn.disabled = true;
+      var target = $("first-shot-job-result");
+      if (target) target.textContent = "Checking the saved job; no provider generation will be started...";
+      try {
+        var detail = await api("/api/nova/creative/projects/" + encodeURIComponent(selected));
+        if (selected !== activeProjectId || revision !== activeProjectRevision) return;
+        renderFirstShotJobResult(detail, selected);
+      } catch (err) {
+        if (selected === activeProjectId && revision === activeProjectRevision && target)
+          target.textContent = err.message || "Unable to check saved video status.";
+      } finally {
+        firstShotResultBtn.disabled = false;
+      }
+    });
   }
 
   function renderPreflight(quote) {
@@ -2460,7 +2958,12 @@
     var imageAspect = $("image-aspect");
     var presenterOutput = $("presenter-output-preset");
     var duration = $("project-duration");
-    if (preset === "social_square") {
+    if (preset === "five_second_test") {
+      if (platform) platform.value = "TikTok";
+      if (imageAspect) imageAspect.value = "9:16";
+      if (presenterOutput) presenterOutput.value = "9:16";
+      if (duration) duration.value = "5";
+    } else if (preset === "social_square") {
       if (platform) platform.value = "Instagram";
       if (imageAspect) imageAspect.value = "1:1";
       if (presenterOutput) presenterOutput.value = "1:1";
@@ -2547,10 +3050,17 @@
           brand_profile_id: activeBrandId
         })
       });
+      // The POST already succeeded. Always open the new project immediately,
+      // even if a later list/assets refresh temporarily fails.
       setActiveProjectId(row.id);
-      showBanner("Project created", true);
-      await refreshProjects();
-      await refreshAssets();
+      showBanner("Project created and opened: " + row.title + ". Continue to the Content Brief below.", true);
+      showCurrentProjectWorkspace(row, true, true);
+      try {
+        await refreshProjects();
+        await refreshAssets();
+      } catch (refreshErr) {
+        showBanner("Project saved: " + row.title + ". Project details did not fully reload; select it in Project history if needed.", true);
+      }
     } catch (err) {
       showBanner(err.message || "Project create failed.", false);
     } finally {

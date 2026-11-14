@@ -156,6 +156,43 @@
       </div>
     </section>
 
+    <section class="card" aria-label="First five-second film shot readiness">
+      <h2>First five-second film shot — readiness only</h2>
+      <p class="hint">Select an existing project, then check its first storyboard scene, matching source image,
+        video provider and budget status. This does not generate video, activate paid providers,
+        confirm a budget or prove acting quality. The existing Generate action is separate.</p>
+      <div class="card" aria-label="fal connection diagnostic">
+        <h3>fal/Kling connection check (free)</h3>
+        <p class="hint">Checks only the configured server-side key against fal's pricing API. Does not enable video, submit a shot, buy credits, or establish account balance or model-generation permission.</p>
+        <button type="button" class="secondary" id="run-fal-diagnostic">Check fal connection (free)</button>
+        <div class="hint" id="fal-diagnostic-result" role="status" aria-live="polite">Not checked. No provider request submitted.</div>
+      </div>
+      <div id="first-shot-readiness-status" class="hint" role="status" aria-live="polite">Select a project to check the first shot.</div>
+      <div class="actions wrap">
+        <button type="button" id="run-first-shot-readiness" class="secondary">Check first shot (free)</button>
+      </div>
+      <div class="hint" id="first-shot-approval-summary">
+        Controlled Kling submission is disabled until all requirements are checked for this project.
+        The separate quote may estimate multiple scene/services; verify the exact cost before authorizing a paid shot.
+      </div>
+      <label class="wide">
+        <input id="first-shot-explicit-approval" type="checkbox" disabled />
+        I authorize one potentially billable five-second Kling shot for the selected project and reference image. No auto-retries or additional shots.
+      </label>
+      <div class="actions wrap">
+        <label>Maximum price for this one shot (USD, up to $1)
+          <input id="first-shot-max-cost" type="number" min="0.01" max="1" step="0.01" placeholder="Enter your limit" />
+        </label>
+        <p class="hint">The current provider price must fit this limit before submission. Unknown pricing blocks generation. No automatic retries, alternate models, or top-ups. This check is not a guarantee of the provider's final invoice.</p>
+        <button type="button" id="submit-first-shot" disabled>Generate one approved five-second shot</button>
+      </div>
+      <div class="hint" id="first-shot-submit-status" role="status" aria-live="polite">No controlled generation submitted.</div>
+      <div class="actions wrap">
+        <button type="button" id="first-shot-check-result" class="secondary">Check shot result (free)</button>
+      </div>
+      <div id="first-shot-job-result" class="hint" role="status" aria-live="polite">No first-shot job checked yet.</div>
+    </section>
+
     <section class="card" aria-label="Brand profile">
       <h2>Brand profile</h2>
       <form id="brand-form" class="grid">
@@ -191,6 +228,7 @@
         </label>
         <label>Production preset
           <select id="production-preset">
+            <option value="five_second_test">5s original motion test · single scene (planning only)</option>
             <option value="vertical_short" selected>30s vertical commercial · Reels / TikTok / Shorts</option>
             <option value="social_square">Social feed square</option>
             <option value="youtube_web">YouTube / web / demo</option>
@@ -210,6 +248,7 @@
         </label>
         <label>Duration
           <select id="project-duration">
+            <option value="5">5</option>
             <option value="15">15</option>
             <option value="30" selected>30</option>
             <option value="60">60</option>
@@ -223,6 +262,16 @@
           <button type="button" id="project-save-settings" class="secondary">Save active project settings</button>
         </div>
       </form>
+    </section>
+
+    <section class="card hidden" id="studio-project-workspace" aria-label="Current project workspace" tabindex="-1" role="region">
+      <h2 id="studio-project-workspace-heading">Your project is ready</h2>
+      <p id="studio-project-workspace-status" role="status">Project saved and selected.</p>
+      <p class="hint">Next: fill in the Content Brief below, save it, and generate the one-scene storyboard. No video render or charge starts when you create a project.</p>
+      <div class="actions">
+        <button type="button" id="studio-project-workspace-continue">Continue to Content Brief</button>
+        <a href="#studio-project-history" class="button secondary">Browse saved projects</a>
+      </div>
     </section>
 
     <section class="card" aria-label="Content brief">
@@ -435,7 +484,7 @@
       });
     });
   </script>
-  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope-calendar"></script>
+  <script src="/static/nova-creative/creative.js?v=project-open-after-create-20261113"></script>
   <script src="/static/nova-creative/calendar.js?v=20261108"></script>
 </body>
 </html>

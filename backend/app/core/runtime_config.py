@@ -10,13 +10,18 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("amicor.runtime_config")
 
-# Required at runtime; absence = critical degradation
+# Database configuration is either PostgreSQL (DATABASE_URL) or a readable
+# SQLite database file (DB_FILENAME or the same app-default path as session.py).
+# Never demand PostgreSQL for an intentionally SQLite-backed staging service.
 _REQUIRED_VARS: tuple[str, ...] = ("DATABASE_URL",)
+_DEFAULT_SQLITE_PATH = Path(__file__).resolve().parents[2] / "data" / "chat.db"
 
 # Optional; absence = degraded but non-fatal
 _OPTIONAL_VARS: tuple[str, ...] = (
@@ -31,6 +36,21 @@ _OPTIONAL_VARS: tuple[str, ...] = (
 _SECRET_VARS: frozenset[str] = frozenset({"OPENAI_API_KEY", "DATABASE_URL"})
 
 
+def _explicit_sqlite_is_readable() -> bool:
+    """Check the configured or app-default SQLite file without creating it."""
+    filename = os.environ.get("DB_FILENAME", "").strip()
+    try:
+        path = Path(filename) if filename else _DEFAULT_SQLITE_PATH
+        if not path.is_file():
+            return False
+        # SQLite read-only URI prevents accidentally creating an empty file.
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2) as conn:
+            conn.execute("SELECT 1").fetchone()
+        return True
+    except (OSError, sqlite3.Error, ValueError):
+        return False
+
+
 def validate_runtime_config() -> dict[str, Any]:
     """
     Validate runtime environment variables.
@@ -40,6 +60,7 @@ def validate_runtime_config() -> dict[str, Any]:
         "app_env": str,
         "debug": bool,
         "has_database_url": bool,
+        "has_sqlite_database": bool,
         "has_redis_url": bool,
         "has_openai_api_key": bool,
         "supervision_log_retention_days": int,
@@ -52,8 +73,9 @@ def validate_runtime_config() -> dict[str, Any]:
     missing_required: list[str] = []
     missing_optional: list[str] = []
 
+    sqlite_ready = _explicit_sqlite_is_readable() if not os.environ.get("DATABASE_URL", "").strip() else False
     for var in _REQUIRED_VARS:
-        if not os.environ.get(var, "").strip():
+        if not os.environ.get(var, "").strip() and not (var == "DATABASE_URL" and sqlite_ready):
             missing_required.append(var)
 
     for var in _OPTIONAL_VARS:
@@ -96,6 +118,7 @@ def validate_runtime_config() -> dict[str, Any]:
         "app_env": app_env,
         "debug": debug,
         "has_database_url": bool(os.environ.get("DATABASE_URL", "").strip()),
+        "has_sqlite_database": sqlite_ready,
         "has_redis_url": bool(os.environ.get("REDIS_URL", "").strip()),
         "has_openai_api_key": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
         "supervision_log_retention_days": retention_days,

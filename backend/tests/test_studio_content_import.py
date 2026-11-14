@@ -70,15 +70,175 @@ def test_authenticated_mp4_upload_and_download_roundtrip(studio, tmp_path, monke
     result=response.json(); asset=result['asset']
     assert not result['paid_request_submitted']
     assert not asset['metadata']['publish_ready']
+    assert asset['metadata']['video_codec'] == 'h264'
+    assert asset['metadata']['video_pixel_format'] in {'yuv420p', 'yuvj420p'}
+    assert isinstance(asset['metadata']['video_profile'], str)
+    assert isinstance(asset['metadata']['video_level'], int)
+    assert asset['metadata']['browser_compatibility_warnings'] == []
     download=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file')
     assert download.status_code==200
     assert download.content==data
+    jobs_before=[job.id for job in service.store.list_jobs(pid, 'owner')]
+    assets_before=[row.id for row in service.store.list_assets(pid, 'owner')]
+    inspection=client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/browser-compatibility')
+    assert inspection.status_code==200,inspection.text
+    assert inspection.json()['read_only']
+    assert inspection.json()['video_codec']=='h264'
+    assert inspection.json()['duration_seconds'] > 0
+    assert inspection.json()['browser_playback_verified'] is False
+    import hashlib
+    assert inspection.json()['source_sha256'] == hashlib.sha256(data).hexdigest()
+    assert inspection.json()['size_bytes'] == len(data)
+    assert inspection.json()['mp4_structure_complete'] is True
+    assert inspection.json()['mp4_has_ftyp'] is True
+    assert inspection.json()['mp4_has_moov'] is True
+    assert inspection.json()['mp4_has_mdat'] is True
+    assert isinstance(inspection.json()['mp4_faststart'], bool)
+    assert [job.id for job in service.store.list_jobs(pid, 'owner')] == jobs_before
+    assert [row.id for row in service.store.list_assets(pid, 'owner')] == assets_before
     duplicate=client.post(url,files={'file':('again.mp4',data,'video/mp4')})
     assert duplicate.json()['reused']
     assert duplicate.json()['asset']['id']==asset['id']
     assert client.post(url,files={'file':('broken.mp4',b'broken','video/mp4')}).status_code==422
     user.user_id='other'
     assert client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/file').status_code==404
+    assert client.get('/api/nova/creative/projects/'+pid+'/assets/'+asset['id']+'/browser-compatibility').status_code==404
     assert client.post(url,files={'file':('other.mp4',data,'video/mp4')}).status_code==404
     app.dependency_overrides.pop(router_module.get_current_user_context)
     assert client.post(url,files={'file':('unauth.mp4',data,'video/mp4')}).status_code in {401,403}
+
+
+
+def test_free_first_shot_preflight_reports_non_durable_store_without_paid_request(studio, monkeypatch):
+    service, pid = studio
+    router_module = importlib.import_module('app.core.nova.creative_studio.router')
+    app = FastAPI()
+    app.include_router(router_module.router)
+    monkeypatch.setattr(router_module, 'get_service', lambda db: service)
+    user = SimpleNamespace(user_id='owner', email='studio-test@example.invalid')
+    app.dependency_overrides[router_module.get_current_user_context] = lambda: user
+    app.dependency_overrides[router_module.require_nova_access] = lambda: None
+    app.dependency_overrides[router_module.get_db] = lambda: None
+    response = TestClient(app).get('/api/nova/creative/projects/' + pid + '/first-shot-readiness')
+    assert response.status_code == 200, response.text
+    report = response.json()
+    assert report['status'] == 'BLOCKED'
+    assert 'DURABLE_SHOT_CLAIM_REQUIRED' in report['blockers']
+    assert report['generation_submitted'] is False
+    assert report['provider_charge_incurred'] is False
+    user.user_id = 'other'
+    denied = TestClient(app).get('/api/nova/creative/projects/' + pid + '/first-shot-readiness')
+    assert denied.status_code == 404
+
+
+
+def test_five_second_project_builds_exact_one_scene_without_paid_media(studio):
+    from app.core.nova.creative_studio.generation import assemble_short_video
+    service, original_pid = studio
+    original = service.get_project('owner', original_pid)
+    new_project = service.create_project('owner', {
+        'title': 'AMICOR First 5-Second Movie Test',
+        'project_type': 'short_video',
+        'platform': 'TikTok',
+        'duration_target': 5,
+        'objective': 'One original five-second moving presenter scene',
+    })
+    assert new_project['duration_target'] == 5
+    assert service.get_project('owner', original_pid)['project']['duration_target'] == original['project']['duration_target']
+    service.create_brief('owner', {
+        'project_id': new_project['id'],
+        'topic': 'AMICOR first motion acceptance',
+        'audience': 'general audience',
+        'style': 'professional',
+        'cta': 'Welcome to AMICOR Nova!',
+        'duration_target': 5,
+    })
+    saved = service.generate_storyboard('owner', new_project['id'])
+    assert len(saved['scenes']) == 1
+    assert saved['scenes'][0]['duration_seconds'] == 5.0
+    assert not any(row['kind'] == 'video' for row in saved['assets'])
+    assert service.get_project('owner', original_pid)['project']['duration_target'] == 30
+    planned = assemble_short_video(
+        topic='AMICOR first motion acceptance',
+        audience='general audience', platform='TikTok', duration_target=5,
+        style='professional', tone='friendly', cta='',
+        reviewed_script='Welcome to AMICOR Nova!',
+    )
+    assert len(planned['scenes']) == 1
+    scene = planned['scenes'][0]
+    assert scene['duration_seconds'] == 5.0
+    assert scene['voiceover_text'] == 'Welcome to AMICOR Nova!'
+    assert 'step' in scene['visual_prompt']
+    assert planned['media_generated'] is False
+    assert planned['video_provider_status'] == 'CONFIG_REQUIRED'
+
+
+def test_five_second_target_does_not_change_legacy_storyboard_durations():
+    from app.core.nova.creative_studio.generation import assemble_short_video
+    def build(duration):
+        return assemble_short_video(
+            topic='AMICOR operations', audience='small business owners',
+            platform='TikTok', duration_target=duration, style='clean social',
+            tone='friendly', cta='Visit getamicor.com',
+        )
+    for duration, count in [(15, 3), (30, 6), (60, 6)]:
+        result = build(duration)
+        assert len(result['scenes']) == count
+        assert sum(s['duration_seconds'] for s in result['scenes']) == pytest.approx(duration)
+        assert result['media_generated'] is False
+
+
+def test_first_shot_reuses_only_verified_owner_approved_presenter_image(studio, monkeypatch, tmp_path):
+    """No new upload, no provider call, and no unapproved image as a shot reference."""
+    from io import BytesIO
+    from PIL import Image
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio import providers
+
+    service, _original_pid = studio
+    project = service.create_project('owner', {
+        'title': 'One five-second scene', 'project_type': 'short_video',
+        'platform': 'TikTok', 'duration_target': 5,
+    })
+    pid = project['id']
+    service.generate_storyboard('owner', pid)
+    media = BytesIO()
+    Image.new('RGB', (512, 768), (30, 45, 90)).save(media, 'PNG')
+    uploaded = service.upload_genova_presenter_image(
+        'owner', pid, media.getvalue(), 'presenter.png', content_type='image/png')
+    asset_id = uploaded['asset']['id']
+    assert uploaded['approved'] is False
+
+    def check():
+        selected = service._project_or_404('owner', pid)
+        return first_shot_readiness(
+            scenes=service.store.list_scenes(pid, 'owner'),
+            assets=service.store.list_assets(pid, 'owner'),
+            provider_status=SimpleNamespace(status='DISABLED'),
+            budget_confirmed=False,
+            media_resolver=providers._resolve_creative_media_url,
+            approved_presenter_image_asset_id=(selected.metadata or {}).get('approved_genova_image_asset_id'),
+        )
+
+    unapproved = check()
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' in unapproved['blockers']
+    service.set_genova_presenter_approval('owner', pid, asset_id)
+    approved = check()
+    assert approved['reference_image_asset_id'] == asset_id
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' not in approved['blockers']
+    assert approved['status'] == 'BLOCKED'
+    assert 'VIDEO_PROVIDER_NOT_AVAILABLE' in approved['blockers']
+    assert 'BUDGET_CONFIRMATION_REQUIRED' in approved['blockers']
+    assert approved['generation_submitted'] is False
+    assert approved['provider_charge_incurred'] is False
+
+    # Never accept an approval from a different project.
+    other = service.create_project('owner', {
+        'title': 'Another project', 'project_type': 'short_video',
+        'platform': 'TikTok', 'duration_target': 5,
+    })
+    with pytest.raises(CreativeStudioError):
+        service.set_genova_presenter_approval('owner', other['id'], asset_id)
+
+    service.set_genova_presenter_approval('owner', pid, None)
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' in check()['blockers']

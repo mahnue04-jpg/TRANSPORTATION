@@ -295,7 +295,7 @@ def test_provider_banner_names_block_reason_without_secret_values():
     rows = {row["kind"]: row for row in provider_statuses()}
     assert rows["talking_avatar"]["credential_env_names"] == ["FAL_KEY"]
     assert rows["talking_avatar"]["invalid_credential_checked"] is False
-    assert "reviewed-planning-video-import-20261030" in html
+    assert "creative.js?v=project-open-after-create-20261113" in html
     assert 'aria-controls="genova-avatar-readiness-result"' in html
     assert "provider_block_reason" in script
     blob = str(rows)
@@ -820,3 +820,19 @@ def test_avatar_malformed_saved_task_is_rejected_without_network(avatar, monkeyp
     assert result["status"] == "ERROR" and result["submission_uncertain"] is False
     assert result["can_resubmit"] is False
 
+
+
+def test_studio_new_project_opens_its_workspace_not_unrelated_commercial():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "static" / "nova-creative" / "index.html").read_text(encoding="utf-8")
+    script = (root / "static" / "nova-creative" / "creative.js").read_text(encoding="utf-8")
+    assert 'id="studio-project-workspace"' in html
+    assert 'id="studio-project-workspace-continue"' in html
+    assert 'id="brief-form"' in html
+    assert 'showCurrentProjectWorkspace(row, true, true)' in script
+    assert 'showCurrentProjectWorkspace(activeRow, false, false)' in script
+    assert 'setActiveProjectId(row.id)' in script
+    assert 'panel.scrollIntoView({ behavior: "auto", block: "start" })' in script
+    assert 'No video render or charge starts when you create a project.' in html
+    assert 'Project saved: ' in script

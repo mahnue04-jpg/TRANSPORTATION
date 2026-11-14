@@ -1,0 +1,51 @@
+name: Studio staging SQLite to PostgreSQL transfer
+
+on:
+  pull_request:
+    paths:
+      - 'backend/scripts/migrate_studio_staging.py'
+      - 'backend/scripts/studio_staging_backup_preflight.py'
+      - 'backend/tests/test_studio_staging_data_transfer.py'
+      - 'backend/tests/test_studio_staging_backup_preflight.py'
+      - '.github/workflows/studio-staging-data-transfer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transfer-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-only
+          POSTGRES_DB: studio_transfer_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TESTING: 'true'
+      STUDIO_TRANSFER_TEST_DATABASE_URL: postgresql+psycopg2://postgres:ci-disposable-only@localhost:5432/studio_transfer_ci
+      NOVA_CREATIVE_VIDEO_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_KLING_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_IMAGE_LIVE_ENABLED: 'false'
+      NOVA_CREATIVE_VOICE_LIVE_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend test dependencies
+        run: python -m pip install -r backend/requirements.txt pytest
+      - name: Verify staged transfer and rollback against disposable PostgreSQL
+        run: python -m pytest -q backend/tests/test_studio_staging_data_transfer.py backend/tests/test_studio_staging_backup_preflight.py

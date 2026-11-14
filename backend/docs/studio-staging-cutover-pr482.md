@@ -1,0 +1,191 @@
+# Nova Creative Studio staging cutover runbook (PR #482)
+
+**Scope:** Staging only. No production switch, paid-provider activation, or customer contract acceptance is authorized by this runbook.
+
+## Approved preparation-only staging release gate (2026-11-11)
+
+**Owner authorization:** Review, test, and prepare PR #482 for a staging-only release. **Not authorized:** merging the PR, triggering any Render deployment or restart, changing Render environment variables, enabling private-object-storage routing, turning on any Kling/video provider, PostgreSQL migration, accepting customer work, or modifying production. Obtain separate explicit owner approval before merging and **separate deployment approval** before deploying.
+
+**Current immutable identifiers to review just before approval:**
+- Render staging service: `srv-db9da4ijnfac73bs0isg`, branch `feature/studio-landscape-film-assembly-20261110`, automatic deployment disabled, 10 GB persistent disk mounted at `/data`.
+- Last verified deployed source: `ba7c5482a945255c46cb5195433a4d9047a46af0` (environment-triggered deploy `dep-dbqhicon74is73c7bm1g`).
+- Candidate PR: `#482`, branch `fix/studio-staging-data-transfer-20261110` targeting the existing Render branch. The exact HEAD SHA and status checks **must be refreshed** before owner approval; previous CI does not cover later commits automatically.
+
+### Phase A — SQLite-preserving application update, **not** a PostgreSQL cutover
+
+1. At release time, confirm the branch, exact candidate SHA, latest seven workflows, no conflicting pushes or unresolved review, and protected route checks. The current CI smoke validates unauthenticated health and privacy boundaries, **not** a signed-in owner or paid Kling production.
+2. Recheck the service disk and active Studio jobs immediately before deployment. Keep `DATABASE_URL` absent if the current service is intentionally SQLite and confirm `DB_FILENAME` resolves to the **existing** `/data/chat.db` rather than a new empty database. Inspect variable **presence and non-secret paths only**, never print credentials.
+3. Capture a **new consistent SQLite snapshot** immediately before any authorized staging deployment, verify `PRAGMA integrity_check`, retain the existing separately recovered off-Render copies, and confirm no missing referenced media. A prior backup from Nov 11 is not necessarily a current rollback image if staging data changed.
+4. Do **not** enable `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE` during the first SQLite-preserving code rollout. Leave `NOVA_CREATIVE_KLING_LIVE_ENABLED` and `NOVA_CREATIVE_VIDEO_LIVE_ENABLED` false; existing local media must continue working. The basic R2 canary is verified but does not establish application-level owner-scoped storage.
+5. Review merge **separately** from deployment; approval to merge does not authorize a deploy. Since Render is configured for the PR's base branch, merging changes the branch's HEAD even with autoDeploy off. Pin the reviewed commit explicitly at deployment time and preserve the old commit for rollback.
+6. After approved deployment, recheck `/api/health/detail`, unchanged SQLite backend, database integrity, startup logs, protected unauthenticated routes, signed-in access to a previously saved owner project, authenticated original MP4 playback/download, invalid-owner access denial, and recovery after restart. Do not generate paid video during this phase.
+7. **Stop and roll back** on missing owner records, database backend changing to PostgreSQL unexpectedly, broken login, missing/unplayable media, owner isolation failure, schema or migration errors, critical startup warnings, or unexpected provider submissions. Roll back to source `ba7c5482...` with the same known-good SQLite disk and provider switches off; do not overwrite or delete the SQLite file or execute a reverse migration. Document the exact rollback deployment and post-rollback health.
+
+### Phase B — separate storage and paid-video approval
+
+Only after Phase A passes: review enabling owner-scoped R2 routing in staging, verify a real authorized owner's saved MP4 (HEAD, GET, checksum, protected playback, restart persistence, owner isolation) and preserve local-file compatibility. Any migration of local media, PostgreSQL database transfer, or paid Kling test requires a distinct approval and a separate rollback plan. Avoid combined code, database, storage and billing switches.
+
+**Evidence status at approval-preparation time:** Off-Render SQLite restoration: `ok`, 12 Creative Studio tables; media archive: 23 files, 39,634,538 uncompressed bytes streamed; R2 private staging bucket basic PUT/GET/DELETE: pass. Full signed-in MP4 test: pending. Current fresh backup/inactive-job predeploy check: pending. No deployment authorization granted.
+
+## Confirmed inventory (2026-11-10)
+
+- Render Studio validation service: `nova-studio-validation-350` (`srv-db9da4ijnfac73bs0isg`), deployed from `feature/studio-landscape-film-assembly-20261110`; Docker service with persistent `/data` disk; automatic deployment disabled.
+- Neon project: `amicor-nova-creative-pr454-staging` (`shy-poetry-63686456`), PostgreSQL 17.
+- Neon `staging` branch: `br-plain-sea-bb75boy7`.
+- Neon `studio-validation-pr478-20261110` branch: `br-mute-haze-bbxomd0l`, created **from parent data**. Its `creative_staging` database is NOT automatically a fresh empty transfer target. Verify counts, not just the presence of the branch.
+- PR #482 SHA `1b891ab8954ae9b02870a7fd6fd9797db89513a5`: SQLite-to-PostgreSQL transfer and backend diagnostic workflows passed.
+- **No staging transfer or production change has been performed.**
+
+## Latest confirmed staging source and read-only preflight (2026-11-10)
+
+- Live GET `/api/health/detail` reports `db.backend=sqlite`, `db.ok=true`, and `db.db_path=/data/chat.db`. Its startup environment validator reports no missing required settings.
+- The separate legacy `app.core.runtime_config` validator requires `DATABASE_URL` and logged critical warnings despite the healthy active SQLite service. **Do not switch database endpoints just to quiet that warning.**
+- Render service `nova-studio-validation-350` reports a 10 GB mounted `/data` disk. Its currently live deployed commit is `ba7c5482a945255c46cb5195433a4d9047a46af0`, not this PR branch.
+- A standalone inventory/backup utility is provided at `backend/scripts/studio_staging_backup_preflight.py`. It runs in a trusted shell with access to the actual mounted disk; the Render management connector does not grant shell or file access.
+
+### Operator procedure from authorized staging shell
+
+Review and run against the actual staging service, **not** a disposable CI checkout or a production instance:
+
+```sh
+APP_ENV=staging python backend/scripts/studio_staging_backup_preflight.py \
+  --source /data/chat.db
+```
+
+The default mode is read-only, returns Studio/account table counts, active job count, and counts of local-present, local-missing, empty, and remote asset references. It does **not** print owner IDs, account content, file paths, or credentials.
+
+After confirming `active_jobs=0`, selecting an owner-only private backup directory outside public/static content, and obtaining approval for the staging backup:
+
+```sh
+APP_ENV=staging python backend/scripts/studio_staging_backup_preflight.py \
+  --source /data/chat.db \
+  --backup-directory /data/private-studio-backups \
+  --backup
+```
+
+This creates an integrity-checked SQLite snapshot with owner-only file permissions and reports its SHA-256 and byte size; it does **not** export or preserve media bytes. Check free disk headroom before backup (the utility fails closed if space is insufficient). Once the backup is exported to secure off-disk storage, compare its SHA-256 and byte count against the original report and independently test an isolated restore. An on-disk backup on the same Render disk is **not sufficient disaster recovery**: separately copy the verified database snapshot and private media to authorized external storage, confirm byte/hash integrity and test restoration in isolation. A restart or disk loss must not destroy the only backup. Never log or upload personal customer records to CI.
+
+Do not confuse database asset references with physically retrievable MP4 files. For remote references, confirm authorized access to the bucket and persisted bytes in a separate owner-scoped procedure. For local file references, enumerate and copy the real referenced bytes through a trusted service shell; the inventory output intentionally contains counts only. Keep provider billing off.
+
+
+## Owner-operated staging evidence (2026-11-11; screenshots reviewed)
+
+- The owner used the Render Shell on `nova-studio-validation-350` to confirm the live SQLite file `/data/chat.db` passes `PRAGMA quick_check`, then created a separately integrity-checked SQLite backup on the persistent disk. The source disk remained in use; no database switch was performed.
+- A private media archive of `/data/nova_creative_media` and `/data/nova_creative_media-private-imports` was created, archive-read checked, and SHA-256 hashed. Owner-side counts showed 22 media files and one private-import file before archive creation.
+- The owner transferred three SQLite snapshots and the media archive to a private Windows laptop directory. Each local file had a SHA-256 calculated; screenshots showed matching SHA-256 values against the originals in Render Shell. This is off-Render copy evidence, **not** an isolated restoration or proof of recoverable video playback.
+- The Windows SSH/SCP client emitted a `server gave bad signature for ED25519 key 0: incorrect signature` warning despite successful SSH login and four completed transfers. **Investigate host-key negotiation before relying on this path for subsequent sensitive transfers. Never disable host-key checking to suppress it.**
+- The owner created Cloudflare R2 bucket `amicor-nova-studio-staging`, confirmed public access disabled, and configured a dedicated Account API token with Object Read & Write permission restricted to that bucket. The existing `amicor-prod` bucket was not selected.
+- Render environment changes were saved and applied by an environment-triggered deployment of existing source commit `ba7c548` (not this draft PR). Render Shell reported the four `NOVA_STUDIO_S3_*` settings present and `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE` disabled.
+- From the **actual Render staging instance**, a read-only `list_objects_v2` against the staging R2 bucket returned PASS. A randomized 4 KiB test object was uploaded, downloaded with matching contents, deleted, and cleanup confirmed. This demonstrates S3 endpoint/credentials and basic PUT/GET/DELETE but **not** owner-scoped MP4 playback, video render or provider billing.
+- The active SQLite service emitted `Runtime config validation CRITICAL: missing required vars — [redacted secret vars]` despite a successful primary startup validator and database readiness. The separate legacy runtime validator treated `DATABASE_URL` as mandatory on SQLite. The draft PR now contains a read-only SQLite recognition fix and regression tests; **this fix is not yet deployed to staging**.
+- Before cutover: review diagnostic CI, verify no active render jobs, perform an **isolated restore** of the off-Render backup, inventory real owner media references, confirm a truly empty Neon destination with schema, then obtain explicit owner approval for migration. Neither passing R2 canary nor passing CI authorizes a production switch or paid-provider activation.
+
+## Owner laptop isolated backup evidence (2026-11-11)
+
+The owner completed two **read-only PowerShell/Python checks** directly against the off-Render copies at `AMICOR-Private-Backups`:
+
+- Python 3.14.4 opened the 8,462,336-byte `chat-backup-*.sqlite` in read-only mode and restored it into a new `:memory:` database through SQLite's backup API. `PRAGMA integrity_check` returned `ok`; the three required Studio tables were present, and 12 `nova_creative_*` tables were found. This is **actual backup restore evidence**, not only a CI fixture.
+- Python streamed every member of `studio-media-20261111-232118.tar.gz` without extraction; archive readability passed, exactly **23 media files** were read, and their declared sizes matched **39,634,538 uncompressed bytes**. The archive itself was **36,914,021 bytes** on Windows.
+- The previously reviewed file-copy hashes were matched between Windows and Render for the backup export. The separate archive streaming result proves member readability; it does **not** independently decode each MP4, prove file-by-file SHA-256 matches against live originals, or demonstrate full owner-authenticated playback.
+- **Status:** Windows recovery verification for the SQLite snapshot and media tarball is complete at the structural/readability level. A full customer recovery rehearsal and signed-in MP4 playback remain outstanding. Preserve originals and do not migrate or activate paid generation based solely on these checks.
+
+## Access and change gate
+
+1. Identify the existing SQLite database file on the actual Render staging `/data` disk using an authenticated administration channel. The Render management connector can inspect service metadata, but does **not** provide disk-level file access. Do not infer the file path.
+2. Confirm staging maintenance window, current signed-in owner, and that all render jobs are inactive. Keep all paid provider switches disabled.
+3. Obtain explicit approval for a staging transfer and preserve a recovery path to the exact source revision. Avoid accidentally deploying the different PR branch just to gain migration access.
+4. Choose an **isolated destination** with an application-prepared schema. Do not reuse an inherited Neon branch or any database with existing rows. Never use the Render production database.
+5. Use a secure interactive environment to supply connection credentials. Never commit them, paste them into a PR comment, or print them in CI.
+
+## Back up first
+
+- Preserve an independent, private copy of SQLite source and any associated write-ahead log, or obtain a consistent SQLite backup while preventing concurrent writers. The transfer utility makes its own integrity-checked backup during `--apply`; retain a separately verified recovery copy before any service switch.
+- Inventory protected media files and storage references separately; the PostgreSQL transfer copies **database references**, not video bytes.
+- Confirm private backup permissions, disk capacity, SQLite `PRAGMA integrity_check`, source table row counts, and a restore procedure. Do not delete or overwrite the source.
+- Document backup retention and access without storing private locations, tokens, or account details in public logs.
+
+## Private object-storage proof (staging, separate owner approval)
+
+The real-video worker already refuses paid provider submission when protected storage is disabled or bucket HEAD fails. HEAD alone proves **neither** PUT authorization nor byte-perfect playback. A separate operator-only, randomized canary is available without needing to buy a video generation:
+
+1. Enter an **authorized staging shell** where only the staging S3 endpoint/bucket/credentials are configured. The connected Render management API does not provide such shell access. Never paste bucket credentials in chat, GitHub, URLs or CI.
+2. Verify `APP_ENV=staging`, `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE=true`, and the intended private staging-only bucket. First run the read-only default:
+   ```sh
+   python backend/scripts/verify_studio_staging_storage_canary.py
+   ```
+   It prints `dry_run` and makes **no S3 request**.
+3. Only with separate authorization for this **staging-only test object**, run:
+   ```sh
+   python backend/scripts/verify_studio_staging_storage_canary.py \
+     --apply --acknowledge-staging-test-object \
+     --expected-bucket ACTUAL_PRIVATE_STAGING_BUCKET
+   ```
+   This creates one random 4 KiB object under `studio-readiness-canary/`, uses a conditional no-overwrite PUT, verifies size and hash metadata by HEAD, downloads and hashes the full bytes, then deletes the exact random object and confirms absence. It never touches customer media, generates video, alters databases, or invokes billable providers.
+4. If any check fails, **do not enable paid Kling**. If cleanup cannot be confirmed, inspect the staging bucket for the isolated test object before retrying. A successful canary is *storage-only* evidence, not proof of owner-scoped MP4 routing or film generation.
+5. After a successful canary, perform a separately approved real-owner-scoped MP4 archive/download and then one explicitly budget-approved five-second provider shot, validating signed-in playback, object persistence, owner isolation, media decoding and movement quality. Capture only sanitized outcomes.
+
+The script's networked `--apply` mode is **never run in CI**; GitHub CI uses in-memory mock S3 only.
+
+## Owner laptop: verify exported backups without a service switch
+
+The staging backup copies are held on an owner-operated Windows laptop. Once the committed offline verifier has passed CI and its source has been reviewed, use a trusted Python 3.11+ environment on the **Windows laptop**, not Render, and point it only at the matching SQLite snapshot and media archive. The tool copies SQLite into a temporary directory, checks its integrity and Studio table inventory, streams media entries without extraction, then cleans up the temporary restored database. It does not connect to the internet or change Render/Neon settings.
+
+Example in **PowerShell** (replace the placeholders with the names actually present in the private backup directory, never paste customer paths or database contents into chat):
+
+```powershell
+python .\\backend\\scripts\\verify_studio_offline_restore.py \`
+  --database \"$env:USERPROFILE\\AMICOR-Private-Backups\\<snapshot>.sqlite\" \`
+  --media \"$env:USERPROFILE\\AMICOR-Private-Backups\\<media>.tar.gz\" \`
+  --expected-media-files 23
+```
+
+The expected count of 23 is derived from the prior owner-side file inventory (22 media files + 1 private import); verify that those files were actually included before relying on this number. If the archive was made with different path prefixes, **inspect the archive layout and review it** instead of bypassing archive path protections. The report contains table counts but not owner records; treat it as internal. Optional `--expected-db-sha256` and `--expected-media-sha256` compare against independently recorded SHA-256 values, never values derived from the same untrusted copy. Protect the backup at rest and preserve the originals.
+
+A passing isolated SQLite restore plus archive-read test is not proof that the **live** account, owner-bound MP4 routes, or database cutover will succeed. Before activating billable providers, separately verify authenticated owner playback, denial of cross-owner access, persistence across restart, and recovery of the saved outputs.
+
+## Transfer acceptance
+
+1. Prepare the reviewed target schema from the exact application revision intended to run after cutover.
+2. Verify every selected destination table is empty. The transfer includes `platform_users` and all `nova_creative_*` tables; excludes refresh-token tables and non-Studio modules.
+3. Set `APP_ENV=staging` and supply the direct encrypted Neon URL only through `NOVA_STAGING_TARGET_DATABASE_URL` in the secure execution environment. The target hostname and database must match separate reviewed values. Pooled URLs are rejected.
+4. Dry-run (prints only table counts):
+   ```sh
+   python backend/scripts/migrate_studio_staging.py \
+     --source /ACTUAL/STAGING/PATH/studio.sqlite \
+     --expected-target-host ACTUAL-DIRECT-HOST.neon.tech \
+     --expected-target-database ACTUAL_EMPTY_DATABASE
+   ```
+5. Compare source/target schema, primary keys, table counts, owner associations, and job states. Verify there are no blocking migrations or unexpected nonempty target tables.
+6. Apply only after explicit staging authorization:
+   ```sh
+   python backend/scripts/migrate_studio_staging.py \
+     --source /ACTUAL/STAGING/PATH/studio.sqlite \
+     --expected-target-host ACTUAL-DIRECT-HOST.neon.tech \
+     --expected-target-database ACTUAL_EMPTY_DATABASE \
+     --backup-directory /PRIVATE/STAGING/BACKUPS \
+     --apply
+   ```
+7. Require `verified: true`, equal per-table row counts and matching transfer checksums. Verify database-generated identifiers/sequences (if present) are safe for **subsequent** inserts before opening the service for writes.
+8. If any step fails, leave the running service on its unchanged source, retain backups, and investigate. Do not switch application database settings.
+
+## Protected storage and sign-in validation
+
+- Confirm private storage credentials, tenant/owner isolation and persisted original video objects independently. SQL asset records are **not** proof that MP4 bytes exist.
+- Before approving a billable five-second Kling request, require `NOVA_STUDIO_PRIVATE_OBJECT_STORAGE=true` and a successful owner-scoped storage preflight. The first-shot worker now performs a read-only S3 `HeadBucket` check **before** marking a SQL claim `POST_ATTEMPTED` or calling the provider. An inaccessible bucket blocks the shot with `PRIVATE_STORAGE_UNAVAILABLE`.
+- A successful `HeadBucket` confirms only existence/read access, **not** upload permissions or playback. An operator must additionally verify an authorized, private test object upload, HEAD metadata, protected read, exact hash, and cleanup within the approved staging bucket before permitting paid generation; do not perform that test on production data.
+- Only after successful transfer, bind the staging application to the reviewed pooled DB endpoint plus private storage configuration. Review the exact deployed commit and deploy intentionally; automatic deployment is off for the validation service.
+- Sign in as an existing test owner (refresh tokens are intentionally excluded, so a new sign-in is expected). Confirm old project and imported asset metadata are present.
+- Verify **Play saved five-second shot** and **Download** with authenticated access to a real MP4, including playable audio/video and correct MIME/status.
+- Confirm another owner cannot retrieve the first owner's files, and signed-out requests are rejected.
+- Create a new disposable project and a new saved asset to confirm that inserts still work after migrating pre-existing identifiers. Exercise replay/restart recovery and duplicate-job protection as applicable.
+- Keep paid providers disabled; confirm no unwanted provider billing or generation is triggered.
+
+## Rollback / stop conditions
+
+Stop on backup integrity failure, missing SQLite/media files, nonempty or inconsistent target, active render jobs, transfer error, authentication errors, unplayable media, cross-owner access, or paid-provider activation.
+
+If a staging switch fails, restore the prior service settings and reviewed application revision, preserve both data copies, and validate owner sign-in and playback on the original source. Do not run a reverse migration without a separate tested plan.
+
+## Evidence required before broader rollout
+
+Record only non-sensitive: staging revision and deploy ID, source/target table counts, backup integrity outcome, transfer report, signed-in Play/Download and owner-isolation test results, media persistence confirmation, and rollback drill outcome. Production release remains a **separate owner approval**.

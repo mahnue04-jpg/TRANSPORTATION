@@ -37,6 +37,39 @@ def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: Backgrou
     with _scene_lock:
         assets = {row.id: row for row in service.store.list_assets(project_id, owner_id)}
         for job in service.store.list_jobs(project_id, owner_id):
+            if job.kind == "first_shot_video" and job.status in {"QUEUED", "RUNNING"} and job.id not in _scene_workers:
+                # A different web process may be checking a fresh job while the
+                # actual worker is still running. Do not overwrite its state.
+                try:
+                    touched = datetime.fromisoformat(str(job.updated_at).replace("Z", "+00:00"))
+                    if touched.tzinfo is None:
+                        touched = touched.replace(tzinfo=timezone.utc)
+                    age_seconds = (datetime.now(timezone.utc) - touched).total_seconds()
+                except (TypeError, ValueError, OverflowError):
+                    age_seconds = 1200
+                if age_seconds < 1200:
+                    continue
+                # A restarted controlled paid-shot worker must never resubmit
+                # without reconciling a persisted provider task identifier.
+                # Keep a completed saved asset if present; otherwise report
+                # ambiguity for owner review rather than claiming a safe retry.
+                linked = [assets[asset_id] for asset_id in job.result_asset_ids
+                          if asset_id in assets and assets[asset_id].kind == "video"]
+                complete = [row for row in linked if row.status == "GENERATED" and row.url]
+                if complete:
+                    service._finish_job(
+                        job, status="GENERATED",
+                        message="Recovered a saved controlled five-second video; inspect playback and motion.",
+                        asset_ids=[row.id for row in complete],
+                    )
+                else:
+                    service._finish_job(
+                        job, status="ERROR",
+                        message="Controlled shot interrupted. Provider submission may have occurred. "
+                                "Review saved task ID and provider usage manually; no automatic retry.",
+                        asset_ids=job.result_asset_ids,
+                    )
+                continue
             if job.kind != "video" or job.status not in {"QUEUED", "RUNNING"} or job.id in _scene_workers:
                 continue
             results = [assets[aid] for aid in job.result_asset_ids if aid in assets and assets[aid].kind == "video"]
@@ -52,7 +85,7 @@ def _recover_scene_jobs(service, owner_id: str, project_id: str, tasks: Backgrou
                 service._finish_job(job, status="ERROR", message="Scene worker was interrupted. No saved Runway task is available; check provider history before retrying. Nova has not automatically submitted another video.", asset_ids=job.result_asset_ids)
 
 
-def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
+def _run_scene_background(owner_id: str, project_id: str, job_id: str, first_shot_reference_id: str | None = None) -> None:
     db = None
     job = None
     _scene_capacity.acquire()
@@ -63,7 +96,13 @@ def _run_scene_background(owner_id: str, project_id: str, job_id: str) -> None:
         deadline = time.monotonic() + 900
         while True:
             service._finish_job(job, status="RUNNING", message="Generating scene artwork and video.", asset_ids=job.result_asset_ids)
-            result = service.request_video_generation(owner_id, project_id, job=job)
+            if first_shot_reference_id is None:
+                result = service.request_video_generation(owner_id, project_id, job=job)
+            else:
+                result = service.request_video_generation(
+                    owner_id, project_id, job=job,
+                    single_shot_reference_id=first_shot_reference_id,
+                )
             if result.get("provider", {}).get("status") != "PROCESSING":
                 break
             if time.monotonic() >= deadline:
@@ -348,6 +387,16 @@ class BudgetConfirmIn(BaseModel):
     quote_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 
+@router.get("/fal-first-shot-diagnostic")
+def fal_first_shot_diagnostic_endpoint(
+    user: UserContext = Depends(get_current_user_context),
+) -> dict[str, Any]:
+    """Read-only account-pricing probe; no generation or financial mutation."""
+    _require_owner(user)
+    from app.core.nova.creative_studio.fal_diagnostic import fal_first_shot_diagnostic
+    return fal_first_shot_diagnostic()
+
+
 @router.get("/projects/{project_id}/preflight")
 def project_preflight_quote(
     project_id: str,
@@ -358,6 +407,41 @@ def project_preflight_quote(
     _require_owner(user)
     try:
         return get_service(db).preflight_quote(user.user_id, project_id)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/projects/{project_id}/first-shot-readiness")
+def first_shot_preflight(
+    project_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-scoped, non-billable first-shot report; never posts to providers."""
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+
+    _require_owner(user)
+    try:
+        service = get_service(db)
+        project = service._project_or_404(user.user_id, project_id)
+        quote = service.preflight_quote(user.user_id, project_id)
+        report = first_shot_readiness(
+            scenes=service.store.list_scenes(project_id, user.user_id),
+            assets=service.store.list_assets(project_id, user.user_id),
+            provider_status=video_provider().status(),
+            budget_confirmed=quote.get("owner_budget_confirmed") is True,
+            media_resolver=_resolve_creative_media_url,
+            approved_presenter_image_asset_id=(project.metadata or {}).get("approved_genova_image_asset_id"),
+        )
+        # Actual paid submission refuses non-durable stores. Surface the same
+        # gate in the FREE readiness report so owner cannot be misled by READY.
+        from app.core.nova.creative_studio.store import DbCreativeStudioStore
+        if not isinstance(service.store, DbCreativeStudioStore):
+            report["blockers"].append("DURABLE_SHOT_CLAIM_REQUIRED")
+            report["status"] = "BLOCKED"
+        return report
     except CreativeStudioError as exc:
         _raise(exc)
         raise
@@ -617,6 +701,136 @@ def clear_failed_video_assets(
         raise
 
 
+class FirstShotSubmitIn(BaseModel):
+    # Explicit action approval distinct from viewing a nonbillable quote.
+    confirm_paid_generation: bool = False
+    reference_image_asset_id: str = Field(min_length=1, max_length=160)
+    # Required explicit per-shot limit, separate from the planning estimate.
+    max_cost_usd: float = Field(gt=0, le=1, allow_inf_nan=False)
+
+
+@router.post("/projects/{project_id}/generate/first-shot")
+def generate_first_shot(
+    project_id: str,
+    payload: FirstShotSubmitIn,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Submit at most one five-second Kling shot for an approved one-scene project.
+
+    Never enable providers, grant a budget, buy credits, or generate fallback
+    image motion. Existing scene generation remains a separate workflow.
+    """
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio.providers import _resolve_creative_media_url
+
+    _require_owner(user)
+    if payload.confirm_paid_generation is not True:
+        raise HTTPException(status_code=422, detail={
+            "code": "EXPLICIT_SHOT_APPROVAL_REQUIRED",
+            "message": "Approve exactly one potentially billable five-second Kling shot.",
+        })
+    service = get_service(db)
+    try:
+        project = service._project_or_404(user.user_id, project_id)
+        service.require_budget_confirmation_for_paid(user.user_id, project_id)
+        if video_provider().provider_id != "fal_kling_video":
+            raise CreativeStudioError(
+                "KLING_FIVE_SECOND_PROVIDER_REQUIRED",
+                "Select the guarded five-second Kling provider before starting this shot.",
+                http_status=422,
+            )
+        quote = service.preflight_quote(user.user_id, project_id)
+        report = first_shot_readiness(
+            scenes=service.store.list_scenes(project_id, user.user_id),
+            assets=service.store.list_assets(project_id, user.user_id),
+            provider_status=video_provider().status(),
+            budget_confirmed=quote.get("owner_budget_confirmed") is True,
+            media_resolver=_resolve_creative_media_url,
+            approved_presenter_image_asset_id=(project.metadata or {}).get("approved_genova_image_asset_id"),
+        )
+        if report["status"] != "READY_TO_REQUEST":
+            raise CreativeStudioError(
+                "FIRST_SHOT_NOT_READY",
+                "The controlled five-second shot is blocked: " + ", ".join(report["blockers"]),
+                http_status=422,
+            )
+        if report["reference_image_asset_id"] != payload.reference_image_asset_id:
+            raise CreativeStudioError(
+                "FIRST_SHOT_REFERENCE_CHANGED",
+                "The reference image changed. Run the free readiness check again.",
+                http_status=409,
+            )
+        # The existing queued worker processes one storyboard scene per job.
+        # Refuse any prior scene video so a second paid post cannot be mistaken
+        # for part of the first acceptance test.
+        with _scene_lock:
+            if any(row.kind in {"video", "first_shot_video"} for row in service.store.list_jobs(project_id, user.user_id)):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_ALREADY_ATTEMPTED",
+                    "A video job already exists. Review or reconcile it before another paid submission.",
+                    http_status=409,
+                )
+            if any(row.kind == "video" for row in service.store.list_assets(project_id, user.user_id)):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_VIDEO_EXISTS",
+                    "This project already has video results. Use a fresh one-scene acceptance project.",
+                    http_status=409,
+                )
+            # A database compare-and-swap is authoritative across web processes.
+            # Refuse the in-memory fallback: it cannot guarantee one paid post.
+            from app.core.nova.creative_studio.store import DbCreativeStudioStore
+            if not isinstance(service.store, DbCreativeStudioStore):
+                raise CreativeStudioError(
+                    "DURABLE_SHOT_CLAIM_REQUIRED",
+                    "A shared database is required for a controlled paid shot.",
+                    http_status=503,
+                )
+            import uuid
+            claim_id = uuid.uuid4().hex
+            current_meta = dict(project.metadata or {})
+            if current_meta.get("first_shot_paid_claim"):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_ALREADY_RESERVED",
+                    "This project already has a controlled shot reservation.",
+                    http_status=409,
+                )
+            reserved_meta = dict(current_meta)
+            reserved_meta["first_shot_paid_claim"] = {
+                "id": claim_id,
+                "reference_image_asset_id": payload.reference_image_asset_id,
+                "state": "RESERVED",
+                "max_cost_usd": payload.max_cost_usd,
+            }
+            if not service.store.compare_and_swap_project_metadata(
+                project_id, user.user_id, current_meta, reserved_meta
+            ):
+                raise CreativeStudioError(
+                    "FIRST_SHOT_CONCURRENT_REQUEST",
+                    "Another request changed this project. No video was submitted.",
+                    http_status=409,
+                )
+            job = service._start_job(user.user_id, project_id, "first_shot_video")
+            service._finish_job(
+                job, status="QUEUED",
+                message="One explicitly authorized five-second Kling shot queued.",
+                asset_ids=[],
+            )
+            _scene_workers.add(job.id)
+            background_tasks.add_task(
+                _run_scene_background, user.user_id, project_id, job.id, payload.reference_image_asset_id,
+            )
+        return {
+            "status": "PROCESSING", "job": job.as_dict(),
+            "scope": "ONE_FIVE_SECOND_KLING_SHOT",
+            "already_running": False,
+        }
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+
+
 @router.post("/projects/{project_id}/generate/video")
 def generate_video(
     project_id: str,
@@ -628,6 +842,14 @@ def generate_video(
     try:
         service = get_service(db)
         service._project_or_404(user.user_id, project_id)
+        # A controlled paid first shot has a separate immutable job kind. Do
+        # not allow the general storyboard route to start a second render.
+        if any(row.kind == "first_shot_video" for row in service.store.list_jobs(project_id, user.user_id)):
+            raise CreativeStudioError(
+                "CONTROLLED_FIRST_SHOT_PROJECT",
+                "A controlled first-shot job exists; review its saved result before more generation.",
+                http_status=409,
+            )
         service.require_budget_confirmation_for_paid(user.user_id, project_id)
         if not service.store.list_scenes(project_id, user.user_id):
             raise CreativeStudioError("STORYBOARD_REQUIRED", "Generate the storyboard before generating scene videos.", http_status=422)
@@ -1430,6 +1652,38 @@ def _verified_remote_video_chunks(stream, expected_size: int, sha256: str):
             raise OSError("Private MP4 content checksum mismatch.")
     finally:
         stream.close()
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/browser-compatibility")
+def inspect_saved_video_browser_compatibility(
+    project_id: str,
+    asset_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Read-only, owner-scoped probe of an EXISTING local video, never a new render.
+
+    A remote-only original is not downloaded into the web worker. No path, file
+    bytes, access tokens or raw ffprobe errors are returned to the browser.
+    """
+    _require_owner(user)
+    studio = get_service(db)
+    try:
+        path, media_type, _filename = studio.open_asset_file(
+            user.user_id, project_id, asset_id, part="media"
+        )
+        if media_type != "video/mp4":
+            raise HTTPException(status_code=422, detail="Selected asset is not an MP4.")
+        from app.core.nova.creative_studio.video_import import inspect_existing_video
+        return inspect_existing_video(path)
+    except CreativeStudioError as exc:
+        _raise(exc)
+        raise
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Saved video could not be inspected safely. Original was not changed.",
+        ) from exc
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/file")

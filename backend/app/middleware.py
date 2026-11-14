@@ -106,8 +106,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-src 'self'; "
                 "frame-ancestors 'self';"
             )
-        # Generated Workspace speech uses a local Blob URL, never a remote media host.
-        if request.url.path.rstrip("/") == "/nova/workspace":
+        # Generated Workspace audio and protected Creative Studio MP4 playback
+        # use browser-local Blob URLs. Restrict this exception to these two
+        # product pages; all other routes retain the default policy.
+        if request.url.path.rstrip("/") in {"/nova/workspace", "/nova/creative"}:
             headers["Content-Security-Policy"] += " media-src 'self' blob:;"
         if request.url.path.rstrip("/") == "/nova/synapse":
             from app.core.nova.synapse.router import provider_origin
