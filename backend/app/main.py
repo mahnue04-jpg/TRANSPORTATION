@@ -271,6 +271,22 @@ async def lifespan(app: FastAPI):
         FRONTEND_BUILD_VERSION,
         HYDRATION_VERSION,
     )
+    # Isolated Growth Agent staging acceptance only. No platform initialization or
+    # deferred tasks when this explicit gate is enabled. Normal startup is unchanged.
+    # This does NOT make API requests read-only: verify route access separately.
+    if os.getenv("NOVA_GA_ISOLATED_SKIP_DB_BOOTSTRAP", "").strip().lower() in {"1", "true", "yes", "on"}:
+        from app.core.nova.growth_agent.staging_preflight import validate
+
+        ok, reason = validate(dict(os.environ))
+        if not ok:
+            raise RuntimeError("Isolated Growth staging bootstrap denied: " + reason)
+        logger.warning(
+            "Isolated Growth staging startup: skipping platform schema/seed/bootstrap "
+            "and background workers; request handlers remain subject to normal auth."
+        )
+        yield
+        return
+
     app_startup.register_shutdown_handlers()
 
     report = app_startup.run_startup_validation() # type: ignore
