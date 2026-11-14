@@ -95,6 +95,23 @@ def test_pricing_permission_failure_is_safe_and_does_not_post(provider, monkeypa
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize('key', ['private\nkey', 'private\rkey', 'private\tkey',
+                                 'private key', 'private\u200bkey', '"private-key"'])
+def test_invalid_credential_blocks_status_price_and_submission(provider, monkeypatch, key):
+    monkeypatch.setenv('FAL_KEY', key)
+    calls = intercept(monkeypatch, quote())
+    assert provider.status().status == 'CONFIG_REQUIRED'
+    result = submit(provider)
+    assert result['status'] == 'CONFIG_REQUIRED'
+    assert 'invalid formatting' in result['message']
+    assert key not in result['message']
+    with pytest.raises(module._SafeKlingError, match='invalid formatting'):
+        provider._first_shot_price(1)
+    with pytest.raises(module._SafeKlingError, match='invalid formatting'):
+        provider._request_json('GET', module.QUEUE + module.MODEL)
+    assert calls == []
+
+
 @pytest.mark.parametrize('limit', [None, 0, -1, 1.01, 'NaN', 'Infinity', True])
 def test_missing_or_invalid_limit_never_contacts_provider(provider, monkeypatch, limit):
     calls = intercept(monkeypatch, quote())

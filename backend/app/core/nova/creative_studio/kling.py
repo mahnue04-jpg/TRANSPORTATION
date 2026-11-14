@@ -25,6 +25,13 @@ class _SafeKlingError(RuntimeError):
     """Only fixed, application-owned messages may reach the UI."""
 
 
+def fal_key_format_valid(key: str) -> bool:
+    """Check header safety only; never repair or authenticate a credential."""
+    return bool(key) and all(33 <= ord(char) <= 126 for char in key) and not (
+        key.startswith(('"', "'")) or key.endswith(('"', "'"))
+    )
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -41,6 +48,9 @@ class FalKlingVideoProvider(RunwayVideoProvider):
         if not self._key():
             return ProviderStatus(self.provider_id, "video", CONFIG_REQUIRED,
                                   "Connect a funded fal account to enable Kling video.", False)
+        if not fal_key_format_valid(self._key()):
+            return ProviderStatus(self.provider_id, "video", CONFIG_REQUIRED,
+                                  "The saved fal credential has invalid formatting. Replace FAL_KEY with the exact key on one line, without quotes or an Authorization prefix.", False)
         if not video_provider_live_enabled():
             return ProviderStatus(self.provider_id, "video", DISABLED,
                                   "Kling is configured; owner activation is required.", True)
@@ -48,6 +58,8 @@ class FalKlingVideoProvider(RunwayVideoProvider):
                               "Nova Studio Kling video generation is available.", True)
 
     def _request_json(self, method, url, *, payload=None):
+        if not fal_key_format_valid(self._key()):
+            raise _SafeKlingError("The saved fal credential has invalid formatting. No provider request was sent.")
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != "https" or parsed.netloc != "queue.fal.run":
             raise _SafeKlingError("Invalid fal queue URL.")
@@ -74,6 +86,8 @@ class FalKlingVideoProvider(RunwayVideoProvider):
         Unknown pricing, billing units, or limits must never authorize spend.
         No redirects, generated media, account purchases, or balance guesses.
         """
+        if not fal_key_format_valid(self._key()):
+            raise _SafeKlingError("The saved fal credential has invalid formatting. No provider request was sent.")
         try:
             if isinstance(max_cost_usd, bool):
                 raise ValueError

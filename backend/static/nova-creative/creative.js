@@ -2109,6 +2109,9 @@
               ? "$" + String(report.price_usd_five_seconds) + " USD (pricing API only)"
               : "UNVERIFIED"),
             "Blockers: " + ((report.blockers || []).join(", ") || "none reported"),
+            ...((report.blockers || []).includes("FAL_KEY_INVALID_FORMAT")
+              ? ["Fix: replace FAL_KEY in the staging service's Render Environment settings with the exact key on one line. Do not include quotes, spaces, or an Authorization prefix. Never paste the key into chat."]
+              : []),
             "No video generated, no purchase submitted."
           ];
           result.textContent = lines.join("\n");
