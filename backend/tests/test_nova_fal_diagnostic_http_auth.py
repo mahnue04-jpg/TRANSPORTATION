@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +31,18 @@ STUDIO_SEED_EMAILS = frozenset({
     "provider@amicor.local",
 })
 
-if not os.environ.get("DATABASE_URL", "").startswith("sqlite:////tmp/"):
+
+def _disposable_sqlite_database() -> bool:
+    # pytest conftest points the suite at backend/data/chat_test_<pid>.db.
+    # An absolute SQLite file under /tmp remains valid for a direct run.
+    url = os.environ.get("DATABASE_URL", "")
+    if url.startswith("sqlite:////tmp/"):
+        return True
+    suite_db = Path(__file__).resolve().parents[1] / "data" / f"chat_test_{os.getpid()}.db"
+    return url == f"sqlite:///{suite_db}"
+
+
+if not _disposable_sqlite_database():
     raise RuntimeError("Refusing to run diagnostic auth tests without a disposable SQLite DATABASE_URL")
 
 
