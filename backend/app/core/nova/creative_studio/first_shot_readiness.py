@@ -17,6 +17,7 @@ def first_shot_readiness(
     provider_status: Any,
     budget_confirmed: bool,
     media_resolver: Any,
+    approved_presenter_image_asset_id: str | None = None,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     ordered_scenes = sorted(scenes, key=lambda row: int(getattr(row, "index", 0)))
@@ -61,6 +62,21 @@ def first_shot_readiness(
         path = media_resolver(asset.url)
         if path is not None and Path(path).is_file():
             source_images.append(asset)
+    # A dedicated one-scene five-second project may reuse its owner-approved
+    # presenter image. The caller reads that approval from this project's
+    # persisted metadata; arbitrary uploads are never treated as approved.
+    if not source_images and len(ordered_scenes) == 1 and first_scene is not None:
+        if duration == 5 and approved_presenter_image_asset_id:
+            for asset in assets:
+                if (str(getattr(asset, "id", "")) != approved_presenter_image_asset_id
+                        or getattr(asset, "kind", None) != "image"
+                        or str(getattr(asset, "status", "")).upper() != "GENERATED"
+                        or not getattr(asset, "url", None)):
+                    continue
+                path = media_resolver(asset.url)
+                if path is not None and Path(path).is_file():
+                    source_images.append(asset)
+                    break
     if not source_images:
         blockers.append("FIRST_SCENE_REFERENCE_IMAGE_REQUIRED")
 

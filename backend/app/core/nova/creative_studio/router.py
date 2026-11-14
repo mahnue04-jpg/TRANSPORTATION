@@ -415,7 +415,7 @@ def first_shot_preflight(
     _require_owner(user)
     try:
         service = get_service(db)
-        service._project_or_404(user.user_id, project_id)
+        project = service._project_or_404(user.user_id, project_id)
         quote = service.preflight_quote(user.user_id, project_id)
         report = first_shot_readiness(
             scenes=service.store.list_scenes(project_id, user.user_id),
@@ -423,6 +423,7 @@ def first_shot_preflight(
             provider_status=video_provider().status(),
             budget_confirmed=quote.get("owner_budget_confirmed") is True,
             media_resolver=_resolve_creative_media_url,
+            approved_presenter_image_asset_id=(project.metadata or {}).get("approved_genova_image_asset_id"),
         )
         # Actual paid submission refuses non-durable stores. Surface the same
         # gate in the FREE readiness report so owner cannot be misled by READY.
@@ -735,6 +736,7 @@ def generate_first_shot(
             provider_status=video_provider().status(),
             budget_confirmed=quote.get("owner_budget_confirmed") is True,
             media_resolver=_resolve_creative_media_url,
+            approved_presenter_image_asset_id=(project.metadata or {}).get("approved_genova_image_asset_id"),
         )
         if report["status"] != "READY_TO_REQUEST":
             raise CreativeStudioError(

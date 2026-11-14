@@ -186,3 +186,59 @@ def test_five_second_target_does_not_change_legacy_storyboard_durations():
         assert len(result['scenes']) == count
         assert sum(s['duration_seconds'] for s in result['scenes']) == pytest.approx(duration)
         assert result['media_generated'] is False
+
+
+def test_first_shot_reuses_only_verified_owner_approved_presenter_image(studio, monkeypatch, tmp_path):
+    """No new upload, no provider call, and no unapproved image as a shot reference."""
+    from io import BytesIO
+    from PIL import Image
+    from app.core.nova.creative_studio.first_shot_readiness import first_shot_readiness
+    from app.core.nova.creative_studio import providers
+
+    service, _original_pid = studio
+    project = service.create_project('owner', {
+        'title': 'One five-second scene', 'project_type': 'short_video',
+        'platform': 'TikTok', 'duration_target': 5,
+    })
+    pid = project['id']
+    service.generate_storyboard('owner', pid)
+    media = BytesIO()
+    Image.new('RGB', (512, 768), (30, 45, 90)).save(media, 'PNG')
+    uploaded = service.upload_genova_presenter_image(
+        'owner', pid, media.getvalue(), 'presenter.png', content_type='image/png')
+    asset_id = uploaded['asset']['id']
+    assert uploaded['approved'] is False
+
+    def check():
+        selected = service._project_or_404('owner', pid)
+        return first_shot_readiness(
+            scenes=service.store.list_scenes(pid, 'owner'),
+            assets=service.store.list_assets(pid, 'owner'),
+            provider_status=SimpleNamespace(status='DISABLED'),
+            budget_confirmed=False,
+            media_resolver=providers._resolve_creative_media_url,
+            approved_presenter_image_asset_id=(selected.metadata or {}).get('approved_genova_image_asset_id'),
+        )
+
+    unapproved = check()
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' in unapproved['blockers']
+    service.set_genova_presenter_approval('owner', pid, asset_id)
+    approved = check()
+    assert approved['reference_image_asset_id'] == asset_id
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' not in approved['blockers']
+    assert approved['status'] == 'BLOCKED'
+    assert 'VIDEO_PROVIDER_NOT_AVAILABLE' in approved['blockers']
+    assert 'BUDGET_CONFIRMATION_REQUIRED' in approved['blockers']
+    assert approved['generation_submitted'] is False
+    assert approved['provider_charge_incurred'] is False
+
+    # Never accept an approval from a different project.
+    other = service.create_project('owner', {
+        'title': 'Another project', 'project_type': 'short_video',
+        'platform': 'TikTok', 'duration_target': 5,
+    })
+    with pytest.raises(CreativeStudioError):
+        service.set_genova_presenter_approval('owner', other['id'], asset_id)
+
+    service.set_genova_presenter_approval('owner', pid, None)
+    assert 'FIRST_SCENE_REFERENCE_IMAGE_REQUIRED' in check()['blockers']
