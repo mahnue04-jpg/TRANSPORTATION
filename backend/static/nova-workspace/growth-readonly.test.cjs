@@ -24,7 +24,7 @@ test("UI does not claim unimplemented approvals or handoff", () => {
   assert.match(js, /Leads returned \(not a total\)/);
   assert.match(js, /Conversations returned \(not a total\)/);
   assert.match(js, /Appointments returned \(maximum 50, not a total\)/);
-  assert.match(js, /Lists may be capped/);
+  assert.doesNotMatch(js, /fetchReadOnly\\("(leads|conversations|appointments)"/);
 });
 
 function harness({ token = "test-token", responseByPath = {}, failFetch = false } = {}) {
@@ -70,12 +70,10 @@ test("unsigned session causes no network calls", async () => {
 test("successful click uses only authenticated GETs and honest returned counts", async () => {
   const h = harness({ responseByPath: {
     health: { body: { status: "ok" } },
-    leads: { body: { leads: [{ email: "private@example.invalid" }] } },
-    conversations: { body: { conversations: [] } },
-    appointments: { body: { appointments: [{ id: "fake" }] } }
+    counts: { body: { counts: { leads: 205, conversations: 103, appointments: 52 } } }
   } });
   await h.click();
-  assert.equal(h.requests.length, 4);
+  assert.equal(h.requests.length, 2);
   for (const request of h.requests) {
     assert.equal(request.options.method, "GET");
     assert.equal(request.options.headers.Authorization, "Bearer test-token");
@@ -89,13 +87,13 @@ test("successful click uses only authenticated GETs and honest returned counts",
 
 test("permission denial and malformed API responses fail closed", async () => {
   for (const responseByPath of [
-    { leads: { status: 403 } },
-    { leads: { body: { leads: null } } }
+    { counts: { status: 403 } },
+    { counts: { body: { counts: { leads: null, conversations: 0, appointments: 0 } } } }
   ]) {
     const h = harness({ responseByPath });
     await h.click();
     assert.match(h.result.textContent, /unavailable for this review/i);
-    assert.doesNotMatch(h.result.textContent, /Leads returned/);
+    assert.doesNotMatch(h.result.textContent, /Total leads/);
     assert.equal(h.trigger.disabled, false);
   }
 });
@@ -124,14 +122,12 @@ test("expired session, disabled feature, and server error show distinct safe mes
 test("repeated manual refresh remains read-only and available", async () => {
   const h = harness({ responseByPath: {
     health: { body: { status: "ok" } },
-    leads: { body: { leads: [] } },
-    conversations: { body: { conversations: [] } },
-    appointments: { body: { appointments: [] } }
+    counts: { body: { counts: { leads: 0, conversations: 0, appointments: 0 } } }
   } });
   // Both checks should succeed without invoking any write request.
   await h.click();
   assert.match(h.result.textContent, /Leads returned \(not a total\): 0/);
   await h.click();
-  assert.equal(h.requests.length, 8);
+  assert.equal(h.requests.length, 4);
   assert.equal(h.trigger.disabled, false);
 });
