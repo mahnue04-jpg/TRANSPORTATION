@@ -788,6 +788,14 @@ class GrowthAgentService:
             )
         )
 
+    def workspace_counts(self, org_id: str) -> dict[str, int]:
+        """Exact, tenant-scoped counts; never fetch or serialize contact PII."""
+        return {
+            "leads": self._org_query(GaContact, org_id).count(),
+            "conversations": self._org_query(GaConversation, org_id).count(),
+            "appointments": self._org_query(GaAppointment, org_id).count(),
+        }
+
     def list_leads(self, org_id: str, *, q: str | None = None, state: str | None = None) -> list[dict]:
         query = self._org_query(GaContact, org_id)
         if state:
