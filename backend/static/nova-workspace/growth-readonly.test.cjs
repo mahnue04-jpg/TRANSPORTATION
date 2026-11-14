@@ -106,3 +106,32 @@ test("network failure is displayed without claiming an action", async () => {
   assert.match(h.result.textContent, /No actions were taken/);
   assert.equal(h.trigger.disabled, false);
 });
+
+test("expired session, disabled feature, and server error show distinct safe messages", async () => {
+  for (const [status, expected] of [
+    [401, /Session expired/],
+    [404, /disabled or unavailable/],
+    [503, /request failed \(503\)/]
+  ]) {
+    const h = harness({ responseByPath: { health: { status } } });
+    await h.click();
+    assert.match(h.result.textContent, expected);
+    assert.doesNotMatch(h.result.textContent, /Leads returned/);
+    assert.equal(h.trigger.disabled, false);
+  }
+});
+
+test("second manual refresh recovers after an earlier error", async () => {
+  const h = harness({ responseByPath: {
+    health: { body: { status: "ok" } },
+    leads: { body: { leads: [] } },
+    conversations: { body: { conversations: [] } },
+    appointments: { body: { appointments: [] } }
+  } });
+  // First click succeeds with an empty set; a second click must still work.
+  await h.click();
+  assert.match(h.result.textContent, /Leads returned \(not a total\): 0/);
+  await h.click();
+  assert.equal(h.requests.length, 8);
+  assert.equal(h.trigger.disabled, false);
+});
