@@ -83,3 +83,22 @@ def test_isolated_lifespan_denies_worker_on(monkeypatch):
             pass
     with pytest.raises(RuntimeError, match="Unsafe live/deletion flag"):
         asyncio.run(run())
+
+
+def test_isolated_testclient_serves_workspace_without_platform_bootstrap(monkeypatch):
+    """Exercise FastAPI lifespan plus the actual Workspace page, not only a helper."""
+    from fastapi.testclient import TestClient
+
+    for key, value in _safe_env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(main_module.app_startup, "register_shutdown_handlers", _boom)
+    monkeypatch.setattr(main_module.app_startup, "startup_recovery", _boom)
+    monkeypatch.setattr(main_module, "init_db", _boom)
+
+    with TestClient(main_module.app) as client:
+        page = client.get("/nova/workspace")
+        assert page.status_code == 200
+        assert "growth-readonly-refresh" in page.text
+        # Protected management API must not leak records anonymously.
+        protected = client.get("/api/nova/growth-agent/leads")
+        assert protected.status_code in {401, 403}
