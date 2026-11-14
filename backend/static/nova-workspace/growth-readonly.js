@@ -42,9 +42,10 @@
       }
       // Only counts are rendered. No hidden customer data is written to HTML.
       setMessage("Growth Agent API reachable (not proof of live delivery).\n" +
-        "Leads: " + responses[1].leads.length + "\n" +
-        "Conversations: " + responses[2].conversations.length + "\n" +
-        "Appointments returned (maximum 50): " + responses[3].appointments.length + "\n" +
+        "Leads returned (not a total): " + responses[1].leads.length + "\n" +
+        "Conversations returned (not a total): " + responses[2].conversations.length + "\n" +
+        "Appointments returned (maximum 50, not a total): " + responses[3].appointments.length + "\n" +
+        "Lists may be capped; no organization-wide totals are claimed.\n" +
         "Source: authenticated API response. No actions sent.\n" +
         "Owner approvals and Operations handoff: not connected.");
     } catch (error) {
