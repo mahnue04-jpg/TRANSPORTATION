@@ -23,7 +23,7 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict[str, str]:
+def _headers(client: TestClient, email: str = "admin@amicor.local") -> dict[str, str]:
     res = client.post("/api/auth/login", json={"email": email, "password": SEED_PASSWORD})
     assert res.status_code == 200, res.text
     token = res.json().get("access_token") or res.json().get("token")
@@ -48,6 +48,24 @@ def test_flags_and_plans_authenticated(client: TestClient) -> None:
     plans = client.get("/api/nova/growth-agent/plans", headers=headers)
     assert plans.status_code == 200
     assert plans.json()["subscriptions_enabled"] is False
+
+
+@pytest.mark.parametrize("email", [
+    "dispatcher@amicor.local",
+    "driver@amicor.local",
+])
+def test_non_admin_cannot_read_growth_records(client: TestClient, email: str) -> None:
+    headers = _headers(client, email=email)
+    for route in ("/api/nova/growth-agent/health", "/api/nova/growth-agent/leads"):
+        res = client.get(route, headers=headers)
+        assert res.status_code == 403, (email, route, res.text)
+
+
+def test_non_admin_cannot_mutate_growth_records(client: TestClient) -> None:
+    headers = _headers(client, email="dispatcher@amicor.local")
+    res = client.post("/api/nova/growth-agent/agent", headers=headers,
+                      json={"paused": True})
+    assert res.status_code == 403
 
 
 def test_unauthenticated_api_rejected(client: TestClient) -> None:
