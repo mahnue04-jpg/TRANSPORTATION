@@ -48,6 +48,8 @@ def validate(environment: dict[str, str]) -> tuple[bool, str]:
     forbidden_enabled = (
         "NOVA_STRIPE_LIVE_ENABLED",
         "NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED",
+        "NOVA_GROWTH_AGENT_BACKGROUND_WORKER",
+        "NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED",
     )
     for flag in forbidden_enabled:
         if environment.get(flag, "").strip().lower() in {"true", "1", "yes", "on"}:
