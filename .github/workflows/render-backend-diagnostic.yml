@@ -44,6 +44,47 @@ jobs:
           tests/test_nova_multi_source_discovery.py
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
 
+  work-revenue-legacy-upload-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CI: "true"
+      TESTING: "true"
+      APP_ENV: development
+      AMICOR_ENVIRONMENT: development
+      ENVIRONMENT: development
+      NOVA_WORK_INPUT_S3_ENABLED: "false"
+      DATABASE_URL: sqlite:///./test_nova_work_revenue_legacy_upload_ci.db
+      AMICOR_RESTRICT_SEED_ACCOUNTS: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Verify seven legacy Work & Revenue workflows still operate in development
+        run: |
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
+          python -m pytest -q -rs \
+            tests/test_nova_work_revenue.py::test_work_inputs_csv_reactivates_autonomous_source_tasks \
+            tests/test_nova_work_revenue.py::test_work_inputs_reject_unsupported_binary \
+            tests/test_nova_work_revenue.py::test_executor_reports_missing_stored_source_file \
+            tests/test_nova_work_revenue.py::test_executor_skips_stale_source_record_and_uses_fresh_reupload \
+            tests/test_nova_work_revenue.py::test_owner_completion_and_invoice_prep_from_autonomous_work \
+            tests/test_nova_work_revenue.py::test_void_invoice_support_removes_only_matching_test_draft_from_active_totals \
+            tests/test_nova_work_revenue.py::test_restore_only_selected_archived_invoice_support_pair
+          echo "Development-only legacy-file compatibility. Production S3/authorization tests run separately." >> "$GITHUB_STEP_SUMMARY"
+
   work-revenue-private-inputs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
