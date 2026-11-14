@@ -21,10 +21,10 @@ test("UI does not claim unimplemented approvals or handoff", () => {
   assert.match(js, /not proof of live delivery/);
   assert.match(js, /Unexpected API format/);
   assert.match(js, /Access denied/);
-  assert.match(js, /Leads returned \(not a total\)/);
-  assert.match(js, /Conversations returned \(not a total\)/);
-  assert.match(js, /Appointments returned \(maximum 50, not a total\)/);
-  assert.doesNotMatch(js, /fetchReadOnly\\("(leads|conversations|appointments)"/);
+  assert.match(js, /Total leads/);
+  assert.match(js, /Total conversations/);
+  assert.match(js, /Total appointments/);
+  assert.doesNotMatch(js, /fetchReadOnly\("(leads|conversations|appointments)"/);
 });
 
 function harness({ token = "test-token", responseByPath = {}, failFetch = false } = {}) {
