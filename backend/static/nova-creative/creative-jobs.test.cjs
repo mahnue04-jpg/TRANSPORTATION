@@ -28,6 +28,7 @@ test('switching projects clears the previous quote, script, file picks and appro
   for (const id of ['presenter-script', 'genova-narration-script', 'genova-image-file', 'genova-narration-file']) ctx.elements[id] = {value: 'old input'};
   ctx.elements['genova-image-choices'] = {textContent: 'original image'};
   ctx.elements['save-presenter-script'] = {disabled: false};
+  ctx.elements['first-shot-max-cost'] = {value: '1'};
   ctx.setActiveProjectId('next');
   assert.equal(ctx.activeProjectId, 'next');
   assert.equal(ctx.latestPreflight, null);
@@ -35,6 +36,37 @@ test('switching projects clears the previous quote, script, file picks and appro
   assert.equal(ctx.elements['genova-image-file'].value, '');
   assert.doesNotMatch(ctx.elements['genova-image-choices'].textContent, /original image/);
   assert.equal(ctx.elements['save-presenter-script'].disabled, true);
+  assert.equal(ctx.elements['first-shot-max-cost'].value, '');
+});
+
+test('controlled shot submits the entered limit and rejects missing or excessive limits', async () => {
+  for (const limit of ['', '0', '1.01', 'NaN', '0.50']) {
+    const handlers = {};
+    const elements = {
+      'first-shot-explicit-approval': {checked: true, addEventListener() {}},
+      'first-shot-max-cost': {value: limit, addEventListener() {}},
+      'submit-first-shot': {addEventListener: (name, handler) => { handlers[name] = handler; }},
+      'first-shot-submit-status': {},
+    };
+    const calls = [];
+    const ctx = vm.createContext({
+      $: id => elements[id], firstShotSubmitting: false,
+      currentFirstShotReport: {status: 'READY_TO_REQUEST', reference_image_asset_id: 'image-1'},
+      currentFirstShotProject: 'p1', activeProjectId: 'p1', activeProjectRevision: 0,
+      latestPreflight: {owner_budget_confirmed: true},
+      showBanner() {}, refreshFirstShotSubmitButton() {},
+      api: async (url, args) => { calls.push(JSON.parse(args.body)); return {job: {id: 'j1'}}; },
+    });
+    vm.runInContext(source.slice(source.indexOf('  var firstShotApproval ='), source.indexOf('  var firstShotPreviewUrl =')), ctx);
+    await handlers.click();
+    if (limit === '0.50') {
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].max_cost_usd, 0.5);
+      assert.equal(calls[0].reference_image_asset_id, 'image-1');
+    } else {
+      assert.equal(calls.length, 0);
+    }
+  }
 });
 
 test('late readiness and image responses cannot repopulate a newly selected project', async () => {

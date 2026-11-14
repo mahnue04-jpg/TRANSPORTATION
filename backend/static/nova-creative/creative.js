@@ -48,6 +48,7 @@
         $("first-shot-explicit-approval").checked = false;
         $("first-shot-explicit-approval").disabled = true;
       }
+      if ($("first-shot-max-cost")) $("first-shot-max-cost").value = "";
       if ($("submit-first-shot")) $("submit-first-shot").disabled = true;
       if ($("first-shot-approval-summary")) {
         $("first-shot-approval-summary").textContent = "Check this project's first shot before any paid submission.";
@@ -2035,7 +2036,9 @@
     var approval = $("first-shot-explicit-approval");
     var submit = $("submit-first-shot");
     if (!submit) return;
+    var maximum = Number($("first-shot-max-cost") && $("first-shot-max-cost").value);
     submit.disabled = firstShotSubmitting || !approval || !approval.checked
+      || !Number.isFinite(maximum) || maximum <= 0 || maximum > 1
       || !currentFirstShotReport || currentFirstShotReport.status !== "READY_TO_REQUEST"
       || !currentFirstShotReport.reference_image_asset_id
       || !latestPreflight || latestPreflight.owner_budget_confirmed !== true
@@ -2118,6 +2121,7 @@
 
   var firstShotApproval = $("first-shot-explicit-approval");
   if (firstShotApproval) firstShotApproval.addEventListener("change", refreshFirstShotSubmitButton);
+  if ($("first-shot-max-cost")) $("first-shot-max-cost").addEventListener("input", refreshFirstShotSubmitButton);
   var singleShotSubmit = $("submit-first-shot");
   if (singleShotSubmit) {
     singleShotSubmit.addEventListener("click", async function () {
@@ -2131,6 +2135,12 @@
         return;
       }
       // The backend revalidates all requirements and holds the shared SQL claim.
+      var limitInput = $("first-shot-max-cost");
+      var maxCost = Number(limitInput && limitInput.value);
+      if (!Number.isFinite(maxCost) || maxCost <= 0 || maxCost > 1) {
+        showBanner("Enter the approved maximum price, greater than $0 and no more than $1.", false);
+        return;
+      }
       firstShotSubmitting = true;
       refreshFirstShotSubmitButton();
       var resultBox = $("first-shot-submit-status");
@@ -2140,6 +2150,7 @@
           method: "POST",
           body: JSON.stringify({
             confirm_paid_generation: true,
+            max_cost_usd: maxCost,
             reference_image_asset_id: report.reference_image_asset_id
           })
         });
