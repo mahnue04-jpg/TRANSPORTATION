@@ -7,6 +7,7 @@ from app.core.nova.growth_agent import staging_start
 def _env():
     return {
         "RENDER_GIT_COMMIT": "b" * 40,
+        "NOVA_GA_ISOLATED_SKIP_DB_BOOTSTRAP": "true",
         "NOVA_GA_APPROVED_STAGING_SHA": "b" * 40,
         "APP_ENV": "staging",
         "AMICOR_ENVIRONMENT": "staging",
@@ -66,3 +67,10 @@ def test_main_execs_only_after_validation(monkeypatch):
     monkeypatch.setattr(staging_start.os, "execv", capture_exec)
     with pytest.raises(ExecCalled):
         staging_start.main()
+
+
+def test_launcher_denies_missing_isolation_flag():
+    env = _env()
+    env.pop("NOVA_GA_ISOLATED_SKIP_DB_BOOTSTRAP")
+    with pytest.raises(ValueError, match="bootstrap bypass"):
+        staging_start.build_uvicorn_argv(env)
