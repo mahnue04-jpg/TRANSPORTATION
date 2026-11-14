@@ -79,7 +79,7 @@ test("successful click uses only authenticated GETs and honest returned counts",
     assert.equal(request.options.headers.Authorization, "Bearer test-token");
     assert.match(request.url, /^\/api\/nova\/growth-agent\//);
   }
-  assert.match(h.result.textContent, /Leads returned \(not a total\): 1/);
+  assert.match(h.result.textContent, /Total leads: 205/);
   assert.match(h.result.textContent, /Owner approvals and Operations handoff: not connected/);
   assert.doesNotMatch(h.result.textContent, /private@example.invalid/);
   assert.equal(h.trigger.disabled, false);
@@ -126,7 +126,7 @@ test("repeated manual refresh remains read-only and available", async () => {
   } });
   // Both checks should succeed without invoking any write request.
   await h.click();
-  assert.match(h.result.textContent, /Leads returned \(not a total\): 0/);
+  assert.match(h.result.textContent, /Total leads: 0/);
   await h.click();
   assert.equal(h.requests.length, 4);
   assert.equal(h.trigger.disabled, false);
