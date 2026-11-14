@@ -52,8 +52,9 @@ def validate(environment: dict[str, str]) -> tuple[bool, str]:
         "NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED",
     )
     for flag in forbidden_enabled:
-        if environment.get(flag, "").strip().lower() in {"true", "1", "yes", "on"}:
-            return False, "Unsafe live/deletion flag enabled"
+        value = environment.get(flag, "").strip().lower()
+        if value not in {"", "false", "0", "no", "off"}:
+            return False, "Unsafe live/deletion flag enabled or unrecognized"
 
     return True, "Growth staging preflight passed (identity only; database untested)"
 
