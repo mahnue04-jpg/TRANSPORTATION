@@ -5,14 +5,17 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, cursor/nova-growth-agent-mvp-1565]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
+      - "backend/static/nova-workspace/growth-readonly*" 
+      - "backend/static/nova-workspace/index.html"
       - "backend/migrations/versions/20261112_nova_growth_agent.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
+      - "backend/tests/test_nova_growth_owner_gate.py"
       - "docs/nova/growth-agent/**"
       - ".github/workflows/nova-growth-agent.yml"
   workflow_dispatch:
@@ -68,7 +71,20 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
-            tests/test_nova_growth_agent_worker_retention.py
+            tests/test_nova_growth_agent_worker_retention.py \
+            tests/test_nova_growth_owner_gate.py
+
+  growth-workspace-ui:
+    name: growth-workspace-ui-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check backend/static/nova-workspace/growth-readonly.js
+      - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
