@@ -57,6 +57,23 @@ class GaBusinessProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
+class GaCampaign(Base):
+    """Owner-reviewed Studio campaign. Widget token is a public embed token, never owner auth."""
+    __tablename__ = "nova_ga_campaigns"
+    __table_args__ = (Index("ix_nova_ga_campaign_org", "organization_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    studio_project_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    widget_installation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    public_widget_token: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(String(2000), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
 class GaWidgetInstallation(Base):
     __tablename__ = "nova_ga_widget_installations"
     __table_args__ = (
@@ -436,6 +453,7 @@ class GaIdempotencyKey(Base):
 
 
 GROWTH_AGENT_TABLES = (
+    GaCampaign.__table__,
     GaBusinessProfile.__table__,
     GaWidgetInstallation.__table__,
     GaContact.__table__,

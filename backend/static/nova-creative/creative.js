@@ -10,6 +10,8 @@
     if (activeProjectId) localStorage.setItem(activeProjectKey, activeProjectId);
     else localStorage.removeItem(activeProjectKey);
     updateActiveProjectLabel();
+    var campaignLink = $("growth-campaign-link");
+    if (campaignLink) campaignLink.href = "/nova/growth" + (activeProjectId ? "?studio_project=" + encodeURIComponent(activeProjectId) : "");
   }
 
   function updateActiveProjectLabel() {

@@ -62,6 +62,7 @@
       },
       body: JSON.stringify({
         token: token,
+        campaign_id: script.getAttribute("data-amicor-growth-campaign") || null,
         message: message,
         conversation_id: conversationId,
         visitor_name: String(fd.get("name") || "") || null,

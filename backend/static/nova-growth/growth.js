@@ -1,6 +1,6 @@
 (() => {
   const state = {
-    token: localStorage.getItem("amicor_growth_token") || "",
+    token: localStorage.getItem("amicor_growth_token") || localStorage.getItem("amicor_nova_creative_token") || "",
     conversationId: null,
     workflowRunId: null,
   };
@@ -62,6 +62,8 @@
     $("inbox").className = "empty";
     $("leads").textContent = "Sign in to load leads.";
     $("leads").className = "empty";
+    $("campaign-list").replaceChildren();
+    $("campaign-project").replaceChildren();
     $("diagnostics-out").textContent = "";
     if ($("diagnostics-flags")) $("diagnostics-flags").textContent = "";
   }
@@ -179,7 +181,7 @@
       }
       const states = ["new", "contacted", "qualified", "booked", "closed"];
       box.className = "";
-      box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>State</th><th>Notes</th><th>Demo</th><th></th></tr></thead><tbody>${rows
+      box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>State</th><th>Notes</th><th>Campaign source</th><th>Demo</th><th></th></tr></thead><tbody>${rows
         .map((l) => {
           const stateOpts = states
             .map(
@@ -193,6 +195,7 @@
             <td><input type="text" aria-label="Lead notes" data-lead-notes value="${escapeHtml(
               l.notes || ""
             )}" /></td>
+            <td>${(l.campaign_sources || []).map((c) => escapeHtml(c.campaign_id)).join(", ") || "Direct / unknown"}<br><span class="hint">Review inquiry before accepting work.</span></td>
             <td>${l.is_synthetic_demo ? '<span class="tag demo">Synthetic</span>' : ""}</td>
             <td><button type="button" class="secondary" data-save-lead>Save</button></td>
           </tr>`;
@@ -230,6 +233,58 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+
+  async function loadCampaigns() {
+    requireSession();
+    const [projects, campaigns] = await Promise.all([
+      api("/api/nova/growth-agent/campaign-projects"), api("/api/nova/growth-agent/campaigns")
+    ]);
+    const select = $("campaign-project");
+    const selected = select.value || new URLSearchParams(location.search).get("studio_project");
+    select.replaceChildren();
+    (projects.projects || []).forEach((p) => {
+      const option = document.createElement("option");
+      option.value = p.id; option.textContent = p.title;
+      option.selected = p.id === selected; select.appendChild(option);
+    });
+    const list = $("campaign-list"); list.replaceChildren();
+    for (const c of campaigns.campaigns || []) {
+      const box = document.createElement("section");
+      const title = document.createElement("h3"); title.textContent = c.title + " · " + c.status;
+      const description = document.createElement("p"); description.textContent = c.description;
+      const link = document.createElement("a"); link.href = c.inquiry_path;
+      link.textContent = c.status === "active" ? "Open customer inquiry page" : "Inquiry link (unavailable until activated)";
+      const button = document.createElement("button"); button.type = "button";
+      button.textContent = c.status === "active" ? "Pause campaign" : "Approve content and activate";
+      button.addEventListener("click", async () => {
+        if (c.status !== "active" && !window.confirm("Approve this title and description for the customer inquiry page? This does not publish your video or send messages.")) return;
+        button.disabled = true;
+        try {
+          await api("/api/nova/growth-agent/campaigns/" + encodeURIComponent(c.id), {
+            method: "PATCH", body: JSON.stringify({ active: c.status !== "active", content_approved: c.status !== "active" })
+          });
+          await loadCampaigns();
+        } catch (err) { $("campaign-status").textContent = err.message; button.disabled = false; }
+      });
+      box.append(title, description, link, document.createElement("br"), button); list.appendChild(box);
+    }
+    $("campaign-status").textContent = "Campaigns loaded. Source links record observed inquiries, not verified sales.";
+  }
+  $("load-campaigns").addEventListener("click", () => loadCampaigns().catch((e) => { $("campaign-status").textContent = e.message; }));
+  $("campaign-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const button = e.submitter; if (button) button.disabled = true;
+    try {
+      requireSession();
+      await api("/api/nova/growth-agent/campaigns", { method: "POST", body: JSON.stringify({
+        studio_project_id: $("campaign-project").value, title: $("campaign-title").value,
+        description: $("campaign-description").value, widget_token: $("widget-token").value.trim()
+      }) });
+      await loadCampaigns();
+      $("campaign-status").textContent = "Draft saved. Review the content below before activating.";
+    } catch (err) { $("campaign-status").textContent = err.message; }
+    finally { if (button) button.disabled = false; }
+  });
 
   async function refreshAll() {
     await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads()]);

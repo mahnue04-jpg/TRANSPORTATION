@@ -81,6 +81,21 @@
       <pre id="setup-preview" class="hint" aria-live="polite"></pre>
     </section>
 
+    <section class="panel" aria-label="Studio campaigns">
+      <h2>Creative Studio campaigns</h2>
+      <p class="hint">Connect a Studio project to an inquiry page. Saving creates a draft; activation requires your review. Nothing is posted or sent automatically.</p>
+      <button type="button" id="load-campaigns" class="secondary">Load my Studio projects and campaigns</button>
+      <form id="campaign-form" class="grid-2">
+        <label>Studio project<select id="campaign-project" required></select></label>
+        <label>Campaign title<input id="campaign-title" maxlength="200" required /></label>
+        <label class="full">Customer-facing description<textarea id="campaign-description" maxlength="2000" required></textarea></label>
+        <p class="hint">First create a widget below for this page's hostname. The campaign uses the widget token in that setup field.</p>
+        <button type="submit">Save campaign draft</button>
+      </form>
+      <p id="campaign-status" role="status"></p>
+      <div id="campaign-list"></div>
+    </section>
+
     <section class="panel" aria-label="Analytics">
       <h2>Analytics</h2>
       <p class="hint">Explicit denominators only. No invented attribution.</p>

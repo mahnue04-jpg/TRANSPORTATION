@@ -27,6 +27,7 @@ from app.core.nova.growth_agent.errors import (
 )
 from app.core.nova.growth_agent.models import (
     LEAD_STATES,
+    GaCampaign,
     GaAppointment,
     GaAppointmentService,
     GaAuditEvent,
@@ -499,6 +500,7 @@ class GrowthAgentService:
         visitor_email: str | None = None,
         consent_marketing: bool = False,
         consent_transactional: bool = False,
+        campaign_id: str | None = None,
     ) -> dict[str, Any]:
         claims = verify_installation_token(token)
         org_id = claims["organization_id"]
@@ -535,6 +537,19 @@ class GrowthAgentService:
             )
         if profile.agent_disabled:
             raise GrowthAgentError("AGENT_DISABLED", "Agent disabled", http_status=403)
+
+        campaign = None
+        if campaign_id:
+            from app.core.nova.growth_agent.campaigns import CampaignService
+            campaign = CampaignService(self).active_campaign(campaign_id)
+            if campaign.organization_id != org_id or campaign.widget_installation_id != installation.id:
+                raise GrowthAgentError("NOT_FOUND", "Campaign unavailable", http_status=404)
+
+        # Reject invalid continuations rather than silently attributing another installation's conversation.
+        if conversation_id:
+            existing_conv = self._org_query(GaConversation, org_id).filter_by(id=conversation_id).one_or_none()
+            if not existing_conv or existing_conv.widget_installation_id != installation.id:
+                raise GrowthAgentError("NOT_FOUND", "Conversation unavailable", http_status=404)
 
         safe_message = _strip_html(message).strip()
         if not safe_message:
@@ -575,6 +590,20 @@ class GrowthAgentService:
             )
             self.db.add(conv)
             self.db.flush()
+
+        if contact and conv.contact_id is None:
+            conv.contact_id = contact.id
+        if contact and campaign:
+            # Record an observed source only, never a sale or causal attribution claim.
+            exists = self._org_query(GaLeadEvent, org_id).filter_by(
+                contact_id=contact.id, event_type="campaign.inquiry"
+            ).all()
+            if not any(e.payload_json.get("campaign_id") == campaign.id for e in exists):
+                self.db.add(GaLeadEvent(
+                    id=_id(), organization_id=org_id, contact_id=contact.id,
+                    event_type="campaign.inquiry",
+                    payload_json={"campaign_id": campaign.id, "studio_project_id": campaign.studio_project_id},
+                ))
 
         self.db.add(
             GaConversationMessage(
@@ -810,6 +839,8 @@ class GrowthAgentService:
         )
         return {
             "id": row.id,
+            "campaign_sources": [e.payload_json for e in self._org_query(GaLeadEvent, row.organization_id)
+                                 .filter_by(contact_id=row.id, event_type="campaign.inquiry").all()],
             "display_name": row.display_name,
             "lead_state": row.lead_state,
             "notes": row.notes,

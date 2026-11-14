@@ -70,6 +70,7 @@ BACKGROUND_WORKER_ENABLED = False
 def live_flags() -> dict[str, bool]:
     return {
         "GROWTH_AGENT_ENABLED": growth_agent_enabled(),
+        "CAMPAIGNS_ENABLED": growth_agent_enabled() and _env_enabled("NOVA_GROWTH_AGENT_CAMPAIGNS_ENABLED"),
         "DEMO_MODE": demo_mode_enabled(),
         "WIDGET_PUBLIC_ENABLED": widget_public_enabled(),
         "BACKGROUND_WORKER_MOCK": background_worker_enabled(),
