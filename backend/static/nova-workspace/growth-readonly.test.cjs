@@ -121,14 +121,14 @@ test("expired session, disabled feature, and server error show distinct safe mes
   }
 });
 
-test("second manual refresh recovers after an earlier error", async () => {
+test("repeated manual refresh remains read-only and available", async () => {
   const h = harness({ responseByPath: {
     health: { body: { status: "ok" } },
     leads: { body: { leads: [] } },
     conversations: { body: { conversations: [] } },
     appointments: { body: { appointments: [] } }
   } });
-  // First click succeeds with an empty set; a second click must still work.
+  // Both checks should succeed without invoking any write request.
   await h.click();
   assert.match(h.result.textContent, /Leads returned \(not a total\): 0/);
   await h.click();
