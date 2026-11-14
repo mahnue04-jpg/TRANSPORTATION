@@ -1239,7 +1239,11 @@ class GrowthAgentService:
                     idempotency_key=delivery_key,
                     cost_estimate_usd=float(msg.get("cost_estimate_usd") or 0),
                     payload_redacted_json={"body_preview": "[REDACTED]"},
-                    available_at=_now(),
+                    # Respect the original preview schedule; never enqueue a future reminder as due now.
+                    available_at=(
+                        appt_mod.parse_iso_utc(msg["scheduled_for_utc"]).replace(tzinfo=None)
+                        if msg.get("scheduled_for_utc") else _now()
+                    ),
                     max_attempts=5,
                 )
                 self.db.add(attempt)
