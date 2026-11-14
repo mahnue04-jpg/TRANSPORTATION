@@ -60,3 +60,11 @@ test('provider failure leaves controls usable and does not show fake output',asy
   assert.equal(h.el('prospect-review-download').disabled,true);
   assert.match(h.el('prospect-review-status').textContent,/provider unavailable/);
 });
+test('work package download requests the owned job and stays disabled without output',async()=>{
+  const h=setup(url=>response(url.endsWith('readiness')?{enabled:true}:result));await flush();
+  assert.equal(h.el('prospect-review-package').disabled,true);
+  h.el('prospect-discovery-query').value='Minnesota travel agencies';await h.submit('prospect-discovery-form');
+  assert.equal(h.el('prospect-review-package').disabled,false);
+  await h.el('prospect-review-package').listeners.click();
+  assert.ok(h.calls.some(c=>c.url.endsWith('/jobs/'+result.job_id+'/work-package.zip')));
+});

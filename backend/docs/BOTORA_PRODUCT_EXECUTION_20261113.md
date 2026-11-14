@@ -78,3 +78,11 @@ From the repository root with its Python dependencies installed:
     PYTHONPATH=backend python backend/scripts/botora_product_assignment.py --verify --output /same/private/output/directory
 
 The output directory must be new; execution will not overwrite an existing run. Store source HTML privately for reproducibility and do not deploy this filesystem-based implementation as multi-tenant customer storage. Exact allowlisting and public-address checks are initial protections; hosted integration needs its own outbound-network enforcement and authorization review.
+
+## Supervised Operations alternative
+
+Operations now prepares personalized review-only outreach messages and qualification questions from saved evidence. A stronger contextual evidence check holds menu-only matches. The independent eight-candidate run produced three drafts (Live Well Travel, Travelorer, Aeris Travel), four holds, and one earlier failed source. None is a confirmed interested buyer. These overlap earlier runs; counts are not additive.
+
+The owner API exposes preparation and a portable ZIP of the Operations CSV, draft queue, explanatory README and checksum receipt. The UI offers that package download after an owned job completes. Recovery validates expected filenames, bounded sizes and checksums and preserves pending approvals. A separate Python process restored three drafts/four holds successfully. The package covers review outputs, not source HTML, job/auth databases or hosted persistence. Checksums detect accidental changes; they are not an authenticated signature.
+
+Validation: 15 focused Python checks and 5 synthetic JavaScript control checks pass. No prospect messages were sent. Agreement signing, approval of exact materials, owner launch authorization and verified business contact/channel remain gates. Full hosted/browser/autonomous acceptance remains outstanding.

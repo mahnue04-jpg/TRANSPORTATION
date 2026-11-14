@@ -8,6 +8,7 @@
   const results = document.getElementById("prospect-review-records");
   const resume = document.getElementById("prospect-review-resume");
   const download = document.getElementById("prospect-review-download");
+  const workPackage = document.getElementById("prospect-review-package");
   const sources = document.getElementById("prospect-review-sources");
   let job = "", busy = false, requestKey = "", signature = "";
   let sessionEpoch = 0;
@@ -28,7 +29,7 @@
     return response;
   }
   function show(data) {
-    job=data.job_id;download.disabled=false;results.replaceChildren();
+    job=data.job_id;download.disabled=false;workPackage.disabled=false;results.replaceChildren();
     const rows=Array.isArray(data.records)?data.records:[];
     status.textContent=rows.length+" source records saved; "+data.summary.workflow_candidates+
       " preliminary workflow matches; "+data.summary.insufficient_evidence+" need stronger evidence; "+data.source_failures.length+
@@ -43,11 +44,11 @@
     });
     try{sessionStorage.setItem("nova-prospect-review-job",job);}catch (_){}
   }
-  function lock(value){busy=value;form.querySelector('button[type="submit"]').disabled=value;discoveryForm.querySelector('button[type="submit"]').disabled=value;resume.disabled=value;download.disabled=value||!job;}
+  function lock(value){busy=value;form.querySelector('button[type="submit"]').disabled=value;discoveryForm.querySelector('button[type="submit"]').disabled=value;resume.disabled=value;download.disabled=value||!job;workPackage.disabled=value||!job;}
   async function available(){
     sessionEpoch += 1;
     const epoch = sessionEpoch;
-    panel.hidden=true;results.replaceChildren();job="";download.disabled=true;
+    panel.hidden=true;results.replaceChildren();job="";download.disabled=true;workPackage.disabled=true;
     try {const r=await request("readiness");const data=await r.json();if(epoch===sessionEpoch)panel.hidden=!data.enabled;} catch (_) {}
   }
   form.addEventListener("submit",async function(event){
@@ -100,6 +101,16 @@
       const blob=await r.blob();if(epoch!==sessionEpoch)return;
       const url=URL.createObjectURL(blob);const link=document.createElement("a");
       link.href=url;link.download="nova-prospect-review.csv";document.body.appendChild(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+    }catch(error){status.textContent=error.message;}finally{lock(false);}
+  });
+  workPackage.addEventListener("click",async function(){
+    if(!job||busy)return;lock(true);const epoch=sessionEpoch;
+    try{
+      const r=await request("jobs/"+encodeURIComponent(job)+"/work-package.zip");
+      const blob=await r.blob();if(epoch!==sessionEpoch)return;
+      const url=URL.createObjectURL(blob);const link=document.createElement("a");
+      link.href=url;link.download="nova-supervised-work-package.zip";document.body.appendChild(link);link.click();link.remove();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
     }catch(error){status.textContent=error.message;}finally{lock(false);}
   });

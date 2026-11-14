@@ -36,10 +36,15 @@ def test_http_job_replay_restart_ownership_and_download(harness,monkeypatch):
     assert fresh.get(f'/prospect-review/jobs/{job}').json()['owner_review']=='PENDING'
     out=fresh.get(f'/prospect-review/jobs/{job}/review.csv')
     assert out.status_code==200 and b'Fixture' in out.content
+    prep=fresh.get(f'/prospect-review/jobs/{job}/preparation')
+    assert prep.status_code==200 and prep.json()['drafts'][0]['can_send'] is False
+    package=fresh.get(f'/prospect-review/jobs/{job}/work-package.zip')
+    assert package.status_code==200 and package.content.startswith(b'PK')
     assert data['handoff']['status']=='HOLD_FOR_LAUNCH_AND_QUALIFICATION'
     who['owner']='owner-b'
     assert client.get(f'/prospect-review/jobs/{job}').status_code==404
     assert client.get(f'/prospect-review/jobs/{job}/review.csv').status_code==404
+    assert client.get(f'/prospect-review/jobs/{job}/work-package.zip').status_code==404
 
 
 def test_production_and_missing_action_are_blocked(harness,monkeypatch):

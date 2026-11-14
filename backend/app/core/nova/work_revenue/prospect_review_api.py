@@ -16,6 +16,7 @@ from app.auth import UserContext
 from .owner_auth import require_work_revenue_owner
 from .prospect_research import run_assignment, verify_saved_run
 from .prospect_discovery import run_discovery, SearchUnavailable
+from .operations_prospect_package import build_package, prepare_queue
 
 router = APIRouter(prefix="/prospect-review",tags=["nova-prospect-review-development"],
                    dependencies=[Depends(require_work_revenue_owner)])
@@ -153,3 +154,21 @@ def download_job(job_id:str,owner:UserContext=Depends(require_work_revenue_owner
     directory,_=saved_job(owner,job_id)
     return Response((directory/'operations-review.csv').read_bytes(),media_type='text/csv',
                     headers={'Content-Disposition':'attachment; filename="nova-prospect-review.csv"','Cache-Control':'no-store'})
+
+
+@router.get('/jobs/{job_id}/preparation')
+def preparation(job_id:str,owner:UserContext=Depends(require_work_revenue_owner)):
+    _,manifest=saved_job(owner,job_id)
+    return prepare_queue(manifest)
+
+
+@router.get('/jobs/{job_id}/work-package.zip')
+def work_package(job_id:str,owner:UserContext=Depends(require_work_revenue_owner)):
+    import tempfile
+    directory,_=saved_job(owner,job_id)
+    with tempfile.TemporaryDirectory(prefix='review-package-',dir=directory) as temp:
+        target=Path(temp)/'review-package.zip'
+        build_package(directory,target)
+        raw=target.read_bytes()
+    return Response(raw,media_type='application/zip',headers={
+        'Content-Disposition':'attachment; filename="nova-supervised-work-package.zip"','Cache-Control':'no-store'})
