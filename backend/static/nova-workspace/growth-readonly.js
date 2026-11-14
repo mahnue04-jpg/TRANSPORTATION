@@ -44,7 +44,7 @@
       setMessage("Growth Agent API reachable (not proof of live delivery).\n" +
         "Leads: " + responses[1].leads.length + "\n" +
         "Conversations: " + responses[2].conversations.length + "\n" +
-        "Appointments: " + responses[3].appointments.length + "\n" +
+        "Appointments returned (maximum 50): " + responses[3].appointments.length + "\n" +
         "Source: authenticated API response. No actions sent.\n" +
         "Owner approvals and Operations handoff: not connected.");
     } catch (error) {
