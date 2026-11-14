@@ -111,3 +111,38 @@ def test_malformed_json_and_oversized_body_fail_closed(probe, monkeypatch):
         report = mod.fal_first_shot_diagnostic()
         assert blocker in report["blockers"]
         assert "private-test-credential" not in json.dumps(report)
+
+
+def test_timeout_is_unverified(probe, monkeypatch):
+    run, _ = probe
+
+    class TimeoutOpener:
+        def open(self, request, **kwargs):
+            assert request.get_method() == "GET"
+            raise TimeoutError("private-test-credential")
+
+    monkeypatch.setattr(mod.urllib.request, "build_opener", lambda *a: TimeoutOpener())
+    report = mod.fal_first_shot_diagnostic()
+    assert "FAL_PRICING_UNAVAILABLE" in report["blockers"]
+    assert "private-test-credential" not in json.dumps(report)
+
+
+def test_redirect_handler_refuses_redirect():
+    from app.core.nova.creative_studio.kling import _NoRedirect
+    assert _NoRedirect().redirect_request(None, None, 302, "", {}, "https://elsewhere.invalid") is None
+
+
+def test_boolean_and_over_precise_price_fail_closed(probe):
+    run, _ = probe
+    for value in [True, None, "Infinity", "0", "-0.01"]:
+        report = run(response([price(unit_price=value)]))
+        assert report["price_usd_five_seconds"] is None
+
+
+def test_nonmatching_model_and_unknown_unit_are_never_authorized(probe):
+    run, _ = probe
+    for item in [price(endpoint_id="fal-ai/unapproved/model"), price(unit="requests")]:
+        report = run(response([item]))
+        assert report["model_authorized"] == "UNVERIFIED"
+        assert report["price_status"] == "UNVERIFIED"
+        assert not report["provider_request_submitted"]
