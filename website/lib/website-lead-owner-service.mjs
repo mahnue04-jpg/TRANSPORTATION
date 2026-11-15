@@ -16,10 +16,11 @@ export async function getOwnerWebsiteInquiries({ resolvePrincipal, session, kv, 
   if (!principal || principal.authenticated !== true) {
     return { status: 401, body: { error: "unauthenticated" } };
   }
-  if (principal.role !== "owner" && principal.role !== "admin" && principal.role !== "super_admin") {
+  if (principal.role !== "admin" && principal.role !== "super_admin_support") {
     return { status: 403, body: { error: "forbidden" } };
   }
-  if (typeof tenantId !== "string" || !tenantId ||
+  if (!principal.userId || typeof principal.userId !== "string" ||
+      typeof tenantId !== "string" || !tenantId ||
       typeof principal.tenantId !== "string" || principal.tenantId !== tenantId) {
     return { status: 403, body: { error: "forbidden" } };
   }
