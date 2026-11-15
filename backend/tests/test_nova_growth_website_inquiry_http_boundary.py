@@ -105,3 +105,65 @@ def test_disabled_growth_flag_denies_inquiry_http(monkeypatch):
     client = TestClient(app)
     result = client.get(PATH, headers=_login(client, "admin@amicor.local"))
     assert result.status_code == 404
+
+
+def test_public_website_legacy_record_flows_to_owner_review_without_writes(monkeypatch):
+    """Simulate Cloudflare's existing website writer format through HTTP owner read."""
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_ENABLED", "true")
+    ensure_auth_schema()
+    seed_default_users()
+    legacy_key = "lead:2026-11-15T06:00:00.000Z:12345678-1234-4234-8234-123456789abc"
+    public_form_payload = {
+        "receivedAt": "2026-11-15T06:00:00.000Z",
+        "name": "Sample Customer",
+        "company": "Example Business",
+        "email": "buyer@example.invalid",
+        "phone": "",
+        "industry": "Professional Services",
+        "companySize": "1-10",
+        "product": "Nova Operations Agent",
+        "message": "Please prepare a service quote",
+        "consent": True,
+        "source": "amicor-public-website-w8",
+    }
+
+    class CapturedPublicKV:
+        def __init__(self):
+            self.writes = 0
+            self.list_calls = 0
+
+        def list_keys(self, *, prefix, cursor):
+            self.list_calls += 1
+            assert (prefix, cursor) == ("lead:", None)
+            return {"keys": [{"name": legacy_key}], "list_complete": True}
+
+        def get_text(self, key):
+            assert key == legacy_key
+            return json.dumps(public_form_payload)
+
+        def put(self, *args, **kwargs):
+            self.writes += 1
+            raise AssertionError("Read-only route must never write to KV")
+
+    store = CapturedPublicKV()
+    app.dependency_overrides[website_inquiry_source_factory] = lambda: lambda org: store
+    try:
+        client = TestClient(app)
+        owner = _login(client, "admin@amicor.local")
+        response = client.get(PATH, headers=owner)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["count"] == 1
+        inquiry = payload["inquiries"][0]
+        assert inquiry["source_key"] == legacy_key
+        assert inquiry["company"] == "Example Business"
+        assert inquiry["product"] == "Nova Operations Agent"
+        assert inquiry["status"] == "needs_owner_review"
+        assert inquiry["is_synthetic"] is False
+        assert store.writes == 0
+        assert store.list_calls == 1
+        denied = client.get(PATH + "?organization_id=other-tenant", headers=owner)
+        assert denied.status_code == 403
+        assert store.list_calls == 1
+    finally:
+        app.dependency_overrides.pop(website_inquiry_source_factory, None)
