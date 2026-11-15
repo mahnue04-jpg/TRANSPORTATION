@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-KTQ6Q68T');</script>
+  <!-- End Google Tag Manager -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>First customer campaign visual demo — AMICOR Nova</title>
+  <link rel="icon" href="/assets/logo.svg">
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <style>
+    body{background:#f3f7f4;color:#14241c}
+    .demo{max-width:970px;margin:1.5rem auto 3rem;padding:0 1rem}
+    .demo-header,.demo-card{background:white;border:1px solid #d3dfd6;padding:1.25rem;margin-bottom:1rem;border-radius:10px}
+    .demo-head{font-size:clamp(1.45rem,3vw,2.2rem);margin:.35rem 0}
+    .demo-note{padding:.8rem 1rem;background:#fff4d9;border-left:4px solid #9a7225;margin:1rem 0;line-height:1.5}
+    .demo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+    .demo-field{display:flex;flex-direction:column;gap:.4rem;font-weight:600}
+    .demo-field select{width:100%;border:1px solid #64796b;padding:.7rem;background:#fff;font:inherit}
+    .demo-check{display:flex;align-items:flex-start;gap:.65rem;line-height:1.45;cursor:pointer}
+    .demo-check input{flex:none;width:1.1rem;height:1.1rem;margin:.18rem 0 0}
+    .demo-actions{display:flex;flex-wrap:wrap;gap:.7rem;margin:.9rem 0}
+    .demo-actions button{background:#1f4b3a;border:0;border-radius:5px;color:white;padding:.7rem 1rem;cursor:pointer;font:inherit}
+    .demo-actions button:disabled{opacity:.5}
+    .demo-feedback{margin-top:.6rem;min-height:1.7rem;font-weight:600}
+    .demo-feedback.error{color:#8b2e2e}
+    .demo-feedback.success{color:#1f4b3a}
+    .demo-counts{display:flex;flex-wrap:wrap;gap:.8rem}
+    .demo-counts span{background:#f0f6f0;border:1px solid #d3dfd6;padding:.5rem .7rem}
+    @media(max-width:650px){.demo-grid{grid-template-columns:1fr}.demo{padding:0 .75rem}.demo-card{padding:1rem}}
+  </style>
+</head>
+<body class="theme-corporate">
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KTQ6Q68T"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- End Google Tag Manager (noscript) -->
+  <a class="skip" href="#main">Skip to content</a>
+  <main class="demo" id="main">
+    <div class="demo-header">
+      <p>AMICOR Nova / First customer campaign</p>
+      <h1 class="demo-head">Campaign review — visual prototype</h1>
+      <p class="demo-note"><strong>Fictional browser demo only.</strong> This page does not authenticate, contact customers, call Growth Agent APIs, record payments or save to a server. Refreshing this page resets all demo reviews. This is not the PR #519 live backend.</p>
+      <p>Example offer: Free Scope Check, followed by a $49 Starter Task after scope agreement. Help small home-service businesses organize unfinished inquiries and prepare follow-up drafts.</p>
+    </div>
+    <section class="demo-card" aria-label="Fictional campaign counts">
+      <h2>Campaign stages</h2>
+      <div class="demo-counts" id="campaign-counts" aria-live="polite"></div>
+    </section>
+    <section class="demo-card" aria-label="Fictional contact review">
+      <h2>Review fictional inquiry</h2>
+      <form id="campaign-form">
+        <div class="demo-grid">
+          <label class="demo-field">Fictional contact
+            <select id="demo-contact">
+              <option value="cedar">Cedar Cleaning (fictional)</option>
+              <option value="north">North Star Repairs (fictional)</option>
+              <option value="lake">Lakeview Home Care (fictional, do not contact)</option>
+            </select>
+          </label>
+          <label class="demo-field">Owner recorded stage
+            <select id="demo-stage">
+              <option value="new">New scope check</option>
+              <option value="qualified">Qualified</option>
+              <option value="quoted">Quote prepared</option>
+              <option value="ordered">Order recorded (not payment verified)</option>
+              <option value="delivered">Delivery recorded (not payment verified)</option>
+              <option value="declined">Declined</option>
+            </select>
+          </label>
+          <label class="demo-check"><input id="demo-inquiries" type="checkbox"> Open inquiries confirmed</label>
+          <label class="demo-check"><input id="demo-authorized" type="checkbox"> Customer authorizes use of their list</label>
+          <label class="demo-check"><input id="demo-sending" type="checkbox"> External sending is required</label>
+          <label class="demo-check"><input id="demo-sensitive" type="checkbox"> Sensitive customer information is required</label>
+        </div>
+        <p>Advancing to Qualified or later requires confirmed inquiries, list authorization, and a scope that does not require sending or sensitive records. This prototype does not send messages.</p>
+        <div class="demo-actions"><button type="submit" id="demo-save">Save fictional review</button><button type="button" id="demo-reset">Reset demo</button></div>
+        <p id="demo-feedback" class="demo-feedback" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    <p><a href="/nova/growth/">Back to Growth preview status</a></p>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const initial = () => ({
+        cedar: { stage:'new', inquiries:false, authorized:false, sending:false, sensitive:false, blocked:false },
+        north: { stage:'new', inquiries:false, authorized:false, sending:false, sensitive:false, blocked:false },
+        lake: { stage:'new', inquiries:false, authorized:false, sending:false, sensitive:false, blocked:true }
+      });
+      let records = initial();
+      const byId = (id) => document.getElementById(id);
+      const keys = [['inquiries','demo-inquiries'],['authorized','demo-authorized'],['sending','demo-sending'],['sensitive','demo-sensitive']];
+      const feedback = (message, kind='') => {
+        const node=byId('demo-feedback');
+        node.textContent=message;
+        node.className='demo-feedback '+kind;
+      };
+      const renderCounts = () => {
+        const counts={new:0,qualified:0,quoted:0,ordered:0,delivered:0,declined:0};
+        Object.values(records).forEach(r => counts[r.stage]++);
+        const host=byId('campaign-counts');host.replaceChildren();
+        Object.entries(counts).forEach(([stage,n])=>{
+          const span=document.createElement('span');span.textContent=stage+': '+n;host.append(span);
+        });
+      };
+      const select = () => {
+        const r=records[byId('demo-contact').value];
+        byId('demo-stage').value=r.stage;
+        keys.forEach(([key,id]) => {byId(id).checked=r[key];});
+        feedback(r.blocked?'Fictional contact is marked do not contact.':'');
+      };
+      byId('demo-contact').addEventListener('change',select);
+      byId('campaign-form').addEventListener('submit',e=>{
+        e.preventDefault();
+        const id=byId('demo-contact').value,r=records[id],next=byId('demo-stage').value;
+        const candidate={...r,stage:next};
+        keys.forEach(([key,element])=>{candidate[key]=byId(element).checked;});
+        const blockers=[];
+        if(candidate.blocked)blockers.push('Contact is marked do not contact');
+        if(!candidate.inquiries)blockers.push('Confirm open inquiries');
+        if(!candidate.authorized)blockers.push('Confirm customer list authorization');
+        if(candidate.sending)blockers.push('External sending requires a separate scope review');
+        if(candidate.sensitive)blockers.push('Sensitive data requires a separate scope review');
+        if(['qualified','quoted','ordered','delivered'].includes(next)&&blockers.length){
+          feedback('Cannot advance: '+blockers.join('; ')+'.','error');return;
+        }
+        const permitted={new:['new','qualified','declined'],qualified:['qualified','quoted','declined'],quoted:['quoted','ordered','declined'],ordered:['ordered','delivered','declined'],delivered:['delivered'],declined:['declined','new']};
+        if(!permitted[r.stage].includes(next)){
+          feedback('Cannot move from '+r.stage+' directly to '+next+'.','error');return;
+        }
+        records[id]=candidate;renderCounts();select();
+        feedback('Fictional review saved for '+byId('demo-contact').selectedOptions[0].textContent+'. No server data changed.','success');
+      });
+      byId('demo-reset').addEventListener('click',()=>{records=initial();byId('demo-contact').value='cedar';select();renderCounts();feedback('Demo reset.');});
+      renderCounts();select();
+    })();
+  </script>
+</body>
+</html>
