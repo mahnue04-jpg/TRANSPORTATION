@@ -14,12 +14,12 @@
 | `IMG_61945839-30AF-44E2-ADA1-FA7D936A843E.jpeg` | Owner photograph of KDP Print Previewer showing a jungle cover | **Reference-only** | The photo contains a computer interface and low-resolution view; may not match actual current published revision |
 | `My First ABC Animal Coloring Adventure.png` | Multi-panel concept collage with letters, cover, and planning elements | **Planning reference only** | Front-cover design differs from KDP Print Previewer photo; sample pages not verified as published |
 | `ABC_Animal_60pp_A-Z_Complete_Illustrated_WORKING_PROOF.pdf` and similar named proofs | Prepublication 60-page design proofs | **Do not advertise as final interior** | Marked working proof/not print ready |
-| Final clean cover image | **Not received or verified** | Awaiting | Need actual current published-edition cover at adequate resolution |
+| `My First ABC Animal Adventure.png` | Standalone original artwork found in ChatGPT Library; 1199×1312 RGB PNG; SHA-256 `4584d5daa765ca42ee96aa70d418d58d4331ab203df47b04fbeceb9df3872dd2` | **Strong candidate, reference/preview only** | Jungle layout visually matches KDP Print Previewer photo, but aspect ratio differs from 8.5×11 paperback trim and current published cover still needs owner/KDP confirmation |
 | Final sample A page | **Not received or verified** | Awaiting | Need final published-edition interior export |
 | Final second interior page | **Not received or verified** | Awaiting | Need final published-edition interior export |
 
 ## Asset verification sequence
-1. Export the front cover from the owner's final KDP cover project or owner-controlled published source, ideally a clean PNG/JPG at sufficient resolution; keep original unmodified.
+1. **Candidate located:** preserve the standalone Library `My First ABC Animal Adventure.png` (1199×1312); visually compare to KDP Print Previewer and current Amazon listing. It depicts the same general jungle motif, but it is **not confirmed** as the exact uploaded print cover and its dimensions differ from the final 8.5×11 aspect ratio. Obtain a clean front-cover image from the final published KDP cover project (or verify the candidate against it); do not stretch it to fit.
 2. Export at least two interior pages from the actually published KDP manuscript PDF (not any earlier proof).
 3. Compare cover title, imprint/author credit, artwork, and interior page labels to the current Amazon listing or latest KDP files.
 4. Record the asset file names, source date, intended usage, and explicit owner approval. Avoid exposing account secrets or private KDP dashboard links.
@@ -30,7 +30,7 @@
 ## Media-approval log (to be filled after verification)
 | Item | Status | Verified source | Owner approval | Notes |
 |---|---|---|---|---|
-| Cover | Missing |  | Pending | |
+| Cover | Candidate found; final published edition unconfirmed | `My First ABC Animal Adventure.png` (ChatGPT Library original) | Pending | 1199×1312; preserve source, do not stretch, crop or imply it's a full KDP print-wrap |
 | Interior page A | Missing |  | Pending | |
 | Interior page 2 | Missing |  | Pending | |
 | 5-second video | Not rendered |  | Pending | |
