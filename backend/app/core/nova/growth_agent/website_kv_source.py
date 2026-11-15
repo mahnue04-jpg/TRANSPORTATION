@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 _API = "https://api.cloudflare.com/client/v4"
 _ID = re.compile(r"^[a-zA-Z0-9_-]{8,128}$")
-_EMAIL = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+_EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _text(raw: Any, length: int) -> str:
