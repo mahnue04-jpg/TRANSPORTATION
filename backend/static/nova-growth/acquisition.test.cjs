@@ -31,12 +31,13 @@ function setup() {
   };
   vm.runInNewContext(source, context);
   const $ = (id) => elements.get(id);
-  const respond = (value) => pending.shift()({ ok: true, json: async () => value });
+  const respond = (value, ok = true) => pending.shift()({ ok, json: async () => value });
+  const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
   const board = {
     plan: { name: 'Pilot', audience: 'Businesses', offer: 'Drafts', entry_offer: '$49 after scope', scope: 'Drafts only', hook: 'Hook', call_to_action: 'Scope check', channels: [] },
     counts: { new: 1 }, contacts: [{ id: 'lead-1', review: { stage: 'new' } }], total_reviewed: 1, unassigned_contacts: 0,
   };
-  return { $, calls, respond, board, setToken: (value) => { session = value; } };
+  return { $, calls, respond, flush, board, setToken: (value) => { session = value; } };
 }
 
 test('signed-out load makes no network request', async () => {
@@ -69,4 +70,58 @@ test('owner contact names render as text and synthetic records stay out', async 
   assert.equal(h.$('acquisition-review').hidden, false);
   h.$('login-form').listeners.submit();
   assert.equal(h.$('acquisition-contact').children.length, 0);
+});
+
+
+test('saving a second contact preserves selection and confirms the saved review', async () => {
+  const h = setup();
+  const leadRows = { leads: [
+    { id: 'lead-1', display_name: 'First' },
+    { id: 'lead-2', display_name: 'Second' },
+  ] };
+  const board = { ...h.board, contacts: [
+    { id: 'lead-1', review: { stage: 'new' } },
+    { id: 'lead-2', review: { stage: 'qualified', has_open_inquiries: true, authorized_list_use: true } },
+  ] };
+  const firstLoad = h.$('acquisition-load').listeners.click();
+  h.respond(board); h.respond(leadRows);
+  await firstLoad;
+  h.$('acquisition-contact').value = 'lead-2';
+  h.$('acquisition-contact').listeners.change();
+  assert.equal(h.$('acquisition-stage').value, 'qualified');
+  const saving = h.$('acquisition-review').listeners.submit({ preventDefault() {} });
+  assert.match(h.calls.at(-1).url, /contacts\/lead-2\/review$/);
+  h.respond({ changed: true });
+  await h.flush();
+  // The server returns an updated board for the same selected contact.
+  h.respond(board); h.respond(leadRows);
+  await saving;
+  assert.equal(h.$('acquisition-contact').value, 'lead-2');
+  assert.equal(h.$('acquisition-stage').value, 'qualified');
+  assert.match(h.$('acquisition-feedback').textContent, /saved for the selected contact/i);
+});
+
+test('scope validation feedback is adjacent to Save and names each blocker', async () => {
+  const h = setup();
+  const loading = h.$('acquisition-load').listeners.click();
+  h.respond(h.board); h.respond({ leads: [{ id: 'lead-1', display_name: 'First' }] });
+  await loading;
+  const saving = h.$('acquisition-review').listeners.submit({ preventDefault() {} });
+  h.respond({ detail: { message: 'Review needs changes', details: {
+    blockers: ['No open inquiries confirmed', 'List authorization is not confirmed']
+  } } }, false);
+  await saving;
+  assert.match(h.$('acquisition-feedback').textContent, /No open inquiries confirmed/);
+  assert.match(h.$('acquisition-feedback').textContent, /List authorization is not confirmed/);
+  assert.equal(h.$('acquisition-feedback').className, 'error');
+});
+
+test('review checkboxes have explicit paired layout and feedback live region', () => {
+  const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  const css = fs.readFileSync(__dirname + '/growth.css', 'utf8');
+  for (const id of ['open', 'permission', 'sending', 'sensitive']) {
+    assert.match(html, new RegExp('class="acquisition-check"[^>]*><input[^>]*id="acquisition-' + id + '"'));
+  }
+  assert.match(html, /id="acquisition-feedback"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(css, /#acquisition-review \.acquisition-check\s*\{\s*flex-direction: row/);
 });
