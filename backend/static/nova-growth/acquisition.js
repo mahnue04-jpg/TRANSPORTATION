@@ -5,10 +5,16 @@
   const status = $("acquisition-status");
   let version = 0;
   let reviews = new Map();
+  const feedback = $("acquisition-feedback");
+  function setFeedback(message, error = false) {
+    feedback.textContent = message;
+    feedback.className = error ? "error" : "hint";
+  }
 
   function clear() {
     version++;
     reviews = new Map();
+    setFeedback("");
     $("acquisition-plan").replaceChildren();
     $("acquisition-counts").textContent = "";
     $("acquisition-contact").replaceChildren();
@@ -26,7 +32,9 @@
     const data = await response.json();
     if (!response.ok) {
       const detail = data.detail;
-      throw new Error(typeof detail === "string" ? detail : detail?.message || "Campaign request failed.");
+      const error = new Error(typeof detail === "string" ? detail : detail?.message || "Campaign request failed.");
+      error.blockers = detail?.details?.blockers || data?.blockers || [];
+      throw error;
     }
     return data;
   }
@@ -46,7 +54,7 @@
     }
   }
 
-  async function load() {
+  async function load(selectedContact = "") {
     const session = token();
     const current = ++version;
     status.textContent = "Loading owner campaign...";
@@ -72,6 +80,9 @@
         option.value = contact.id;
         contacts.append(option);
       }
+      if (selectedContact && Array.from(contacts.options).some((option) => option.value === selectedContact)) {
+        contacts.value = selectedContact;
+      }
       $("acquisition-review").hidden = !contacts.options.length;
       selectReview();
       status.textContent = contacts.options.length
@@ -95,10 +106,12 @@
     event.preventDefault();
     const session = token();
     const current = version;
+    const contactId = $("acquisition-contact").value;
     const button = $("acquisition-save");
+    setFeedback("");
     button.disabled = true;
     try {
-      await request(`/acquisition/contacts/${encodeURIComponent($("acquisition-contact").value)}/review`, session, {
+      await request(`/acquisition/contacts/${encodeURIComponent(contactId)}/review`, session, {
         stage: $("acquisition-stage").value,
         has_open_inquiries: $("acquisition-open").checked,
         authorized_list_use: $("acquisition-permission").checked,
@@ -106,9 +119,13 @@
         requires_sensitive_data: $("acquisition-sensitive").checked,
       });
       if (current !== version || session !== token()) return;
-      await load();
+      await load(contactId);
+      if (session === token()) setFeedback("Review saved for the selected contact.");
     } catch (error) {
-      if (current === version && session === token()) status.textContent = error.message;
+      if (current === version && session === token()) {
+        const details = error.blockers && error.blockers.length ? error.blockers.join("; ") : error.message;
+        setFeedback(details, true);
+      }
     } finally {
       button.disabled = false;
     }
