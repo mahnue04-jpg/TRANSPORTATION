@@ -10,7 +10,9 @@ Status: **DRAFT — owner review required**. No automatic publishing, ad spend, 
 - Direct canonical product URL: https://www.amazon.com/dp/B0HQY4PBJK
 - Amazon product page itself could not be independently loaded. **Current availability, price, page count, customer reviews, author byline, product images, and bestseller status are not verified.** Do not claim them in promotions.
 - Paperback ISBN 9798140234065, listed previously in owner preparation materials, **not reconfirmed from Amazon's listing**.
-- The real cover and approved interior samples were not located in connected Drive search. **Never replace them with synthetic pages presented as the book.**
+- A prior ChatGPT Library search located a **KDP Print Previewer camera photo** (`IMG_61945839-30AF-44E2-ADA1-FA7D936A843E.jpeg`) showing a full paperback cover. The pictured front has a blue/yellow title, jungle background, parrot and monkey above, and elephant, lion, zebra and open letter pages below. This is evidence of a KDP cover layout at the time of screenshot, **not** a high-resolution exported cover or definitive proof that the final published edition retained it.
+- A separate Library PNG (`My First ABC Animal Coloring Adventure.png`) contains a multi-panel **planning collage** with a visibly different front cover and sample ABC pages; it must **not** be presented as the published cover. The Library also contains multiple 60-page interior PDF **working proofs labeled not print ready**. None should be used as final edition advertising content without exact visual comparison against published KDP files.
+- **Clean, approved full-resolution cover and final interior samples remain unavailable**; do not invent replacements or extract blurry source art from a photographed monitor.
 
 ## Audience and offer
 Audience: parents, caregivers, and educators seeking a coloring-based introduction to the alphabet. Speak to adults making purchasing decisions; avoid directing children to purchase or creating pressure.
@@ -52,7 +54,8 @@ Mandatory: verify narration fits the final 30s with a natural human-sounding voi
 
 ## Owner approval checklist
 - [ ] Confirm ASIN link opens the correct live edition in the intended Amazon marketplace.
-- [ ] Confirm final cover and sample pages match published edition; permission/rights are held.
+- [ ] Acquire clean front-cover export directly from published KDP project; compare against KDP preview screenshot and live listing.
+- [ ] Acquire at least two approved interior sample pages from **the published KDP revision**, not prior working proofs; permission/rights are held.
 - [ ] Confirm actual byline, optional price, age suitability and page count from live listing before including them.
 - [ ] Approve text and video script.
 - [ ] Review actual finished short-video export (playback, captions, volume, download).
