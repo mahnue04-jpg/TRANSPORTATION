@@ -1,5 +1,6 @@
 """Pure synthetic tests. Never query Cloudflare or real customer records."""
 import pytest
+from urllib.parse import unquote
 
 from app.core.nova.growth_agent.website_kv_source import (
     WebsiteKVSource, configured_website_source,
@@ -26,7 +27,7 @@ def _source(pages, records, *, tenant="tenant-one"):
         if path.startswith("keys?"):
             return pages.pop(0)
         if path.startswith("values/"):
-            return records.get(path.removeprefix("values/"))
+            return records.get(unquote(path.removeprefix("values/")))
         raise AssertionError("unexpected read")
     return WebsiteKVSource(
         tenant_id=tenant, account_id="account1234", namespace_id="namespace1234",
