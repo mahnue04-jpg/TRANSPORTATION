@@ -29,7 +29,7 @@ test('not-configured source shows disconnected not zero leads',async()=>{
   const ui=harness(async()=>({status:503,ok:false}));
   await ui.click();
   assert.match(ui.nodes['website-inquiries-live-status'].textContent,/Not connected/);
-  assert.doesNotMatch(ui.nodes['website-inquiries-live-status'].textContent,/zero customer requests/i);
+  assert.match(ui.nodes['website-inquiries-live-status'].textContent,/does not mean zero customer requests/i);
   assert.equal(ui.nodes['website-inquiries-live-list'].children.length,0);
 });
 test('missing session never calls API',async()=>{
