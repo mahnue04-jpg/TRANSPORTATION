@@ -48,3 +48,10 @@ test("unrelated index entries never cause get calls", async () => {
   assert.equal(reads, 1);
   assert.equal(result.inquiries.length, 1);
 });
+
+test("disappearing KV record is stale, never silently lost", async () => {
+  const store = fixture([{keys:[{name:"lead:gone"}],list_complete:true}], {});
+  const result = await readWebsiteInquiries(store);
+  assert.equal(result.state, "stale");
+  assert.deepEqual(result.inquiries, []);
+});
