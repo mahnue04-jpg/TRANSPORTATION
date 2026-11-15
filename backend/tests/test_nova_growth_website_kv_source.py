@@ -114,3 +114,13 @@ def test_repeated_cursor_fails_closed():
 def test_failed_kv_listing_fails_closed():
     src = _source([{"success": False, "result": [], "result_info": {}}], {})
     assert src.read("tenant-one")["state"] == "unavailable"
+
+
+def test_explicit_value_api_error_never_looks_like_zero_customers():
+    key = "lead:AMQ-SAMPLE"
+    src = _source([_complete(key)], {
+        key: {"success": False, "errors": [{"message": "private error"}]}
+    })
+    assert src.read("tenant-one") == {
+        "state": "unavailable", "inquiries": [], "complete": False
+    }
