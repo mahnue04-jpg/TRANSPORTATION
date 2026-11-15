@@ -121,6 +121,14 @@
       <div id="leads" class="empty">No leads yet.</div>
     </section>
 
+    <section class="panel" aria-label="Website inquiries synthetic preview">
+      <h2>Website inquiries — synthetic preview</h2>
+      <p class="hint">Owner-only demonstration. Production Cloudflare KV is not connected. No inquiries are imported, messaged, or charged.</p>
+      <button type="button" id="website-inquiries-preview-load" class="secondary">Load synthetic preview</button>
+      <p id="website-inquiries-preview-status" role="status" aria-live="polite">Sign in before loading. Not live customer information.</p>
+      <div id="website-inquiries-preview-list"></div>
+    </section>
+
     <section class="panel" aria-label="Widget">
       <h2>Website chat widget</h2>
       <p class="hint">Signed installation token scoped to domain. Consent required before storing contact details.</p>
@@ -210,5 +218,6 @@
 
   <script src="/static/nova-growth/growth.js"></script>
   <script src="/static/nova-growth/acquisition.js"></script>
+  <script src="/static/nova-growth/website-inquiries-preview.js"></script>
 </body>
 </html>
