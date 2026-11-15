@@ -729,6 +729,32 @@ class OpenAIVoiceProvider:
                 'Sound polished and friendly, like a modern small-business product presenter. '
                 'Read every word exactly. Pronounce AMICOR as AM ih core. Do not add any words.'
             )
+        if scoped_test:
+            # Claim a single attempt *before* the network request. O_EXCL is
+            # atomic even across worker processes. Retain the marker on failures
+            # and timeouts: a timed-out provider request might still be billable.
+            # This path must point to a persistent, non-shared staging disk.
+            claim_path = str(os.getenv("NOVA_CREATIVE_VOICE_TEST_CLAIM_FILE") or "").strip()
+            if not claim_path:
+                return {
+                    "status": "ERROR",
+                    "message": "Scoped voice test blocked: persistent one-attempt marker is not configured.",
+                    "script": clean,
+                    "url": None,
+                    "asset_generated": False,
+                }
+            try:
+                marker_fd = os.open(claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                return {
+                    "status": "ERROR",
+                    "message": "Scoped voice test has already been attempted; no second request submitted.",
+                    "script": clean,
+                    "url": None,
+                    "asset_generated": False,
+                }
+            with os.fdopen(marker_fd, "w", encoding="utf-8") as marker:
+                marker.write("SCOPED_VOICE_TEST_ATTEMPTED\\n")
         client = get_client()
         # In scoped testing, prevent SDK automatic retries that could submit again.
         if scoped_test:
