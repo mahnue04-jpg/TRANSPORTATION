@@ -101,6 +101,17 @@ def acquisition_review(
         raise
 
 
+@router.get("/website-inquiries/preview")
+def website_inquiries_synthetic_preview(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+) -> dict[str, Any]:
+    """Signed owner-only, tenant-scoped synthetic display; no production KV access."""
+    _org(user, organization_id)
+    from app.core.nova.growth_agent.website_inquiry_preview import synthetic_website_inquiry_preview
+    return synthetic_website_inquiry_preview()
+
+
 @router.get("/retention")
 def retention(user: UserContext = Depends(require_growth_owner)) -> dict[str, Any]:
     return GrowthAgentService.retention_policy()
