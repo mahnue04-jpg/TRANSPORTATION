@@ -1,0 +1,5 @@
+inquiry_id,customer_label,service,recorded_status,quote_amount_usd,source_record_id
+SYN-001,Fictional Customer A,Office cleaning,Quote prepared,180,export-row-1
+SYN-002,Fictional Customer B,Move-out cleaning,Needs scope,,export-row-2
+SYN-001,Fictional Customer A,Office cleaning,Quote prepared,180,export-row-3
+SYN-003,Fictional Customer C,Weekly home cleaning,Awaiting customer decision,120,export-row-4

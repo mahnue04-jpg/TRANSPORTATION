@@ -24,6 +24,32 @@ os.environ.setdefault("NOVA_GROWTH_AGENT_DEMO_MODE", "true")
 def _uid(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
+
+def test_acquisition_latest_counts_and_saved_review_on_postgres(db):
+    from app.core.nova.growth_agent.acquisition import AcquisitionReviewIn, campaign_board, save_campaign_review
+    from app.core.nova.growth_agent.models import GaContact, GaLeadEvent
+
+    org, other_org = _uid("campaign"), _uid("other")
+    contact = _uid("contact")
+    db.add(GaContact(id=contact, organization_id=org, display_name="Synthetic CI fixture", is_synthetic_demo=False))
+    db.commit()
+    try:
+        for stage in ("new", "qualified", "quoted", "ordered"):
+            body = AcquisitionReviewIn(stage=stage, has_open_inquiries=True, authorized_list_use=True,
+                                       requires_external_sending=False, requires_sensitive_data=False)
+            save_campaign_review(db, org, contact, body, actor_user_id="ci-owner")
+        board = campaign_board(db, org)
+        assert board["counts"]["ordered"] == board["total_reviewed"] == 1
+        assert board["counts"]["new"] == 0
+        assert board["verified_revenue_cents"] is None
+        assert board["contacts"][0]["id"] == contact
+        assert campaign_board(db, other_org)["total_reviewed"] == 0
+    finally:
+        db.rollback()
+        db.query(GaLeadEvent).filter_by(organization_id=org).delete()
+        db.query(GaContact).filter_by(organization_id=org).delete()
+        db.commit()
+
 PG_URL = (
     os.getenv("NOVA_GA_PG_TEST_URL")
     or (os.getenv("DATABASE_URL") if "postgres" in (os.getenv("DATABASE_URL") or "") else None)

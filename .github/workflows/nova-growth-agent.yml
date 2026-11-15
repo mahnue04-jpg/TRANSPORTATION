@@ -159,24 +159,28 @@ jobs:
           PGPASSWORD: ga_ci_dispos
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y postgresql-client
+          # Use this disposable server's own clients; newer host clients can
+          # emit settings that PostgreSQL 16 cannot restore.
+          pg_container='${{ job.services.postgres.id }}'
+          pg16() { docker exec -i -e PGUSER -e PGPASSWORD "$pg_container" "$@"; }
+          pg16 pg_dump --version
+          pg16 pg_restore --version
           source_db=nova_ga_ci_backup_fixture
           restored_db=nova_ga_ci_restore_fixture
           backup_file="$RUNNER_TEMP/nova_ga_ci_fixture.dump"
           trap 'rm -f "$backup_file"' EXIT
-          createdb "$source_db"
-          psql -X -v ON_ERROR_STOP=1 -d "$source_db" <<'SQL'
+          pg16 createdb "$source_db"
+          pg16 psql -X -v ON_ERROR_STOP=1 -d "$source_db" <<'SQL'
           CREATE TABLE backup_probe (id integer PRIMARY KEY, label text NOT NULL);
           INSERT INTO backup_probe (id, label) VALUES (1, 'synthetic-one'), (2, 'synthetic-two');
           SQL
-          pg_dump --format=custom --no-owner --no-acl --file="$backup_file" "$source_db"
+          pg16 pg_dump --format=custom --no-owner --no-acl "$source_db" > "$backup_file"
           test -s "$backup_file"
-          createdb "$restored_db"
-          pg_restore --no-owner --no-acl --exit-on-error --dbname="$restored_db" "$backup_file"
-          expected="$(psql -X -At -d "$source_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
-          actual="$(psql -X -At -d "$restored_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          pg16 createdb "$restored_db"
+          pg16 pg_restore --no-owner --no-acl --exit-on-error --dbname="$restored_db" < "$backup_file"
+          expected="$(pg16 psql -X -At -d "$source_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          actual="$(pg16 psql -X -At -d "$restored_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
           test -n "$expected"
           test "$expected" = "$actual"
-          test "$(psql -X -At -d "$restored_db" -c "SELECT count(*) FROM backup_probe")" = "2"
+          test "$(pg16 psql -X -At -d "$restored_db" -c "SELECT count(*) FROM backup_probe")" = "2"
           echo "Disposable-only backup and restore rehearsal passed; no Render database accessed"
