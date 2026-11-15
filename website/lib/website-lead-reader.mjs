@@ -19,7 +19,8 @@ export async function readWebsiteInquiries(store, options = {}) {
       for (const item of result.keys) {
         if (!item || typeof item.name !== "string" || !item.name.startsWith("lead:")) continue;
         const value = await store.get(item.name);
-        if (typeof value === "string") entries.push({ key: item.name, value });
+        if (typeof value !== "string") return { state: "stale", inquiries: [], complete: false };
+        entries.push({ key: item.name, value });
       }
       if (result.list_complete === true) {
         return { state: "available", inquiries: normalizeWebsiteLeadEntries(entries), complete: true };
