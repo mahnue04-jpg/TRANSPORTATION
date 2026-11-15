@@ -5,7 +5,7 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114]
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114, feat/amicor-first-customer-campaign-20261114]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
@@ -15,6 +15,7 @@ on:
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
+      - "backend/tests/test_nova_growth_website_inquiries_preview.py"
       - "backend/tests/test_nova_growth_owner_gate.py"
       - "backend/tests/test_nova_growth_staging_preflight.py"
       - "backend/tests/test_nova_growth_staging_start.py"
@@ -75,6 +76,7 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
+            tests/test_nova_growth_website_inquiries_preview.py \
             tests/test_nova_growth_agent_acquisition.py \
             tests/test_nova_growth_agent_worker_retention.py \
             tests/test_nova_growth_owner_gate.py \
@@ -93,6 +95,7 @@ jobs:
           node-version: "22"
       - run: node --check backend/static/nova-workspace/growth-readonly.js
       - run: node --check backend/static/nova-growth/acquisition.js
+      - run: node --check backend/static/nova-growth/website-inquiries-preview.js
       - run: node --test backend/static/nova-growth/acquisition.test.cjs
       - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
 
