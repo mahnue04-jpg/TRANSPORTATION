@@ -64,3 +64,18 @@ test("stale, forbidden, and malformed snapshots disclose nothing",async()=>{
     assert.equal(h.button.disabled,false);
   }
 });
+
+test("owner sees source reference, requested service and synthetic label", async () => {
+  const h=harness({response:{state:"available",complete:true,inquiries:[
+    {source_system:"cloudflare_amicor_leads",source_key:"lead:AMQ-TEST",
+     reference_id:"AMQ-TEST",product:"Nova Operations Agent",
+     name:"Synthetic Applicant",consent:true,is_synthetic:true}
+  ]}});
+  await h.click();
+  assert.match(h.output.textContent,/AMQ-TEST/);
+  assert.match(h.output.textContent,/Nova Operations Agent/);
+  assert.match(h.output.textContent,/Synthetic Applicant/);
+  assert.match(h.output.textContent,/\[SYNTHETIC\]/);
+  assert.match(h.output.textContent,/consent recorded/);
+  assert.doesNotMatch(h.output.textContent,/Completed jobs: 1/);
+});
