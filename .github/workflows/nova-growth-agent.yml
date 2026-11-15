@@ -5,14 +5,21 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, cursor/nova-growth-agent-mvp-1565]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
+      - "backend/static/nova-workspace/growth-readonly*" 
+      - "backend/static/nova-workspace/index.html"
       - "backend/migrations/versions/20261112_nova_growth_agent.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
+      - "backend/tests/test_nova_growth_owner_gate.py"
+      - "backend/tests/test_nova_growth_staging_preflight.py"
+      - "backend/tests/test_nova_growth_staging_start.py"
+      - "backend/tests/test_nova_growth_isolated_lifespan.py"
+      - "backend/app/main.py"
       - "docs/nova/growth-agent/**"
       - ".github/workflows/nova-growth-agent.yml"
   workflow_dispatch:
@@ -68,7 +75,23 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
-            tests/test_nova_growth_agent_worker_retention.py
+            tests/test_nova_growth_agent_worker_retention.py \
+            tests/test_nova_growth_owner_gate.py \
+            tests/test_nova_growth_staging_preflight.py \
+            tests/test_nova_growth_staging_start.py \
+            tests/test_nova_growth_isolated_lifespan.py
+
+  growth-workspace-ui:
+    name: growth-workspace-ui-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check backend/static/nova-workspace/growth-readonly.js
+      - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
@@ -125,3 +148,33 @@ jobs:
             HEALTH_ISF_STRIPE_SECRET_KEY NOVA_STRIPE_SECRET_KEY ANTHROPIC_API_KEY \
             TWILIO_AUTH_TOKEN TWILIO_ACCOUNT_SID
           python -m pytest -q tests/test_nova_growth_agent_postgres.py
+      - name: Rehearse backup and restore on disposable CI databases only
+        run: |
+          set -euo pipefail
+          # Match pg_dump/pg_restore client to the PostgreSQL 16 service.
+          # Synthetic fixture only; never access Render staging or production.
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 \
+            -e PGUSER=ga_ci -e PGPASSWORD=ga_ci_dispos \
+            -v "$RUNNER_TEMP:/backup" postgres:16 bash -se <<'SCRIPT'
+          set -euo pipefail
+          source_db=nova_ga_ci_backup_fixture
+          restored_db=nova_ga_ci_restore_fixture
+          backup_file=/backup/nova_ga_ci_fixture.dump
+          trap 'rm -f "$backup_file"' EXIT
+          createdb "$source_db"
+          psql -X -v ON_ERROR_STOP=1 -d "$source_db" <<'SQL'
+          CREATE TABLE backup_probe (id integer PRIMARY KEY, label text NOT NULL);
+          INSERT INTO backup_probe (id, label) VALUES (1, 'synthetic-one'), (2, 'synthetic-two');
+          SQL
+          pg_dump --format=custom --no-owner --no-acl --file="$backup_file" "$source_db"
+          test -s "$backup_file"
+          createdb "$restored_db"
+          pg_restore --no-owner --no-acl --exit-on-error --dbname="$restored_db" "$backup_file"
+          expected="$(psql -X -At -d "$source_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          actual="$(psql -X -At -d "$restored_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          test -n "$expected"
+          test "$expected" = "$actual"
+          test "$(psql -X -At -d "$restored_db" -c "SELECT count(*) FROM backup_probe")" = "2"
+          echo "Disposable-only backup and restore rehearsal passed; no Render database accessed"
+          SCRIPT

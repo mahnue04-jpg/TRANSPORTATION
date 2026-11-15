@@ -1,0 +1,70 @@
+# Growth Agent PR #517 — private staging recovery execution gate
+
+**Status: NOT EXECUTED.** Draft operational procedure, November 14, 2026.
+This is not deployment authorization and does not prove a backup exists.
+
+## Verified identity and access constraints
+- Render workspace: Saye's workspace (`tea-d8oe81b7uimc739gujp0`).
+- Staging web service: `nova-growth-validation-490` (`srv-dbqv8ip5efls73dtpmo0`), auto-deploy **off**.
+- Dedicated staging PostgreSQL instance: `nova-ga-490-dispos` (`dpg-dbqv7mmtlv9c73d7tnb0-a`), database `nova_ga_490_dispos`; **do not connect to the production `amicor` DB**.
+- Render metadata reports the database available. The hosted Render connector cannot establish a SQL session because **external IP allowlist is empty**. Do not relax the allowlist to make this check pass.
+- Connected Render tools currently have metadata and read-only SQL but **no backup/export/restore action**. Existing database backup availability and restorable state are **not verified**.
+- GitHub CI verifies a **different synthetic** pg_dump → pg_restore fixture on disposable databases; this is NOT evidence of a real staging backup.
+
+## Newly identified dashboard export option — not executed (2026-11-14)
+
+Render's public documentation describes an on-demand logical backup option in **database Dashboard → Recovery → Create export**, typically retained for seven days. This may provide a backup without permitting external SQL connections or provision of any additional service. **Availability for this exact database plan is not yet confirmed by a logged-in dashboard view.** Verify availability, export limits, retention, and any displayed costs before triggering it. This is a separate operation from a point-in-time restore, which can create a **new billable** instance.
+
+**Read-only preparation step:** In Saye's workspace, select only database `nova-ga-490-dispos` (`dpg-dbqv7mmtlv9c73d7tnb0-a`) and inspect **Recovery**. Confirm whether `Create export` is offered, whether an existing logical export is listed, and any fee/warnings. Do **not** click `Create export` or `Restore Database` as part of read-only preparation. Avoid showing or sharing connection strings. Report only availability, timestamp and policy/cost notices.
+
+Sources (Render official public documentation, verify the current dashboard): https://render.com/docs/postgresql-backups and https://render.com/articles/how-to-backup-and-restore-postgresql-databases .
+
+If approved later, creating an export does not itself prove recoverability: independently restore a copy to a separately authorized disposable database, then verify schema/counts and sample workflows. Keep the real source database untouched.
+
+## Preconditions (hard stop unless all satisfied)
+1. Explicit owner authorization to export the identified staging data through a private internal Render connection and to restore it **only into a separately approved isolated disposable destination**. If provisioning incurs costs, stop and obtain a separate price approval.
+2. Approved private execution identity with access confined to the specific staging database, not production. Never add `0.0.0.0/0` to a database allowlist or put credentials in GitHub, logs, tickets, or chat.
+3. Confirm the destination is disposable and **not** production, current staging, Creative Studio, or any shared database. Record destination identity before any restore.
+4. Storage location is access-controlled, encrypted, not served as a public artifact, with explicit retention and deletion policy. No raw records or credentials in the final verification report.
+5. Disable any optional Growth Agent worker and retention schedule on the disposable restore environment; ensure no real outbound provider calls.
+
+## Private execution procedure (only after approval)
+
+Use a controlled internal session with approved tools and no public network exposure. The operator must supply the internal connection URLs through a private secret manager (not shell history or PR text). Commands below are templates; they must NOT be run with production or current staging as the restore target.
+
+```sh
+# In an approved internal execution environment only.
+# SOURCE_URL: dedicated Growth staging database, READ access sufficient for pg_dump.
+# RESTORE_URL: separate, EMPTY, approved disposable database.
+# Both supplied securely; never echo or commit them.
+umask 077
+backup_dir="$(mktemp -d)"
+trap 'rm -rf "$backup_dir"' EXIT
+pg_dump --format=custom --no-owner --no-acl --file="$backup_dir/growth-staging.dump" "$SOURCE_URL"
+test -s "$backup_dir/growth-staging.dump"
+pg_restore --list "$backup_dir/growth-staging.dump" > "$backup_dir/archive-manifest.txt"
+test -s "$backup_dir/archive-manifest.txt"
+# STOP and confirm RESTORE_URL identity + emptiness once again.
+pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_URL" "$backup_dir/growth-staging.dump"
+```
+
+**The example deletes the temporary dump on process exit**; production-quality evidence preservation requires an approved encrypted backup destination and retention schedule. A successful restore should be followed by *read-only* comparisons of schema revisions, non-sensitive table counts, and a synthetic owner-scoped application smoke check on the isolated clone. Avoid posting row values. Do not run schema migrations or sample seeding on the source.
+
+## Preflight compatibility blocker — restored-clone app test
+
+The existing `staging_preflight.py` intentionally hard-pins the **current** staging host `dpg-dbqv7mmtlv9c73d7tnb0-a` and database name `nova_ga_490_dispos`. Consequently, simply setting `DATABASE_URL` to the restored disposable database will be **rejected** by `staging_start.py` and the isolated `lifespan` gate. This is the correct fail-closed behavior, but it means the documented *restored-clone application smoke test* is **not executable using that launcher as written**.
+
+Before any restored-clone application test, independently approve the disposable destination identity and review a **separate clone-specific, exact-identity allowlist** limited to that destination. Do not modify the current staging host pin, set the clone URL to the existing staging database, bypass the guard, or use a production database. First verify the dump/restore data read-only on the clone; application startup tests must follow their own review/approval and must not be mistaken for a source-database recovery test. No clone-specific startup code is authorized by this runbook.
+
+When using native `pg_dump` and `pg_restore`, supply **libpq-compatible** PostgreSQL connection URLs (`postgres://` or `postgresql://`), not SQLAlchemy's `postgresql+psycopg2://` dialect prefix. Convert only within an approved secret-handling process, without printing connection strings.
+
+## Acceptance evidence (record without secrets or customer data)
+- Source service/DB identifiers, source backup timestamp, tool versions, encrypted archive location/retention owner.
+- Confirmation that the dump had no errors, manifest was readable, restore finished with no errors.
+- Destination ID and evidence it was a separate disposable database.
+- Schema revision comparison and per-table counts/digests for permitted data, redacted and access-controlled.
+- Recovery test operator/approver and rollback procedures.
+- No source modifications, no outbound deliveries, no paid activation, no production/Creative Studio touches.
+
+## Go/no-go
+**NO-GO until the above real-source restore succeeds and the exact startup candidate passes application acceptance on the isolated restored destination.** PR #517 remains draft/unmerged. The existing staging service stays pinned to the prior commit; its restart, settings change, and deployment all require a separate explicit staging-only owner approval.

@@ -23,7 +23,7 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict[str, str]:
+def _headers(client: TestClient, email: str = "admin@amicor.local") -> dict[str, str]:
     res = client.post("/api/auth/login", json={"email": email, "password": SEED_PASSWORD})
     assert res.status_code == 200, res.text
     token = res.json().get("access_token") or res.json().get("token")
@@ -48,6 +48,24 @@ def test_flags_and_plans_authenticated(client: TestClient) -> None:
     plans = client.get("/api/nova/growth-agent/plans", headers=headers)
     assert plans.status_code == 200
     assert plans.json()["subscriptions_enabled"] is False
+
+
+@pytest.mark.parametrize("email", [
+    "dispatcher@amicor.local",
+    "driver@amicor.local",
+])
+def test_non_admin_cannot_read_growth_records(client: TestClient, email: str) -> None:
+    headers = _headers(client, email=email)
+    for route in ("/api/nova/growth-agent/health", "/api/nova/growth-agent/leads"):
+        res = client.get(route, headers=headers)
+        assert res.status_code == 403, (email, route, res.text)
+
+
+def test_non_admin_cannot_mutate_growth_records(client: TestClient) -> None:
+    headers = _headers(client, email="dispatcher@amicor.local")
+    res = client.post("/api/nova/growth-agent/agent", headers=headers,
+                      json={"paused": True})
+    assert res.status_code == 403
 
 
 def test_unauthenticated_api_rejected(client: TestClient) -> None:
@@ -149,3 +167,30 @@ def test_http_journey_smoke_authenticated(client: TestClient) -> None:
     health = client.get("/api/nova/growth-agent/health", headers=headers)
     assert health.status_code == 200
     assert health.json()["live_flags"]["sms"] is False
+
+
+def test_counts_endpoint_owner_only_and_pii_free(client: TestClient) -> None:
+    path = "/api/nova/growth-agent/counts"
+    assert client.get(path).status_code in {401, 403}
+    denied = client.get(path, headers=_headers(client, "dispatcher@amicor.local"))
+    assert denied.status_code == 403
+    response = client.get(path, headers=_headers(client))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body) == {"counts"}
+    assert set(body["counts"]) == {"leads", "conversations", "appointments"}
+    assert all(type(value) is int and value >= 0 for value in body["counts"].values())
+    assert "email" not in response.text.lower()
+    assert "display_name" not in response.text
+
+
+def test_counts_get_does_not_initialize_growth_service(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    from app.core.nova.growth_agent.service import GrowthAgentService
+
+    def forbidden_init(*args, **kwargs):
+        raise AssertionError("Count summary must not initialize GrowthAgentService or change schema")
+
+    monkeypatch.setattr(GrowthAgentService, "__init__", forbidden_init)
+    response = client.get("/api/nova/growth-agent/counts", headers=_headers(client))
+    assert response.status_code == 200, response.text
+    assert set(response.json()["counts"]) == {"leads", "conversations", "appointments"}
