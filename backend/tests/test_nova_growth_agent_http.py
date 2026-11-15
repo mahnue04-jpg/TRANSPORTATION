@@ -50,6 +50,22 @@ def test_flags_and_plans_authenticated(client: TestClient) -> None:
     assert plans.json()["subscriptions_enabled"] is False
 
 
+def test_acquisition_routes_require_owner_and_tenant_scope(client: TestClient) -> None:
+    route = "/api/nova/growth-agent/acquisition"
+    assert client.get(route).status_code in {401, 403}
+    dispatcher = _headers(client, email="dispatcher@amicor.local")
+    assert client.get(route, headers=dispatcher).status_code == 403
+    review = {"stage": "new", "has_open_inquiries": True, "authorized_list_use": True,
+              "requires_external_sending": False, "requires_sensitive_data": False}
+    assert client.post(route + "/contacts/missing/review", headers=dispatcher, json=review).status_code == 403
+    owner = _headers(client)
+    board = client.get(route, headers=owner)
+    assert board.status_code == 200, board.text
+    assert board.json()["verified_revenue_cents"] is None
+    assert client.get(route + "?organization_id=other-tenant", headers=owner).status_code == 403
+    assert client.post(route + "/contacts/missing/review", headers=owner, json=review).status_code == 404
+
+
 @pytest.mark.parametrize("email", [
     "dispatcher@amicor.local",
     "driver@amicor.local",

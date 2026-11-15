@@ -5,7 +5,7 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main, cursor/nova-growth-agent-mvp-1565]
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
@@ -75,6 +75,7 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
+            tests/test_nova_growth_agent_acquisition.py \
             tests/test_nova_growth_agent_worker_retention.py \
             tests/test_nova_growth_owner_gate.py \
             tests/test_nova_growth_staging_preflight.py \
@@ -91,6 +92,8 @@ jobs:
         with:
           node-version: "22"
       - run: node --check backend/static/nova-workspace/growth-readonly.js
+      - run: node --check backend/static/nova-growth/acquisition.js
+      - run: node --test backend/static/nova-growth/acquisition.test.cjs
       - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
 
   growth-agent-postgres:
