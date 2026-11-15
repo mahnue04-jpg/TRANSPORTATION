@@ -24,7 +24,7 @@ export function normalizeWebsiteLeadEntry(entry) {
   const consent = record.consent === true || record.consent === "yes";
   const name = limitedText(record.name, MAX.name);
   const email = limitedText(record.email, MAX.email).toLowerCase();
-  if (!name || !email || !/^[^\s@]+@[^\s@]+\\.[^\s@]+$/.test(email)) return null;
+  if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
   const referenceId = entry.key.startsWith("lead:AMQ-") ? entry.key.slice(5) : null;
   return {
     source_system: "cloudflare_amicor_leads",
