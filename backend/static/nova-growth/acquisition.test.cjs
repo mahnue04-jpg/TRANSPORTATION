@@ -32,7 +32,7 @@ function setup() {
   vm.runInNewContext(source, context);
   const $ = (id) => elements.get(id);
   const respond = (value, ok = true) => pending.shift()({ ok, json: async () => value });
-  const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const board = {
     plan: { name: 'Pilot', audience: 'Businesses', offer: 'Drafts', entry_offer: '$49 after scope', scope: 'Drafts only', hook: 'Hook', call_to_action: 'Scope check', channels: [] },
     counts: { new: 1 }, contacts: [{ id: 'lead-1', review: { stage: 'new' } }], total_reviewed: 1, unassigned_contacts: 0,
@@ -93,6 +93,7 @@ test('saving a second contact preserves selection and confirms the saved review'
   assert.match(h.calls.at(-1).url, /contacts\/lead-2\/review$/);
   h.respond({ changed: true });
   await h.flush();
+  assert.equal(h.calls.length, 5, 'save must queue two refreshed GET requests');
   // The server returns an updated board for the same selected contact.
   h.respond(board); h.respond(leadRows);
   await saving;
