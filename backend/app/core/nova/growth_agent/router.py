@@ -177,10 +177,17 @@ def widget_chat(
 def workspace_counts(
     organization_id: str | None = None,
     user: UserContext = Depends(require_growth_owner),
-    svc: GrowthAgentService = Depends(_svc),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Owner-only exact counts scoped to the authenticated organization; no contact PII."""
-    return {"counts": svc.workspace_counts(_org(user, organization_id))}
+    """Owner-only tenant-scoped summary; never invoke schema initialization or fetch PII."""
+    from app.core.nova.growth_agent.models import GaAppointment, GaContact, GaConversation
+
+    org = _org(user, organization_id)
+    return {"counts": {
+        "leads": db.query(GaContact).filter(GaContact.organization_id == org).count(),
+        "conversations": db.query(GaConversation).filter(GaConversation.organization_id == org).count(),
+        "appointments": db.query(GaAppointment).filter(GaAppointment.organization_id == org).count(),
+    }}
 
 
 @router.get("/leads")
