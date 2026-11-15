@@ -5,6 +5,7 @@ on:
     paths:
       - 'backend/app/core/nova/creative_studio/**'
       - 'backend/tests/test_provider_commercial_30s.py'
+      - 'backend/tests/test_nova_scoped_voice_guard.py'
       - 'backend/tests/test_provider_commercial_assembly.py'
       - 'backend/tests/test_studio_content_import.py'
       - 'backend/tests/test_nova_studio_private_object_storage.py'
