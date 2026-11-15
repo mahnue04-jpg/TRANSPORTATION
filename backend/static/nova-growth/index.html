@@ -167,6 +167,35 @@
       <pre id="book-out" class="hint"></pre>
     </section>
 
+    <section class="panel" aria-label="First customer campaign">
+      <h2>First customer campaign</h2>
+      <p class="hint">Plan and review existing CRM contacts. No automatic outreach, publishing or payments. Synthetic contacts are excluded.</p>
+      <button type="button" id="acquisition-load">Load campaign</button>
+      <p id="acquisition-status" role="status">Sign in, then load the campaign.</p>
+      <div id="acquisition-plan"></div>
+      <div id="acquisition-counts" class="hint"></div>
+      <form id="acquisition-review" hidden>
+        <div class="grid-2">
+          <label>Existing CRM contact<select id="acquisition-contact" required></select></label>
+          <label>Owner recorded stage<select id="acquisition-stage">
+            <option value="new">New scope check</option>
+            <option value="qualified">Qualified</option>
+            <option value="quoted">Quote prepared</option>
+            <option value="ordered">Order recorded by owner</option>
+            <option value="delivered">Delivery recorded by owner</option>
+            <option value="declined">Declined</option>
+          </select></label>
+          <label class="acquisition-check"><input type="checkbox" id="acquisition-open" /> Open inquiries confirmed</label>
+          <label class="acquisition-check"><input type="checkbox" id="acquisition-permission" /> Customer authorizes use of their list</label>
+          <label class="acquisition-check"><input type="checkbox" id="acquisition-sending" /> External sending is required</label>
+          <label class="acquisition-check"><input type="checkbox" id="acquisition-sensitive" /> Sensitive customer data is required</label>
+        </div>
+        <p class="hint">Qualification is for list organization and draft preparation only. It does not grant permission to contact anyone. Order stages do not verify payment.</p>
+        <button type="submit" id="acquisition-save">Save owner review</button>
+        <p id="acquisition-feedback" class="hint" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
     <section class="panel" aria-label="Synthetic demo">
       <h2>Synthetic business demo</h2>
       <p class="hint">Fictitious Cedar Ridge scenario — clearly labeled. No prospect outreach.</p>
@@ -180,5 +209,6 @@
   </main>
 
   <script src="/static/nova-growth/growth.js"></script>
+  <script src="/static/nova-growth/acquisition.js"></script>
 </body>
 </html>

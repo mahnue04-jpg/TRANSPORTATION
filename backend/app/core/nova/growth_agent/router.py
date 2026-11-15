@@ -11,6 +11,7 @@ from app.auth import UserContext
 from app.core.nova.growth_agent.errors import GrowthAgentError
 from app.core.nova.growth_agent.flags import live_flags, widget_public_enabled
 from app.core.nova.growth_agent.demo import run_synthetic_demo
+from app.core.nova.growth_agent.acquisition import AcquisitionReviewIn
 from app.core.nova.growth_agent.schemas import (
     AgentStateIn,
     AvailabilityIn,
@@ -71,6 +72,33 @@ def plans(user: UserContext = Depends(require_growth_owner)) -> dict[str, Any]:
     from app.core.nova.growth_agent.commercial import plan_catalog
 
     return plan_catalog()
+
+
+@router.get("/acquisition")
+def acquisition_board(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-only read path; avoid service constructor's schema initialization."""
+    from app.core.nova.growth_agent.acquisition import campaign_board
+    return campaign_board(db, _org(user, organization_id))
+
+
+@router.post("/acquisition/contacts/{contact_id}/review")
+def acquisition_review(
+    contact_id: str,
+    body: AcquisitionReviewIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    from app.core.nova.growth_agent.acquisition import save_campaign_review
+    org = _org(user, body.organization_id)
+    try:
+        return save_campaign_review(svc.db, org, contact_id, body, actor_user_id=user.user_id)
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
 
 
 @router.get("/retention")

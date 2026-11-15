@@ -1,0 +1,4 @@
+inquiry_id,customer_label,service,recorded_status,quote_amount_usd,proposed_next_action,missing_information,source_records,review_required
+SYN-001,Fictional Customer A,Office cleaning,Quote prepared,180,Review whether the quote was sent and prepare a follow-up,Quote delivery and contact permission not confirmed,export-row-1;export-row-3,YES
+SYN-002,Fictional Customer B,Move-out cleaning,Needs scope,,Confirm job details before preparing a quote,Property size and requested date and price not supplied,export-row-2,YES
+SYN-003,Fictional Customer C,Weekly home cleaning,Awaiting customer decision,120,Review prior conversation before choosing a follow-up,Timing and contact permission not confirmed,export-row-4,YES

@@ -50,6 +50,22 @@ def test_flags_and_plans_authenticated(client: TestClient) -> None:
     assert plans.json()["subscriptions_enabled"] is False
 
 
+def test_acquisition_routes_require_owner_and_tenant_scope(client: TestClient) -> None:
+    route = "/api/nova/growth-agent/acquisition"
+    assert client.get(route).status_code in {401, 403}
+    dispatcher = _headers(client, email="dispatcher@amicor.local")
+    assert client.get(route, headers=dispatcher).status_code == 403
+    review = {"stage": "new", "has_open_inquiries": True, "authorized_list_use": True,
+              "requires_external_sending": False, "requires_sensitive_data": False}
+    assert client.post(route + "/contacts/missing/review", headers=dispatcher, json=review).status_code == 403
+    owner = _headers(client)
+    board = client.get(route, headers=owner)
+    assert board.status_code == 200, board.text
+    assert board.json()["verified_revenue_cents"] is None
+    assert client.get(route + "?organization_id=other-tenant", headers=owner).status_code == 403
+    assert client.post(route + "/contacts/missing/review", headers=owner, json=review).status_code == 404
+
+
 @pytest.mark.parametrize("email", [
     "dispatcher@amicor.local",
     "driver@amicor.local",
@@ -182,7 +198,6 @@ def test_counts_endpoint_owner_only_and_pii_free(client: TestClient) -> None:
     assert all(type(value) is int and value >= 0 for value in body["counts"].values())
     assert "email" not in response.text.lower()
     assert "display_name" not in response.text
-
 
 def test_counts_get_does_not_initialize_growth_service(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     from app.core.nova.growth_agent.service import GrowthAgentService
