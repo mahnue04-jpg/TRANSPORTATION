@@ -114,7 +114,9 @@ def test_shared_rate_limit_concurrent_and_restart(Session, db):
 
     assert results.count("ok") == limit
     assert results.count("RATE_LIMITED") == 12 - limit
-    assert current_count(Session(), organization_id="org-rate", bucket_key=bucket, now_ts=fixed_now_ts) == limit
+    # Read through a fresh session to avoid a stale identity-map snapshot.
+    with Session() as fresh_db:
+        assert current_count(fresh_db, organization_id="org-rate", bucket_key=bucket, now_ts=fixed_now_ts) == limit
 
     # Restart simulation: new session still sees durable counter.
     db2 = Session()
