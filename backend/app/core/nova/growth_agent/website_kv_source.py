@@ -100,7 +100,7 @@ class WebsiteKVSource:
                         continue
                     seen.add(key)
                     data = self.request_json("values/" + quote(key, safe=""))
-                    if not isinstance(data, dict):
+                    if not isinstance(data, dict) or data.get("success") is False:
                         raise ValueError("invalid KV value")
                     row = self._normalize(key, data)
                     if row is not None:
