@@ -10,12 +10,12 @@ function kv() {
     async get() { calls++; return rec; }
   };
 }
-const valid = { authenticated:true, role:"owner", tenantId:"tenant-1" };
+const valid = { authenticated:true, role:"admin", userId:"owner-1", tenantId:"tenant-1" };
 const invoke = (principal, store=kv()) => getOwnerWebsiteInquiries({
   resolvePrincipal: async () => principal, session: "trusted-session",
   kv: store, tenantId:"tenant-1"
 });
-test("owner sees normalized synthetic inquiry", async () => {
+test("authenticated admin sees normalized synthetic inquiry", async () => {
   const r = await invoke(valid);
   assert.equal(r.status,200);
   assert.equal(r.body.inquiries[0].is_synthetic,true);
@@ -55,4 +55,21 @@ test("verifier error denies before KV reads", async () => {
   const r=await getOwnerWebsiteInquiries({resolvePrincipal:async()=>{throw Error("internal");},session:"x",kv:store,tenantId:"tenant-1"});
   assert.equal(r.status,401);
   assert.equal(store.calls,0);
+});
+
+test("unsupported owner label is rejected (backend uses explicit admin roles)", async () => {
+  const store=kv();
+  const r=await invoke({...valid,role:"owner"},store);
+  assert.equal(r.status,403);
+  assert.equal(store.calls,0);
+});
+test("missing authenticated user ID is rejected", async () => {
+  const store=kv();
+  const r=await invoke({...valid,userId:""},store);
+  assert.equal(r.status,403);
+  assert.equal(store.calls,0);
+});
+test("super admin support role is authorized with tenant context", async () => {
+  const r=await invoke({...valid,role:"super_admin_support"});
+  assert.equal(r.status,200);
 });
