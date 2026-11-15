@@ -46,8 +46,21 @@
         throw new Error("Unexpected website inquiry response. No count shown.");
       }
       var synthetic = data.inquiries.filter(function (row) { return row.is_synthetic === true; }).length;
+      var details = data.inquiries.slice(0, 15).map(function (row, index) {
+        var reference = typeof row.reference_id === "string" && row.reference_id
+          ? row.reference_id.slice(0, 45) : row.source_key.slice(0, 75);
+        var product = typeof row.product === "string" && row.product
+          ? row.product.slice(0, 80) : "Unspecified service";
+        var name = typeof row.name === "string" && row.name
+          ? row.name.slice(0, 120) : "No name provided";
+        return (index + 1) + ". " + reference + " · " + product +
+          " · " + name + (row.is_synthetic === true ? " [SYNTHETIC]" : "") +
+          (row.consent === true ? " · consent recorded" : " · consent not verified");
+      });
       message("Website inquiry snapshot: " + data.inquiries.length +
         " records (" + synthetic + " synthetic).\n" +
+        (details.length ? details.join("\n") + "\n" : "No inquiries in this verified snapshot.\n") +
+        (data.inquiries.length > details.length ? "Showing first 15 records only.\n" : "") +
         "This is a source snapshot, not CRM contacts, completed jobs, or paid customers.\n" +
         "No messages sent and no records imported.");
     } catch (error) {
