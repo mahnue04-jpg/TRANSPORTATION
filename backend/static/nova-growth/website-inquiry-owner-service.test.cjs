@@ -5,12 +5,12 @@ const { loadWebsiteInquiries } = require('./website-inquiry-owner-service.cjs');
 const owner = { authenticated:true, role:'owner', organization_id:'amicor' };
 const record = { receivedAt:'2026-11-14T21:00:00.000Z', name:'AMICOR QA Test', company:'AMICOR', email:'qa@example.com', message:'INTERNAL TEST ONLY', consent:true };
 const key = 'lead:AMQ-AB12CD34';
-test('owner receives synthetic inquiry once from injected fixture', async () => {
+test('owner receives untrusted inquiry once despite test words', async () => {
   const source = { list:async () => ({complete:true,entries:[{key,value:record},{key,value:record}]}) };
   const result = await loadWebsiteInquiries({principal:owner,organizationId:'amicor',source});
   assert.equal(result.status,'ok');
   assert.equal(result.count,1);
-  assert.equal(result.inquiries[0].is_synthetic,true);
+  assert.equal(result.inquiries[0].is_synthetic,false);
 });
 test('anonymous access is denied before source access', async () => {
   let reads = 0;
