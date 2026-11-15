@@ -14,6 +14,7 @@ function createFixturePagedSource(kv) {
       if (prefix !== 'lead:') throw new TypeError('Only lead keys may be listed');
       let cursor;
       const visited = new Set();
+      const seenCursors = new Set();
       const entries = [];
       for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
         const result = await kv.list({ prefix, ...(cursor ? { cursor } : {}) });
@@ -32,9 +33,10 @@ function createFixturePagedSource(kv) {
         }
         if (result.list_complete) return { entries, complete: true };
         if (!result.cursor || typeof result.cursor !== 'string' ||
-            (cursor && result.cursor === cursor)) {
+            seenCursors.has(result.cursor)) {
           throw new Error('Invalid fixture cursor');
         }
+        seenCursors.add(result.cursor);
         cursor = result.cursor;
       }
       throw new Error('Fixture page limit exceeded');
