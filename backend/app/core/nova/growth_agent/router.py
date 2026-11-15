@@ -592,3 +592,8 @@ def synthetic_demo(
     except GrowthAgentError as exc:
         _handle(exc)
         raise
+
+
+# Owner-scoped website inquiries, disabled when no reviewed data adapter exists.
+from app.core.nova.growth_agent.website_inquiries import router as website_inquiries_router
+router.include_router(website_inquiries_router)

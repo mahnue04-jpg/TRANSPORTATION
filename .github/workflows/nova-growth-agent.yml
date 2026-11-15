@@ -5,17 +5,20 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main, cursor/nova-growth-agent-mvp-1565]
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
-      - "backend/static/nova-workspace/growth-readonly*" 
+      - "backend/static/nova-workspace/growth-readonly*"
+      - "backend/static/nova-workspace/growth-website-inquiries*" 
       - "backend/static/nova-workspace/index.html"
       - "backend/migrations/versions/20261112_nova_growth_agent.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
       - "backend/tests/test_nova_growth_owner_gate.py"
+      - "backend/tests/test_nova_growth_website_inquiries_http.py"
+      - "backend/tests/test_nova_growth_website_kv_source.py"
       - "backend/tests/test_nova_growth_staging_preflight.py"
       - "backend/tests/test_nova_growth_staging_start.py"
       - "backend/tests/test_nova_growth_isolated_lifespan.py"
@@ -77,6 +80,9 @@ jobs:
             tests/test_nova_growth_agent_http.py \
             tests/test_nova_growth_agent_worker_retention.py \
             tests/test_nova_growth_owner_gate.py \
+            tests/test_nova_growth_website_inquiries_http.py \
+            tests/test_nova_growth_website_kv_source.py \
+            tests/test_nova_growth_website_inquiries_end_to_end.py \
             tests/test_nova_growth_staging_preflight.py \
             tests/test_nova_growth_staging_start.py \
             tests/test_nova_growth_isolated_lifespan.py
@@ -92,6 +98,8 @@ jobs:
           node-version: "22"
       - run: node --check backend/static/nova-workspace/growth-readonly.js
       - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
+      - run: node --check backend/static/nova-workspace/growth-website-inquiries.js
+      - run: node --test backend/static/nova-workspace/growth-website-inquiries.test.cjs
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
