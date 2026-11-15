@@ -182,3 +182,15 @@ def test_counts_endpoint_owner_only_and_pii_free(client: TestClient) -> None:
     assert all(type(value) is int and value >= 0 for value in body["counts"].values())
     assert "email" not in response.text.lower()
     assert "display_name" not in response.text
+
+
+def test_counts_get_does_not_initialize_growth_service(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    from app.core.nova.growth_agent.service import GrowthAgentService
+
+    def forbidden_init(*args, **kwargs):
+        raise AssertionError("Count summary must not initialize GrowthAgentService or change schema")
+
+    monkeypatch.setattr(GrowthAgentService, "__init__", forbidden_init)
+    response = client.get("/api/nova/growth-agent/counts", headers=_headers(client))
+    assert response.status_code == 200, response.text
+    assert set(response.json()["counts"]) == {"leads", "conversations", "appointments"}
