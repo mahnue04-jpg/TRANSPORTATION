@@ -45,6 +45,8 @@ def test_scoped_voice_rejects_wrong_voice_and_presenter_mode(monkeypatch):
 def test_scoped_voice_request_disables_sdk_retries(monkeypatch, tmp_path):
     _guard(monkeypatch)
     monkeypatch.setenv("NOVA_CREATIVE_VOICE_ASSET_DIR", str(tmp_path))
+    claim = tmp_path / "one-attempt.claim"
+    monkeypatch.setenv("NOVA_CREATIVE_VOICE_TEST_CLAIM_FILE", str(claim))
     calls = []
     class Client:
         def with_options(self, *, max_retries):
@@ -68,6 +70,11 @@ def test_scoped_voice_request_disables_sdk_retries(monkeypatch, tmp_path):
     assert calls[1][1]["voice"] == "nova"
     assert calls[1][1]["input"] == SCRIPT
     assert calls[1][1]["model"] == "gpt-4o-mini-tts"
+    assert claim.read_text().startswith("SCOPED_VOICE_TEST_ATTEMPTED")
+    repeated = providers.OpenAIVoiceProvider().generate(script=SCRIPT, voice="nova")
+    assert repeated["asset_generated"] is False
+    assert "already been attempted" in repeated["message"]
+    assert len(calls) == 2
 
 
 def test_scoped_voice_requires_explicit_hash(monkeypatch):
@@ -76,3 +83,12 @@ def test_scoped_voice_requires_explicit_hash(monkeypatch):
     monkeypatch.setattr(providers, "get_client", lambda: (_ for _ in ()).throw(AssertionError("provider accessed")))
     result = providers.OpenAIVoiceProvider().generate(script=SCRIPT, voice="nova")
     assert result["asset_generated"] is False
+
+
+def test_scoped_voice_requires_persistent_claim_path(monkeypatch):
+    _guard(monkeypatch)
+    monkeypatch.delenv("NOVA_CREATIVE_VOICE_TEST_CLAIM_FILE", raising=False)
+    monkeypatch.setattr(providers, "get_client", lambda: (_ for _ in ()).throw(AssertionError("provider accessed")))
+    result = providers.OpenAIVoiceProvider().generate(script=SCRIPT, voice="nova")
+    assert result["asset_generated"] is False
+    assert "marker is not configured" in result["message"]
