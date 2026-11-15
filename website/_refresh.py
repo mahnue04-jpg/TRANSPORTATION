@@ -105,7 +105,22 @@ def apply(add, pages, status_table):
         hero('Nova software', 'Ask Nova', 'Get help researching questions, organizing information, and preparing drafts you can review.', button(LOGIN, 'Open Ask Nova') + button(SIGNUP, 'Create a Nova Account', False))
         + section('Start with a practical question', '<div class="grid grid-3"><article class="card"><h3>Research</h3><p>Ask for a comparison or a source-backed research outline. Check the cited sources before relying on the answer.</p></article><article class="card"><h3>Draft</h3><p>Prepare email, report, checklist, and planning drafts from information you provide.</p></article><article class="card"><h3>Organize</h3><p>Break a project into tasks, questions, and next steps.</p></article></div><p>Account access and available tools depend on your plan. Sign-in is currently required for Mrs. Nova Brain.</p>'))
 
-    operations = hero('Nova software', 'Nova Operations Agent', 'Supported digital operations with scope checks and human review. Explore the demo or submit a business task.', button(AGENT, 'Open Operations Agent') + button(SIGNUP, 'Start a Seven-Day Trial', False))
+    scope_url = '/early-access/?product=Nova%20Operations%20Agent&intent=scope'
+    inquiry_support = hero(
+        'For cleaning &amp; home-service businesses', 'Customer inquiries. Organized.',
+        'Organize your existing inquiry list, flag missing details, and prepare follow-up drafts for your review.',
+        button(scope_url, 'Request a Free Scope Check') + button('/samples/', 'View Sample Deliverables', False),
+    )
+    inquiry_support += section('What you receive', '<div class="grid grid-3">' + ''.join([
+        card('An organized inquiry list', 'A consistent tracker, with possible duplicate source records identified for review.', scope_url, 'Describe your task'),
+        card('Clear next steps', 'Recorded status, missing information, and proposed next actions. Missing facts are flagged rather than invented.', scope_url, 'Check the scope'),
+        card('Follow-up drafts', 'Prepared messages for your review. You decide what to send; customer messages are not sent automatically.', scope_url, 'Request a scope check'),
+    ]) + '</div>')
+    inquiry_support += section('Start small, with an agreed scope', '<p><strong>Free Scope Check: $0.</strong> Describe the task, approximate number of inquiries, deadline, and preferred output. Do not send customer lists or private records with the initial inquiry.</p><p><strong>Starter Task: $49 one time</strong> after we agree in writing on input size, deliverables, turnaround, price, and review arrangements. Larger tasks are quoted separately. Requesting a scope check does not start a purchase or subscription.</p>')
+    inquiry_support += section('How your request becomes work', '<ol><li>Submit a short business inquiry through the request form.</li><li>AMICOR reviews the fit and confirms the scope and a suitable file-transfer method.</li><li>Approve the written scope and agreed payment arrangements before work starts.</li><li>Review your tracker and drafts against the agreed deliverables.</li></ol><p>This service does not guarantee sales, bookings, or recovered revenue. We do not send messages to your customers as part of this starter offer.</p>' + button(scope_url, 'Request My Free Scope Check'))
+    replace('/nova-inquiry-support/', 'Nova Inquiry Support — Free Scope Check', 'AMICOR Nova helps cleaning and home-service businesses organize inquiries and prepare follow-up drafts. Request a free scope check.', inquiry_support)
+
+    operations = hero('Nova software', 'Nova Operations Agent', 'Supported digital operations with scope checks and human review. Explore the demo or submit a business task.', button('/nova-inquiry-support/', 'Get Help Organizing Inquiries') + button(AGENT, 'Explore the Demo', False))
     operations += section('Supported work', text_service_cards + '<p>Administrative operations, research, spreadsheets, documentation, customer-support preparation, workflow support, and proposal organization are listed in the app. Supported work stays within the approved engagement.</p>')
     operations += section('Starting options', plans)
     operations += section('Try the lead-workflow demo', '<p>Enter a sample inquiry in the public app and see how Nova organizes work for owner review. The demo is a sandbox and does not send email, update a CRM, or charge money.</p>' + button(AGENT, 'Run the Interactive Demo'))

@@ -52,6 +52,10 @@
     message.value = "Project goal:\nDeliverables needed:\nApproximate volume:\nDeadline:\n";
   }
 
+  if (message && params.get("intent") === "scope" && !message.value) {
+    message.value = "Free Scope Check — Inquiry Support\nBusiness type:\nApproximate number of inquiries:\nWhere the list is currently stored (describe only):\nDesired tracker or draft output:\nDeadline:\n\nPlease do not include customer records, passwords, or payment details.";
+  }
+
   var form = document.querySelector("[data-early-access-form]");
   if (!form) return;
 

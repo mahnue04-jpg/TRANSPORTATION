@@ -1211,7 +1211,7 @@ def main() -> None:
         target.write_text(str(item["html"]), encoding="utf-8")
 
     routes = [
-        "/business-services/", "/ask-nova/", "/nova-operations/", "/samples/", "/company-profile/",
+        "/business-services/", "/ask-nova/", "/nova-operations/", "/nova-inquiry-support/", "/samples/", "/company-profile/",
         "/",
         "/products/",
         "/solutions/",
