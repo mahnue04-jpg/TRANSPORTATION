@@ -7,6 +7,8 @@ on:
       - "backend/static/nova-growth/website-lead-adapter.test.cjs"
       - "backend/static/nova-growth/website-inquiry-owner-service.cjs"
       - "backend/static/nova-growth/website-inquiry-owner-service.test.cjs"
+      - "backend/static/nova-growth/website-inquiry-paged-fixture.cjs"
+      - "backend/static/nova-growth/website-inquiry-paged-fixture.test.cjs"
       - ".github/workflows/website-kv-growth-adapter.yml"
   workflow_dispatch:
 
@@ -23,4 +25,5 @@ jobs:
         run: |
           node --test \
             backend/static/nova-growth/website-lead-adapter.test.cjs \
-            backend/static/nova-growth/website-inquiry-owner-service.test.cjs
+            backend/static/nova-growth/website-inquiry-owner-service.test.cjs \
+            backend/static/nova-growth/website-inquiry-paged-fixture.test.cjs
