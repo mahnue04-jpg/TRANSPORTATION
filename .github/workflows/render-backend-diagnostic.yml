@@ -45,8 +45,7 @@ jobs:
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
 
   backend-diagnostic:
-    # Exact Python 3.11.9 has a published build for 24.04, not 26.04.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
@@ -86,7 +85,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11.9"
+          python-version: "3.11"
 
       - name: Install backend dependencies
         run: |
