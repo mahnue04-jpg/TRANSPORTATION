@@ -20,7 +20,10 @@ router = APIRouter(tags=["nova-growth-agent"])
 # has passed isolated staging acceptance. The dependency is replaceable in
 # tests; no public input can select a data source.
 def get_website_inquiry_source() -> Any:
-    return None
+    from app.core.nova.growth_agent.website_kv_source import configured_website_source
+
+    # Explicit environment gate; unconfigured instances return None.
+    return configured_website_source()
 
 
 def website_inquiries(
