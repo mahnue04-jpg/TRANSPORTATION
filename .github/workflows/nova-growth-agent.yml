@@ -96,6 +96,7 @@ jobs:
       - run: node --check backend/static/nova-workspace/growth-readonly.js
       - run: node --check backend/static/nova-growth/acquisition.js
       - run: node --check backend/static/nova-growth/website-inquiries-preview.js
+      - run: node --test backend/static/nova-growth/website-inquiries-preview.test.cjs
       - run: node --test backend/static/nova-growth/acquisition.test.cjs
       - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
 
