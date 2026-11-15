@@ -9,7 +9,8 @@ on:
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
-      - "backend/static/nova-workspace/growth-readonly*" 
+      - "backend/static/nova-workspace/growth-readonly*"
+      - "backend/static/nova-workspace/growth-website-inquiries*" 
       - "backend/static/nova-workspace/index.html"
       - "backend/migrations/versions/20261112_nova_growth_agent.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
@@ -94,6 +95,8 @@ jobs:
           node-version: "22"
       - run: node --check backend/static/nova-workspace/growth-readonly.js
       - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
+      - run: node --check backend/static/nova-workspace/growth-website-inquiries.js
+      - run: node --test backend/static/nova-workspace/growth-website-inquiries.test.cjs
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
