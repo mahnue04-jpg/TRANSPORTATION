@@ -86,6 +86,8 @@ def test_shared_rate_limit_concurrent_and_restart(Session, db):
     install_id = widget["installation_id"]
     bucket = f"widget:{install_id}"
     limit = 5
+    # One shared window across worker threads and assertions, even at minute rollover.
+    fixed_now_ts = 1_796_000_010.0
 
     def hit(_i: int):
         local = Session()
@@ -95,6 +97,7 @@ def test_shared_rate_limit_concurrent_and_restart(Session, db):
                 organization_id="org-rate",
                 bucket_key=bucket,
                 limit=limit,
+                now_ts=fixed_now_ts,
                 commit=True,
             )
             return "ok"
@@ -111,7 +114,7 @@ def test_shared_rate_limit_concurrent_and_restart(Session, db):
 
     assert results.count("ok") == limit
     assert results.count("RATE_LIMITED") == 12 - limit
-    assert current_count(db, organization_id="org-rate", bucket_key=bucket) == limit
+    assert current_count(Session(), organization_id="org-rate", bucket_key=bucket, now_ts=fixed_now_ts) == limit
 
     # Restart simulation: new session still sees durable counter.
     db2 = Session()
@@ -122,6 +125,7 @@ def test_shared_rate_limit_concurrent_and_restart(Session, db):
                 organization_id="org-rate",
                 bucket_key=bucket,
                 limit=limit,
+                now_ts=fixed_now_ts,
                 commit=True,
             )
         assert exc.value.code == "RATE_LIMITED"
