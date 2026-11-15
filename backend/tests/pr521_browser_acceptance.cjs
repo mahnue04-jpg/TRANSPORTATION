@@ -31,18 +31,29 @@ const assert = require('node:assert/strict');
     assert.equal(await list.locator('div').count(),1);
     assert.match(await list.textContent(), /Fictional Example Company/);
     assert.doesNotMatch(await list.textContent(), /live customer|actual revenue/i);
+    // Actual owner dashboard connection control must report disconnected,
+    // never claim there are zero customer inquiries.
+    const connectionButton = page.locator('#website-inquiries-live-check');
+    const connectionStatus = page.locator('#website-inquiries-live-status');
+    const connectionList = page.locator('#website-inquiries-live-list');
+    await connectionButton.click();
+    await page.waitForFunction(() => document.querySelector('#website-inquiries-live-status')?.textContent.includes('Not connected.'), null, {timeout:12000});
+    assert.match(await connectionStatus.textContent(), /does not mean zero customer requests/);
+    assert.equal(await connectionList.locator('div').count(), 0);
     const token=await page.evaluate(()=>localStorage.getItem('amicor_growth_token'));
     const cross=await page.request.get(base+'/api/nova/growth-agent/website-inquiries/preview?organization_id=foreign-tenant',{headers:{Authorization:'Bearer '+token}});
     assert.equal(cross.status(),403);
 
     await page.locator('#sign-out').click();
+    await page.waitForFunction(()=>document.querySelector('#website-inquiries-live-status')?.textContent.includes('Sign in before checking.'));
+    assert.equal(await connectionList.locator('div').count(), 0);
     await page.waitForFunction(()=>!localStorage.getItem('amicor_growth_token'));
     assert.equal(await list.locator('div').count(),0);
     await load.click();
     assert.match(await status.textContent(),/Owner sign-in required/);
     assert.equal(await list.locator('div').count(),0);
     assert.deepEqual(errors,[]);
-    console.log('PASS: Chromium owner login, synthetic-only display, cross-tenant denial, sign-out, anonymous denial');
+    console.log('PASS: Chromium owner login, synthetic preview, disconnected source status, cross-tenant denial, sign-out, anonymous denial');
   } finally {
     await page.screenshot({path:'pr521-browser-evidence.png',fullPage:true}).catch(()=>{});
     await browser.close();
