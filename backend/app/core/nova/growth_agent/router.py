@@ -101,6 +101,37 @@ def acquisition_review(
         raise
 
 
+
+
+def website_inquiry_source_factory():
+    """No production source is configured. Tests may inject an offline fixture."""
+    return None
+
+
+@router.get("/website-inquiries/read-only")
+def website_inquiries_read_only(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    source_factory: Any = Depends(website_inquiry_source_factory),
+) -> dict[str, Any]:
+    """Owner-only, exact-tenant source boundary. Default 503; no live KV reads."""
+    from app.core.nova.growth_agent.website_inquiry_owner_boundary import (
+        WebsiteInquiryAccessDenied,
+        read_owner_website_inquiries,
+    )
+    from app.core.nova.growth_agent.website_inquiry_readonly import WebsiteInquirySourceError
+
+    try:
+        # Authorization is checked before the source factory is invoked.
+        return read_owner_website_inquiries(
+            user, organization_id,
+            source_factory if callable(source_factory) else lambda _org: None,
+        )
+    except WebsiteInquiryAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="website_inquiry_access_denied") from exc
+    except WebsiteInquirySourceError as exc:
+        raise HTTPException(status_code=503, detail="website_inquiry_source_unavailable") from exc
+
 @router.get("/website-inquiries/preview")
 def website_inquiries_synthetic_preview(
     organization_id: str | None = None,
