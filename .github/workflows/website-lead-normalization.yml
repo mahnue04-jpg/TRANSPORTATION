@@ -4,6 +4,8 @@ on:
     paths:
       - website/lib/website-lead-normalize.mjs
       - website/tests/website-lead-normalize.test.mjs
+      - website/lib/website-lead-reader.mjs
+      - website/tests/website-lead-reader.test.mjs
       - .github/workflows/website-lead-normalization.yml
   workflow_dispatch:
 
@@ -20,4 +22,4 @@ jobs:
         with:
           node-version: '22'
       - name: Run website lead normalization tests
-        run: node --test website/tests/website-lead-normalize.test.mjs
+        run: node --test website/tests/website-lead-normalize.test.mjs website/tests/website-lead-reader.test.mjs
