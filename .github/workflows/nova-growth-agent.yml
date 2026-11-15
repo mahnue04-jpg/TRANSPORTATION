@@ -5,7 +5,7 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main, cursor/nova-growth-agent-mvp-1565]
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
@@ -16,6 +16,7 @@ on:
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
       - "backend/tests/test_nova_growth_agent_*.py"
       - "backend/tests/test_nova_growth_owner_gate.py"
+      - "backend/tests/test_nova_growth_website_inquiries_http.py"
       - "backend/tests/test_nova_growth_staging_preflight.py"
       - "backend/tests/test_nova_growth_staging_start.py"
       - "backend/tests/test_nova_growth_isolated_lifespan.py"
