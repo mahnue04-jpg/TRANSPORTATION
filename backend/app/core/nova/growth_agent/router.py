@@ -78,10 +78,11 @@ def plans(user: UserContext = Depends(require_growth_owner)) -> dict[str, Any]:
 def acquisition_board(
     organization_id: str | None = None,
     user: UserContext = Depends(require_growth_owner),
-    svc: GrowthAgentService = Depends(_svc),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    """Owner-only read path; avoid service constructor's schema initialization."""
     from app.core.nova.growth_agent.acquisition import campaign_board
-    return campaign_board(svc.db, _org(user, organization_id))
+    return campaign_board(db, _org(user, organization_id))
 
 
 @router.post("/acquisition/contacts/{contact_id}/review")
