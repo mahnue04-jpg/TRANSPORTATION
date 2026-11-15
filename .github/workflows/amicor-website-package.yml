@@ -31,6 +31,7 @@ jobs:
           python3 website/tests/check_internal_links.py
           python3 website/tests/test_website_redesign.py
           python3 website/tests/test_early_access_honeypot.py
+          python3 website/tests/test_growth_demo_preview.py
           node website/tests/lead_allowlist_staging.mjs
       - name: Assemble site-only directory
         run: python3 website/package_public_site.py
