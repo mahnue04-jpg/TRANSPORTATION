@@ -5,7 +5,9 @@ on:
       - website/lib/website-lead-normalize.mjs
       - website/tests/website-lead-normalize.test.mjs
       - website/lib/website-lead-reader.mjs
-      - website/tests/website-lead-reader.test.mjs
+      - website/tests/website-lead-reader.test.mjs website/tests/website-lead-owner-service.test.mjs
+      - website/lib/website-lead-owner-service.mjs
+      - website/tests/website-lead-owner-service.test.mjs
       - .github/workflows/website-lead-normalization.yml
   workflow_dispatch:
 
