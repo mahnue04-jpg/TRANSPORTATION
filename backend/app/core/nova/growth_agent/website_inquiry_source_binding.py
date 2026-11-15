@@ -35,7 +35,7 @@ def select_inquiry_source_binding(
 
     Do not pass request query parameters or user-supplied JSON as `bindings`.
     """
-    if not isinstance(organization_id, str) or not _ORG.fullmatch(organization_id):
+    if not isinstance(organization_id, str) or organization_id == "global" or not _ORG.fullmatch(organization_id):
         raise WebsiteInquiryBindingDenied("website_inquiry_binding_unavailable")
     if not isinstance(bindings, Mapping):
         raise WebsiteInquiryBindingDenied("website_inquiry_binding_unavailable")
