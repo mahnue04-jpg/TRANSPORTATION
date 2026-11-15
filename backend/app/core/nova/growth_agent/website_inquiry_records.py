@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 from typing import Any
 
-_LEGACY = re.compile(r"^lead:(?P<date>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z):[a-fA-F0-9-]{36}$")
+_LEGACY = re.compile(r"^lead:(?P<date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z):[a-fA-F0-9-]{36}$")
 _REFERENCE = re.compile(r"^lead:(AMQ-[A-Z0-9]{8})$")
 
 
