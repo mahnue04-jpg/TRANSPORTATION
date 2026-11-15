@@ -17,7 +17,7 @@ function setup() {
     set innerHTML(_) { throw Error('HTML interpolation forbidden'); }
   }
   const elements = new Map();
-  for (const id of ['load', 'status', 'plan', 'counts', 'review', 'contact', 'stage', 'open', 'permission', 'sending', 'sensitive', 'save']) {
+  for (const id of ['load', 'status', 'plan', 'counts', 'review', 'contact', 'stage', 'open', 'permission', 'sending', 'sensitive', 'save', 'feedback']) {
     elements.set('acquisition-' + id, new Element(id === 'contact' || id === 'stage' ? 'select' : 'div'));
   }
   elements.set('sign-out', new Element()); elements.set('login-form', new Element());
