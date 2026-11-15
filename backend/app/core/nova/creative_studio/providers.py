@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import hmac
 import base64
 import json
 import os
@@ -693,7 +695,32 @@ class OpenAIVoiceProvider:
             }
         model = str(os.getenv("NOVA_CREATIVE_VOICE_MODEL") or "gpt-4o-mini-tts").strip()
         voice = resolve_studio_voice(voice, presenter=presenter)
+        # Optional narrow staging safeguard. This does not enforce a dollar cap:
+        # the provider controls billable audio token count. Keep live generation
+        # disabled until a separate isolated provider-project spend control is set.
+        scoped_test = os.getenv("NOVA_CREATIVE_VOICE_SCOPED_TEST", "").lower() == "true"
+        if scoped_test:
+            expected_hash = str(os.getenv("NOVA_CREATIVE_VOICE_TEST_SCRIPT_SHA256") or "").lower().strip()
+            actual_hash = hashlib.sha256(clean.encode("utf-8")).hexdigest()
+            if (
+                not expected_hash or not hmac.compare_digest(actual_hash, expected_hash)
+                or len(clean) > 500 or voice != "nova" or presenter
+                or model != "gpt-4o-mini-tts"
+            ):
+                return {
+                    "status": "ERROR",
+                    "message": "Scoped voice test blocked: incorrect script, model, voice, or request mode.",
+                    "script": clean,
+                    "url": None,
+                    "asset_generated": False,
+                }
         speech_args = dict(model=model, voice=voice, input=clean[:4000], response_format="mp3")
+        if scoped_test:
+            speech_args["instructions"] = (
+                "Warm, confident, polished female audiobook-style promotional narration. "
+                "Natural conversational pacing, gentle emphasis, no exaggerated announcer tone. "
+                "Read exactly the given words; pronounce AMICOR as AM ih core."
+            )
         if presenter and model.startswith("gpt-4o-mini-tts"):
             speech_args['instructions'] = (
                 'Speak as a young adult woman in her twenties with an unmistakably feminine voice. '
@@ -702,7 +729,11 @@ class OpenAIVoiceProvider:
                 'Sound polished and friendly, like a modern small-business product presenter. '
                 'Read every word exactly. Pronounce AMICOR as AM ih core. Do not add any words.'
             )
-        response = get_client().audio.speech.create(**speech_args)
+        client = get_client()
+        # In scoped testing, prevent SDK automatic retries that could submit again.
+        if scoped_test:
+            client = client.with_options(max_retries=0)
+        response = client.audio.speech.create(**speech_args)
         binary = getattr(response, "content", None)
         if binary is None and hasattr(response, "read"):
             binary = response.read()
