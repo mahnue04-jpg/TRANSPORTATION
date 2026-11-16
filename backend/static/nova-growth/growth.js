@@ -8,6 +8,30 @@
   const $ = (id) => document.getElementById(id);
   const banner = $("status-banner");
   const sessionMeta = $("session-meta");
+  const loginForm = $("login-form");
+  const loginSubmit = $("login-submit");
+  const signOutButton = $("sign-out");
+  let sessionVerification = 0;
+  let verifiedSession = false;
+
+  function showAuthState(mode, email = "") {
+    const loggedIn = mode === "authenticated";
+    const verifying = mode === "verifying";
+    loginForm.querySelectorAll("input").forEach((input) => {
+      input.hidden = loggedIn;
+      input.disabled = loggedIn || verifying;
+      const label = input.closest("label");
+      if (label) label.hidden = loggedIn;
+    });
+    loginSubmit.hidden = loggedIn;
+    loginSubmit.disabled = verifying;
+    signOutButton.hidden = !loggedIn;
+    verifiedSession = loggedIn;
+    if (loggedIn) {
+      $("login-password").value = "";
+      sessionMeta.textContent = `Signed in as ${email}.`;
+    }
+  }
 
   function setBanner(text, kind = "warn") {
     banner.className = `banner ${kind}`;
@@ -34,26 +58,65 @@
     }
     if (!res.ok) {
       const detail = data.detail || data.message || data.error || res.statusText;
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      error.status = res.status;
+      throw error;
     }
     return data;
   }
 
+  async function verifySession(token) {
+    const validation = ++sessionVerification;
+    showAuthState("verifying");
+    sessionMeta.textContent = "Checking your sign-in…";
+    try {
+      const user = await api("/api/auth/me");
+      if (validation !== sessionVerification || state.token !== token) return;
+      showAuthState("authenticated", user.email || "owner");
+      setBanner("Signed in. Live messaging and telephone providers remain off.", "ok");
+      await refreshAll();
+      if (validation === sessionVerification && verifiedSession && window.NovaReceptionist?.onAuthenticated) {
+        await window.NovaReceptionist.onAuthenticated();
+      }
+    } catch (error) {
+      if (validation !== sessionVerification || state.token !== token) return;
+      if (error.status === 401 || error.status === 403) {
+        signOut();
+        sessionMeta.textContent = "Your session expired. Please sign in again.";
+      } else {
+        // Transient 502/network failures are not evidence of an invalid token.
+        // Preserve the saved token for a later reload, but do not mark it verified.
+        state.token = "";
+        showAuthState("signed-out");
+        sessionMeta.textContent = "Unable to verify your sign-in. Please try again.";
+        setBanner("Connection problem: owner session could not be verified.", "warn");
+      }
+    }
+  }
+
   async function login(email, password) {
-    const data = await api("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    state.token = data.access_token || data.token || "";
-    if (!state.token) throw new Error("No access token returned");
-    localStorage.setItem("amicor_growth_token", state.token);
-    sessionMeta.textContent = `Signed in as ${email}`;
-    setBanner("Signed in. Growth Agent APIs require NOVA_GROWTH_AGENT_ENABLED=true.", "ok");
-    await refreshAll();
+    showAuthState("verifying");
+    try {
+      const data = await api("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+      state.token = data.access_token || data.token || "";
+      if (!state.token) throw new Error("No access token returned");
+      localStorage.setItem("amicor_growth_token", state.token);
+      await verifySession(state.token);
+    } catch (error) {
+      showAuthState("signed-out");
+      throw error;
+    }
   }
 
   function signOut() {
+    ++sessionVerification;
     state.token = "";
+    showAuthState("signed-out");
+    $("login-password").value = "";
+    $("login-email").value = "";
     localStorage.removeItem("amicor_growth_token");
     sessionMeta.textContent = "Signed out.";
     setBanner("Sign in required. Metrics, diagnostics, CRM, and booking need an owner session.", "warn");
@@ -70,7 +133,7 @@
   }
 
   function requireSession() {
-    if (!state.token) {
+    if (!state.token || !verifiedSession) {
       throw new Error("Sign in required before using owner controls.");
     }
   }
@@ -238,7 +301,7 @@
     await Promise.all([refreshMetrics(), refreshInbox(), refreshLeads()]);
   }
 
-  $("login-form").addEventListener("submit", async (e) => {
+  loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
       await login($("login-email").value.trim(), $("login-password").value);
@@ -589,16 +652,11 @@
   // Default booking day hint
   $("book-day").value = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
 
+  window.NovaGrowthSession = { isVerified: () => verifiedSession };
   if (state.token) {
-    sessionMeta.textContent = "Restored session token from local storage.";
-    refreshAll().catch((err) => {
-      setBanner(`Session restore failed: ${err.message}. Sign in again.`, "warn");
-      signOut();
-    });
+    verifySession(state.token);
   } else {
-    setBanner(
-      "Sign in required. Set NOVA_GROWTH_AGENT_ENABLED=true in local/staging. Live providers remain off.",
-      "warn"
-    );
+    showAuthState("signed-out");
+    setBanner("Sign in required. Live messaging and telephone providers remain off.", "warn");
   }
 })();

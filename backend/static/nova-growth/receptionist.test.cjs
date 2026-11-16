@@ -160,6 +160,7 @@ function loadNovaReceptionist(mocks = {}) {
       addEventListener: () => {},
       setTimeout: (fn) => fn(),
       NovaReceptionist: null,
+      NovaGrowthSession: { isVerified: () => mocks.verified !== false },
     },
     localStorage: {
       getItem: (k) => localStore[k] ?? null,
@@ -546,4 +547,10 @@ test("refresh prefers readiness endpoint and falls back to status readiness key"
   assert.match(fallback.elements["receptionist-root"].innerHTML, /embed-cal/);
   assert.match(fallback.elements["receptionist-root"].innerHTML, /Revoked/);
   assert.match(fallback.elements["receptionist-root"].innerHTML, /Not connected/);
+});
+test("receptionist manual refresh blocks unverified restored sessions", async () => {
+  const { Nova, elements, fetchCalls } = loadNovaReceptionist({ verified: false });
+  await Nova.refresh();
+  assert.equal(fetchCalls.length, 0, "no owner receptionist API should be called before session verification");
+  assert.match(elements["receptionist-root"].innerHTML, /Sign in to load receptionist status/);
 });

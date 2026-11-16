@@ -1,0 +1,38 @@
+name: Nova Growth owner session UI checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/static/nova-growth/growth.js"
+      - "backend/static/nova-growth/growth.css"
+      - "backend/static/nova-growth/index.html"
+      - "backend/static/nova-growth/growth-session.test.cjs"
+      - ".github/workflows/nova-growth-session-ui-check.yml"
+  push:
+    branches:
+      - fix/nova-growth-session-chat-labels-20261116
+    paths:
+      - "backend/static/nova-growth/**"
+      - ".github/workflows/nova-growth-session-ui-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ui-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JavaScript syntax
+        run: |
+          node --check backend/static/nova-growth/growth.js
+          node --check backend/static/nova-growth/receptionist.js
+          node --check backend/static/nova-growth/growth-session.test.cjs
+      - name: Owner session UI tests
+        run: node --test backend/static/nova-growth/growth-session.test.cjs
+      - name: Receptionist UI regression tests
+        run: node --test backend/static/nova-growth/receptionist.test.cjs
