@@ -1,0 +1,142 @@
+{
+  "base": "http://127.0.0.1:8775",
+  "steps": [
+    {
+      "name": "api_login",
+      "ok": true
+    },
+    {
+      "name": "demo_synthetic",
+      "ok": true,
+      "label": "SYNTHETIC DEMO"
+    },
+    {
+      "name": "readiness_not_connected",
+      "ok": true
+    },
+    {
+      "name": "availability",
+      "ok": true,
+      "slot_count": 16,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "book",
+      "ok": true,
+      "label": "SIMULATED_MOCK_CALENDAR",
+      "calendar_sync": {
+        "provider": "mock_calendar",
+        "status": "suppressed",
+        "live": false,
+        "externally_confirmed": false,
+        "sync_job_id": "2246425d-ed5d-4374-8f4d-fd9c6a0de7b0",
+        "event_id": "4b171487d8ccaaf7b4c50dcd83c76867a517cf985021ddb64a99b1fe3aa50d7f",
+        "mock_adapter_status": "sent_mock"
+      },
+      "owner_notification": {
+        "id": "26348722-0012-409a-abf4-98354e4e169c",
+        "organization_id": "33a73873-4eb1-40b9-8c66-09bd5ca226f9",
+        "channel": "email",
+        "purpose": "transactional",
+        "event_type": "appointment_booked",
+        "idempotency_key": "notify:staging-journey-book-2026-11-17",
+        "status": "queued",
+        "provider": "mock_email",
+        "attempt_number": 0,
+        "error_code": null,
+        "provider_message_id": null,
+        "payload_redacted_json": {
+          "appointment_id": "75bb4ee371bf418a936889c196d95b57",
+          "service_code": "inspect",
+          "sync_status": "suppressed"
+        },
+        "created_at": "2026-11-16T15:37:23.563456Z",
+        "updated_at": "2026-11-16T15:37:23.563458Z"
+      }
+    },
+    {
+      "name": "reschedule",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "cancel",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "rebook",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "notify_tick",
+      "ok": true,
+      "note": "provider_accepted is not inbox receipt",
+      "label": "SIMULATED_MOCK_EMAIL"
+    },
+    {
+      "name": "handoffs",
+      "ok": true
+    },
+    {
+      "name": "browser_readiness",
+      "ok": true
+    }
+  ],
+  "labels": [
+    "SIMULATED",
+    "STAGING_PREP"
+  ],
+  "readiness_http": 503,
+  "flags": {
+    "REAL_CALENDAR_WRITE": false,
+    "REAL_EMAIL_SEND": false,
+    "REAL_VOICE": false,
+    "GOOGLE_OAUTH_CONFIGURED": true,
+    "GOOGLE_OAUTH_HTTP_ENABLED": false,
+    "VOICE_SIMULATOR": true
+  },
+  "demo_synthetic": {
+    "status": 200
+  },
+  "readiness_snapshot": {
+    "connected": false,
+    "status": "Not connected",
+    "configuration": {
+      "state": "disconnected",
+      "label": "Not connected \u2014 owner must authorize Google Calendar"
+    },
+    "pilot_live_ready": false
+  },
+  "availability_status": 200,
+  "availability_external": {
+    "state": "disconnected",
+    "calendar_id": null,
+    "reason": "Not connected",
+    "busy_count": 0,
+    "advisory": true
+  },
+  "book": {
+    "status": 200,
+    "body": "{\"id\":\"75bb4ee371bf418a936889c196d95b57\",\"status\":\"confirmed\",\"starts_at_utc\":\"2026-11-17T15:00:00Z\",\"ends_at_utc\":\"2026-11-17T15:30:00Z\",\"service_code\":\"inspect\",\"contact_id\":\"db74c913252c41adb36fc4b5c59274ce\",\"calendar_sync\":{\"provider\":\"mock_calendar\",\"status\":\"suppressed\",\"live\":false,\"externally_confirmed\":false,\"sync_job_id\":\"2246425d-ed5d-4374-8f4d-fd9c6a0de7b0\",\"event_id\":\"4b171487d8ccaaf7b4c50dcd83c76867a517cf985021ddb64a99b1fe3aa50d7f\",\"mock_adapter_status\":\"sent_mock\"},\"owner_notifica"
+  },
+  "reschedule": {
+    "status": 200
+  },
+  "cancel": {
+    "status": 200
+  },
+  "rebook": {
+    "status": 200
+  },
+  "notify_tick": {
+    "status": 200,
+    "body": "{\"worker_id\":\"owner-notify-3bb3c625\",\"claimed\":10,\"processed\":10,\"results\":[{\"id\":\"0ba03d88-767e-4ac1-9363-d34ec838d707\",\"organization_id\":\"33a73873-4eb1-40b9-8c66-09bd5ca226f9\",\"channel\":\"email\",\"purpose\":\"transactional\",\"event_type\":\"appointment_booked\",\"idempotency_key\":\"notify:demo-book-db74c913252c41adb36fc4b5c59274ce-2026-11-18T15:00:00Z\",\"status\":\"provider_accepted\",\"provider\":\"mock_email\","
+  },
+  "handoffs": {
+    "status": 200
+  },
+  "browser_readiness_excerpt": "SIMULATED \u2014 VOICE/LIVE PATHS NOT INDEPENDENTLY VERIFIED\nReadiness\n\nDistinguishes missing configuration, failed connection, and an empty sync queue.\n\nCalendar\n\nNot connected\n\nCONFIGURATION\nConfigured\nSELECTED CALENDAR\n\u2014\nSUMMARY\n\u2014\nCREDENTIAL HEALTH\nMissing refresh\n\nNot connected \u2014 owner must authorize Google Calendar\n\nSync queue\n\nNo pending sync work\n\nPENDING\n0\nRUNNING\n0\nFAILED\n0\nNotifications\n\nConfigured\n\nDELIVERY STATE\nprovider_accepted (not inbox receipt)\n\nprovider_accepted is not inbox receipt \u2014 delivery acknowledged by provider only\n\nTwilio / webhook\n\nUnmapped\n\nWEBHOOK\nWebhook not ready\nMODE\nSIMULATED",
+  "passed": true
+}

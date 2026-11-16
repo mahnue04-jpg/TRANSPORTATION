@@ -181,6 +181,21 @@ def test_tokens_never_in_status_or_safe_errors(db):
     assert "super-secret" not in str(exc.value)
 
 
+def test_oauth_http_enabled_flag_allows_live_gate_without_calendar_writes(monkeypatch):
+    """Token HTTP may be opted in without REAL_CALENDAR_WRITE."""
+    from app.core.nova.growth_agent import flags
+    from app.core.nova.growth_agent.providers import google_oauth_http as goh
+
+    assert flags.REAL_CALENDAR_WRITE is False
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_ENABLED", "true")
+    monkeypatch.setenv("NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED", "true")
+    # Credentials already set by module fixtures / env in this file
+    assert flags.google_oauth_http_enabled() is True
+    assert goh._live_allowed(http_client=None) is True
+    monkeypatch.setenv("NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED", "false")
+    assert goh._live_allowed(http_client=None) is False
+
+
 def test_state_single_use(db):
     started = _start(db)
     state = started["state"]

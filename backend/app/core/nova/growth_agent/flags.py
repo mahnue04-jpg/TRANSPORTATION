@@ -87,6 +87,18 @@ def google_oauth_configured() -> bool:
     return all(str(os.getenv(name) or "").strip() for name in required)
 
 
+def google_oauth_http_enabled() -> bool:
+    """Allow live Google token exchange/refresh without enabling calendar writes.
+
+    Staging opt-in only. Default off. Independent of REAL_CALENDAR_WRITE (always False).
+    """
+    if not growth_agent_enabled():
+        return False
+    if not google_oauth_configured():
+        return False
+    return _env_enabled("NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED")
+
+
 # Hard-off live capabilities — cannot be enabled via headers or UI alone.
 REAL_EMAIL_SEND = False
 REAL_SMS_SEND = False
@@ -111,6 +123,7 @@ def live_flags() -> dict[str, bool]:
         "OWNER_NOTIFY_WORKER_MOCK": owner_notification_worker_enabled(),
         "VOICE_SIMULATOR": voice_simulator_enabled(),
         "GOOGLE_OAUTH_CONFIGURED": google_oauth_configured(),
+        "GOOGLE_OAUTH_HTTP_ENABLED": google_oauth_http_enabled(),
         "REAL_EMAIL_SEND": REAL_EMAIL_SEND,
         "REAL_SMS_SEND": REAL_SMS_SEND,
         "REAL_CALENDAR_WRITE": REAL_CALENDAR_WRITE,

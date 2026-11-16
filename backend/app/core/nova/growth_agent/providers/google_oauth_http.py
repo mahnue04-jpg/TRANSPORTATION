@@ -6,7 +6,7 @@ import os
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
-from app.core.nova.growth_agent.flags import REAL_CALENDAR_WRITE, google_oauth_configured
+from app.core.nova.growth_agent.flags import google_oauth_http_enabled
 
 
 class OAuthHttpError(Exception):
@@ -25,13 +25,14 @@ _TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 def _live_allowed(*, http_client: object | None) -> bool:
+    """Token HTTP may run when a client is injected or OAuth HTTP is explicitly enabled.
+
+    Independent of REAL_CALENDAR_WRITE (always False): connecting a calendar does not
+    authorize Google Calendar API writes.
+    """
     if http_client is not None:
         return True
-    if not REAL_CALENDAR_WRITE:
-        return False
-    if not google_oauth_configured():
-        return False
-    return True
+    return google_oauth_http_enabled()
 
 
 def _client_credentials() -> tuple[str, str]:

@@ -9,7 +9,10 @@ Sanitized Chromium captures from disposable local acceptance. **No secrets.**
 | `receptionist_readiness_panel.png` | Owner readiness: missing/not connected vs empty queue vs SIMULATED Twilio |
 | `receptionist_voice_simulator.png` | Voice simulator button → service-backed FAQ (SIMULATED) |
 | `receptionist_chromium_evidence.json` | Machine-readable step results |
+| `receptionist_staging_readiness.png` | Staging-prep Chromium: owner readiness Not connected |
+| `receptionist_staging_owner_journey.json` | Staging-prep API+browser journey (SIMULATED booking lifecycle) |
+| `receptionist_staging_db_rehearsal.json` | Disposable PG backup/restore + Alembic receptionist upgrade evidence |
 
 These files are committed so reviewers can open them on GitHub without Cursor `/opt/cursor/artifacts` access.
 
-**Not proof of live Google/Twilio.** Live pilot requires `RECEPTIONIST_REAL_ACCOUNT_ACCEPTANCE.md`.
+**Not proof of live Google/Twilio or a Render deploy.** Live pilot requires `RECEPTIONIST_REAL_ACCOUNT_ACCEPTANCE.md`. Staging provision requires `RECEPTIONIST_STAGING_RELEASE_APPROVAL_527.md`.

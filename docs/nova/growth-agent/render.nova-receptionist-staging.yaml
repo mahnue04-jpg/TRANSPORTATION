@@ -1,0 +1,100 @@
+# Isolated Nova AI Receptionist STAGING blueprint (#527 / PR #528)
+#
+# OWNER APPROVAL REQUIRED before applying in the Render Dashboard.
+# Do NOT point this at production amicor-health-isf-db.
+# Do NOT reuse or modify existing nova-growth-validation-490 / nova_ga_490_dispos.
+# Do NOT enable live calendar writes, live email, or live Twilio voice.
+#
+# Resource note: Render allows only ONE free Postgres per workspace.
+# Existing staging already uses a free Postgres (nova_ga_490_dispos). Creating
+# this second database may require the paid Basic Postgres plan (~$6/mo) unless
+# the owner frees the existing free slot. Stop and report before paid create.
+#
+# Expected public URL after provision (Render assigns exact host):
+#   https://nova-receptionist-staging.onrender.com/nova/growth
+
+databases:
+  - name: nova-receptionist-staging-db
+    plan: free
+    databaseName: nova_ga_receptionist_dispos
+    user: nova_ga_receptionist
+
+services:
+  - type: web
+    name: nova-receptionist-staging
+    runtime: python
+    plan: free
+    rootDir: backend
+    # Owner replaces branch with the approved candidate SHA tip branch after merge-to-deploy branch choice.
+    branch: cursor/nova-receptionist-staging-release-c9ac
+    buildCommand: pip install --upgrade -r requirements.txt
+    # Additive receptionist revision only after parent Growth retention schema.
+    releaseCommand: alembic upgrade 20261116_nova_ga_receptionist
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health/readiness
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nova-receptionist-staging-db
+          property: connectionString
+      - key: ALEMBIC_DATABASE_URL
+        fromDatabase:
+          name: nova-receptionist-staging-db
+          property: connectionString
+      - key: APP_ENV
+        value: staging
+      - key: AMICOR_ENVIRONMENT
+        value: staging
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: AMICOR_SEED_PASSWORD
+        sync: false
+      - key: AMICOR_DEPLOYMENT_SYNC_KEY
+        sync: false
+      - key: AMICOR_PUBLIC_URL
+        value: https://nova-receptionist-staging.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://nova-receptionist-staging.onrender.com
+      - key: NOVA_GROWTH_AGENT_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_DEMO_MODE
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_WIDGET_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_WIDGET_SECRET
+        sync: false
+      - key: NOVA_GROWTH_AGENT_BACKGROUND_WORKER
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED
+        value: "false"
+      - key: NOVA_GROWTH_AGENT_CALENDAR_SYNC_WORKER
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_OWNER_NOTIFY_WORKER
+        value: "true"
+      - key: NOVA_GROWTH_AGENT_VOICE_SIMULATOR
+        value: "true"
+      # OAuth token HTTP only — does NOT enable REAL_CALENDAR_WRITE / email / voice.
+      - key: NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED
+        value: "false"
+      - key: NOVA_GA_GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: NOVA_GA_GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI
+        value: https://nova-receptionist-staging.onrender.com/api/nova/growth-agent/calendar/oauth/callback
+      - key: NOVA_GA_CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: NOVA_STRIPE_LIVE_ENABLED
+        value: "false"
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"

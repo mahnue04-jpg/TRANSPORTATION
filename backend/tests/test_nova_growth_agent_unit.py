@@ -39,6 +39,7 @@ def test_live_flags_hard_off():
     assert flags["BULK_COLD_OUTREACH"] is False
     assert flags["BACKGROUND_WORKER_ENABLED"] is False  # live worker hard-off
     assert flags["MOCK_TRANSPORT_ONLY"] is True
+    assert flags["GOOGLE_OAUTH_HTTP_ENABLED"] is False  # default off; independent of writes
     assert "BACKGROUND_WORKER_MOCK" in flags
     assert "RETENTION_DELETE_ENABLED" in flags
 
