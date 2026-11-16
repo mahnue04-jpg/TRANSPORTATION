@@ -6,16 +6,16 @@
 
 | Role | SHA | Notes |
 |------|-----|-------|
-| Reviewed prior head | `d588fc5d5bb28a8c9f9d3e509722b6d796622da5` | Green CI; voice mapping flake fixed |
+| Reviewed prior head | `b48ec2393fe08f7ba4db3518790dff8650007051` | Green CI on release-readiness package |
+| Prior voice-flake tip | `d588fc5d5bb28a8c9f9d3e509722b6d796622da5` | Do not treat as current deploy tip |
 | Base feature candidate preserved | `03befdea4685209dfdd63649372d688640d43f62` | Prior green Growth Agent CI |
-| **Implementation tip** | `e5689d250f3189e790d684a10630a1f43d06ca1e` | Blueprint/start/readiness/empty-DB code + evidence |
-| **Deploy tip** | Tip of `cursor/nova-receptionist-staging-release-c9ac` after CI green (confirm with `git rev-parse`; do not reuse older green runs) | Must equal `NOVA_GA_EXPECTED_GIT_COMMIT` at manual deploy |
-| Staging-release branch | `cursor/nova-receptionist-staging-release-c9ac` | Must point at the approved tip; `autoDeployTrigger: off` |
+| **Deploy tip** | Tip of `cursor/nova-receptionist-staging-release-c9ac` after **this** guard-pass CI green (`git rev-parse`) | Must equal `NOVA_GA_EXPECTED_GIT_COMMIT` (full 40-char hex) at manual deploy |
+| Staging-release branch | `cursor/nova-receptionist-staging-release-c9ac` | `autoDeployTrigger: off`; same tip as pilot after merge |
 | Prior green CI must not validate a newer tip | — | Re-run workflows on the deployment candidate before deploy |
 
 ## Owner approval statement (copy/paste)
 
-> Approve isolated Render staging for Nova AI Receptionist using blueprint `docs/nova/growth-agent/render.nova-receptionist-staging.yaml` with `autoDeployTrigger: off`, free web plan, and startCommand `python scripts/receptionist_staging_start.py`. Do not modify `nova-growth-validation-490` / `nova_ga_490_dispos`. Because the workspace already uses its one free Postgres on that existing staging DB, there is **no $0 isolated database option** unless that free slot is freed first. If keeping 490’s free DB, separately approve paid Postgres **~$6/mo** (`0.1c-256mb`) before creating `nova-receptionist-staging-db`. Keep live calendar writes, live email, and live Twilio disabled. Deploy **only** the approved tip SHA (set `NOVA_GA_EXPECTED_GIT_COMMIT` to that SHA). Do not start Google consent until the service is live and the callback URL is verified.
+> Approve isolated Render staging for Nova AI Receptionist using blueprint `docs/nova/growth-agent/render.nova-receptionist-staging.yaml` with `autoDeployTrigger: off`, free web plan, and startCommand `python scripts/receptionist_staging_start.py`. Do not modify `nova-growth-validation-490` / `nova_ga_490_dispos`. Because the workspace already uses its one free Postgres on that existing staging DB, there is **no $0 isolated database option** unless that free slot is freed first. If keeping 490’s free DB, separately approve paid Postgres **$6/mo** (`0.1c-256mb` per render.com/pricing) before creating `nova-receptionist-staging-db`. Keep live calendar writes, live email, and live Twilio disabled. Deploy **only** the approved tip: set `NOVA_GA_EXPECTED_GIT_COMMIT` to the full 40-character hex SHA (required; abbreviations rejected). Do not start Google consent until the service is live and the callback URL is verified.
 
 ## Recommended target (isolated — leave existing staging unchanged)
 
@@ -50,19 +50,31 @@ Render policy (docs, Nov 2026): **one active free Postgres per workspace**; free
 | Scenario | Incremental cost | Action |
 |----------|------------------|--------|
 | Free web hours available + free Postgres slot freed by owner | **$0** | Allowed only if owner explicitly frees/reassigns the free slot without harming 490 |
-| Keep `nova_ga_490_dispos` on free + create isolated DB | **~$6/mo** Postgres | **STOP** until owner approves paid DB |
-| Free web hours exhausted | **~$7/mo** web | **STOP** until owner approves paid web |
+| Keep `nova_ga_490_dispos` on free + create isolated DB | **$6/mo** Postgres (`0.1c-256mb`) | **STOP** until owner approves paid DB |
+| Free web hours exhausted | **$7/mo** Starter web | **STOP** until owner approves paid web |
 
-**Current package decision:** No zero-cost isolated database is available while `nova_ga_490_dispos` holds the free slot. This agent did **not** remove, reuse, or create any Render database. Owner must choose: (A) free the free slot, or (B) approve ~$6/mo paid Postgres.
+**Current package decision:** No zero-cost isolated database is available while `nova_ga_490_dispos` holds the free slot. This agent did **not** remove, reuse, purchase, or create any Render database. Owner must choose: (A) free the free slot, or (B) approve **$6/mo** paid Postgres.
+
+## Startup guards (required)
+
+`backend/scripts/receptionist_staging_start.py` fails closed **before** any PostgreSQL connection / Alembic / uvicorn when:
+
+| Guard | Rule |
+|-------|------|
+| Commit pin | `NOVA_GA_EXPECTED_GIT_COMMIT` **required**; both expected and `RENDER_GIT_COMMIT`/`GIT_COMMIT` must be full **40-char hex** and **exactly equal** (no prefix match) |
+| URL unify | If both `ALEMBIC_DATABASE_URL` and `DATABASE_URL` are set, host+port+database must match; both are then set to the approved URL for migrate **and** uvicorn |
+| Destination | Expected DB name `nova_ga_receptionist_dispos`; optional exact `NOVA_GA_EXPECTED_DATABASE_HOST`; reject SQLite, exact protected DBs (`nova_ga_490_dispos`), production Health ISF hosts |
+
+Regressions: `backend/tests/test_receptionist_staging_start.py` (missing/abbrev/malformed/mismatch pins; URL conflicts; scheme equivalence; protected rejection; fail-before-connect).
 
 ## Exact deploy procedure (after approval)
 
-1. Confirm tip SHA on `cursor/nova-receptionist-staging-release-c9ac` equals the approved deployment candidate.
+1. Confirm tip SHA on `cursor/nova-receptionist-staging-release-c9ac` equals the approved deployment candidate (`git rev-parse`).
 2. Confirm CI green **on that tip** (do not reuse older green runs).
 3. Apply blueprint in Render Dashboard (or create resources manually to match it). Do not enable auto-deploy.
-4. Set secrets (names only below). Set `NOVA_GA_EXPECTED_GIT_COMMIT` to the approved full SHA.
+4. Set secrets (names only below). Set `NOVA_GA_EXPECTED_GIT_COMMIT` to the approved **full 40-character** SHA. Optionally set `NOVA_GA_EXPECTED_DATABASE_HOST` to the Render private DB hostname after provision.
 5. Manual Deploy → that exact commit.
-6. Startup script validates DB name `nova_ga_receptionist_dispos`, rejects SQLite/490/production hosts, acquires PG advisory lock, runs `alembic upgrade 20261116_nova_ga_receptionist`, verifies revision, execs uvicorn. Failure exits non-zero (deploy fails closed).
+6. Startup: commit pin → unify/validate URLs → advisory lock → `alembic upgrade 20261116_nova_ga_receptionist` → verify revision → exec uvicorn with the **same** approved URL. Failure exits non-zero.
 7. Accept only when `GET /api/health/readiness` returns **200** with `traffic_ready: true`. Missing Google/Twilio config must not 503 traffic readiness.
 
 ### Why startCommand migrate (not preDeploy / releaseCommand)
@@ -131,7 +143,8 @@ Screenshot: `docs/nova/growth-agent/screenshots/receptionist_staging_readiness.p
 | `NOVA_GA_GOOGLE_OAUTH_CLIENT_ID` | Google OAuth client |
 | `NOVA_GA_GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth secret |
 | `NOVA_GA_CREDENTIAL_ENCRYPTION_KEY` | Fernet key for tokens at rest |
-| `NOVA_GA_EXPECTED_GIT_COMMIT` | Exact approved tip SHA (deploy guard) |
+| `NOVA_GA_EXPECTED_GIT_COMMIT` | Full 40-char hex approved tip SHA (**required** deploy guard) |
+| `NOVA_GA_EXPECTED_DATABASE_HOST` | Optional exact private DB hostname after Render assigns it |
 | `NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED` | Staging opt-in for token HTTP **without** calendar writes |
 
 **Proposed redirect URI:**  

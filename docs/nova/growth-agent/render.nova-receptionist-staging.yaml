@@ -72,7 +72,10 @@ services:
         value: nova_ga_receptionist_dispos
       - key: NOVA_GA_EXPECTED_ALEMBIC_REVISION
         value: 20261116_nova_ga_receptionist
-      # Owner sets this to the approved tip SHA at deploy time (Dashboard or CLI).
+      # Optional exact host pin after Render assigns the private DB hostname.
+      - key: NOVA_GA_EXPECTED_DATABASE_HOST
+        sync: false
+      # REQUIRED: full 40-character hex tip SHA. Missing/abbrev/mismatch fails startup.
       - key: NOVA_GA_EXPECTED_GIT_COMMIT
         sync: false
       - key: NOVA_GROWTH_AGENT_ENABLED

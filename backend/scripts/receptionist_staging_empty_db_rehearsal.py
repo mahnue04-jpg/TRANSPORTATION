@@ -189,6 +189,9 @@ def main() -> int:
     if before:
         raise SystemExit(f"Expected empty database, found tables: {sorted(before)[:20]}")
 
+    # Full synthetic 40-char pins — rehearsals must not weaken production guards.
+    synthetic_commit = "c" * 40
+    parsed_host = (urlparse(args.url.replace("postgresql+psycopg2://", "postgresql://", 1)).hostname or "").lower()
     env = os.environ.copy()
     env.update(
         {
@@ -196,14 +199,18 @@ def main() -> int:
             "DATABASE_URL": args.url,
             "ALEMBIC_DATABASE_URL": args.url,
             "NOVA_GA_EXPECTED_DATABASE_NAME": _dbname(args.url),
+            "NOVA_GA_EXPECTED_DATABASE_HOST": parsed_host,
             "NOVA_GA_EXPECTED_ALEMBIC_REVISION": TARGET_REVISION,
+            "NOVA_GA_EXPECTED_GIT_COMMIT": synthetic_commit,
+            "RENDER_GIT_COMMIT": synthetic_commit,
+            "GIT_COMMIT": synthetic_commit,
             "APP_ENV": "staging",
             "AMICOR_ENVIRONMENT": "staging",
             "TESTING": "false",
         }
     )
-    # Local rehearsal does not set RENDER_GIT_COMMIT; leave commit guard unset.
-    env.pop("NOVA_GA_EXPECTED_GIT_COMMIT", None)
+    evidence["synthetic_git_commit"] = synthetic_commit
+    evidence["expected_database_host"] = parsed_host
 
     migrate = subprocess.run(
         [sys.executable, "scripts/receptionist_staging_start.py", "--migrate-only"],

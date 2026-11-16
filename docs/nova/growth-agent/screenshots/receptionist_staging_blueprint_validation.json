@@ -1,23 +1,8 @@
 {
-  "schema_url": "https://render.com/schema/render.yaml.json",
-  "schema_id": "https://render.com/schema/render.yaml.json",
-  "blueprint": "docs/nova/growth-agent/render.nova-receptionist-staging.yaml",
-  "validator": "jsonschema.Draft202012Validator",
   "valid": true,
   "error_count": 0,
-  "errors": [],
-  "negative_control_releaseCommand_rejected": true,
-  "service": {
-    "plan": "free",
-    "autoDeployTrigger": "off",
-    "startCommand": "python scripts/receptionist_staging_start.py",
-    "healthCheckPath": "/api/health/readiness",
-    "has_releaseCommand": false,
-    "has_preDeployCommand": false
-  },
-  "migration_approach": "startCommand guarded script (free plan; preDeployCommand requires paid)",
-  "render_docs": [
-    "https://render.com/docs/blueprint-spec",
-    "https://github.com/render-oss/skills/blob/main/skills/render-deploy/references/configuration-guide.md"
-  ]
+  "autoDeployTrigger": "off",
+  "startCommand": "python scripts/receptionist_staging_start.py",
+  "has_releaseCommand": false,
+  "schema_url": "https://render.com/schema/render.yaml.json"
 }
