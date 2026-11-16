@@ -5,11 +5,11 @@
 # Do NOT reuse or modify existing nova-growth-validation-490 / nova_ga_490_dispos.
 # Do NOT enable live calendar writes, live email, or live Twilio voice.
 #
-# Resource note: Render allows only ONE free Postgres per workspace.
-# Existing staging already uses a free Postgres (nova_ga_490_dispos). Creating
-# this second database may require the paid Basic Postgres plan (~$7/mo as of
-# Render docs; confirm live Dashboard pricing) unless the owner frees the
-# existing free slot. Stop and report before paid create.
+# Resource note: an isolated paid 0.1c-256mb PostgreSQL database is owner-approved
+# up to $6/month in Saye's workspace. A separate staging database already
+# exists as nova-receptionist-staging-db-h799 (nova_ga_receptionist_dispos).
+# DO NOT reapply this Blueprint to create a duplicate resource or incur an
+# additional charge; reconcile/adopt existing resources only after a new review.
 #
 # Migration note: free web services do NOT support preDeployCommand.
 # releaseCommand is not a valid Blueprint field. Migrations run inside
@@ -17,12 +17,14 @@
 #
 # autoDeployTrigger is off — owner deploys the exact approved commit SHA only.
 #
-# Expected public URL after provision (Render assigns exact host):
-#   https://nova-receptionist-staging.onrender.com/nova/growth
+# Existing Render service (2026-11-16): nova-receptionist-staging-h799
+#   https://nova-receptionist-staging-h799.onrender.com/nova/growth
+# The unsuffixed URL below is a template only and must not be deployed
+# without reconciling the actual service origin and OAuth callback.
 
 databases:
   - name: nova-receptionist-staging-db
-    plan: free
+    plan: 0.1c-256mb
     databaseName: nova_ga_receptionist_dispos
     user: nova_ga_receptionist
 
@@ -65,7 +67,7 @@ services:
       - key: AMICOR_DEPLOYMENT_SYNC_KEY
         sync: false
       - key: AMICOR_PUBLIC_URL
-        value: https://nova-receptionist-staging.onrender.com
+        value: https://nova-receptionist-staging-h799.onrender.com
       - key: ALLOWED_ORIGINS
         value: https://nova-receptionist-staging.onrender.com
       - key: NOVA_GA_EXPECTED_DATABASE_NAME
@@ -106,7 +108,7 @@ services:
       - key: NOVA_GA_GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       - key: NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI
-        value: https://nova-receptionist-staging.onrender.com/api/nova/growth-agent/calendar/oauth/callback
+        value: https://nova-receptionist-staging-h799.onrender.com/api/nova/growth-agent/calendar/oauth/callback
       - key: NOVA_GA_CREDENTIAL_ENCRYPTION_KEY
         sync: false
       - key: NOVA_STRIPE_LIVE_ENABLED
