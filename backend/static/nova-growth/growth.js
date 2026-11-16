@@ -75,6 +75,9 @@
       showAuthState("authenticated", user.email || "owner");
       setBanner("Signed in. Live messaging and telephone providers remain off.", "ok");
       await refreshAll();
+      if (validation === sessionVerification && verifiedSession && window.NovaReceptionist?.onAuthenticated) {
+        await window.NovaReceptionist.onAuthenticated();
+      }
     } catch (error) {
       if (validation !== sessionVerification || state.token !== token) return;
       if (error.status === 401 || error.status === 403) {
@@ -649,6 +652,7 @@
   // Default booking day hint
   $("book-day").value = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
 
+  window.NovaGrowthSession = { isVerified: () => verifiedSession };
   if (state.token) {
     verifySession(state.token);
   } else {
