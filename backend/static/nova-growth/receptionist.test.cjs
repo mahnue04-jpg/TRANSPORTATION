@@ -32,10 +32,24 @@ const sensitiveKeyLine = source.slice(
   source.indexOf(";", source.indexOf("const SENSITIVE_KEY")) + 1
 );
 
+const defaultCalledLine = source.slice(
+  source.indexOf("const DEFAULT_CALLED"),
+  source.indexOf(";", source.indexOf("const DEFAULT_CALLED")) + 1
+);
+const defaultCallerLine = source.slice(
+  source.indexOf("const DEFAULT_CALLER"),
+  source.indexOf(";", source.indexOf("const DEFAULT_CALLER")) + 1
+);
+
 const helpers = [
   sensitiveKeyLine,
+  defaultCalledLine,
+  defaultCallerLine,
   extractFunction("escapeHtml"),
   extractFunction("redactForDisplay"),
+  extractFunction("isCalendarConnected"),
+  extractFunction("normalizeCalendar"),
+  extractFunction("buildVoiceSimulatorPayload"),
   extractFunction("renderFaqSection"),
   extractFunction("renderAgentStatusSection"),
   extractFunction("renderCalendarSection"),
@@ -45,7 +59,6 @@ const helpers = [
   extractFunction("renderVoiceSimulatorSection"),
   extractFunction("renderReceptionistPanel"),
   extractFunction("clearRecvStatus"),
-  extractFunction("clearState"),
 ].join("\n");
 
 function runHelpers(extra = "") {
@@ -57,7 +70,9 @@ function runHelpers(extra = "") {
     handoffs: null,
     voiceResult: null,
     faqSummary: null,
+    tokenSnapshot: null,
   };
+  let sessionGeneration = 0;
   const elements = {};
   const element = (id) => {
     if (!elements[id]) {
@@ -65,30 +80,149 @@ function runHelpers(extra = "") {
     }
     return elements[id];
   };
-  const ctx = { cache, document: { getElementById: element }, window: {}, localStorage: { getItem: () => "" } };
+  const ctx = {
+    cache,
+    sessionGeneration,
+    document: { getElementById: element },
+    window: {},
+    localStorage: { getItem: () => "" },
+  };
   vm.createContext(ctx);
-  vm.runInContext(`const $ = (id) => document.getElementById(id);\n${helpers}\n${extra}`, ctx);
-  return { ctx, elements };
+  vm.runInContext(
+    `const $ = (id) => document.getElementById(id);
+let sessionGeneration = 0;
+function clearState() {
+  sessionGeneration += 1;
+  cache.status = null;
+  cache.calendar = null;
+  cache.syncErrors = null;
+  cache.notifications = null;
+  cache.handoffs = null;
+  cache.voiceResult = null;
+  cache.faqSummary = null;
+  cache.tokenSnapshot = null;
+  const root = $("receptionist-root");
+  if (root) {
+    root.innerHTML = '<div class="hint">Signed out — receptionist state cleared.</div>';
+  }
+  clearRecvStatus();
+}
+${helpers}
+${extra}`,
+    ctx
+  );
+  return { ctx, elements, getGeneration: () => vm.runInContext("sessionGeneration", ctx) };
 }
 
-test("calendar section shows Not connected when disconnected", () => {
+function loadNovaReceptionist(mocks = {}) {
+  const elements = {};
+  const element = (id) => {
+    if (!elements[id]) {
+      elements[id] = {
+        innerHTML: "",
+        textContent: "",
+        className: "hint",
+        value: "",
+        addEventListener: () => {},
+      };
+    }
+    return elements[id];
+  };
+  const sessionStore = { ...mocks.sessionStorage };
+  const localStore = { amicor_growth_token: mocks.token || "tok-a" };
+  const fetchCalls = [];
+  const ctx = {
+    document: {
+      getElementById: element,
+      title: "Growth",
+      readyState: "loading",
+      addEventListener: () => {},
+    },
+    window: {
+      location: { href: mocks.href || "https://example.test/nova/growth", assign: () => {} },
+      addEventListener: () => {},
+      setTimeout: (fn) => fn(),
+      NovaReceptionist: null,
+    },
+    localStorage: {
+      getItem: (k) => localStore[k] ?? null,
+      setItem: (k, v) => {
+        localStore[k] = v;
+      },
+    },
+    sessionStorage: {
+      getItem: (k) => sessionStore[k] ?? null,
+      setItem: (k, v) => {
+        sessionStore[k] = v;
+      },
+      removeItem: (k) => {
+        delete sessionStore[k];
+      },
+    },
+    history: { replaceState: () => {} },
+    fetch: async (url, opts) => {
+      fetchCalls.push({ url, opts });
+      if (mocks.fetch) return mocks.fetch(url, opts, fetchCalls);
+      return { ok: true, text: async () => JSON.stringify({}) };
+    },
+    console: { error: () => {} },
+  };
+  vm.createContext(ctx);
+  const testSource = source.replace(
+    /\n  if \(document\.readyState === "loading"\) \{[\s\S]*$/,
+    "\n"
+  );
+  vm.runInContext(testSource, ctx);
+  return { Nova: ctx.window.NovaReceptionist, elements, fetchCalls, ctx, sessionStore, localStore };
+}
+
+test("calendar section shows Connected and calendar id when connected:true", () => {
   const { ctx } = runHelpers();
-  const html = ctx.renderCalendarSection({ connected: false });
-  assert.match(html, /Not connected/);
-  assert.doesNotMatch(html, /Connected/);
+  const html = ctx.renderCalendarSection({
+    connected: true,
+    calendar_id: "cal-primary",
+    status: "connected",
+  });
+  assert.match(html, /Connected/);
+  assert.match(html, /cal-primary/);
+  assert.doesNotMatch(html, /Not connected/);
 });
 
-test("sign-out clearState wipes cache and receptionist DOM", () => {
-  const { ctx, elements } = runHelpers();
+test("calendar section shows Not connected when disconnected or missing", () => {
+  const { ctx } = runHelpers();
+  assert.match(ctx.renderCalendarSection({ connected: false }), /Not connected/);
+  assert.match(ctx.renderCalendarSection({ status: "Not connected" }), /Not connected/);
+  assert.match(ctx.renderCalendarSection(null), /Not connected/);
+  assert.match(ctx.renderCalendarSection({ status: "connected" }), /Connected/);
+  assert.equal(ctx.isCalendarConnected({ connected: false, status: "connected" }), false);
+});
+
+test("sign-out clearState wipes cache, DOM, and bumps session generation", () => {
+  const { ctx, elements, getGeneration } = runHelpers();
   elements["receptionist-root"] = { innerHTML: "<div>loaded</div>", textContent: "", className: "hint" };
+  const before = getGeneration();
   ctx.cache.status = { paused: true };
   ctx.cache.calendar = { connected: true, calendar_id: "cal-1" };
   ctx.cache.voiceResult = { simulated: true, reply: "ok" };
   ctx.clearState();
+  assert.equal(getGeneration(), before + 1);
   assert.equal(ctx.cache.status, null);
   assert.equal(ctx.cache.calendar, null);
   assert.equal(ctx.cache.voiceResult, null);
   assert.match(elements["receptionist-root"].innerHTML, /cleared/);
+});
+
+test("voice simulator payload includes called_number and simulated flag", () => {
+  const { ctx } = runHelpers();
+  const payload = ctx.buildVoiceSimulatorPayload("booking", "Hello", "+15555550100", "+15555550101");
+  assert.equal(payload.called_number, "+15555550100");
+  assert.equal(payload.caller_number, "+15555550101");
+  assert.equal(payload.intent, "booking");
+  assert.equal(payload.utterance, "Hello");
+  assert.equal(payload.simulated, true);
+  const html = ctx.renderVoiceSimulatorSection(null);
+  assert.match(html, /recv-voice-called/);
+  assert.match(html, /SIMULATED/);
 });
 
 test("voice simulator panel is labeled SIMULATED", () => {
@@ -131,4 +265,28 @@ test("rendered HTML redacts tokens and never leaks secrets", () => {
   assert.doesNotMatch(panel, /super-secret/);
   assert.doesNotMatch(panel, /widget-token-value/);
   assert.match(panel, /not externally confirmed|Not connected/);
+});
+
+test("stale refresh does not repaint after clearState bumps generation", async () => {
+  const statusPayload = {
+    calendar: { connected: true, calendar_id: "late-cal" },
+    agent: { active: true },
+  };
+  const { Nova, elements } = loadNovaReceptionist({
+    fetch: async (url) => {
+      if (url.includes("/receptionist/status")) {
+        await new Promise((r) => setTimeout(r, 30));
+        return { ok: true, text: async () => JSON.stringify(statusPayload) };
+      }
+      return { ok: true, text: async () => JSON.stringify({ items: [] }) };
+    },
+  });
+  elements["receptionist-root"] = { innerHTML: "", textContent: "", className: "hint" };
+  const gen = Nova._test.getGeneration();
+  const refreshPromise = Nova.refresh();
+  Nova.clearState();
+  await refreshPromise;
+  assert.ok(Nova._test.getGeneration() > gen);
+  assert.match(elements["receptionist-root"].innerHTML, /cleared/);
+  assert.doesNotMatch(elements["receptionist-root"].innerHTML, /late-cal/);
 });

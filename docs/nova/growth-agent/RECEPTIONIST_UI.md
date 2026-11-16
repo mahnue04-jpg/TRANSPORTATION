@@ -17,10 +17,10 @@ Static owner dashboard slice for the Nova Growth Agent receptionist pilot. Ships
 1. **Sign in** — same bearer session as the rest of the Growth dashboard (`amicor_growth_token`).
 2. **Setup wizard** — FAQs and operating hours remain the source of truth; the receptionist panel summarizes counts and links to `#setup-wizard`.
 3. **Receptionist panel** — refresh loads parallel GETs for status, sync errors, notifications, and handoffs.
-4. **Calendar** — explicit **Not connected** when OAuth is missing or disconnected; connect/disconnect call the calendar OAuth routes (server may return 404 until backend lands).
+4. **Calendar** — explicit **Not connected** when OAuth is missing or disconnected; `connected: true` from status is authoritative, with `status: "connected"` as a fallback. Connect sets `sessionStorage.ga_calendar_oauth_pending=1` before redirect (never tokens). Return URLs with `calendar_oauth_state` + `calendar_oauth_code` (or `state` + `code` while pending) trigger authenticated `POST .../calendar/oauth/callback`, then query params are stripped.
 5. **Handoffs** — queue with per-row **Acknowledge** → `POST .../handoffs/{id}/acknowledge`.
 6. **Agent pause/disable** — display-only in this panel; owners still use Setup wizard **Pause**, **Disable**, and **Resume** buttons.
-7. **Voice simulator** — banner **SIMULATED — not a live phone call**; `POST .../voice/simulator/run` with `simulated: true`.
+7. **Voice simulator** — banner **SIMULATED — not a live phone call**; `POST .../voice/simulator/run` with `called_number`, `caller_number`, `intent`, `utterance`, and `simulated: true` (pilot defaults `+15555550100` / `+15555550101`).
 
 ## API paths (future / staging)
 
@@ -28,6 +28,7 @@ Static owner dashboard slice for the Nova Growth Agent receptionist pilot. Ships
 | --- | --- |
 | GET | `/api/nova/growth-agent/receptionist/status` |
 | POST | `/api/nova/growth-agent/calendar/oauth/start` |
+| POST | `/api/nova/growth-agent/calendar/oauth/callback` |
 | POST | `/api/nova/growth-agent/calendar/disconnect` |
 | GET | `/api/nova/growth-agent/calendar/sync-errors` |
 | GET | `/api/nova/growth-agent/notifications` |
@@ -50,7 +51,7 @@ cd backend/static/nova-growth
 node --test receptionist.test.cjs
 ```
 
-Asserts: disconnected calendar copy, sign-out clearing, SIMULATED labeling, and no token substrings in rendered HTML.
+Asserts: connected/disconnected calendar copy, sign-out clearing and session generation bumps, voice payload fields, stale refresh guard, SIMULATED labeling, and no token substrings in rendered HTML.
 
 ## Mobile
 

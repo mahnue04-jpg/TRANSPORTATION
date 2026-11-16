@@ -7,7 +7,15 @@
     handoffs: null,
     voiceResult: null,
     faqSummary: null,
+    tokenSnapshot: null,
   };
+
+  let sessionGeneration = 0;
+
+  const OAUTH_PENDING_KEY = "ga_calendar_oauth_pending";
+  const TOKEN_KEY = "amicor_growth_token";
+  const DEFAULT_CALLED = "+15555550100";
+  const DEFAULT_CALLER = "+15555550101";
 
   const $ = (id) => document.getElementById(id);
 
@@ -40,7 +48,7 @@
   }
 
   function readToken() {
-    return localStorage.getItem("amicor_growth_token") || "";
+    return localStorage.getItem(TOKEN_KEY) || "";
   }
 
   function authHeaders() {
@@ -69,6 +77,67 @@
     return redactForDisplay(data);
   }
 
+  function isCalendarConnected(calendar) {
+    if (!calendar) return false;
+    if (typeof calendar.connected === "boolean") return calendar.connected === true;
+    const status = String(calendar.status || "").trim().toLowerCase();
+    return status === "connected";
+  }
+
+  function normalizeCalendar(calendar) {
+    const base = calendar && typeof calendar === "object" ? { ...calendar } : {};
+    base.connected = isCalendarConnected(calendar);
+    return base;
+  }
+
+  function buildVoiceSimulatorPayload(intent, utterance, calledNumber, callerNumber) {
+    return {
+      called_number: (calledNumber || DEFAULT_CALLED).trim(),
+      caller_number: (callerNumber || DEFAULT_CALLER).trim(),
+      intent: (intent || "general").trim(),
+      utterance: (utterance || "What are your hours?").trim(),
+      simulated: true,
+    };
+  }
+
+  function readOAuthReturnParams() {
+    const params = new URLSearchParams(window.location.search);
+    const explicitState = params.get("calendar_oauth_state");
+    const explicitCode = params.get("calendar_oauth_code");
+    if (explicitState && explicitCode) {
+      return { state: explicitState, code: explicitCode };
+    }
+    const state = params.get("state");
+    const code = params.get("code");
+    if (state && code && sessionStorage.getItem(OAUTH_PENDING_KEY) === "1") {
+      return { state, code };
+    }
+    return null;
+  }
+
+  function stripOAuthQueryFromUrl() {
+    const url = new URL(window.location.href);
+    ["calendar_oauth_state", "calendar_oauth_code", "state", "code"].forEach((key) => {
+      url.searchParams.delete(key);
+    });
+    const search = url.searchParams.toString();
+    const next = url.pathname + (search ? `?${search}` : "") + url.hash;
+    history.replaceState({}, document.title, next);
+  }
+
+  function abortIfStale(gen) {
+    return gen !== sessionGeneration;
+  }
+
+  function onTokenChangedFromSnapshot() {
+    const token = readToken();
+    if (cache.tokenSnapshot !== null && token !== cache.tokenSnapshot) {
+      clearState();
+      return true;
+    }
+    return false;
+  }
+
   function setupFaqSummaryFromDom() {
     const hours = $("biz-hours");
     const faqs = $("biz-faqs");
@@ -95,9 +164,9 @@
   }
 
   function renderCalendarSection(calendar) {
-    const connected = calendar && calendar.connected === true;
-  const statusLabel = connected
-      ? escapeHtml(calendar.status || "Connected")
+    const connected = isCalendarConnected(calendar);
+    const statusLabel = connected
+      ? escapeHtml(calendar.status === "connected" ? "Connected" : calendar.status || "Connected")
       : "Not connected";
     const statusClass = connected ? "ok" : "warn";
     const calendarId = connected
@@ -263,6 +332,8 @@
         <div class="recv-sim-banner" role="note">SIMULATED — not a live phone call</div>
         <h3>Voice simulator</h3>
         <p class="hint">Dry-run receptionist voice handling. No PSTN, no customer outreach.</p>
+        <label>Called number (E.164)<input id="recv-voice-called" type="text" value="${DEFAULT_CALLED}" autocomplete="off" /></label>
+        <label>Caller number (E.164)<input id="recv-voice-caller" type="text" value="${DEFAULT_CALLER}" autocomplete="off" /></label>
         <label>Caller intent<input id="recv-voice-intent" type="text" placeholder="Book a consultation" /></label>
         <label>Utterance<input id="recv-voice-utterance" type="text" placeholder="What are your hours tomorrow?" /></label>
         <div class="actions">
@@ -274,7 +345,7 @@
 
   function renderReceptionistPanel(data) {
     const status = data && data.status ? data.status : {};
-    const calendar = data && data.calendar ? data.calendar : { connected: false };
+    const calendar = normalizeCalendar(data && data.calendar ? data.calendar : { connected: false });
     return `
       <div class="recv-grid">
         ${renderFaqSection(data && data.faqSummary)}
@@ -295,19 +366,26 @@
     const connect = root.querySelector("#recv-connect-calendar");
     if (connect) {
       connect.addEventListener("click", async () => {
+        const gen = sessionGeneration;
         try {
           requireSession();
           const data = await api("/api/nova/growth-agent/calendar/oauth/start", {
             method: "POST",
             body: "{}",
           });
+          if (abortIfStale(gen)) return;
           if (data && data.authorization_url) {
+            try {
+              sessionStorage.setItem(OAUTH_PENDING_KEY, "1");
+            } catch {
+              /* sessionStorage unavailable */
+            }
             window.location.assign(data.authorization_url);
           } else {
             showRecvError("OAuth start did not return an authorization URL (pilot API may be offline).");
           }
         } catch (err) {
-          showRecvError(err.message);
+          if (!abortIfStale(gen)) showRecvError(err.message);
         }
       });
     }
@@ -315,12 +393,14 @@
     const disconnect = root.querySelector("#recv-disconnect-calendar");
     if (disconnect) {
       disconnect.addEventListener("click", async () => {
+        const gen = sessionGeneration;
         try {
           requireSession();
           await api("/api/nova/growth-agent/calendar/disconnect", { method: "POST", body: "{}" });
+          if (abortIfStale(gen)) return;
           await refresh();
         } catch (err) {
-          showRecvError(err.message);
+          if (!abortIfStale(gen)) showRecvError(err.message);
         }
       });
     }
@@ -328,19 +408,27 @@
     const runVoice = root.querySelector("#recv-run-voice");
     if (runVoice) {
       runVoice.addEventListener("click", async () => {
+        const gen = sessionGeneration;
         try {
           requireSession();
           const intent = ($("recv-voice-intent") && $("recv-voice-intent").value.trim()) || "general";
           const utterance =
             ($("recv-voice-utterance") && $("recv-voice-utterance").value.trim()) ||
             "What are your hours?";
+          const called =
+            ($("recv-voice-called") && $("recv-voice-called").value.trim()) || DEFAULT_CALLED;
+          const caller =
+            ($("recv-voice-caller") && $("recv-voice-caller").value.trim()) || DEFAULT_CALLER;
+          const body = buildVoiceSimulatorPayload(intent, utterance, called, caller);
           const data = await api("/api/nova/growth-agent/voice/simulator/run", {
             method: "POST",
-            body: JSON.stringify({ intent, utterance, simulated: true }),
+            body: JSON.stringify(body),
           });
+          if (abortIfStale(gen)) return;
           cache.voiceResult = data;
           paintPanel();
         } catch (err) {
+          if (abortIfStale(gen)) return;
           cache.voiceResult = { simulated: true, error: err.message };
           paintPanel();
         }
@@ -349,6 +437,7 @@
 
     root.querySelectorAll(".recv-ack").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        const gen = sessionGeneration;
         const id = btn.getAttribute("data-handoff-id");
         if (!id) return;
         try {
@@ -357,9 +446,10 @@
             method: "POST",
             body: "{}",
           });
+          if (abortIfStale(gen)) return;
           await refresh();
         } catch (err) {
-          showRecvError(err.message);
+          if (!abortIfStale(gen)) showRecvError(err.message);
         }
       });
     });
@@ -401,6 +491,7 @@
   }
 
   function clearState() {
+    sessionGeneration += 1;
     cache.status = null;
     cache.calendar = null;
     cache.syncErrors = null;
@@ -408,6 +499,7 @@
     cache.handoffs = null;
     cache.voiceResult = null;
     cache.faqSummary = null;
+    cache.tokenSnapshot = null;
     const root = $("receptionist-root");
     if (root) {
       root.innerHTML = `<div class="hint">Signed out — receptionist state cleared.</div>`;
@@ -415,13 +507,47 @@
     clearRecvStatus();
   }
 
+  async function completeCalendarOAuthIfNeeded() {
+    const gen = sessionGeneration;
+    const oauth = readOAuthReturnParams();
+    if (!oauth) return false;
+    if (!readToken()) return false;
+    try {
+      requireSession();
+      await api("/api/nova/growth-agent/calendar/oauth/callback", {
+        method: "POST",
+        body: JSON.stringify({ state: oauth.state, code: oauth.code }),
+      });
+      if (abortIfStale(gen)) return true;
+      try {
+        sessionStorage.removeItem(OAUTH_PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
+      stripOAuthQueryFromUrl();
+      return true;
+    } catch (err) {
+      if (!abortIfStale(gen)) showRecvError(err.message);
+      try {
+        sessionStorage.removeItem(OAUTH_PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
+      stripOAuthQueryFromUrl();
+      return false;
+    }
+  }
+
   async function refresh() {
+    const gen = sessionGeneration;
     const root = $("receptionist-root");
     if (!root) return;
+    if (onTokenChangedFromSnapshot()) return;
     if (!readToken()) {
       root.innerHTML = `<div class="hint">Sign in to load receptionist status.</div>`;
       return;
     }
+    cache.tokenSnapshot = readToken();
     root.innerHTML = `<div class="loading">Loading receptionist status…</div>`;
     clearRecvStatus();
     cache.faqSummary = setupFaqSummaryFromDom();
@@ -433,16 +559,17 @@
       api("/api/nova/growth-agent/handoffs"),
     ]);
 
+    if (abortIfStale(gen)) return;
+
     if (results[0].status === "fulfilled") {
       const payload = results[0].value || {};
       cache.status = payload.agent || payload.status || payload;
-      cache.calendar = payload.calendar || cache.status.calendar || { connected: false };
-      if (cache.calendar.connected !== true) {
-        cache.calendar = { ...cache.calendar, connected: false };
-      }
+      cache.calendar = normalizeCalendar(
+        payload.calendar || cache.status.calendar || { connected: false }
+      );
     } else {
       cache.status = { paused: false, disabled: false, pilot: true, error: results[0].reason.message };
-      cache.calendar = { connected: false };
+      cache.calendar = normalizeCalendar({ connected: false });
     }
 
     cache.syncErrors =
@@ -458,10 +585,17 @@
         ? results[3].value.items || results[3].value.handoffs || results[3].value
         : [];
 
+    if (abortIfStale(gen)) return;
     paintPanel();
   }
 
   function init() {
+    window.addEventListener("storage", (event) => {
+      if (event.key === TOKEN_KEY && event.newValue !== cache.tokenSnapshot) {
+        clearState();
+      }
+    });
+
     const loginForm = $("login-form");
     if (loginForm) {
       loginForm.addEventListener("submit", () => {
@@ -476,12 +610,25 @@
       const btn = $(id);
       if (btn) btn.addEventListener("click", () => window.setTimeout(() => refresh().catch(() => {}), 600));
     });
-    if (readToken()) {
-      refresh().catch(() => clearState());
-    } else {
-      const root = $("receptionist-root");
-      if (root) root.innerHTML = `<div class="hint">Sign in to load receptionist status.</div>`;
-    }
+
+    const boot = async () => {
+      const gen = sessionGeneration;
+      if (onTokenChangedFromSnapshot()) return;
+      if (readToken()) {
+        try {
+          await completeCalendarOAuthIfNeeded();
+        } catch {
+          /* errors surfaced in receptionist-status */
+        }
+        if (abortIfStale(gen)) return;
+        await refresh().catch(() => clearState());
+      } else {
+        const root = $("receptionist-root");
+        if (root) root.innerHTML = `<div class="hint">Sign in to load receptionist status.</div>`;
+      }
+    };
+
+    boot().catch(() => clearState());
   }
 
   window.NovaReceptionist = {
@@ -492,6 +639,16 @@
     renderReceptionistPanel,
     redactForDisplay,
     escapeHtml,
+    isCalendarConnected,
+    normalizeCalendar,
+    buildVoiceSimulatorPayload,
+    _test: {
+      getGeneration: () => sessionGeneration,
+      setGeneration: (value) => {
+        sessionGeneration = Number(value) || 0;
+      },
+      abortIfStale,
+    },
   };
 
   if (document.readyState === "loading") {

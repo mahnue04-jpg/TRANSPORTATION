@@ -84,7 +84,7 @@
 
     <section class="panel receptionist-panel" aria-label="Receptionist pilot" id="receptionist-panel">
       <h2>Receptionist (pilot)</h2>
-      <p class="hint">Owner status for voice handoffs, calendar sync, and simulated call flows. Not live telephony.</p>
+      <p class="hint">Owner status for voice handoffs, calendar sync, and simulated call flows. Not live telephony. After Google OAuth, this page may return with <code>calendar_oauth_state</code> and <code>calendar_oauth_code</code> query params; the panel completes the exchange and strips them (no tokens stored in the browser).</p>
       <div class="actions">
         <button type="button" id="recv-refresh" class="secondary">Refresh receptionist</button>
       </div>
