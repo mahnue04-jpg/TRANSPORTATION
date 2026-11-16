@@ -19,8 +19,8 @@
 #
 # Existing Render service (2026-11-16): nova-receptionist-staging-h799
 #   https://nova-receptionist-staging-h799.onrender.com/nova/growth
-# The unsuffixed URL below is a template only and must not be deployed
-# without reconciling the actual service origin and OAuth callback.
+# This reference Blueprint still uses template resource names. Do not apply it
+# over or alongside the live-h799 resources without an adoption plan.
 
 databases:
   - name: nova-receptionist-staging-db
@@ -69,7 +69,7 @@ services:
       - key: AMICOR_PUBLIC_URL
         value: https://nova-receptionist-staging-h799.onrender.com
       - key: ALLOWED_ORIGINS
-        value: https://nova-receptionist-staging.onrender.com
+        value: https://nova-receptionist-staging-h799.onrender.com
       - key: NOVA_GA_EXPECTED_DATABASE_NAME
         value: nova_ga_receptionist_dispos
       - key: NOVA_GA_EXPECTED_ALEMBIC_REVISION
