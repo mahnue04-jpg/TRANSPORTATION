@@ -10,8 +10,10 @@ Sanitized Chromium captures from disposable local acceptance. **No secrets.**
 | `receptionist_voice_simulator.png` | Voice simulator button → service-backed FAQ (SIMULATED) |
 | `receptionist_chromium_evidence.json` | Machine-readable step results |
 | `receptionist_staging_readiness.png` | Staging-prep Chromium: owner readiness Not connected |
-| `receptionist_staging_owner_journey.json` | Staging-prep API+browser journey (SIMULATED booking lifecycle) |
+| `receptionist_staging_owner_journey.json` | Staging-prep API+browser journey; requires `/api/health/readiness` HTTP 200 |
 | `receptionist_staging_db_rehearsal.json` | Disposable PG backup/restore + Alembic receptionist upgrade evidence |
+| `receptionist_staging_empty_db_rehearsal.json` | Empty-DB first deploy via `receptionist_staging_start.py --migrate-only` |
+| `receptionist_staging_blueprint_validation.json` | Render Blueprint JSON Schema validation (no `releaseCommand`) |
 
 These files are committed so reviewers can open them on GitHub without Cursor `/opt/cursor/artifacts` access.
 

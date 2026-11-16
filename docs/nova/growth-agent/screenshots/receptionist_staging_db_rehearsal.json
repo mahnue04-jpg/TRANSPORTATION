@@ -1,5 +1,5 @@
 {
-  "started_at_utc": "2026-11-16T15:34:43.021030+00:00",
+  "started_at_utc": "2026-11-16T16:20:02.728950+00:00",
   "parent_revision": "20261112_nova_ga_retention",
   "target_revision": "20261116_nova_ga_receptionist",
   "src_db": "nova_ga_receptionist_src",
@@ -7,13 +7,13 @@
   "orm_create_all_used_for_receptionist": false,
   "src_bootstrap": "stamp_parent",
   "seed": {
-    "organization_id": "org-rehearse-438598e8",
-    "profile_id": "526b7c2a483447bd89b6a2e4244311f8",
-    "contact_id": "165df7b93c134241af4c1a1e307764bc",
-    "appointment_id": "69ec3fd5d9f74a69bebaa253c4793651",
+    "organization_id": "org-rehearse-ed0aead1",
+    "profile_id": "8be7233038064c5092eb07bdd526a19c",
+    "contact_id": "743a822ca75e4cdb92487c63aaf6ce0e",
+    "appointment_id": "f1f15a87722646ffb10b01e33ef27fad",
     "business_name": "Rehearse Biz"
   },
-  "backup_bytes": 44558,
+  "backup_bytes": 44555,
   "restore_ok": true,
   "revision_after_restore": "20261112_nova_ga_retention",
   "receptionist_present_before_upgrade": [],
@@ -53,5 +53,5 @@
     "optional_alembic_downgrade": "Only with separate owner approval; not required for app rollback"
   },
   "passed": true,
-  "finished_at_utc": "2026-11-16T15:34:48.257952+00:00"
+  "finished_at_utc": "2026-11-16T16:20:07.600589+00:00"
 }

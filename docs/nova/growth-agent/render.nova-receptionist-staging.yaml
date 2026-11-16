@@ -7,8 +7,15 @@
 #
 # Resource note: Render allows only ONE free Postgres per workspace.
 # Existing staging already uses a free Postgres (nova_ga_490_dispos). Creating
-# this second database may require the paid Basic Postgres plan (~$6/mo) unless
-# the owner frees the existing free slot. Stop and report before paid create.
+# this second database may require the paid Basic Postgres plan (~$7/mo as of
+# Render docs; confirm live Dashboard pricing) unless the owner frees the
+# existing free slot. Stop and report before paid create.
+#
+# Migration note: free web services do NOT support preDeployCommand.
+# releaseCommand is not a valid Blueprint field. Migrations run inside
+# startCommand via scripts/receptionist_staging_start.py (advisory-locked).
+#
+# autoDeployTrigger is off — owner deploys the exact approved commit SHA only.
 #
 # Expected public URL after provision (Render assigns exact host):
 #   https://nova-receptionist-staging.onrender.com/nova/growth
@@ -25,12 +32,12 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    # Owner replaces branch with the approved candidate SHA tip branch after merge-to-deploy branch choice.
     branch: cursor/nova-receptionist-staging-release-c9ac
+    autoDeployTrigger: "off"
     buildCommand: pip install --upgrade -r requirements.txt
-    # Additive receptionist revision only after parent Growth retention schema.
-    releaseCommand: alembic upgrade 20261116_nova_ga_receptionist
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Free-plan supported path: guarded Alembic upgrade then uvicorn.
+    # Fails closed on migration / DB / commit-guard errors (no SQLite fallback).
+    startCommand: python scripts/receptionist_staging_start.py
     healthCheckPath: /api/health/readiness
     envVars:
       - key: DATABASE_URL
@@ -45,6 +52,8 @@ services:
         value: staging
       - key: AMICOR_ENVIRONMENT
         value: staging
+      - key: APP_VERSION
+        value: 2026.11.16-nova-receptionist.staging
       - key: LOG_LEVEL
         value: INFO
       - key: SECRET_KEY
@@ -59,6 +68,13 @@ services:
         value: https://nova-receptionist-staging.onrender.com
       - key: ALLOWED_ORIGINS
         value: https://nova-receptionist-staging.onrender.com
+      - key: NOVA_GA_EXPECTED_DATABASE_NAME
+        value: nova_ga_receptionist_dispos
+      - key: NOVA_GA_EXPECTED_ALEMBIC_REVISION
+        value: 20261116_nova_ga_receptionist
+      # Owner sets this to the approved tip SHA at deploy time (Dashboard or CLI).
+      - key: NOVA_GA_EXPECTED_GIT_COMMIT
+        sync: false
       - key: NOVA_GROWTH_AGENT_ENABLED
         value: "true"
       - key: NOVA_GROWTH_AGENT_DEMO_MODE

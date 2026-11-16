@@ -35,7 +35,29 @@ def _next_weekday() -> str:
 def main() -> int:
     evidence: dict = {"base": BASE, "steps": [], "labels": ["SIMULATED", "STAGING_PREP"]}
     with httpx.Client(base_url=BASE, timeout=60.0) as client:
-        evidence["readiness_http"] = client.get("/api/health/readiness").status_code
+        readiness_resp = client.get("/api/health/readiness")
+        evidence["readiness_http"] = readiness_resp.status_code
+        try:
+            evidence["readiness_probe"] = readiness_resp.json()
+        except Exception:
+            evidence["readiness_probe"] = {"raw": readiness_resp.text[:500]}
+        if readiness_resp.status_code != 200:
+            raise SystemExit(
+                f"/api/health/readiness expected 200 for staging traffic, got {readiness_resp.status_code}: "
+                f"{evidence['readiness_probe']}"
+            )
+        probe = evidence["readiness_probe"]
+        if probe.get("traffic_ready") is False:
+            raise SystemExit(f"traffic_ready must be true: {probe}")
+        evidence["steps"].append(
+            {
+                "name": "infra_readiness_http_200",
+                "ok": True,
+                "http_probe": probe.get("http_probe"),
+                "overall_status": probe.get("overall_status"),
+            }
+        )
+
         login = client.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
         login.raise_for_status()
         token = login.json()["access_token"]
