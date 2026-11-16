@@ -67,6 +67,9 @@ def pg_engine():
             from alembic import command
             from alembic.config import Config
 
+            # ALEMBIC_DATABASE_URL wins in migrations/env.py so we do not
+            # silently migrate the app's default SQLite DATABASE_URL.
+            os.environ["ALEMBIC_DATABASE_URL"] = PG_URL
             cfg = Config("alembic.ini")
             cfg.set_main_option("sqlalchemy.url", PG_URL)
             command.upgrade(cfg, "20261112_nova_ga_retention")

@@ -24,8 +24,16 @@ import app.core.nova.creative_studio.db_models  # noqa: F401, E402 — Creative 
 # ── Alembic Config object ────────────────────────────────────────────────────
 config = context.config
 
-# Inject the runtime DATABASE_URL so alembic.ini can stay url-free
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Prefer an explicit URL from the Alembic Config (tests / callers that already
+# called set_main_option) or ALEMBIC_DATABASE_URL. Only fall back to the app's
+# DATABASE_URL when sqlalchemy.url is blank — otherwise disposable Postgres
+# rehearsals silently migrate the default SQLite file.
+_configured_url = (config.get_main_option("sqlalchemy.url") or "").strip()
+_alembic_override = (os.getenv("ALEMBIC_DATABASE_URL") or "").strip()
+if _alembic_override:
+    config.set_main_option("sqlalchemy.url", _alembic_override)
+elif not _configured_url:
+    config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # Set up Python loggers as defined in alembic.ini
 if config.config_file_name is not None:

@@ -98,17 +98,39 @@ def _current_alembic_revision(engine) -> str | None:
     return row[0] if row else None
 
 
-def _apply_receptionist_alembic(engine, pg_url: str) -> dict[str, Any]:
-    """Prefer targeted upgrade; fall back to heads on empty disposable DBs.
+def _alembic_cfg(pg_url: str) -> Any:
+    """Build Alembic config that targets the disposable Postgres URL.
 
-    Drops receptionist tables first so a prior ORM ``ensure`` in the same disposable
-    DB cannot conceal a missing Alembic revision.
+    ``migrations/env.py`` previously overwrote Config URLs with the app
+    DATABASE_URL (often SQLite). Set both Config and ALEMBIC_DATABASE_URL so
+    the rehearsal cannot silently migrate the wrong database.
     """
-    from alembic import command
     from alembic.config import Config
 
+    os.environ["ALEMBIC_DATABASE_URL"] = pg_url
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", pg_url)
+    return cfg
+
+
+def _apply_receptionist_alembic(engine, pg_url: str) -> dict[str, Any]:
+    """Apply the receptionist revision on the disposable Postgres URL.
+
+    Prefer stamp-parent + upgrade so this rehearsal exercises the actual
+    ``20261116_nova_ga_receptionist`` DDL without depending on the full
+    Health/ISF chain. Fall back to upgrade-target / heads when needed.
+
+    Drops receptionist tables first so a prior ORM ``ensure`` in the same
+    disposable DB cannot conceal a missing Alembic revision.
+    """
+    from alembic import command
+
+    if engine.dialect.name != "postgresql":
+        raise RuntimeError(
+            f"Receptionist Alembic rehearsal requires PostgreSQL, got {engine.dialect.name}"
+        )
+
+    cfg = _alembic_cfg(pg_url)
     notes: list[str] = []
 
     _drop_receptionist_tables(engine)
@@ -116,37 +138,42 @@ def _apply_receptionist_alembic(engine, pg_url: str) -> dict[str, Any]:
         "Receptionist tables still present after disposable drop — cannot rehearse Alembic"
     )
 
-    current = _current_alembic_revision(engine)
-    # If already at/after receptionist, stamp parent so upgrade() re-applies DDL.
-    if current == RECEPTIONIST_REVISION:
-        command.stamp(cfg, "20261112_nova_ga_retention")
-        notes.append(f"stamped parent from {current}")
-
-    try:
-        command.upgrade(cfg, RECEPTIONIST_REVISION)
-        return {"mode": "upgrade_target", "revision": RECEPTIONIST_REVISION, "notes": notes}
-    except Exception as exc:  # noqa: BLE001
-        notes.append(f"upgrade {RECEPTIONIST_REVISION} failed: {exc}")
-
-    # Isolated empty DBs may not tolerate the full prior Health/ISF chain cleanly;
-    # still try heads before any ORM ensure for receptionist tables.
-    try:
-        command.upgrade(cfg, "heads")
-        return {"mode": "upgrade_heads", "revision": "heads", "notes": notes}
-    except Exception as exc:  # noqa: BLE001
-        notes.append(f"upgrade heads failed: {exc}")
-
-    # Disposable-only escape hatch: stamp parent revision then apply receptionist DDL.
+    # Disposable primary path: stamp parent, then run receptionist upgrade() DDL
+    # against the same Postgres URL the tests inspect.
     try:
         command.stamp(cfg, "20261112_nova_ga_retention")
+        notes.append("stamped parent 20261112_nova_ga_retention")
         command.upgrade(cfg, RECEPTIONIST_REVISION)
         return {
             "mode": "stamp_parent_then_upgrade",
             "revision": RECEPTIONIST_REVISION,
             "notes": notes,
+            "url_dialect": "postgresql",
         }
     except Exception as exc:  # noqa: BLE001
         notes.append(f"stamp+upgrade failed: {exc}")
+
+    try:
+        command.upgrade(cfg, RECEPTIONIST_REVISION)
+        return {
+            "mode": "upgrade_target",
+            "revision": RECEPTIONIST_REVISION,
+            "notes": notes,
+            "url_dialect": "postgresql",
+        }
+    except Exception as exc:  # noqa: BLE001
+        notes.append(f"upgrade {RECEPTIONIST_REVISION} failed: {exc}")
+
+    try:
+        command.upgrade(cfg, "heads")
+        return {
+            "mode": "upgrade_heads",
+            "revision": "heads",
+            "notes": notes,
+            "url_dialect": "postgresql",
+        }
+    except Exception as exc:  # noqa: BLE001
+        notes.append(f"upgrade heads failed: {exc}")
         raise RuntimeError(
             "Alembic could not create receptionist tables on disposable Postgres: "
             + "; ".join(notes)
