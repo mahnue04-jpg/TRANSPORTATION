@@ -1023,7 +1023,7 @@
     const root = $("receptionist-root");
     if (!root) return;
     if (onTokenChangedFromSnapshot()) return;
-    if (!readToken()) {
+    if (!readToken() || !window.NovaGrowthSession?.isVerified()) {
       root.innerHTML = `<div class="hint">Sign in to load receptionist status.</div>`;
       return;
     }
@@ -1084,12 +1084,7 @@
       }
     });
 
-    const loginForm = $("login-form");
-    if (loginForm) {
-      loginForm.addEventListener("submit", () => {
-        window.setTimeout(() => refresh().catch(() => clearState()), 400);
-      });
-    }
+    // Session verification, not a timed login callback, triggers receptionist loading.
     const signOutBtn = $("sign-out");
     if (signOutBtn) {
       signOutBtn.addEventListener("click", () => clearState());
