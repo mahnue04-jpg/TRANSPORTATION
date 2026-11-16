@@ -98,6 +98,7 @@ from app.core.nova.creative_studio.router import router as nova_creative_router 
 from app.core.nova.creative_studio.router import webhook_router as nova_creative_webhook_router  # type: ignore
 from app.core.nova.creative_studio.casting_router_draft import router as nova_casting_router  # type: ignore
 from app.core.nova.growth_agent.router import router as nova_growth_agent_router  # type: ignore
+from app.core.nova.growth_agent.receptionist_router import router as nova_growth_receptionist_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -539,6 +540,7 @@ app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
 app.include_router(nova_casting_router)
 app.include_router(nova_growth_agent_router)
+app.include_router(nova_growth_receptionist_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:

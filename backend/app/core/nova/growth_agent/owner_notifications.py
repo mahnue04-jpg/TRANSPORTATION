@@ -97,9 +97,10 @@ def enqueue_owner_notification(
     )
     db.add(row)
     try:
-        db.flush()
+        # Nested savepoint — never wipe sibling appointment/sync work on conflict.
+        with db.begin_nested():
+            db.flush()
     except IntegrityError:
-        db.rollback()
         dup = (
             db.query(GaOwnerNotification)
             .filter_by(organization_id=org_id, idempotency_key=idempotency_key)

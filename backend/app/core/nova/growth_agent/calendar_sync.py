@@ -159,9 +159,10 @@ def enqueue_sync(
     )
     db.add(job)
     try:
-        db.flush()
+        # Nested savepoint — never wipe sibling appointment work on conflict.
+        with db.begin_nested():
+            db.flush()
     except IntegrityError:
-        db.rollback()
         row = (
             db.query(GaCalendarSyncJob)
             .filter_by(

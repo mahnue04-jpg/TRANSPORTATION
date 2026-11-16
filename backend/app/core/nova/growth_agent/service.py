@@ -32,6 +32,7 @@ from app.core.nova.growth_agent.models import (
     GaAuditEvent,
     GaAvailabilityRule,
     GaBusinessProfile,
+    GaCalendarConnection,
     GaConsentRecord,
     GaContact,
     GaContactIdentity,
@@ -97,6 +98,55 @@ class GrowthAgentService:
         self.sms = MockSmsAdapter()
         self.calendar = MockCalendarAdapter()
         ensure_growth_agent_schema(bind=db.get_bind())
+
+    def _calendar_connection(self, org_id: str) -> GaCalendarConnection | None:
+        return (
+            self.db.query(GaCalendarConnection)
+            .filter_by(organization_id=org_id)
+            .one_or_none()
+        )
+
+    def _enqueue_calendar_sync(
+        self,
+        org_id: str,
+        *,
+        appointment_id: str,
+        action: str,
+        starts_at: datetime | None = None,
+        ends_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Durable outbox enqueue. Internal booking success ≠ Google confirmation."""
+        from app.core.nova.growth_agent import calendar_sync
+
+        return calendar_sync.enqueue_sync(
+            self.db,
+            org_id=org_id,
+            appointment_id=appointment_id,
+            action=action,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            connection=self._calendar_connection(org_id),
+        )
+
+    def _enqueue_owner_notification(
+        self,
+        org_id: str,
+        *,
+        event_type: str,
+        idempotency_key: str,
+        payload_redacted: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            from app.core.nova.growth_agent import owner_notifications as on
+        except ImportError:
+            return None
+        return on.enqueue_owner_notification(
+            self.db,
+            org_id=org_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key,
+            payload_redacted=payload_redacted or {},
+        )
 
     # ── audit / usage / idempotency ──────────────────────────────────────────
 
@@ -1627,6 +1677,23 @@ class GrowthAgentService:
             cal = self.calendar.write_event(
                 {"action": "create", "appointment_id": appt.id, "live": False}
             )
+            sync_job = self._enqueue_calendar_sync(
+                org_id,
+                appointment_id=appt.id,
+                action="create",
+                starts_at=start,
+                ends_at=end,
+            )
+            notify = self._enqueue_owner_notification(
+                org_id,
+                event_type=event_type,
+                idempotency_key=f"notify:{idempotency_key}",
+                payload_redacted={
+                    "appointment_id": appt.id,
+                    "service_code": service_code,
+                    "sync_status": sync_job.get("status"),
+                },
+            )
             response = {
                 "id": appt.id,
                 "status": appt.status,
@@ -1634,7 +1701,16 @@ class GrowthAgentService:
                 "ends_at_utc": end.isoformat().replace("+00:00", "Z"),
                 "service_code": service_code,
                 "contact_id": contact_id,
-                "calendar_sync": {"provider": cal.provider, "status": cal.status, "live": False},
+                "calendar_sync": {
+                    "provider": cal.provider,
+                    "status": sync_job.get("status") or cal.status,
+                    "live": False,
+                    "externally_confirmed": sync_job.get("status") == "confirmed",
+                    "sync_job_id": sync_job.get("id"),
+                    "event_id": sync_job.get("event_id"),
+                    "mock_adapter_status": cal.status,
+                },
+                "owner_notification": notify,
                 "is_synthetic_demo": is_synthetic_demo,
             }
             self._idempotent_put(org_id, "appointment_book", idempotency_key, response)
@@ -1662,6 +1738,17 @@ class GrowthAgentService:
         if appt.status == "cancelled":
             return {"id": appt.id, "status": appt.status}
         appt.status = "cancelled"
+        sync_job = self._enqueue_calendar_sync(
+            org_id,
+            appointment_id=appt.id,
+            action="cancel",
+        )
+        notify = self._enqueue_owner_notification(
+            org_id,
+            event_type="appointment_cancelled",
+            idempotency_key=f"notify-cancel:{appt.id}:{appt.updated_at.isoformat() if appt.updated_at else appt.id}",
+            payload_redacted={"appointment_id": appt.id, "sync_status": sync_job.get("status")},
+        )
         self.audit(
             org_id,
             action="appointment.cancel",
@@ -1671,7 +1758,17 @@ class GrowthAgentService:
             summary="Appointment cancelled",
         )
         self.db.commit()
-        return {"id": appt.id, "status": appt.status}
+        return {
+            "id": appt.id,
+            "status": appt.status,
+            "calendar_sync": {
+                "status": sync_job.get("status"),
+                "live": False,
+                "externally_confirmed": sync_job.get("status") == "confirmed",
+                "sync_job_id": sync_job.get("id"),
+            },
+            "owner_notification": notify,
+        }
 
     def reschedule_appointment(
         self,
@@ -1768,6 +1865,22 @@ class GrowthAgentService:
             cal = self.calendar.write_event(
                 {"action": "reschedule", "appointment_id": appt.id, "live": False}
             )
+            sync_job = self._enqueue_calendar_sync(
+                org_id,
+                appointment_id=appt.id,
+                action="reschedule",
+                starts_at=start,
+                ends_at=end,
+            )
+            notify = self._enqueue_owner_notification(
+                org_id,
+                event_type="appointment_rescheduled",
+                idempotency_key=f"notify:{idempotency_key}",
+                payload_redacted={
+                    "appointment_id": appt.id,
+                    "sync_status": sync_job.get("status"),
+                },
+            )
             response = {
                 "id": appt.id,
                 "status": appt.status,
@@ -1775,7 +1888,16 @@ class GrowthAgentService:
                 "ends_at_utc": end.isoformat().replace("+00:00", "Z"),
                 "service_code": service.code,
                 "contact_id": appt.contact_id,
-                "calendar_sync": {"provider": cal.provider, "status": cal.status, "live": False},
+                "calendar_sync": {
+                    "provider": cal.provider,
+                    "status": sync_job.get("status") or cal.status,
+                    "live": False,
+                    "externally_confirmed": sync_job.get("status") == "confirmed",
+                    "sync_job_id": sync_job.get("id"),
+                    "event_id": sync_job.get("event_id"),
+                    "mock_adapter_status": cal.status,
+                },
+                "owner_notification": notify,
                 "is_synthetic_demo": bool(appt.is_synthetic_demo),
             }
             self._idempotent_put(org_id, "appointment_reschedule", idempotency_key, response)
