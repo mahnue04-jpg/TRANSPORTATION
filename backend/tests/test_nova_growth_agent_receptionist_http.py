@@ -44,7 +44,7 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict[str, str]:
+def _headers(client: TestClient, email: str = "admin@amicor.local") -> dict[str, str]:
     res = client.post("/api/auth/login", json={"email": email, "password": SEED_PASSWORD})
     assert res.status_code == 200, res.text
     token = res.json().get("access_token") or res.json().get("token")
