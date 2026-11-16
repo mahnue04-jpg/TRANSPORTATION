@@ -1575,7 +1575,9 @@ class GrowthAgentService:
                 "reason": payload.get("reason"),
             }
 
-        # Default transport: hard-off freebusy → provider_unavailable (do not pretend empty=free)
+        # Default transport: hard-off freebusy → provider_unavailable (do not pretend empty=free).
+        # Token callback is wired so an authorized connection can refresh; live freebusy still gated.
+        from app.core.nova.growth_agent.calendar_credentials import access_token_provider_for
         from app.core.nova.growth_agent.providers.google_calendar_requests import (
             CalendarBinding,
         )
@@ -1583,7 +1585,7 @@ class GrowthAgentService:
             GoogleCalendarTransport,
         )
 
-        transport = GoogleCalendarTransport()
+        transport = GoogleCalendarTransport(get_access_token=access_token_provider_for(self.db))
         binding = CalendarBinding(org_id, str(status.get("calendar_id") or "primary"))
         try:
             freebusy = transport.list_freebusy(
@@ -1985,6 +1987,28 @@ class GrowthAgentService:
                 existing=existing,
                 buffer_minutes=service.buffer_minutes,
             )
+            # Recheck external busy before confirm (same gate as book_appointment).
+            from app.core.nova.growth_agent.calendar_availability_external import (
+                filter_slots_against_busy,
+            )
+
+            external = self._resolve_external_busy(
+                org_id,
+                time_min=start - timedelta(minutes=int(service.buffer_minutes or 0)),
+                time_max=end + timedelta(minutes=int(service.buffer_minutes or 0)),
+            )
+            if external["state"] == "available" and external["busy"]:
+                kept = filter_slots_against_busy(
+                    [(start, end)],
+                    list(external["busy"]),
+                    buffer_minutes=int(service.buffer_minutes or 0),
+                )
+                if not kept:
+                    raise GrowthAgentError(
+                        "EXTERNAL_BUSY_CONFLICT",
+                        "Selected slot conflicts with external calendar busy time; pick another slot",
+                        http_status=409,
+                    )
             # Free the unique slot if a cancelled appointment already occupies the target.
             blocker = (
                 self._org_query(GaAppointment, org_id)

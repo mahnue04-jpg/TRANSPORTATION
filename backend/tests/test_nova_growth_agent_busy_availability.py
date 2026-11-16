@@ -179,3 +179,42 @@ def test_available_busy_filters_slots_and_blocks_book(db):
                 is_synthetic_demo=True,
             )
         assert exc.value.code == "EXTERNAL_BUSY_CONFLICT"
+
+
+def test_available_busy_blocks_reschedule(db):
+    org = "org-resched-busy"
+    _seed(db, org)
+    _connect(db, org)
+    day = _next_weekday()
+
+    open_svc = GrowthAgentService(
+        db, external_busy_provider=lambda *a: {"state": "disconnected", "busy": []}
+    )
+    baseline = open_svc.list_availability(org, service_code="consult", day=day)
+    assert len(baseline["slots"]) >= 2
+    first = baseline["slots"][0]["starts_at_utc"]
+    second = baseline["slots"][1]["starts_at_utc"]
+    booked = open_svc.book_appointment(
+        org,
+        contact_id="contact-busy",
+        service_code="consult",
+        starts_at_utc=first,
+        idempotency_key="resched-busy-book",
+        is_synthetic_demo=True,
+    )
+
+    start = datetime.strptime(day, "%Y-%m-%d").replace(hour=15, minute=0, tzinfo=timezone.utc)
+    end = start + timedelta(hours=6)
+
+    def provider(_org, time_min, time_max):
+        return {"state": "available", "busy": [(start, end)]}
+
+    busy_svc = GrowthAgentService(db, external_busy_provider=provider)
+    with pytest.raises(GrowthAgentError) as exc:
+        busy_svc.reschedule_appointment(
+            org,
+            booked["id"],
+            starts_at_utc=second,
+            idempotency_key="resched-busy-block",
+        )
+    assert exc.value.code == "EXTERNAL_BUSY_CONFLICT"
