@@ -1,7 +1,7 @@
 # Staging-only release approval — Nova AI Receptionist (#527)
 
 **Status:** Prepared only. **Not provisioned. Not deployed.**  
-**Package tip (this branch):** see git HEAD / PR update.  
+**Package tip (this branch):** `ff375a0f5f5404722a5929243dc25909a4a15b98`  
 **Base candidate preserved:** `03befdea4685209dfdd63649372d688640d43f62`
 
 ## Owner approval statement (copy/paste)
