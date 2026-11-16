@@ -37,8 +37,8 @@
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
         <div class="actions">
-          <button type="submit">Sign in</button>
-          <button type="button" id="sign-out" class="secondary">Sign out</button>
+          <button type="submit" id="login-submit">Sign in</button>
+          <button type="button" id="sign-out" class="secondary" hidden>Sign out</button>
         </div>
       </form>
       <p id="session-meta" class="hint"></p>
@@ -133,18 +133,19 @@
     </section>
 
     <section class="panel" aria-label="Widget">
-      <h2>Website chat widget</h2>
+      <h2>Add Nova Chat to Your Website</h2>
       <p class="hint">Signed installation token scoped to domain. Consent required before storing contact details.</p>
       <div class="grid-2">
-        <label>Allowed domain<input id="widget-domain" placeholder="demo.example.com" /></label>
+        <label>Website address<input id="widget-domain" placeholder="getamicor.com" /></label>
       </div>
       <div class="actions">
-        <button type="button" id="create-widget">Create installation</button>
+        <button type="button" id="create-widget">Set Up Website Chat</button>
       </div>
       <pre id="widget-out" class="hint"></pre>
       <div class="chat-log" id="widget-chat-log" aria-live="polite"></div>
       <form id="widget-chat-form" class="grid-2">
-        <label>Token<input id="widget-token" required /></label>
+        <label>Website Connection Key<input id="widget-token" required autocomplete="off" /></label>
+        <p class="hint">This key securely connects Nova Chat to your website. Keep it private.</p>
         <label>Message<input id="widget-message" required placeholder="What are your hours?" /></label>
         <label>Visitor name<input id="widget-name" /></label>
         <label>Visitor email<input id="widget-email" type="email" /></label>
