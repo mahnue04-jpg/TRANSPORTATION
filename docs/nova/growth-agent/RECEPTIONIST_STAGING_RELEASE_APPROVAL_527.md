@@ -6,12 +6,14 @@
 
 | Role | SHA | Notes |
 |------|-----|-------|
-| Reviewed prior head | `b48ec2393fe08f7ba4db3518790dff8650007051` | Green CI on release-readiness package |
-| Prior voice-flake tip | `d588fc5d5bb28a8c9f9d3e509722b6d796622da5` | Do not treat as current deploy tip |
-| Base feature candidate preserved | `03befdea4685209dfdd63649372d688640d43f62` | Prior green Growth Agent CI |
-| **Deploy tip** | Tip of `cursor/nova-receptionist-staging-release-c9ac` after **this** guard-pass CI green (`git rev-parse`) | Must equal `NOVA_GA_EXPECTED_GIT_COMMIT` (full 40-char hex) at manual deploy |
-| Staging-release branch | `cursor/nova-receptionist-staging-release-c9ac` | `autoDeployTrigger: off`; same tip as pilot after merge |
-| Prior green CI must not validate a newer tip | — | Re-run workflows on the deployment candidate before deploy |
+| Reviewed prior head | `b48ec2393fe08f7ba4db3518790dff8650007051` | Pre-guard package; superseded |
+| Guard implementation | `520319fb5586d76e92ce3b2a1e103339cc225199` | Exact commit pin + URL unity |
+| **Deploy tip (CI green)** | `f50c2740bec484c7cd6250bcf73e3def9b765418` | Guard tests wired into Growth CI workflow |
+| Staging-release branch | `cursor/nova-receptionist-staging-release-c9ac` | Same tip; `autoDeployTrigger: off` |
+| Growth Agent CI | [43916361507](https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43916361507) | postgres-dispos + tests + UI success |
+| Render backend diagnostic | [43916361518](https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43916361518) | success (GitHub diagnostic ≠ Render deploy) |
+| Casting | [43916361519](https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43916361519) | success |
+| `NOVA_GA_EXPECTED_GIT_COMMIT` at deploy | `f50c2740bec484c7cd6250bcf73e3def9b765418` | Full 40-char hex; exact equality required |
 
 ## Owner approval statement (copy/paste)
 
