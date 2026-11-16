@@ -1,0 +1,180 @@
+{
+  "previews": {
+    "generation": "off"
+  },
+  "databases": [
+    {
+      "name": "nova-receptionist-staging-db",
+      "plan": "0.1c-256mb",
+      "diskSizeGB": 1,
+      "storageAutoscalingEnabled": false,
+      "highAvailability": {
+        "enabled": false
+      },
+      "databaseName": "nova_ga_receptionist_dispos",
+      "user": "nova_ga_receptionist",
+      "region": "virginia",
+      "postgresMajorVersion": "16",
+      "ipAllowList": []
+    }
+  ],
+  "services": [
+    {
+      "type": "web",
+      "name": "nova-receptionist-staging",
+      "runtime": "python",
+      "plan": "free",
+      "region": "virginia",
+      "repo": "https://github.com/mahnue04-jpg/TRANSPORTATION",
+      "branch": "release/nova-receptionist-f50c2740",
+      "rootDir": "backend",
+      "autoDeployTrigger": "off",
+      "buildCommand": "test \"$RENDER_GIT_COMMIT\" = f50c2740bec484c7cd6250bcf73e3def9b765418 && pip install -r requirements.txt",
+      "startCommand": "python -c 'import os,runpy; origin=os.environ[\"RENDER_EXTERNAL_URL\"]; os.environ[\"AMICOR_PUBLIC_URL\"]=origin; os.environ[\"ALLOWED_ORIGINS\"]=origin; os.environ[\"NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI\"]=origin+\"/api/nova/growth-agent/calendar/oauth/callback\"; runpy.run_path(\"scripts/receptionist_staging_start.py\",run_name=\"__main__\")'",
+      "healthCheckPath": "/api/health/readiness",
+      "envVars": [
+        {
+          "key": "APP_ENV",
+          "value": "staging"
+        },
+        {
+          "key": "AMICOR_ENVIRONMENT",
+          "value": "staging"
+        },
+        {
+          "key": "APP_VERSION",
+          "value": "nova-receptionist-staging-f50c2740"
+        },
+        {
+          "key": "PYTHON_VERSION",
+          "value": "3.12.9"
+        },
+        {
+          "key": "LOG_LEVEL",
+          "value": "INFO"
+        },
+        {
+          "key": "NOVA_GA_EXPECTED_GIT_COMMIT",
+          "value": "f50c2740bec484c7cd6250bcf73e3def9b765418"
+        },
+        {
+          "key": "NOVA_GA_EXPECTED_DATABASE_NAME",
+          "value": "nova_ga_receptionist_dispos"
+        },
+        {
+          "key": "NOVA_GA_EXPECTED_ALEMBIC_REVISION",
+          "value": "20261116_nova_ga_receptionist"
+        },
+        {
+          "key": "AMICOR_RESTRICT_SEED_ACCOUNTS",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_ENABLED",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_DEMO_MODE",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_WIDGET_ENABLED",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_BACKGROUND_WORKER",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED",
+          "value": "false"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED",
+          "value": "false"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_CALENDAR_SYNC_WORKER",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_OWNER_NOTIFY_WORKER",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_VOICE_SIMULATOR",
+          "value": "true"
+        },
+        {
+          "key": "NOVA_GA_GOOGLE_OAUTH_HTTP_ENABLED",
+          "value": "false"
+        },
+        {
+          "key": "NOVA_STRIPE_LIVE_ENABLED",
+          "value": "false"
+        },
+        {
+          "key": "HEALTH_ISF_STRIPE_ENABLED",
+          "value": "false"
+        },
+        {
+          "key": "DB_POOL_SIZE",
+          "value": "2"
+        },
+        {
+          "key": "DB_MAX_OVERFLOW",
+          "value": "1"
+        },
+        {
+          "key": "MALLOC_ARENA_MAX",
+          "value": "2"
+        },
+        {
+          "key": "DATABASE_URL",
+          "fromDatabase": {
+            "name": "nova-receptionist-staging-db",
+            "property": "connectionString"
+          }
+        },
+        {
+          "key": "ALEMBIC_DATABASE_URL",
+          "fromDatabase": {
+            "name": "nova-receptionist-staging-db",
+            "property": "connectionString"
+          }
+        },
+        {
+          "key": "NOVA_GA_EXPECTED_DATABASE_HOST",
+          "fromDatabase": {
+            "name": "nova-receptionist-staging-db",
+            "property": "host"
+          }
+        },
+        {
+          "key": "SECRET_KEY",
+          "generateValue": true
+        },
+        {
+          "key": "JWT_SECRET",
+          "generateValue": true
+        },
+        {
+          "key": "AMICOR_SEED_PASSWORD",
+          "generateValue": true
+        },
+        {
+          "key": "AMICOR_DEPLOYMENT_SYNC_KEY",
+          "generateValue": true
+        },
+        {
+          "key": "NOVA_GROWTH_AGENT_WIDGET_SECRET",
+          "generateValue": true
+        },
+        {
+          "key": "NOVA_GA_CREDENTIAL_ENCRYPTION_KEY",
+          "generateValue": true
+        }
+      ]
+    }
+  ]
+}
