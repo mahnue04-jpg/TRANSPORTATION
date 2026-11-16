@@ -1,0 +1,23 @@
+name: Nova calendar request contract
+
+on:
+  pull_request:
+    paths:
+      - backend/app/core/nova/growth_agent/providers/google_calendar_requests.py
+      - backend/tests/test_nova_growth_agent_calendar_requests.py
+      - .github/workflows/nova-calendar-request-contract.yml
+
+permissions:
+  contents: read
+
+jobs:
+  calendar-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify offline request lifecycle and tenant boundary
+        run: python -m unittest discover -s backend/tests -p test_nova_growth_agent_calendar_requests.py -v
