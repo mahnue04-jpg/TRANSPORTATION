@@ -5,7 +5,7 @@
 
 ## Tested commit
 
-*(filled at push time — see PR update)*
+`e655745c1227fb4f7049671a01233c1186008916`
 
 ## What this package asks of the owner
 
