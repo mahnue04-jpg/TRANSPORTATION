@@ -7,6 +7,7 @@
     handoffs: null,
     voiceResult: null,
     faqSummary: null,
+    readiness: null,
     tokenSnapshot: null,
   };
 
@@ -88,6 +89,309 @@
     const base = calendar && typeof calendar === "object" ? { ...calendar } : {};
     base.connected = isCalendarConnected(calendar);
     return base;
+  }
+
+  function readinessTone(kind) {
+    if (kind === "ok") return "recv-status-ok";
+    if (kind === "warn") return "recv-status-warn";
+    return "recv-status-muted";
+  }
+
+  function normalizeConnectionState(raw) {
+    const value = String(raw || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    if (!value || value === "unknown" || value === "unverified") return "unverified";
+    if (value === "not_connected" || value === "disconnected") return "disconnected";
+    if (
+      value === "missing_config" ||
+      value === "missing_configuration" ||
+      value === "oauth_not_configured" ||
+      value === "not_configured"
+    ) {
+      return "missing_config";
+    }
+    if (value === "needs_reconnect" || value === "expired") return "needs_reconnect";
+    if (value === "revoked") return "revoked";
+    if (value === "connected") return "connected";
+    if (value === "error" || value === "failed") return "needs_reconnect";
+    return value;
+  }
+
+  function connectionStateLabel(state) {
+    switch (normalizeConnectionState(state)) {
+      case "connected":
+        return "Connected";
+      case "disconnected":
+        return "Not connected";
+      case "missing_config":
+        return "Missing configuration";
+      case "needs_reconnect":
+        return "Needs reconnect";
+      case "revoked":
+        return "Revoked";
+      default:
+        return "Unverified";
+    }
+  }
+
+  function connectionStateTone(state) {
+    const normalized = normalizeConnectionState(state);
+    if (normalized === "connected") return "ok";
+    if (normalized === "unverified") return "muted";
+    return "warn";
+  }
+
+  function normalizeCredentialHealth(raw) {
+    let value = raw;
+    if (raw && typeof raw === "object") {
+      value = raw.state || raw.credential_health || raw.status || "";
+      if (!value && raw.has_refresh_credential === false) value = "missing_refresh";
+      if (!value && raw.refresh_needed === true && raw.has_refresh_credential) value = "expired";
+    }
+    value = String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    if (!value) return "unverified";
+    if (value === "healthy" || value === "ok") return "healthy";
+    if (
+      value === "expired" ||
+      value === "credentials_expired" ||
+      value === "needs_reconnect"
+    ) {
+      return "expired";
+    }
+    if (
+      value === "missing_refresh" ||
+      value === "refresh_token_missing" ||
+      value === "missing_refresh_token" ||
+      value === "missing_connection"
+    ) {
+      return "missing_refresh";
+    }
+    return "unverified";
+  }
+
+  function credentialHealthLabel(health) {
+    switch (normalizeCredentialHealth(health)) {
+      case "healthy":
+        return "Healthy";
+      case "expired":
+        return "Expired";
+      case "missing_refresh":
+        return "Missing refresh";
+      default:
+        return "Unverified";
+    }
+  }
+
+  function normalizeSyncQueue(queue) {
+    const src = queue && typeof queue === "object" ? queue : {};
+    const counts = src.counts && typeof src.counts === "object" ? src.counts : {};
+    const pendingFromCounts =
+      Number(counts.pending || 0) + Number(counts.retrying || 0) + Number(counts.running || 0);
+    const pending =
+      src.pending_or_running != null
+        ? Number(src.pending_or_running) || 0
+        : src.pending != null
+          ? Number(src.pending) || 0
+          : pendingFromCounts;
+    const failed = src.failed != null ? Number(src.failed) || 0 : Number(counts.failed) || 0;
+    const running = src.running != null ? Number(src.running) || 0 : Number(counts.running) || 0;
+    const recoverable = Array.isArray(src.recoverable_errors)
+      ? src.recoverable_errors
+      : Array.isArray(src.errors)
+        ? src.errors
+        : [];
+    const empty =
+      typeof src.empty === "boolean"
+        ? src.empty
+        : String(src.state || "").toLowerCase() === "empty" ||
+          (pending === 0 && failed === 0 && running === 0);
+    return {
+      pending,
+      failed,
+      running,
+      recoverable_errors: recoverable,
+      empty,
+      label: src.label || null,
+      state: src.state || null,
+    };
+  }
+
+  function normalizeTwilio(twilio) {
+    const src = twilio && typeof twilio === "object" ? twilio : {};
+    const webhook = src.webhook && typeof src.webhook === "object" ? src.webhook : {};
+    const mappingRaw = String(
+      src.mapping_state || src.mapping || src.number_mapping || ""
+    )
+      .trim()
+      .toLowerCase();
+    let mapping = "unverified";
+    if (mappingRaw === "mapped") mapping = "mapped";
+    else if (mappingRaw === "unmapped") mapping = "unmapped";
+    else if (mappingRaw === "inactive_or_kill_switch") mapping = "unmapped";
+
+    const modeRaw = String(src.mode || src.voice_mode || "").trim().toLowerCase();
+    let mode = "unverified";
+    if (
+      modeRaw === "simulator" ||
+      modeRaw === "simulated" ||
+      src.simulated === true ||
+      webhook.simulator_enabled === true ||
+      webhook.live_voice === false ||
+      /simulated/i.test(String(webhook.label || ""))
+    ) {
+      mode = "simulator";
+    } else if (
+      modeRaw === "live_off" ||
+      modeRaw === "live-off" ||
+      modeRaw === "off" ||
+      src.live === false
+    ) {
+      mode = "live_off";
+    }
+    const webhookReady =
+      typeof webhook.ready === "boolean"
+        ? webhook.ready
+        : typeof src.webhook_ready === "boolean"
+          ? src.webhook_ready
+          : typeof src.webhook_readiness === "boolean"
+            ? src.webhook_readiness
+            : null;
+    return {
+      mapping,
+      webhook_ready: webhookReady,
+      mode,
+      simulated: mode === "simulator" || src.simulated === true || webhook.live_voice === false,
+      label: src.label || webhook.label || null,
+    };
+  }
+
+  function normalizeNotificationsReadiness(notifications) {
+    const src = notifications && typeof notifications === "object" ? notifications : {};
+    const configuration =
+      src.configuration && typeof src.configuration === "object" ? src.configuration : {};
+    const counts = src.counts && typeof src.counts === "object" ? src.counts : {};
+    const honesty = src.honesty && typeof src.honesty === "object" ? src.honesty : {};
+    let configured = null;
+    if (typeof src.configured === "boolean") configured = src.configured;
+    else if (src.worker_enabled === true || configuration.adapter) configured = true;
+    else if (src.worker_enabled === false && !configuration.adapter) configured = false;
+    else if (src.config_state) {
+      const cs = String(src.config_state).toLowerCase();
+      configured = cs !== "missing" && cs !== "missing_config";
+    }
+
+    let delivery = String(
+      src.delivery_state || src.recent_status || src.status || src.state || ""
+    ).trim();
+    if (!delivery || delivery === "active" || delivery === "empty") {
+      if (counts.provider_accepted) delivery = "provider_accepted";
+      else if (counts.failed) delivery = "failed";
+      else if (counts.queued) delivery = "queued";
+      else if (String(src.state || "").toLowerCase() === "empty") delivery = "empty";
+      else delivery = delivery || "Unverified";
+    }
+    const honestyNote =
+      src.honesty_note ||
+      (honesty.provider_accepted_is_not_inbox_receipt
+        ? "provider_accepted is not inbox receipt — delivery acknowledged by provider only"
+        : "provider_accepted is not inbox receipt — delivery acknowledged by provider only");
+    return {
+      configured,
+      delivery_state: delivery || "Unverified",
+      honesty_note: honestyNote,
+      label: src.label || null,
+      counts,
+    };
+  }
+
+  function normalizeReadiness(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const embedded = payload.readiness && typeof payload.readiness === "object";
+    const root = embedded ? payload.readiness : payload;
+    // Dedicated readiness responses include sync_queue / voice; bare calendar status does not.
+    const looksLikeReadiness =
+      root.sync_queue != null ||
+      root.voice != null ||
+      root.twilio != null ||
+      (root.calendar && root.calendar.credential_health != null) ||
+      root.pilot_live_ready != null;
+    if (!embedded && !looksLikeReadiness && payload.calendar && !payload.sync_queue) {
+      // Avoid treating plain /receptionist/status as readiness.
+      return null;
+    }
+    const calendarSrc = root.calendar && typeof root.calendar === "object" ? root.calendar : {};
+    const configuration =
+      calendarSrc.configuration && typeof calendarSrc.configuration === "object"
+        ? calendarSrc.configuration
+        : {};
+    let connectionState =
+      calendarSrc.connection_state ||
+      configuration.state ||
+      calendarSrc.state ||
+      calendarSrc.status ||
+      (typeof calendarSrc.connected === "boolean"
+        ? calendarSrc.connected
+          ? "connected"
+          : "disconnected"
+        : "");
+    if (
+      calendarSrc.configured === false ||
+      calendarSrc.config_missing === true ||
+      String(configuration.state || "").toLowerCase() === "missing_configuration"
+    ) {
+      connectionState = "missing_config";
+    }
+    const credentialHealth =
+      calendarSrc.credential_health ||
+      calendarSrc.credentials_health ||
+      calendarSrc.credential_state ||
+      "";
+    const syncQueue = normalizeSyncQueue(root.sync_queue || root.syncQueue || root.queue);
+    const notifications = normalizeNotificationsReadiness(
+      root.notifications && !Array.isArray(root.notifications)
+        ? root.notifications
+        : root.notification || root.owner_notifications || {}
+    );
+    const twilio = normalizeTwilio(root.twilio || root.voice || root.telephony);
+    const honesty = root.honesty && typeof root.honesty === "object" ? root.honesty : {};
+    return {
+      calendar: {
+        connection_state: normalizeConnectionState(connectionState),
+        configured:
+          typeof calendarSrc.configured === "boolean"
+            ? calendarSrc.configured
+            : normalizeConnectionState(connectionState) !== "missing_config",
+        calendar_id:
+          calendarSrc.selected_calendar_id ||
+          calendarSrc.calendar_id ||
+          null,
+        calendar_summary:
+          calendarSrc.selected_calendar_summary ||
+          calendarSrc.calendar_summary ||
+          calendarSrc.summary ||
+          null,
+        credential_health: normalizeCredentialHealth(credentialHealth),
+        configuration_label: configuration.label || null,
+      },
+      sync_queue: syncQueue,
+      notifications,
+      twilio,
+      honesty,
+      source: embedded ? "status_embed" : "readiness",
+    };
+  }
+
+  function extractReadinessFromStatus(statusPayload) {
+    if (!statusPayload || typeof statusPayload !== "object") return null;
+    if (statusPayload.readiness && typeof statusPayload.readiness === "object") {
+      return normalizeReadiness(statusPayload.readiness);
+    }
+    return null;
   }
 
   function buildVoiceSimulatorPayload(intent, utterance, calledNumber, callerNumber) {
@@ -356,11 +660,160 @@
       </article>`;
   }
 
+  function renderReadinessRecoverableErrors(errors) {
+    const rows = Array.isArray(errors) ? errors : [];
+    if (!rows.length) return "";
+    const items = rows
+      .slice(0, 5)
+      .map((row) => {
+        const code = escapeHtml(row.code || row.error_code || row.last_error_code || "");
+        const message = escapeHtml(row.message || row.detail || row.operation || "recoverable");
+        return `<li>${code ? `${code}: ` : ""}${message}</li>`;
+      })
+      .join("");
+    return `<ul class="recv-readiness-errors hint">${items}</ul>`;
+  }
+
+  function renderReadinessSection(readiness) {
+    if (!readiness) {
+      return `
+      <article class="recv-card recv-readiness" data-recv-readiness>
+        <div class="recv-sim-banner" role="note">Unverified</div>
+        <h3>Readiness</h3>
+        <p class="recv-status ${readinessTone("muted")}">Unverified</p>
+        <p class="hint">Owner readiness payload not available yet. Missing configuration is not a failed connection.</p>
+      </article>`;
+    }
+
+    const calendar = readiness.calendar || {};
+    const queue = readiness.sync_queue || normalizeSyncQueue({});
+    const notifications = readiness.notifications || normalizeNotificationsReadiness({});
+    const twilio = readiness.twilio || normalizeTwilio({});
+    const connState = normalizeConnectionState(calendar.connection_state);
+    const connLabel = connectionStateLabel(connState);
+    const credLabel = credentialHealthLabel(calendar.credential_health);
+    const credTone =
+      normalizeCredentialHealth(calendar.credential_health) === "healthy"
+        ? "ok"
+        : normalizeCredentialHealth(calendar.credential_health) === "unverified"
+          ? "muted"
+          : "warn";
+    const calendarId = escapeHtml(calendar.calendar_id || "—");
+    const calendarSummary = escapeHtml(calendar.calendar_summary || "—");
+    const configLabel =
+      calendar.configured === false || connState === "missing_config"
+        ? "Missing configuration"
+        : calendar.configured === true
+          ? "Configured"
+          : "Unverified";
+    const queueTone = queue.failed > 0 ? "warn" : "ok";
+    const queueLabel =
+      queue.label ||
+      (queue.empty
+        ? "Empty queue (not a failure)"
+        : queue.failed > 0
+          ? "Queue has failures"
+          : "Queue active");
+    const notifyConfigured =
+      notifications.configured === true
+        ? "Configured"
+        : notifications.configured === false
+          ? "Missing configuration"
+          : "Unverified";
+    const deliveryRaw = String(notifications.delivery_state || "Unverified");
+    const deliveryLabel =
+      deliveryRaw.toLowerCase() === "provider_accepted"
+        ? "provider_accepted (not inbox receipt)"
+        : deliveryRaw.toLowerCase() === "empty"
+          ? "Empty queue (not a failure)"
+          : deliveryRaw || "Unverified";
+    const mappingLabel =
+      twilio.label ||
+      (twilio.mapping === "mapped"
+        ? "Mapped"
+        : twilio.mapping === "unmapped"
+          ? "Unmapped"
+          : "Unverified");
+    const webhookLabel =
+      twilio.webhook_ready === true
+        ? "Webhook ready"
+        : twilio.webhook_ready === false
+          ? "Webhook not ready"
+          : "Unverified";
+    const twilioMode =
+      twilio.mode === "simulator"
+        ? "SIMULATED"
+        : twilio.mode === "live_off"
+          ? "Live-off"
+          : "Unverified";
+    const showSimBanner = twilio.simulated || twilio.mode === "simulator";
+    const calendarConfigDetail = calendar.configuration_label
+      ? `<p class="hint">${escapeHtml(calendar.configuration_label)}</p>`
+      : "";
+
+    return `
+      <article class="recv-card recv-readiness" data-recv-readiness>
+        ${
+          showSimBanner
+            ? `<div class="recv-sim-banner" role="note">SIMULATED — voice/live paths not independently verified</div>`
+            : `<div class="recv-unverified-banner" role="note">Unverified — owner readiness snapshot</div>`
+        }
+        <h3>Readiness</h3>
+        <p class="hint">Distinguishes missing configuration, failed connection, and an empty sync queue.</p>
+        <div class="recv-readiness-grid">
+          <section class="recv-readiness-block" data-recv-readiness-calendar>
+            <h4>Calendar</h4>
+            <p class="recv-status ${readinessTone(connectionStateTone(connState))}">${escapeHtml(connLabel)}</p>
+            <dl class="recv-dl">
+              <div><dt>Configuration</dt><dd>${escapeHtml(configLabel)}</dd></div>
+              <div><dt>Selected calendar</dt><dd class="recv-mono">${calendarId}</dd></div>
+              <div><dt>Summary</dt><dd>${calendarSummary}</dd></div>
+              <div><dt>Credential health</dt><dd class="recv-status ${readinessTone(credTone)}">${escapeHtml(
+                credLabel
+              )}</dd></div>
+            </dl>
+            ${calendarConfigDetail}
+          </section>
+          <section class="recv-readiness-block" data-recv-readiness-sync>
+            <h4>Sync queue</h4>
+            <p class="recv-status ${readinessTone(queueTone)}">${escapeHtml(queueLabel)}</p>
+            <dl class="recv-dl">
+              <div><dt>Pending</dt><dd>${queue.pending}</dd></div>
+              <div><dt>Running</dt><dd>${queue.running}</dd></div>
+              <div><dt>Failed</dt><dd>${queue.failed}</dd></div>
+            </dl>
+            ${renderReadinessRecoverableErrors(queue.recoverable_errors)}
+          </section>
+          <section class="recv-readiness-block" data-recv-readiness-notifications>
+            <h4>Notifications</h4>
+            <p class="recv-status ${readinessTone(
+              notifications.configured === false ? "warn" : notifications.configured ? "ok" : "muted"
+            )}">${escapeHtml(notifyConfigured)}</p>
+            <dl class="recv-dl">
+              <div><dt>Delivery state</dt><dd>${escapeHtml(deliveryLabel)}</dd></div>
+            </dl>
+            <p class="hint">${escapeHtml(notifications.honesty_note)}</p>
+          </section>
+          <section class="recv-readiness-block" data-recv-readiness-twilio>
+            <h4>Twilio / webhook</h4>
+            <p class="recv-status ${readinessTone(
+              twilio.mapping === "mapped" ? "ok" : twilio.mapping === "unmapped" ? "warn" : "muted"
+            )}">${escapeHtml(mappingLabel)}</p>
+            <dl class="recv-dl">
+              <div><dt>Webhook</dt><dd>${escapeHtml(webhookLabel)}</dd></div>
+              <div><dt>Mode</dt><dd><span class="recv-label-sim">${escapeHtml(twilioMode)}</span></dd></div>
+            </dl>
+          </section>
+        </div>
+      </article>`;
+  }
+
   function renderReceptionistPanel(data) {
     const status = data && data.status ? data.status : {};
     const calendar = normalizeCalendar(data && data.calendar ? data.calendar : { connected: false });
     return `
       <div class="recv-grid">
+        ${renderReadinessSection(data && data.readiness)}
         ${renderFaqSection(data && data.faqSummary)}
         ${renderAgentStatusSection(status)}
         ${renderCalendarSection(calendar)}
@@ -499,6 +952,7 @@
       handoffs: cache.handoffs,
       voiceResult: cache.voiceResult,
       faqSummary: cache.faqSummary,
+      readiness: cache.readiness,
     });
     bindPanelActions(root);
   }
@@ -512,6 +966,7 @@
     cache.handoffs = null;
     cache.voiceResult = null;
     cache.faqSummary = null;
+    cache.readiness = null;
     cache.tokenSnapshot = null;
     const root = $("receptionist-root");
     if (root) {
@@ -582,15 +1037,17 @@
       api("/api/nova/growth-agent/calendar/sync-errors"),
       api("/api/nova/growth-agent/notifications"),
       api("/api/nova/growth-agent/handoffs"),
+      api("/api/nova/growth-agent/receptionist/readiness"),
     ]);
 
     if (abortIfStale(gen)) return;
 
+    let statusPayload = null;
     if (results[0].status === "fulfilled") {
-      const payload = results[0].value || {};
-      cache.status = payload.agent || payload.status || payload;
+      statusPayload = results[0].value || {};
+      cache.status = statusPayload.agent || statusPayload.status || statusPayload;
       cache.calendar = normalizeCalendar(
-        payload.calendar || cache.status.calendar || { connected: false }
+        statusPayload.calendar || cache.status.calendar || { connected: false }
       );
     } else {
       cache.status = { paused: false, disabled: false, pilot: true, error: results[0].reason.message };
@@ -609,6 +1066,12 @@
       results[3].status === "fulfilled"
         ? results[3].value.items || results[3].value.handoffs || results[3].value
         : [];
+
+    if (results[4].status === "fulfilled") {
+      cache.readiness = normalizeReadiness(results[4].value);
+    } else {
+      cache.readiness = extractReadinessFromStatus(statusPayload);
+    }
 
     if (abortIfStale(gen)) return;
     paintPanel();
@@ -661,11 +1124,14 @@
     refresh,
     init,
     renderCalendarSection,
+    renderReadinessSection,
     renderReceptionistPanel,
     redactForDisplay,
     escapeHtml,
     isCalendarConnected,
     normalizeCalendar,
+    normalizeReadiness,
+    extractReadinessFromStatus,
     buildVoiceSimulatorPayload,
     _test: {
       getGeneration: () => sessionGeneration,

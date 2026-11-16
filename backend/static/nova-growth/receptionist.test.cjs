@@ -49,6 +49,17 @@ const helpers = [
   extractFunction("redactForDisplay"),
   extractFunction("isCalendarConnected"),
   extractFunction("normalizeCalendar"),
+  extractFunction("readinessTone"),
+  extractFunction("normalizeConnectionState"),
+  extractFunction("connectionStateLabel"),
+  extractFunction("connectionStateTone"),
+  extractFunction("normalizeCredentialHealth"),
+  extractFunction("credentialHealthLabel"),
+  extractFunction("normalizeSyncQueue"),
+  extractFunction("normalizeTwilio"),
+  extractFunction("normalizeNotificationsReadiness"),
+  extractFunction("normalizeReadiness"),
+  extractFunction("extractReadinessFromStatus"),
   extractFunction("buildVoiceSimulatorPayload"),
   extractFunction("renderFaqSection"),
   extractFunction("renderAgentStatusSection"),
@@ -57,6 +68,8 @@ const helpers = [
   extractFunction("renderNotificationsSection"),
   extractFunction("renderHandoffsSection"),
   extractFunction("renderVoiceSimulatorSection"),
+  extractFunction("renderReadinessRecoverableErrors"),
+  extractFunction("renderReadinessSection"),
   extractFunction("renderReceptionistPanel"),
   extractFunction("clearRecvStatus"),
 ].join("\n");
@@ -70,6 +83,7 @@ function runHelpers(extra = "") {
     handoffs: null,
     voiceResult: null,
     faqSummary: null,
+    readiness: null,
     tokenSnapshot: null,
   };
   let sessionGeneration = 0;
@@ -100,6 +114,7 @@ function clearState() {
   cache.handoffs = null;
   cache.voiceResult = null;
   cache.faqSummary = null;
+  cache.readiness = null;
   cache.tokenSnapshot = null;
   const root = $("receptionist-root");
   if (root) {
@@ -124,6 +139,8 @@ function loadNovaReceptionist(mocks = {}) {
         className: "hint",
         value: "",
         addEventListener: () => {},
+        querySelector: () => null,
+        querySelectorAll: () => [],
       };
     }
     return elements[id];
@@ -282,7 +299,14 @@ test("stale refresh does not repaint after clearState bumps generation", async (
       return { ok: true, text: async () => JSON.stringify({ items: [] }) };
     },
   });
-  elements["receptionist-root"] = { innerHTML: "", textContent: "", className: "hint" };
+  elements["receptionist-root"] = {
+    innerHTML: "",
+    textContent: "",
+    className: "hint",
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+  };
   const gen = Nova._test.getGeneration();
   const refreshPromise = Nova.refresh();
   Nova.clearState();
@@ -290,4 +314,236 @@ test("stale refresh does not repaint after clearState bumps generation", async (
   assert.ok(Nova._test.getGeneration() > gen);
   assert.match(elements["receptionist-root"].innerHTML, /cleared/);
   assert.doesNotMatch(elements["receptionist-root"].innerHTML, /late-cal/);
+});
+
+test("normalizeReadiness accepts build_readiness API payload shape", () => {
+  const { ctx } = runHelpers();
+  const normalized = ctx.normalizeReadiness({
+    organization_id: "org-1",
+    calendar: {
+      connected: true,
+      status: "connected",
+      calendar_id: "primary",
+      calendar_summary: "Pilot",
+      configuration: { state: "connected", label: "Google Calendar connected" },
+      selected_calendar_id: "primary",
+      selected_calendar_summary: "Pilot",
+      credential_health: {
+        state: "healthy",
+        has_refresh_credential: true,
+        has_access_credential: true,
+        access_expires_at: null,
+        refresh_needed: false,
+      },
+    },
+    sync_queue: {
+      state: "empty",
+      label: "Empty queue (not a failure)",
+      counts: {},
+      pending_or_running: 0,
+      failed: 0,
+      recoverable_errors: [],
+    },
+    notifications: {
+      state: "empty",
+      label: "Empty queue (not a failure)",
+      counts: {},
+      worker_enabled: true,
+      honesty: { provider_accepted_is_not_inbox_receipt: true },
+      configuration: { purpose: "transactional_only", adapter: "mock_email" },
+    },
+    voice: {
+      mapping_state: "unmapped",
+      label: "No Twilio number mapped for this organization",
+      webhook: {
+        ready: false,
+        live_voice: false,
+        simulator_enabled: true,
+        label: "SIMULATED — live voice hard-off",
+      },
+    },
+    honesty: { empty_queue_is_not_failure: true },
+    pilot_live_ready: false,
+  });
+  assert.equal(normalized.calendar.connection_state, "connected");
+  assert.equal(normalized.calendar.calendar_id, "primary");
+  assert.equal(normalized.calendar.credential_health, "healthy");
+  assert.equal(normalized.sync_queue.empty, true);
+  assert.equal(normalized.twilio.mapping, "unmapped");
+  assert.equal(normalized.twilio.mode, "simulator");
+  const html = ctx.renderReadinessSection(normalized);
+  assert.match(html, /Empty queue \(not a failure\)/);
+  assert.match(html, /SIMULATED/);
+  assert.match(html, /primary/);
+  assert.doesNotMatch(html, /refresh_token|access_token/);
+});
+
+test("readiness section labels missing config, empty queue, and SIMULATED twilio", () => {
+  const { ctx } = runHelpers();
+  const html = ctx.renderReadinessSection(
+    ctx.normalizeReadiness({
+      calendar: {
+        connection_state: "missing_config",
+        configured: false,
+        calendar_id: null,
+        calendar_summary: null,
+        credential_health: "missing_refresh",
+      },
+      sync_queue: { pending: 0, failed: 0, running: 0, recoverable_errors: [] },
+      notifications: {
+        configured: false,
+        delivery_state: "provider_accepted",
+      },
+      twilio: { mapping: "unmapped", webhook_ready: false, mode: "simulator", simulated: true },
+    })
+  );
+  assert.match(html, /Missing configuration/);
+  assert.match(html, /Empty queue \(not a failure\)/);
+  assert.match(html, /Missing refresh/);
+  assert.match(html, /provider_accepted \(not inbox receipt\)/);
+  assert.match(html, /Unmapped/);
+  assert.match(html, /SIMULATED/);
+  assert.doesNotMatch(html, /access_token|refresh_token|ya29\./i);
+});
+
+test("readiness distinguishes connected calendar and failed sync queue", () => {
+  const { ctx } = runHelpers();
+  const html = ctx.renderReadinessSection(
+    ctx.normalizeReadiness({
+      calendar: {
+        connection_state: "connected",
+        configured: true,
+        calendar_id: "cal-primary",
+        calendar_summary: "Front desk",
+        credential_health: "healthy",
+      },
+      sync_queue: {
+        pending: 1,
+        failed: 2,
+        running: 0,
+        recoverable_errors: [{ code: "TIMEOUT_AFTER_WRITE", message: "retryable" }],
+      },
+      notifications: { configured: true, delivery_state: "queued" },
+      twilio: { mapping: "mapped", webhook_ready: true, mode: "live_off" },
+    })
+  );
+  assert.match(html, /Connected/);
+  assert.match(html, /cal-primary/);
+  assert.match(html, /Front desk/);
+  assert.match(html, /Healthy/);
+  assert.match(html, /Queue has failures/);
+  assert.match(html, /TIMEOUT_AFTER_WRITE/);
+  assert.match(html, /Mapped/);
+  assert.match(html, /Live-off/);
+  assert.doesNotMatch(html, /Empty queue/);
+});
+
+test("readiness shows Not connected and Unverified when payload incomplete", () => {
+  const { ctx } = runHelpers();
+  assert.match(ctx.renderReadinessSection(null), /Unverified/);
+  const html = ctx.renderReadinessSection(
+    ctx.normalizeReadiness({
+      calendar: { connection_state: "disconnected" },
+      sync_queue: {},
+      notifications: {},
+      twilio: {},
+    })
+  );
+  assert.match(html, /Not connected/);
+  assert.match(html, /Unverified/);
+});
+
+test("readiness redacts secrets before render", () => {
+  const { ctx } = runHelpers();
+  const redacted = ctx.redactForDisplay({
+    calendar: {
+      connection_state: "needs_reconnect",
+      calendar_id: "cal-1",
+      access_token: "secret-access",
+      refresh_token: "secret-refresh",
+      credential_health: "expired",
+    },
+    sync_queue: { pending: 0, failed: 0, running: 0 },
+    notifications: { configured: true, delivery_state: "failed", token: "notify-secret" },
+    twilio: { mapping: "mapped", mode: "simulator", auth_token: "twilio-secret" },
+  });
+  const html = ctx.renderReadinessSection(ctx.normalizeReadiness(redacted));
+  assert.doesNotMatch(html, /secret-access|secret-refresh|notify-secret|twilio-secret/);
+  assert.match(html, /Needs reconnect|Expired|SIMULATED/);
+  assert.equal(redacted.calendar.access_token, "[redacted]");
+  assert.equal(redacted.calendar.refresh_token, "[redacted]");
+  assert.equal(redacted.notifications.token, "[redacted]");
+});
+
+test("refresh prefers readiness endpoint and falls back to status readiness key", async () => {
+  const readinessPayload = {
+    calendar: {
+      connection_state: "connected",
+      calendar_id: "ready-cal",
+      credential_health: "healthy",
+      configured: true,
+    },
+    sync_queue: { pending: 0, failed: 0, running: 0 },
+    notifications: { configured: true, delivery_state: "queued" },
+    twilio: { mapping: "mapped", webhook_ready: true, mode: "simulator", simulated: true },
+  };
+  const { Nova, elements, fetchCalls } = loadNovaReceptionist({
+    fetch: async (url) => {
+      if (url.includes("/receptionist/readiness")) {
+        return { ok: true, text: async () => JSON.stringify(readinessPayload) };
+      }
+      if (url.includes("/receptionist/status")) {
+        return {
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              calendar: { connected: true, calendar_id: "status-cal" },
+              agent: { active: true },
+            }),
+        };
+      }
+      return { ok: true, text: async () => JSON.stringify({ items: [] }) };
+    },
+  });
+  // Prefetch root via getElementById so querySelector stubs exist.
+  elements["receptionist-root"];
+  await Nova.refresh();
+  assert.ok(fetchCalls.some((c) => String(c.url).includes("/receptionist/readiness")));
+  assert.match(elements["receptionist-root"].innerHTML, /ready-cal/);
+  assert.match(elements["receptionist-root"].innerHTML, /data-recv-readiness/);
+  assert.match(elements["receptionist-root"].innerHTML, /SIMULATED/);
+
+  const fallback = loadNovaReceptionist({
+    fetch: async (url) => {
+      if (url.includes("/receptionist/readiness")) {
+        return { ok: false, statusText: "Not Found", text: async () => JSON.stringify({ detail: "missing" }) };
+      }
+      if (url.includes("/receptionist/status")) {
+        return {
+          ok: true,
+          text: async () =>
+            JSON.stringify({
+              calendar: { connected: false, status: "Not connected" },
+              agent: { active: true },
+              readiness: {
+                calendar: {
+                  connection_state: "revoked",
+                  calendar_id: "embed-cal",
+                  credential_health: "expired",
+                },
+                sync_queue: { pending: 0, failed: 0, running: 0 },
+                notifications: { configured: false, delivery_state: "Unverified" },
+                twilio: { mapping: "unmapped", mode: "live_off" },
+              },
+            }),
+        };
+      }
+      return { ok: true, text: async () => JSON.stringify({ items: [] }) };
+    },
+  });
+  fallback.elements["receptionist-root"];
+  await fallback.Nova.refresh();
+  assert.match(fallback.elements["receptionist-root"].innerHTML, /embed-cal/);
+  assert.match(fallback.elements["receptionist-root"].innerHTML, /Revoked/);
+  assert.match(fallback.elements["receptionist-root"].innerHTML, /Not connected/);
 });
