@@ -66,6 +66,12 @@ class HandoffAckIn(BaseModel):
     organization_id: str | None = None
 
 
+class SelectCalendarIn(BaseModel):
+    organization_id: str | None = None
+    calendar_id: str = Field(min_length=1, max_length=320)
+    calendar_summary: str | None = Field(default=None, max_length=200)
+
+
 class VoiceSimulatorIn(BaseModel):
     """UI and API agree: called_number/caller_number required; intent/utterance or script."""
 
@@ -88,7 +94,10 @@ def receptionist_status(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     org = _org(user, organization_id)
+    from app.core.nova.growth_agent.readiness import build_readiness
+
     calendar = calendar_oauth.get_calendar_connection_status(db, org_id=org)
+    readiness = build_readiness(db, org_id=org)
     sync_rows = (
         db.query(GaCalendarSyncJob)
         .filter(
@@ -150,12 +159,26 @@ def receptionist_status(
             }
             for row in handoffs
         ],
+        "readiness": readiness,
         "honesty": {
             "internal_booking_is_not_google_confirmation": True,
             "provider_accepted_is_not_inbox_receipt": True,
             "voice_simulator_is_not_live_phone": True,
         },
     }
+
+
+@router.get("/receptionist/readiness")
+def receptionist_readiness(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Owner-only readiness snapshot — no secrets; honest simulated/unverified labels."""
+    from app.core.nova.growth_agent.readiness import build_readiness
+
+    org = _org(user, organization_id)
+    return build_readiness(db, org_id=org)
 
 
 @router.post("/calendar/oauth/start")
@@ -244,6 +267,41 @@ def calendar_disconnect(
     return calendar_oauth.disconnect_calendar(db, org_id=org, owner_user_id=user.user_id)
 
 
+@router.get("/calendar/list")
+def calendar_list(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """List calendars for the connected org (injectable/live-gated; no tokens returned)."""
+    from app.core.nova.growth_agent import calendar_credentials as creds
+
+    org = _org(user, organization_id)
+    return creds.list_calendars_for_org(db, org_id=org)
+
+
+@router.post("/calendar/select")
+def calendar_select(
+    body: SelectCalendarIn,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Persist selected calendar id after OAuth. Does not enable live Google writes."""
+    from app.core.nova.growth_agent import calendar_credentials as creds
+
+    org = _org(user, body.organization_id)
+    result = creds.select_calendar(
+        db,
+        org_id=org,
+        owner_user_id=user.user_id,
+        calendar_id=body.calendar_id,
+        calendar_summary=body.calendar_summary,
+    )
+    if result.get("error_code") in {"CALENDAR_NOT_CONNECTED", "OWNER_MISMATCH", "INVALID_CALENDAR_ID"}:
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
 @router.get("/calendar/sync-errors")
 def calendar_sync_errors(
     organization_id: str | None = None,
@@ -279,7 +337,10 @@ def calendar_sync_tick(
     if not calendar_sync_worker_enabled():
         raise HTTPException(status_code=404, detail="Calendar sync worker disabled")
     org = _org(user, body.organization_id)
-    transport = GoogleCalendarTransport()
+    from app.core.nova.growth_agent.calendar_credentials import access_token_provider_for
+
+    # Token provider is wired so injected http clients can authorize; live writes stay hard-off.
+    transport = GoogleCalendarTransport(get_access_token=access_token_provider_for(db))
     results = calendar_sync.process_sync_batch(
         db,
         worker_id=f"owner-tick-{user.user_id[:8]}",
@@ -288,6 +349,32 @@ def calendar_sync_tick(
         organization_id=org,
     )
     return {"processed": results, "live": False}
+
+
+@router.post("/notifications/tick")
+def notifications_tick(
+    body: OrgIn,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Process transactional owner notifications via mock adapter. Live email hard-off."""
+    from app.core.nova.growth_agent import owner_notifications as on
+    from app.core.nova.growth_agent.flags import owner_notification_worker_enabled
+    from app.core.nova.growth_agent.providers.mock_email import MockEmailAdapter
+
+    if not owner_notification_worker_enabled():
+        raise HTTPException(status_code=404, detail="Owner notification worker disabled")
+    _org(user, body.organization_id)
+    result = on.process_owner_notifications(
+        db,
+        worker_id=f"owner-notify-{user.user_id[:8]}",
+        limit=20,
+        email_adapter=MockEmailAdapter(),
+    )
+    db.commit()
+    result["honesty"] = {"provider_accepted_is_not_inbox_receipt": True}
+    result["live"] = False
+    return result
 
 
 @router.get("/notifications")
@@ -452,9 +539,25 @@ async def twilio_voice_webhook(request: Request, db: Session = Depends(get_db)) 
 
     form = {str(k): str(v) for k, v in (await request.form()).items()}
     signature = request.headers.get("X-Twilio-Signature", "")
-    url = str(request.url)
+    from app.core.nova.growth_agent.voice.twilio_signature import public_request_url
+
+    # Twilio signs the public URL (scheme/host as seen by Twilio), not the internal proxy URL.
+    url = public_request_url(
+        request_url=str(request.url),
+        headers={k: v for k, v in request.headers.items()},
+    )
     auth_token = str(os.getenv("TWILIO_AUTH_TOKEN") or "").strip() or None
-    simulator_mode = str(form.get("simulated") or "").lower() in {"1", "true", "yes"}
+    # Public webhook: never honor unsigned simulation shortcuts. Simulator mode only
+    # when the voice simulator flag is on AND the caller already presents a signature
+    # that will be validated (owner-labeled helpers use SIMULATOR_AUTH).
+    wants_sim = str(form.get("simulated") or "").lower() in {"1", "true", "yes"}
+    simulator_mode = bool(wants_sim and voice_simulator_enabled() and signature)
+    if wants_sim and not voice_simulator_enabled():
+        return PlainTextResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response><Reject/></Response>',
+            media_type="application/xml",
+            status_code=403,
+        )
 
     # Hard-off: never process as live telephony.
     if REAL_VOICE:

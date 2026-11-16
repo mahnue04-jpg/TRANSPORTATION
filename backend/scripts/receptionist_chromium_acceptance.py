@@ -42,6 +42,18 @@ def main() -> int:
         evidence["calendar_text"] = cal[:500]
         assert "Not connected" in cal or "Connected" in cal
 
+        # Owner readiness panel
+        readiness = page.locator("[data-recv-readiness]")
+        if readiness.count():
+            text = readiness.first.inner_text()
+            evidence["readiness_text"] = text[:800]
+            assert "Missing configuration" in text or "Not connected" in text or "Connected" in text or "Unverified" in text
+            page.locator("[data-recv-readiness]").first.scroll_into_view_if_needed()
+            page.screenshot(path=str(OUT / "receptionist_readiness_panel.png"), full_page=True)
+            evidence["steps"].append({"name": "readiness_panel", "ok": True})
+        else:
+            evidence["steps"].append({"name": "readiness_panel", "ok": False, "note": "panel not rendered"})
+
         # Activate setup so service-backed voice FAQ has an approved profile
         page.fill("#biz-name", "Chromium Receptionist Biz")
         page.fill("#biz-web", "https://chromium.example")

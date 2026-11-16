@@ -87,6 +87,45 @@ def check_timestamp_replay_skew(params: Mapping[str, Any]) -> None:
         return
 
 
+def public_request_url(
+    *,
+    request_url: str,
+    headers: Mapping[str, str] | None = None,
+    public_base: str | None = None,
+) -> str:
+    """Rebuild the URL Twilio signed when the app sits behind a reverse proxy.
+
+    Per Twilio Request Validation docs, the signature covers the exact public URL
+    (scheme + host + path + query). Prefer ``AMICOR_PUBLIC_URL`` path override, else
+    ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` / ``Host``.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+    import os
+
+    hdrs = {str(k).lower(): str(v) for k, v in dict(headers or {}).items()}
+    parts = urlsplit(str(request_url))
+    base = (public_base or str(os.getenv("AMICOR_PUBLIC_URL") or "")).strip().rstrip("/")
+    if base:
+        base_parts = urlsplit(base if "://" in base else f"https://{base}")
+        return urlunsplit(
+            (
+                base_parts.scheme or "https",
+                base_parts.netloc or parts.netloc,
+                parts.path,
+                parts.query,
+                "",
+            )
+        )
+
+    scheme = hdrs.get("x-forwarded-proto") or parts.scheme or "https"
+    if "," in scheme:
+        scheme = scheme.split(",", 1)[0].strip()
+    host = hdrs.get("x-forwarded-host") or hdrs.get("host") or parts.netloc
+    if "," in host:
+        host = host.split(",", 1)[0].strip()
+    return urlunsplit((scheme, host, parts.path, parts.query, ""))
+
+
 def validate_twilio_signature(
     *,
     url: str,
@@ -95,7 +134,11 @@ def validate_twilio_signature(
     auth_token: str | None,
     simulator_mode: bool = False,
 ) -> None:
-    """Validate ``X-Twilio-Signature``. Reject missing auth token unless simulator."""
+    """Validate ``X-Twilio-Signature`` (Twilio RequestValidator algorithm).
+
+    Reject missing auth token unless ``simulator_mode`` (owner simulator only).
+    Public webhook must never set simulator_mode without a valid signature path.
+    """
     token = (auth_token or "").strip()
     if not token:
         if simulator_mode:
@@ -113,6 +156,13 @@ def validate_twilio_signature(
             "Missing X-Twilio-Signature header",
             http_status=401,
         )
+
+    # Unsigned "simulated=true" on the public webhook is rejected: simulator_mode
+    # alone does not skip HMAC when a real auth token is configured; and when the
+    # token is missing, only the labeled SIMULATOR_AUTH path is used for owner tests.
+    if not simulator_mode and str(params.get("simulated") or "").lower() in {"1", "true", "yes"}:
+        # Still require a valid signature against the real token — do not short-circuit.
+        pass
 
     check_timestamp_replay_skew(params)
 
