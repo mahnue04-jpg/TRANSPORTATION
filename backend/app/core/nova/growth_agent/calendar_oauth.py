@@ -53,17 +53,27 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 def _not_connected_payload(**extra: Any) -> dict[str, Any]:
+    """Canonical disconnected schema — UI requires connected:false explicitly."""
     payload: dict[str, Any] = {
+        "connected": False,
         "status": "Not connected",
         "calendar_id": None,
+        "calendar_summary": None,
         "last_error_code": extra.pop("last_error_code", None),
         "connected_at": None,
+        "provider": "google",
     }
     payload.update(extra)
+    payload["connected"] = False
     return payload
 
 
 def get_calendar_connection_status(db: Session, *, org_id: str) -> dict[str, Any]:
+    """Return a single explicit schema for UI and APIs.
+
+    Fields: connected (bool), status (display), calendar_id, calendar_summary,
+    last_error_code, connected_at, disconnected_at?, provider, expires_at?.
+    """
     if not google_oauth_configured():
         return _not_connected_payload(error_code="OAUTH_NOT_CONFIGURED")
 
@@ -72,25 +82,57 @@ def get_calendar_connection_status(db: Session, *, org_id: str) -> dict[str, Any
         .filter(GaCalendarConnection.organization_id == org_id)
         .one_or_none()
     )
-    if row is None or row.status in {"not_connected", "revoked"}:
+    if row is None:
+        return _not_connected_payload()
+
+    raw = (row.status or "not_connected").lower()
+    if raw in {"not_connected", "revoked"}:
+        display = "Not connected" if raw == "not_connected" else "revoked"
         return _not_connected_payload(
-            last_error_code=row.last_error_code if row else None,
-            disconnected_at=row.disconnected_at.isoformat() if row and row.disconnected_at else None,
+            status=display if raw == "revoked" else "Not connected",
+            last_error_code=row.last_error_code,
+            disconnected_at=row.disconnected_at.isoformat() if row.disconnected_at else None,
         )
 
-    status = row.status
-    if status == "not_connected":
-        display = "Not connected"
-    else:
-        display = status
+    if raw in {"needs_reconnect", "error"}:
+        return _not_connected_payload(
+            status=raw,
+            last_error_code=row.last_error_code or ("CREDENTIALS_EXPIRED" if raw == "needs_reconnect" else "CONNECTION_ERROR"),
+            calendar_id=row.calendar_id,
+            calendar_summary=row.calendar_summary,
+            disconnected_at=row.disconnected_at.isoformat() if row.disconnected_at else None,
+        )
+
+    # Access token expiry is advisory — refresh may still succeed; surface needs_reconnect
+    # only when status was already marked that way. Connected means refresh credential present.
+    if raw == "connected" and not row.refresh_token_encrypted:
+        return _not_connected_payload(
+            status="needs_reconnect",
+            last_error_code="REFRESH_TOKEN_MISSING",
+            calendar_id=row.calendar_id,
+            calendar_summary=row.calendar_summary,
+        )
+
+    if raw != "connected":
+        return _not_connected_payload(
+            status=raw,
+            last_error_code=row.last_error_code,
+            calendar_id=row.calendar_id,
+            calendar_summary=row.calendar_summary,
+        )
 
     return {
-        "status": display,
+        "connected": True,
+        "status": "connected",
         "calendar_id": row.calendar_id,
+        "calendar_summary": row.calendar_summary,
         "last_error_code": row.last_error_code,
         "connected_at": row.connected_at.isoformat() if row.connected_at else None,
-        "disconnected_at": row.disconnected_at.isoformat() if row.disconnected_at else None,
-        "provider": row.provider,
+        "disconnected_at": None,
+        "provider": row.provider or "google",
+        "access_token_expires_at": (
+            row.access_token_expires_at.isoformat() if row.access_token_expires_at else None
+        ),
     }
 
 
@@ -107,13 +149,12 @@ def start_oauth(
 
     approved = _approved_redirect_uri()
     if not approved or redirect_uri != approved:
-        return {
-            "status": "Not connected",
-            "error_code": "REDIRECT_URI_MISMATCH",
-            "authorization_url": None,
-            "state": None,
-            "expires_at": None,
-        }
+        return _not_connected_payload(
+            error_code="REDIRECT_URI_MISMATCH",
+            authorization_url=None,
+            state=None,
+            expires_at=None,
+        )
 
     client_id = str(os.getenv("NOVA_GA_GOOGLE_OAUTH_CLIENT_ID") or "").strip()
     state = secrets.token_urlsafe(32)
@@ -176,7 +217,7 @@ def _load_oauth_state(db: Session, *, state: str) -> GaCalendarOAuthState | None
 
 
 def _oauth_failure(error_code: str) -> dict[str, Any]:
-    return {"status": "Not connected", "error_code": error_code}
+    return _not_connected_payload(error_code=error_code)
 
 
 def complete_oauth(
@@ -277,17 +318,21 @@ def complete_oauth(
     db.commit()
 
     if conn.status == "needs_reconnect":
-        return {
-            "status": "needs_reconnect",
-            "error_code": "REFRESH_TOKEN_MISSING",
-            "calendar_id": conn.calendar_id,
-        }
+        return _not_connected_payload(
+            status="needs_reconnect",
+            error_code="REFRESH_TOKEN_MISSING",
+            calendar_id=conn.calendar_id,
+            calendar_summary=conn.calendar_summary,
+        )
 
     return {
+        "connected": True,
         "status": "connected",
         "calendar_id": conn.calendar_id,
+        "calendar_summary": conn.calendar_summary,
         "connected_at": conn.connected_at.isoformat() + "Z" if conn.connected_at else None,
         "last_error_code": None,
+        "provider": conn.provider or "google",
     }
 
 

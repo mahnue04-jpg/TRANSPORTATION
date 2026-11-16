@@ -8,6 +8,7 @@ tests and local demos only; they do not place or receive real phone calls.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -39,7 +40,7 @@ def craft_signed_simulator_webhook(
     params: dict[str, Any] = {
         "To": to_number,
         "From": from_number,
-        "CallSid": f"SIM{event_type[:8]}-{to_number[-4:]}",
+        "CallSid": f"SIM{event_type[:8]}-{uuid4().hex[:10]}",
         "CallStatus": "in-progress",
         "event_type": event_type,
         "event_id": None,
@@ -49,7 +50,7 @@ def craft_signed_simulator_webhook(
     if extra:
         params.update(extra)
     if not params.get("event_id"):
-        params["event_id"] = f"sim:{params['CallSid']}:{event_type}:{params.get('SequenceNumber', '0')}"
+        params["event_id"] = f"sim:{params['CallSid']}:{event_type}:{params.get('SequenceNumber', '0')}:{uuid4().hex[:8]}"
     signature = compute_twilio_signature(url=url, params=params, auth_token=auth_token)
     return {
         "params": params,

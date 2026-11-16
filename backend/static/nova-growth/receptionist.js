@@ -102,14 +102,20 @@
 
   function readOAuthReturnParams() {
     const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get("oauth_error");
+    if (oauthError) {
+      return { error: oauthError };
+    }
     const explicitState = params.get("calendar_oauth_state");
     const explicitCode = params.get("calendar_oauth_code");
     if (explicitState && explicitCode) {
       return { state: explicitState, code: explicitCode };
     }
+    // Server GET callback redirects here with calendar_oauth=1&state&code
     const state = params.get("state");
     const code = params.get("code");
-    if (state && code && sessionStorage.getItem(OAUTH_PENDING_KEY) === "1") {
+    const fromCallback = params.get("calendar_oauth") === "1";
+    if (state && code && (fromCallback || sessionStorage.getItem(OAUTH_PENDING_KEY) === "1")) {
       return { state, code };
     }
     return null;
@@ -117,7 +123,14 @@
 
   function stripOAuthQueryFromUrl() {
     const url = new URL(window.location.href);
-    ["calendar_oauth_state", "calendar_oauth_code", "state", "code"].forEach((key) => {
+    [
+      "calendar_oauth_state",
+      "calendar_oauth_code",
+      "calendar_oauth",
+      "oauth_error",
+      "state",
+      "code",
+    ].forEach((key) => {
       url.searchParams.delete(key);
     });
     const search = url.searchParams.toString();
@@ -511,6 +524,18 @@
     const gen = sessionGeneration;
     const oauth = readOAuthReturnParams();
     if (!oauth) return false;
+    if (oauth.error) {
+      if (!abortIfStale(gen)) {
+        showRecvError(`Calendar connection was not completed (${oauth.error}).`);
+      }
+      stripOAuthQueryFromUrl();
+      try {
+        sessionStorage.removeItem(OAUTH_PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
+      return false;
+    }
     if (!readToken()) return false;
     try {
       requireSession();

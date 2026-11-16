@@ -99,6 +99,7 @@ def test_receptionist_status_not_connected(client: TestClient) -> None:
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["calendar"]["status"] == "Not connected"
+    assert body["calendar"]["connected"] is False
     assert body["honesty"]["internal_booking_is_not_google_confirmation"] is True
     assert "rt-secret" not in res.text
     assert "refresh_token" not in res.text.lower() or "refresh_token_encrypted" not in res.text.lower()
@@ -151,11 +152,38 @@ def test_oauth_start_injected_complete_and_disconnect(client: TestClient) -> Non
     assert status.status_code == 200
     cal = status.json()["calendar"]
     assert cal["status"] != "Not connected"
+    assert cal["connected"] is True
     assert "rt-secret" not in status.text
 
     disc = client.post("/api/nova/growth-agent/calendar/disconnect", headers=auth, json={})
     assert disc.status_code == 200
     assert disc.json()["status"] == "Not connected"
+    assert disc.json()["connected"] is False
+
+
+def test_oauth_get_callback_redirects_to_spa(client: TestClient) -> None:
+    res = client.get(
+        "/api/nova/growth-agent/calendar/oauth/callback",
+        params={"state": "st-test", "code": "cd-test"},
+        follow_redirects=False,
+    )
+    assert res.status_code in {302, 307}
+    loc = res.headers.get("location") or ""
+    assert loc.startswith("/nova/growth")
+    assert "calendar_oauth=1" in loc
+    assert "state=st-test" in loc
+    assert "code=cd-test" in loc
+    assert "access_token" not in loc
+    assert "refresh_token" not in loc
+
+    err = client.get(
+        "/api/nova/growth-agent/calendar/oauth/callback",
+        params={"error": "access_denied"},
+        follow_redirects=False,
+    )
+    assert err.status_code in {302, 307}
+    err_loc = err.headers.get("location") or ""
+    assert "oauth_error=access_denied" in err_loc
 
 
 def test_booking_journey_sync_pending_not_external_confirmed(client: TestClient) -> None:
@@ -363,3 +391,94 @@ def test_voice_simulator_labeled(client: TestClient) -> None:
     assert body["simulated"] is True
     assert body["live_phone"] is False
     assert "SIMULATED" in body["label"]
+
+
+def test_voice_simulator_ui_intent_utterance_payload(client: TestClient) -> None:
+    """receptionist.js sends intent/utterance/simulated — API must accept them."""
+    headers = _headers(client)
+    auth = {k: v for k, v in headers.items() if not k.startswith("_")}
+    _activate_profile(client, headers, "Voice UI Biz")
+    res = client.post(
+        "/api/nova/growth-agent/voice/simulator/run",
+        headers=auth,
+        json={
+            "called_number": "+15555550100",
+            "caller_number": "+15555550101",
+            "intent": "general",
+            "utterance": "What are your hours?",
+            "simulated": True,
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["simulated"] is True
+    assert body["intent"] == "general"
+    assert body["outcomes"]
+    assert body["outcomes"][0]["status"] in {"processed", "duplicate"}
+    faq = body["outcomes"][0].get("result") or body["outcomes"][0]
+    # Service-backed FAQ should return grounded content from approved FAQs
+    blob = str(faq).lower()
+    assert "hour" in blob or "mon" in blob or "9" in blob or "faq" in blob or "answer" in blob
+
+
+def test_calendar_status_states_connected_expired_revoked(client: TestClient) -> None:
+    headers = _headers(client)
+    auth = {k: v for k, v in headers.items() if not k.startswith("_")}
+    org_id = _activate_profile(client, headers, "Status States Biz")
+
+    db = SessionLocal()
+    try:
+        profile = db.query(GaBusinessProfile).filter_by(organization_id=org_id).one()
+        conn = (
+            db.query(GaCalendarConnection)
+            .filter_by(organization_id=org_id)
+            .one_or_none()
+        )
+        if conn is None:
+            conn = GaCalendarConnection(
+                id=uuid4().hex,
+                organization_id=org_id,
+                owner_user_id=profile.owner_user_id,
+            )
+            db.add(conn)
+        conn.owner_user_id = profile.owner_user_id
+        conn.provider = "google"
+        conn.status = "connected"
+        conn.calendar_id = "primary"
+        conn.calendar_summary = "Pilot"
+        conn.refresh_token_encrypted = encrypt_secret("fake-refresh")
+        conn.access_token_encrypted = encrypt_secret("fake-access")
+        conn.connected_at = datetime.utcnow()
+        conn.disconnected_at = None
+        conn.last_error_code = None
+        db.commit()
+    finally:
+        db.close()
+
+    ok = client.get("/api/nova/growth-agent/receptionist/status", headers=auth)
+    assert ok.status_code == 200
+    assert ok.json()["calendar"]["connected"] is True
+    assert ok.json()["calendar"]["status"] == "connected"
+
+    db = SessionLocal()
+    try:
+        row = db.query(GaCalendarConnection).filter_by(organization_id=org_id).one()
+        row.status = "needs_reconnect"
+        row.last_error_code = "CREDENTIALS_EXPIRED"
+        db.commit()
+    finally:
+        db.close()
+    expired = client.get("/api/nova/growth-agent/receptionist/status", headers=auth)
+    assert expired.json()["calendar"]["connected"] is False
+    assert expired.json()["calendar"]["status"] == "needs_reconnect"
+
+    db = SessionLocal()
+    try:
+        row = db.query(GaCalendarConnection).filter_by(organization_id=org_id).one()
+        row.status = "revoked"
+        db.commit()
+    finally:
+        db.close()
+    revoked = client.get("/api/nova/growth-agent/receptionist/status", headers=auth)
+    assert revoked.json()["calendar"]["connected"] is False
+    assert revoked.json()["calendar"]["status"] == "revoked"

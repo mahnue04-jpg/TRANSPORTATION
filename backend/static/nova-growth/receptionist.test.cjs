@@ -168,9 +168,10 @@ function loadNovaReceptionist(mocks = {}) {
     console: { error: () => {} },
   };
   vm.createContext(ctx);
+  // Strip auto-init but keep the IIFE closer so vm can parse the module.
   const testSource = source.replace(
-    /\n  if \(document\.readyState === "loading"\) \{[\s\S]*$/,
-    "\n"
+    /\n  if \(document\.readyState === "loading"\) \{[\s\S]*?\n\}\)\(\);\s*$/,
+    "\n})();\n"
   );
   vm.runInContext(testSource, ctx);
   return { Nova: ctx.window.NovaReceptionist, elements, fetchCalls, ctx, sessionStore, localStore };

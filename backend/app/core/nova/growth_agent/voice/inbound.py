@@ -289,13 +289,54 @@ def assert_appointment_authorized(
     session: GaVoiceSession,
     appointment_id: str,
 ) -> None:
+    """Authorize appointment mutations only via session-bound ownership.
+
+    Rules (all required):
+    1. Appointment must exist in the session's organization (tenant isolation).
+    2. Appointment id must already be in session.authorized_appointment_ids_json
+       (e.g. from a book in this call) OR appointment.contact_id must equal
+       session.contact_id with a verified caller fingerprint match.
+
+    Caller recognition alone must never authorize an arbitrary appointment ID.
+    """
+    from app.core.nova.growth_agent.models import GaAppointment
+
+    appt_id = (appointment_id or "").strip()
+    if not appt_id:
+        raise GrowthAgentError(
+            "VOICE_APPOINTMENT_UNAUTHORIZED",
+            "Appointment id required",
+            http_status=403,
+        )
+
+    appt = (
+        db.query(GaAppointment)
+        .filter_by(id=appt_id, organization_id=session.organization_id)
+        .one_or_none()
+    )
+    if appt is None:
+        raise GrowthAgentError(
+            "VOICE_APPOINTMENT_UNAUTHORIZED",
+            "Appointment not found for this tenant",
+            http_status=403,
+        )
+
     authorized = list(session.authorized_appointment_ids_json or [])
-    if appointment_id in authorized:
+    if appt_id in authorized:
         return
-    if _contact_matches_caller(db, session):
-        authorized.append(appointment_id)
+
+    # Contact-bound path: session must already be linked to this contact AND
+    # the caller fingerprint must match that contact's phone identity.
+    if (
+        session.contact_id
+        and appt.contact_id == session.contact_id
+        and _contact_matches_caller(db, session)
+    ):
+        authorized.append(appt_id)
         session.authorized_appointment_ids_json = authorized
+        db.flush()
         return
+
     raise GrowthAgentError(
         "VOICE_APPOINTMENT_UNAUTHORIZED",
         "Caller is not authorized to change this appointment",

@@ -9,7 +9,7 @@ import hashlib
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -67,10 +67,18 @@ class HandoffAckIn(BaseModel):
 
 
 class VoiceSimulatorIn(BaseModel):
+    """UI and API agree: called_number/caller_number required; intent/utterance or script."""
+
     organization_id: str | None = None
     called_number: str = Field(min_length=3, max_length=40)
     caller_number: str = Field(min_length=3, max_length=40)
+    intent: str | None = Field(default=None, max_length=64)
+    utterance: str | None = Field(default=None, max_length=2000)
     script: list[dict[str, Any]] = Field(default_factory=list)
+    simulated: bool = True
+    appointment_id: str | None = None
+    service_code: str | None = None
+    slot_start: str | None = None
 
 
 @router.get("/receptionist/status")
@@ -183,29 +191,26 @@ def calendar_oauth_callback_get(
     state: str = "",
     code: str = "",
     error: str | None = None,
-) -> PlainTextResponse:
-    """Browser landing for OAuth redirect — tokens never appear here by design.
+) -> RedirectResponse:
+    """Browser return after Google redirect — never expose tokens in the body.
 
-    Owners complete the exchange via authenticated POST with the same state/code.
+    Redirects to the owner SPA with ``code`` + ``state`` (or ``oauth_error``) so the
+    authenticated page can POST completion. Single-use state remains server-bound;
+    the SPA strips query params after the authenticated exchange.
     """
+    from urllib.parse import urlencode
+
+    base = "/nova/growth"
+    params: dict[str, str] = {"calendar_oauth": "1"}
     if error:
-        return PlainTextResponse(
-            "Google Calendar connection was not completed. Return to Nova and retry.\n"
-            f"Safe error: {error}\n",
-            status_code=400,
-        )
+        params["oauth_error"] = str(error)[:200]
+        return RedirectResponse(url=f"{base}?{urlencode(params)}", status_code=302)
     if not state or not code:
-        return PlainTextResponse(
-            "Missing OAuth parameters. Calendar remains Not connected.\n",
-            status_code=400,
-        )
-    return PlainTextResponse(
-        "Authorization code received by server callback landing. "
-        "Complete connection from the signed-in Nova receptionist panel "
-        "(authenticated POST). Tokens are never shown in this page.\n"
-        f"state_present={bool(state)} code_present={bool(code)}\n",
-        status_code=200,
-    )
+        params["oauth_error"] = "missing_code_or_state"
+        return RedirectResponse(url=f"{base}?{urlencode(params)}", status_code=302)
+    params["state"] = state
+    params["code"] = code
+    return RedirectResponse(url=f"{base}?{urlencode(params)}", status_code=302)
 
 
 @router.post("/calendar/oauth/callback")
@@ -338,6 +343,12 @@ def voice_simulator_run(
     user: UserContext = Depends(require_growth_owner),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    """Owner-only voice path simulator — never hits Twilio or places calls.
+
+    Accepts either a multi-step ``script`` or a single ``intent``/``utterance`` turn
+    (as sent by receptionist.js). Routes through ServiceBackedGrowthVoiceOps →
+    real FAQ / lead / availability / booking / notify / handoff services.
+    """
     if not voice_simulator_enabled():
         raise HTTPException(
             status_code=404,
@@ -346,10 +357,13 @@ def voice_simulator_run(
     org = _org(user, body.organization_id)
     from uuid import uuid4
 
-    from app.core.nova.growth_agent import handoff_queue as hq
     from app.core.nova.growth_agent.models import GaVoiceAgentMapping
     from app.core.nova.growth_agent.voice import simulator as sim
     from app.core.nova.growth_agent.voice.inbound import normalize_e164
+    from app.core.nova.growth_agent.voice.ops import (
+        ServiceBackedGrowthVoiceOps,
+        intent_to_event_type,
+    )
 
     called = normalize_e164(body.called_number)
     mapping = (
@@ -374,109 +388,45 @@ def voice_simulator_run(
     elif mapping.organization_id != org:
         raise HTTPException(status_code=403, detail="Called number mapped to another tenant")
 
-    class _Ops:
-        def faq_answer(self, *, organization_id: str, question: str) -> dict[str, Any]:
-            return {
-                "answer": "Simulated FAQ response",
-                "question": question,
-                "organization_id": organization_id,
-                "simulated": True,
-            }
+    steps = list(body.script or [])
+    if not steps:
+        event_type = intent_to_event_type(body.intent, body.utterance)
+        step: dict[str, Any] = {
+            "event_type": event_type,
+            "from_number": body.caller_number,
+            "question": body.utterance or body.intent or "",
+            "SpeechResult": body.utterance or "",
+        }
+        if body.appointment_id:
+            step["appointment_id"] = body.appointment_id
+        if body.service_code:
+            step["service_code"] = body.service_code
+        if body.slot_start:
+            step["slot_start"] = body.slot_start
+        # Auto-chain lead capture before book when UI asks to book in one click
+        if event_type == "book":
+            steps = [
+                {
+                    "event_type": "capture_lead",
+                    "from_number": body.caller_number,
+                    "caller_name": "Simulator caller",
+                },
+                step,
+            ]
+        elif event_type == "faq_answer":
+            steps = [step]
+        else:
+            steps = [step]
 
-        def capture_lead(
-            self,
-            *,
-            organization_id: str,
-            phone: str | None,
-            name: str | None,
-            notes: str | None,
-        ) -> dict[str, Any]:
-            return {
-                "contact_id": None,
-                "organization_id": organization_id,
-                "phone_present": bool(phone),
-                "name": name,
-                "notes": notes,
-                "simulated": True,
-            }
-
-        def check_availability(
-            self, *, organization_id: str, service_code: str | None
-        ) -> dict[str, Any]:
-            return {
-                "organization_id": organization_id,
-                "service_code": service_code or "consult",
-                "slots": [],
-                "simulated": True,
-                "note": "Availability empty in lightweight simulator ops; use injected ops in tests",
-            }
-
-        def book(
-            self,
-            *,
-            organization_id: str,
-            contact_id: str | None,
-            service_code: str,
-            slot_start: str,
-        ) -> dict[str, Any]:
-            return {
-                "status": "simulated_only",
-                "organization_id": organization_id,
-                "contact_id": contact_id,
-                "service_code": service_code,
-                "slot_start": slot_start,
-                "simulated": True,
-                "externally_confirmed": False,
-            }
-
-        def reschedule(
-            self, *, organization_id: str, appointment_id: str, slot_start: str
-        ) -> dict[str, Any]:
-            return {
-                "status": "simulated_only",
-                "organization_id": organization_id,
-                "appointment_id": appointment_id,
-                "slot_start": slot_start,
-                "simulated": True,
-                "externally_confirmed": False,
-            }
-
-        def cancel(self, *, organization_id: str, appointment_id: str) -> dict[str, Any]:
-            return {
-                "status": "simulated_only",
-                "organization_id": organization_id,
-                "appointment_id": appointment_id,
-                "simulated": True,
-                "externally_confirmed": False,
-            }
-
-        def create_handoff(
-            self,
-            *,
-            organization_id: str,
-            contact_id: str | None,
-            reason: str,
-            summary: str,
-        ) -> dict[str, Any]:
-            row = hq.create_handoff(
-                db,
-                org_id=organization_id,
-                reason=reason or "voice_escalation",
-                summary=summary or "Simulated voice handoff",
-                channel="voice",
-                contact_id=contact_id,
-            )
-            db.flush()
-            return row
-
-    steps = body.script or [{"event_type": "faq_answer", "from_number": body.caller_number}]
     for step in steps:
         step.setdefault("from_number", body.caller_number)
+
+    ops = ServiceBackedGrowthVoiceOps(db, actor_user_id=user.user_id)
     outcomes = sim.run_labeled_simulator_journey(
         db,
         url="https://example.invalid/api/nova/growth-agent/voice/twilio/webhook",
         to_number=body.called_number,
-        growth_ops=_Ops(),  # type: ignore[arg-type]
+        growth_ops=ops,  # type: ignore[arg-type]
         steps=steps,
     )
     db.commit()
@@ -485,6 +435,8 @@ def voice_simulator_run(
         "live_phone": False,
         "label": "SIMULATED — not proof of live phone operation",
         "organization_id": org,
+        "intent": body.intent,
+        "utterance": body.utterance,
         "outcomes": outcomes,
     }
 

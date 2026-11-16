@@ -317,6 +317,8 @@ def test_unauthorized_appointment_change_denied(db):
 
 
 def test_authorized_book_reschedule_cancel_via_injected_ops(db):
+    from app.core.nova.growth_agent.models import GaAppointment
+
     org = "org-auth-flow"
     mapping = _mapping(db, org=org)
     ops = MockVoiceOps(org)
@@ -340,6 +342,22 @@ def test_authorized_book_reschedule_cancel_via_injected_ops(db):
     db.refresh(session)
     assert "appt-authorized-1" in session.authorized_appointment_ids_json
 
+    # Appointment must exist in-tenant for change authorization (caller match alone is insufficient).
+    db.add(
+        GaAppointment(
+            id="appt-authorized-1",
+            organization_id=org,
+            contact_id=session.contact_id or "contact-1",
+            service_id="svc-1",
+            starts_at_utc=datetime(2026, 11, 17, 15, 0),
+            ends_at_utc=datetime(2026, 11, 17, 15, 30),
+            status="confirmed",
+            idempotency_key="voice-auth-1",
+            timezone="America/Chicago",
+        )
+    )
+    db.commit()
+
     process_inbound_event(
         db,
         mapping=mapping,
@@ -357,6 +375,66 @@ def test_authorized_book_reschedule_cancel_via_injected_ops(db):
         growth_ops=ops,
     )
     assert [c[0] for c in ops.calls] == ["book", "reschedule", "cancel"]
+
+
+def test_caller_match_alone_does_not_authorize_foreign_appointment(db):
+    """Caller fingerprint match must not authorize an arbitrary appointment id."""
+    from app.core.nova.growth_agent.models import GaAppointment, GaContact, GaContactIdentity
+
+    org = "org-caller-only"
+    mapping = _mapping(db, org=org)
+    ops = MockVoiceOps(org)
+    caller = "+15555550999"
+    session = get_or_create_session(
+        db,
+        organization_id=org,
+        provider="twilio",
+        call_sid="CA-caller-only",
+        caller_phone=caller,
+    )
+    contact = GaContact(
+        id="contact-caller",
+        organization_id=org,
+        display_name="Caller",
+        lead_state="new",
+        dedupe_fingerprint="fp-caller",
+    )
+    db.add(contact)
+    db.add(
+        GaContactIdentity(
+            id=uuid4(),
+            organization_id=org,
+            contact_id=contact.id,
+            channel="phone",
+            external_id=phone_identity_hash(caller),
+        )
+    )
+    session.contact_id = contact.id
+    db.add(
+        GaAppointment(
+            id="appt-other-contact",
+            organization_id=org,
+            contact_id="someone-else",
+            service_id="svc-1",
+            starts_at_utc=datetime(2026, 11, 17, 15, 0),
+            ends_at_utc=datetime(2026, 11, 17, 15, 30),
+            status="confirmed",
+            idempotency_key="voice-other-1",
+            timezone="America/Chicago",
+        )
+    )
+    db.commit()
+
+    with pytest.raises(GrowthAgentError) as exc:
+        process_inbound_event(
+            db,
+            mapping=mapping,
+            session=session,
+            event_type="cancel",
+            payload={"appointment_id": "appt-other-contact"},
+            growth_ops=ops,
+        )
+    assert exc.value.code == "VOICE_APPOINTMENT_UNAUTHORIZED"
 
 
 def test_simulator_labeled_and_signed(db):

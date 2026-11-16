@@ -71,12 +71,18 @@ node --test static/nova-growth/receptionist.test.cjs
 | Capability | Status |
 |------------|--------|
 | OAuth code path + encrypted storage | **Implemented** (injected exchange in tests) |
+| Browser OAuth return → authenticated POST | **Implemented** (GET 302 to SPA; no tokens in body) |
+| Calendar `connected` bool contract | **Implemented** |
 | Live Google OAuth grant / real calendar write | **Not live-verified** — hard-off |
 | Sync outbox + conflict/restart recovery | **Implemented** with fake transport |
+| External busy on availability/booking | **Implemented** (injected busy; live freebusy hard-off → provider_unavailable) |
 | Owner notifications delivery to inbox | **Simulated** (`provider_accepted` ≠ receipt) |
 | Twilio webhook auth + session gates | **Implemented** (HMAC + dedupe); live calls **off** |
-| Voice simulator | **Simulated only** — not proof of live phone |
-| Browser DOM panel | **Implemented**; Chromium E2E against this tip pending CI |
+| Voice simulator UI ↔ service-backed ops | **Implemented** (Chromium button verified; SIMULATED) |
+| Owner gate (admin/support same-tenant) | **Implemented** |
+| Browser DOM panel | **Implemented**; Chromium acceptance evidence in integration pass note |
+
+See also `RECEPTIONIST_INTEGRATION_PASS_527.md` for the Priority 1–3 correction pass.
 
 ## Remaining owner blockers
 

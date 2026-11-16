@@ -137,12 +137,16 @@ def test_successful_injected_exchange_stores_encrypted_tokens(db):
         http_exchange=fake_exchange,
     )
     assert result["status"] == "connected"
+    assert result["connected"] is True
     assert result["calendar_id"] == "primary"
 
     conn = db.query(GaCalendarConnection).one()
     assert decrypt_secret(conn.refresh_token_encrypted) == secret_refresh
     assert decrypt_secret(conn.access_token_encrypted) == secret_access
     assert conn.status == "connected"
+    status = get_calendar_connection_status(db, org_id="org-oauth-1")
+    assert status["connected"] is True
+    assert status["status"] == "connected"
 
 
 def test_tokens_never_in_status_or_safe_errors(db):
@@ -269,6 +273,7 @@ def test_disconnect_clears_tokens(db):
     assert conn.disconnected_at is not None
     status = get_calendar_connection_status(db, org_id="org-oauth-1")
     assert status["status"] == "Not connected"
+    assert status["connected"] is False
 
 
 def test_missing_refresh_token_needs_reconnect(db):
