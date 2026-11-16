@@ -98,6 +98,7 @@ from app.core.nova.creative_studio.router import router as nova_creative_router 
 from app.core.nova.creative_studio.router import webhook_router as nova_creative_webhook_router  # type: ignore
 from app.core.nova.creative_studio.casting_router_draft import router as nova_casting_router  # type: ignore
 from app.core.nova.growth_agent.router import router as nova_growth_agent_router  # type: ignore
+from app.core.nova.growth_agent.receptionist_router import router as nova_growth_receptionist_router  # type: ignore
 from app.core.nova.signup.isolation import NovaCustomerProductGuardMiddleware  # type: ignore
 from app.core.nova.command_center_router import router as command_center_router  # type: ignore
 from app.core.nova.operational_health_router import router as health_router  # type: ignore
@@ -539,6 +540,7 @@ app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
 app.include_router(nova_casting_router)
 app.include_router(nova_growth_agent_router)
+app.include_router(nova_growth_receptionist_router)
 
 # ── Health ISF module router ───────────────────────────────────────────────────
 try:
@@ -658,14 +660,40 @@ def enterprise_dashboard(
 def health_readiness():
     """
     Readiness probe with structured environment and config checks.
-    Returns 200 only when overall_status is ready (production env + config + DB).
-    Returns 503 with blocked_reasons when deployment blockers are present.
+
+    Production: HTTP 200 only when overall_status is ``ready`` (full promotion gate).
+    Staging/test: HTTP 200 when infrastructure traffic gates pass (required auth
+    secrets + reachable non-SQLite database). Missing optional Google/Twilio
+    configuration is reported in the payload and must not fail the probe.
+    Production-promotion blockers remain visible under ``blocked_reasons``.
     """
     from app.deployment.readiness import DeploymentReadinessChecker
     from fastapi.responses import JSONResponse
 
     report = DeploymentReadinessChecker.build_readiness_report()
-    status_code = 200 if report["overall_status"] == "ready" else 503
+    runtime_env = (
+        str(os.environ.get("AMICOR_ENVIRONMENT") or os.environ.get("APP_ENV") or "")
+        .strip()
+        .lower()
+    )
+    config = report.get("config_checks") or {}
+    env = report.get("environment") or {}
+    database = report.get("database") or {}
+    traffic_ok = bool(env.get("required_present")) and bool(database.get("connected"))
+    production_db = config.get("production_database") or {}
+    if production_db:
+        traffic_ok = traffic_ok and bool(production_db.get("passed"))
+
+    report["traffic_ready"] = traffic_ok
+    report["production_promotion_ready"] = report.get("overall_status") == "ready"
+    report["optional_integrations_do_not_block_traffic"] = True
+
+    if runtime_env in {"staging", "test"}:
+        report["http_probe"] = "staging_traffic"
+        status_code = 200 if traffic_ok else 503
+    else:
+        report["http_probe"] = "production_promotion"
+        status_code = 200 if report.get("overall_status") == "ready" else 503
     return JSONResponse(content=report, status_code=status_code)
 
 

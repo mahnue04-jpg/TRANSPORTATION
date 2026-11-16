@@ -1,0 +1,222 @@
+{
+  "base": "http://127.0.0.1:8775",
+  "steps": [
+    {
+      "name": "infra_readiness_http_200",
+      "ok": true,
+      "http_probe": "staging_traffic",
+      "overall_status": "ready"
+    },
+    {
+      "name": "api_login",
+      "ok": true
+    },
+    {
+      "name": "demo_synthetic",
+      "ok": true,
+      "label": "SYNTHETIC DEMO"
+    },
+    {
+      "name": "readiness_not_connected",
+      "ok": true
+    },
+    {
+      "name": "availability",
+      "ok": true,
+      "slot_count": 16,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "book",
+      "ok": true,
+      "label": "SIMULATED_MOCK_CALENDAR",
+      "calendar_sync": {
+        "provider": "mock_calendar",
+        "status": "suppressed",
+        "live": false,
+        "externally_confirmed": false,
+        "sync_job_id": "672de991-8ac8-42cb-973a-043307e0bcd0",
+        "event_id": "13bf971b78e8ca6213ab3dbf51f5e7fa008a093ffdd5b521839ae6d44ad8fbf2",
+        "mock_adapter_status": "sent_mock"
+      },
+      "owner_notification": {
+        "id": "202411a9-d0d6-45d3-ae7c-5587d019c078",
+        "organization_id": "00000000-0000-0000-0000-00000000a1c0",
+        "channel": "email",
+        "purpose": "transactional",
+        "event_type": "appointment_booked",
+        "idempotency_key": "notify:staging-journey-book-2026-11-17",
+        "status": "queued",
+        "provider": "mock_email",
+        "attempt_number": 0,
+        "error_code": null,
+        "provider_message_id": null,
+        "payload_redacted_json": {
+          "appointment_id": "1691478fd1734eb98baaa726d7b95551",
+          "service_code": "inspect",
+          "sync_status": "suppressed"
+        },
+        "created_at": "2026-11-16T16:19:53.931528Z",
+        "updated_at": "2026-11-16T16:19:53.931530Z"
+      }
+    },
+    {
+      "name": "reschedule",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "cancel",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "rebook",
+      "ok": true,
+      "label": "SIMULATED"
+    },
+    {
+      "name": "notify_tick",
+      "ok": true,
+      "note": "provider_accepted is not inbox receipt",
+      "label": "SIMULATED_MOCK_EMAIL"
+    },
+    {
+      "name": "handoffs",
+      "ok": true
+    },
+    {
+      "name": "browser_readiness",
+      "ok": true
+    }
+  ],
+  "labels": [
+    "SIMULATED",
+    "STAGING_PREP"
+  ],
+  "readiness_http": 200,
+  "readiness_probe": {
+    "overall_status": "ready",
+    "score": 95,
+    "environment": {
+      "required_present": true,
+      "issues": [],
+      "warnings": [
+        "Recommended env var not set: HEALTH_ISF_WS_MAX_ORG_CONNECTIONS"
+      ],
+      "passed": [
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "JWT_SECRET"
+      ]
+    },
+    "production_environment": {
+      "required_present": true,
+      "issues": [],
+      "passed": [
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "JWT_SECRET",
+        "ALLOWED_ORIGINS",
+        "AMICOR_PUBLIC_URL",
+        "APP_VERSION"
+      ],
+      "required_vars": [
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "JWT_SECRET",
+        "ALLOWED_ORIGINS",
+        "AMICOR_PUBLIC_URL",
+        "APP_VERSION"
+      ]
+    },
+    "config_checks": {
+      "cors_not_wildcard": {
+        "passed": true,
+        "detail": "CORS origins appear restricted"
+      },
+      "debug_disabled": {
+        "passed": true,
+        "detail": "Debug mode off"
+      },
+      "log_level_appropriate": {
+        "passed": true,
+        "detail": "Log level INFO is appropriate"
+      },
+      "app_version_set": {
+        "passed": true,
+        "detail": "App version: 2026.08.01-phase56a-fast-boot.1"
+      },
+      "production_database": {
+        "passed": true,
+        "detail": "Database URL points to production-grade data store"
+      },
+      "public_url_set": {
+        "passed": true,
+        "detail": "Public URL configured: https://nova-receptionist-staging.onrender.com"
+      }
+    },
+    "database": {
+      "connected": true,
+      "detail": "Database reachable"
+    },
+    "blocked_reasons": [],
+    "summary": "Deployment environment meets production readiness criteria.",
+    "recommendations": [
+      "Recommended: Recommended env var not set: HEALTH_ISF_WS_MAX_ORG_CONNECTIONS"
+    ],
+    "traffic_ready": true,
+    "production_promotion_ready": true,
+    "optional_integrations_do_not_block_traffic": true,
+    "http_probe": "staging_traffic"
+  },
+  "flags": {
+    "REAL_CALENDAR_WRITE": false,
+    "REAL_EMAIL_SEND": false,
+    "REAL_VOICE": false,
+    "GOOGLE_OAUTH_CONFIGURED": true,
+    "GOOGLE_OAUTH_HTTP_ENABLED": false,
+    "VOICE_SIMULATOR": true
+  },
+  "demo_synthetic": {
+    "status": 200
+  },
+  "readiness_snapshot": {
+    "connected": false,
+    "status": "Not connected",
+    "configuration": {
+      "state": "disconnected",
+      "label": "Not connected \u2014 owner must authorize Google Calendar"
+    },
+    "pilot_live_ready": false
+  },
+  "availability_status": 200,
+  "availability_external": {
+    "state": "disconnected",
+    "calendar_id": null,
+    "reason": "Not connected",
+    "busy_count": 0,
+    "advisory": true
+  },
+  "book": {
+    "status": 200,
+    "body": "{\"id\":\"1691478fd1734eb98baaa726d7b95551\",\"status\":\"confirmed\",\"starts_at_utc\":\"2026-11-17T15:00:00Z\",\"ends_at_utc\":\"2026-11-17T15:30:00Z\",\"service_code\":\"inspect\",\"contact_id\":\"760b6788adda4a498828bc1aeb191024\",\"calendar_sync\":{\"provider\":\"mock_calendar\",\"status\":\"suppressed\",\"live\":false,\"externally_confirmed\":false,\"sync_job_id\":\"672de991-8ac8-42cb-973a-043307e0bcd0\",\"event_id\":\"13bf971b78e8ca6213ab3dbf51f5e7fa008a093ffdd5b521839ae6d44ad8fbf2\",\"mock_adapter_status\":\"sent_mock\"},\"owner_notifica"
+  },
+  "reschedule": {
+    "status": 200
+  },
+  "cancel": {
+    "status": 200
+  },
+  "rebook": {
+    "status": 200
+  },
+  "notify_tick": {
+    "status": 200,
+    "body": "{\"worker_id\":\"owner-notify-f66f52f5\",\"claimed\":8,\"processed\":8,\"results\":[{\"id\":\"202411a9-d0d6-45d3-ae7c-5587d019c078\",\"organization_id\":\"00000000-0000-0000-0000-00000000a1c0\",\"channel\":\"email\",\"purpose\":\"transactional\",\"event_type\":\"appointment_booked\",\"idempotency_key\":\"notify:staging-journey-book-2026-11-17\",\"status\":\"provider_accepted\",\"provider\":\"mock_email\",\"attempt_number\":0,\"error_code\":nu"
+  },
+  "handoffs": {
+    "status": 200
+  },
+  "passed": true
+}

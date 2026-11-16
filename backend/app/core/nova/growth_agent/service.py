@@ -32,6 +32,7 @@ from app.core.nova.growth_agent.models import (
     GaAuditEvent,
     GaAvailabilityRule,
     GaBusinessProfile,
+    GaCalendarConnection,
     GaConsentRecord,
     GaContact,
     GaContactIdentity,
@@ -90,13 +91,69 @@ _ACTIVE_BOOKING_STATUSES = ("confirmed", "rescheduled")
 
 
 class GrowthAgentService:
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        external_busy_provider: Any | None = None,
+    ) -> None:
         self.db = db
         self.ai = MockAIAdapter()
         self.email = MockEmailAdapter()
         self.sms = MockSmsAdapter()
         self.calendar = MockCalendarAdapter()
+        # Optional callable(org_id, time_min, time_max) -> {"state", "busy"} for tests
+        self.external_busy_provider = external_busy_provider
         ensure_growth_agent_schema(bind=db.get_bind())
+
+    def _calendar_connection(self, org_id: str) -> GaCalendarConnection | None:
+        return (
+            self.db.query(GaCalendarConnection)
+            .filter_by(organization_id=org_id)
+            .one_or_none()
+        )
+
+    def _enqueue_calendar_sync(
+        self,
+        org_id: str,
+        *,
+        appointment_id: str,
+        action: str,
+        starts_at: datetime | None = None,
+        ends_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Durable outbox enqueue. Internal booking success ≠ Google confirmation."""
+        from app.core.nova.growth_agent import calendar_sync
+
+        return calendar_sync.enqueue_sync(
+            self.db,
+            org_id=org_id,
+            appointment_id=appointment_id,
+            action=action,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            connection=self._calendar_connection(org_id),
+        )
+
+    def _enqueue_owner_notification(
+        self,
+        org_id: str,
+        *,
+        event_type: str,
+        idempotency_key: str,
+        payload_redacted: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        try:
+            from app.core.nova.growth_agent import owner_notifications as on
+        except ImportError:
+            return None
+        return on.enqueue_owner_notification(
+            self.db,
+            org_id=org_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key,
+            payload_redacted=payload_redacted or {},
+        )
 
     # ── audit / usage / idempotency ──────────────────────────────────────────
 
@@ -1474,6 +1531,96 @@ class GrowthAgentService:
 
     # ── appointments ─────────────────────────────────────────────────────────
 
+    def _resolve_external_busy(
+        self,
+        org_id: str,
+        *,
+        time_min: datetime,
+        time_max: datetime,
+    ) -> dict[str, Any]:
+        """Fetch external busy windows with an explicit connection state.
+
+        States:
+        - disconnected: no connected calendar (filter skipped)
+        - provider_unavailable: connected but freebusy failed/suppressed
+        - available: freebusy succeeded (busy may be empty)
+        """
+        from app.core.nova.growth_agent.calendar_oauth import get_calendar_connection_status
+
+        status = get_calendar_connection_status(self.db, org_id=org_id)
+        if not status.get("connected"):
+            return {
+                "state": "disconnected",
+                "busy": [],
+                "calendar_id": status.get("calendar_id"),
+                "reason": status.get("status") or "Not connected",
+            }
+
+        if self.external_busy_provider is not None:
+            try:
+                payload = self.external_busy_provider(org_id, time_min, time_max)
+            except Exception as exc:  # noqa: BLE001 — surface as provider-unavailable
+                return {
+                    "state": "provider_unavailable",
+                    "busy": [],
+                    "calendar_id": status.get("calendar_id"),
+                    "reason": f"provider_error:{type(exc).__name__}",
+                }
+            state = str(payload.get("state") or "available")
+            busy = list(payload.get("busy") or [])
+            return {
+                "state": state if state in {"available", "provider_unavailable", "disconnected"} else "available",
+                "busy": busy,
+                "calendar_id": status.get("calendar_id"),
+                "reason": payload.get("reason"),
+            }
+
+        # Default transport: hard-off freebusy → provider_unavailable (do not pretend empty=free).
+        # Token callback is wired so an authorized connection can refresh; live freebusy still gated.
+        from app.core.nova.growth_agent.calendar_credentials import access_token_provider_for
+        from app.core.nova.growth_agent.providers.google_calendar_requests import (
+            CalendarBinding,
+        )
+        from app.core.nova.growth_agent.providers.google_calendar_transport import (
+            GoogleCalendarTransport,
+        )
+
+        transport = GoogleCalendarTransport(get_access_token=access_token_provider_for(self.db))
+        binding = CalendarBinding(org_id, str(status.get("calendar_id") or "primary"))
+        try:
+            freebusy = transport.list_freebusy(
+                binding=binding,
+                organization_id=org_id,
+                time_min=time_min if time_min.tzinfo else time_min.replace(tzinfo=timezone.utc),
+                time_max=time_max if time_max.tzinfo else time_max.replace(tzinfo=timezone.utc),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "state": "provider_unavailable",
+                "busy": [],
+                "calendar_id": status.get("calendar_id"),
+                "reason": f"transport_error:{type(exc).__name__}",
+            }
+        if not freebusy.ok:
+            return {
+                "state": "provider_unavailable",
+                "busy": [],
+                "calendar_id": status.get("calendar_id"),
+                "reason": freebusy.error_code or freebusy.outcome or "freebusy_unavailable",
+            }
+        busy = transport.list_busy_events(
+            binding=binding,
+            organization_id=org_id,
+            time_min=time_min if time_min.tzinfo else time_min.replace(tzinfo=timezone.utc),
+            time_max=time_max if time_max.tzinfo else time_max.replace(tzinfo=timezone.utc),
+        )
+        return {
+            "state": "available",
+            "busy": busy,
+            "calendar_id": status.get("calendar_id"),
+            "reason": None,
+        }
+
     def list_availability(
         self,
         org_id: str,
@@ -1481,6 +1628,10 @@ class GrowthAgentService:
         service_code: str,
         day: str,
     ) -> dict[str, Any]:
+        from app.core.nova.growth_agent.calendar_availability_external import (
+            filter_slots_against_busy,
+        )
+
         profile = self._require_profile(org_id)
         service = (
             self.db.query(GaAppointmentService)
@@ -1517,7 +1668,45 @@ class GrowthAgentService:
             existing=existing,
             tz_name=profile.timezone,
         )
-        return {"service_code": service_code, "day": day, "timezone": profile.timezone, "slots": slots}
+
+        # External busy filtering — advisory; booking rechecks before confirm
+        window_start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        window_end = window_start + timedelta(days=1)
+        external = self._resolve_external_busy(org_id, time_min=window_start, time_max=window_end)
+        filtered_slots = slots
+        if external["state"] == "available" and external["busy"]:
+            slot_tuples = []
+            for s in slots:
+                start = appt_mod.parse_iso_utc(s["starts_at_utc"])
+                end = appt_mod.parse_iso_utc(s["ends_at_utc"])
+                slot_tuples.append((start, end))
+            kept = filter_slots_against_busy(
+                slot_tuples,
+                list(external["busy"]),
+                buffer_minutes=int(service.buffer_minutes or 0),
+            )
+            kept_starts = {k[0].isoformat().replace("+00:00", "Z") for k in kept}
+            # also accept Z vs offset formatting
+            filtered_slots = []
+            for s in slots:
+                start = appt_mod.parse_iso_utc(s["starts_at_utc"])
+                key = start.isoformat().replace("+00:00", "Z")
+                if any(abs((start - k[0]).total_seconds()) < 1 for k in kept) or key in kept_starts:
+                    filtered_slots.append(s)
+
+        return {
+            "service_code": service_code,
+            "day": day,
+            "timezone": profile.timezone,
+            "slots": filtered_slots,
+            "external_calendar": {
+                "state": external["state"],
+                "calendar_id": external.get("calendar_id"),
+                "reason": external.get("reason"),
+                "busy_count": len(external.get("busy") or []),
+                "advisory": True,
+            },
+        }
 
     def book_appointment(
         self,
@@ -1564,6 +1753,31 @@ class GrowthAgentService:
                 existing=existing,
                 buffer_minutes=service.buffer_minutes,
             )
+            # Recheck external busy before confirm (availability read is advisory).
+            from app.core.nova.growth_agent.calendar_availability_external import (
+                filter_slots_against_busy,
+            )
+
+            external = self._resolve_external_busy(
+                org_id,
+                time_min=start - timedelta(minutes=int(service.buffer_minutes or 0)),
+                time_max=end + timedelta(minutes=int(service.buffer_minutes or 0)),
+            )
+            if external["state"] == "available" and external["busy"]:
+                kept = filter_slots_against_busy(
+                    [(start, end)],
+                    list(external["busy"]),
+                    buffer_minutes=int(service.buffer_minutes or 0),
+                )
+                if not kept:
+                    raise GrowthAgentError(
+                        "EXTERNAL_BUSY_CONFLICT",
+                        "Selected slot conflicts with external calendar busy time; pick another slot",
+                        http_status=409,
+                    )
+            # provider_unavailable: proceed with internal booking; sync may fail later
+            # disconnected: internal-only booking (honest externally_confirmed=false)
+
             # Reuse a cancelled row at the same unique slot so cancel→rebook works
             # without relaxing the DB unique constraint.
             start_naive = start.replace(tzinfo=None)
@@ -1627,6 +1841,23 @@ class GrowthAgentService:
             cal = self.calendar.write_event(
                 {"action": "create", "appointment_id": appt.id, "live": False}
             )
+            sync_job = self._enqueue_calendar_sync(
+                org_id,
+                appointment_id=appt.id,
+                action="create",
+                starts_at=start,
+                ends_at=end,
+            )
+            notify = self._enqueue_owner_notification(
+                org_id,
+                event_type=event_type,
+                idempotency_key=f"notify:{idempotency_key}",
+                payload_redacted={
+                    "appointment_id": appt.id,
+                    "service_code": service_code,
+                    "sync_status": sync_job.get("status"),
+                },
+            )
             response = {
                 "id": appt.id,
                 "status": appt.status,
@@ -1634,7 +1865,16 @@ class GrowthAgentService:
                 "ends_at_utc": end.isoformat().replace("+00:00", "Z"),
                 "service_code": service_code,
                 "contact_id": contact_id,
-                "calendar_sync": {"provider": cal.provider, "status": cal.status, "live": False},
+                "calendar_sync": {
+                    "provider": cal.provider,
+                    "status": sync_job.get("status") or cal.status,
+                    "live": False,
+                    "externally_confirmed": sync_job.get("status") == "confirmed",
+                    "sync_job_id": sync_job.get("id"),
+                    "event_id": sync_job.get("event_id"),
+                    "mock_adapter_status": cal.status,
+                },
+                "owner_notification": notify,
                 "is_synthetic_demo": is_synthetic_demo,
             }
             self._idempotent_put(org_id, "appointment_book", idempotency_key, response)
@@ -1662,6 +1902,17 @@ class GrowthAgentService:
         if appt.status == "cancelled":
             return {"id": appt.id, "status": appt.status}
         appt.status = "cancelled"
+        sync_job = self._enqueue_calendar_sync(
+            org_id,
+            appointment_id=appt.id,
+            action="cancel",
+        )
+        notify = self._enqueue_owner_notification(
+            org_id,
+            event_type="appointment_cancelled",
+            idempotency_key=f"notify-cancel:{appt.id}:{appt.updated_at.isoformat() if appt.updated_at else appt.id}",
+            payload_redacted={"appointment_id": appt.id, "sync_status": sync_job.get("status")},
+        )
         self.audit(
             org_id,
             action="appointment.cancel",
@@ -1671,7 +1922,17 @@ class GrowthAgentService:
             summary="Appointment cancelled",
         )
         self.db.commit()
-        return {"id": appt.id, "status": appt.status}
+        return {
+            "id": appt.id,
+            "status": appt.status,
+            "calendar_sync": {
+                "status": sync_job.get("status"),
+                "live": False,
+                "externally_confirmed": sync_job.get("status") == "confirmed",
+                "sync_job_id": sync_job.get("id"),
+            },
+            "owner_notification": notify,
+        }
 
     def reschedule_appointment(
         self,
@@ -1726,6 +1987,28 @@ class GrowthAgentService:
                 existing=existing,
                 buffer_minutes=service.buffer_minutes,
             )
+            # Recheck external busy before confirm (same gate as book_appointment).
+            from app.core.nova.growth_agent.calendar_availability_external import (
+                filter_slots_against_busy,
+            )
+
+            external = self._resolve_external_busy(
+                org_id,
+                time_min=start - timedelta(minutes=int(service.buffer_minutes or 0)),
+                time_max=end + timedelta(minutes=int(service.buffer_minutes or 0)),
+            )
+            if external["state"] == "available" and external["busy"]:
+                kept = filter_slots_against_busy(
+                    [(start, end)],
+                    list(external["busy"]),
+                    buffer_minutes=int(service.buffer_minutes or 0),
+                )
+                if not kept:
+                    raise GrowthAgentError(
+                        "EXTERNAL_BUSY_CONFLICT",
+                        "Selected slot conflicts with external calendar busy time; pick another slot",
+                        http_status=409,
+                    )
             # Free the unique slot if a cancelled appointment already occupies the target.
             blocker = (
                 self._org_query(GaAppointment, org_id)
@@ -1768,6 +2051,22 @@ class GrowthAgentService:
             cal = self.calendar.write_event(
                 {"action": "reschedule", "appointment_id": appt.id, "live": False}
             )
+            sync_job = self._enqueue_calendar_sync(
+                org_id,
+                appointment_id=appt.id,
+                action="reschedule",
+                starts_at=start,
+                ends_at=end,
+            )
+            notify = self._enqueue_owner_notification(
+                org_id,
+                event_type="appointment_rescheduled",
+                idempotency_key=f"notify:{idempotency_key}",
+                payload_redacted={
+                    "appointment_id": appt.id,
+                    "sync_status": sync_job.get("status"),
+                },
+            )
             response = {
                 "id": appt.id,
                 "status": appt.status,
@@ -1775,7 +2074,16 @@ class GrowthAgentService:
                 "ends_at_utc": end.isoformat().replace("+00:00", "Z"),
                 "service_code": service.code,
                 "contact_id": appt.contact_id,
-                "calendar_sync": {"provider": cal.provider, "status": cal.status, "live": False},
+                "calendar_sync": {
+                    "provider": cal.provider,
+                    "status": sync_job.get("status") or cal.status,
+                    "live": False,
+                    "externally_confirmed": sync_job.get("status") == "confirmed",
+                    "sync_job_id": sync_job.get("id"),
+                    "event_id": sync_job.get("event_id"),
+                    "mock_adapter_status": cal.status,
+                },
+                "owner_notification": notify,
                 "is_synthetic_demo": bool(appt.is_synthetic_demo),
             }
             self._idempotent_put(org_id, "appointment_reschedule", idempotency_key, response)

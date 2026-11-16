@@ -1,0 +1,75 @@
+{
+  "base": "http://127.0.0.1:8765",
+  "steps": [
+    {
+      "name": "load",
+      "ok": true
+    },
+    {
+      "name": "login",
+      "ok": true
+    },
+    {
+      "name": "readiness_panel",
+      "ok": true
+    },
+    {
+      "name": "activate_setup",
+      "ok": true
+    },
+    {
+      "name": "voice_simulator_button",
+      "ok": true
+    },
+    {
+      "name": "oauth_get_redirect",
+      "ok": true
+    },
+    {
+      "name": "sign_out_clears",
+      "ok": true
+    }
+  ],
+  "calendar_text": "Calendar\n\nNot connected\n\nCALENDAR ID\n\u2014\nSUMMARY\n\u2014\nSYNC STATE\n\u2014\nConnect Google Calendar\nDisconnect\n\nExternal calendar sync is pending until the provider acknowledges. Mock bookings are not externally confirmed.",
+  "readiness_text": "SIMULATED \u2014 VOICE/LIVE PATHS NOT INDEPENDENTLY VERIFIED\nReadiness\n\nDistinguishes missing configuration, failed connection, and an empty sync queue.\n\nCalendar\n\nNot connected\n\nCONFIGURATION\nConfigured\nSELECTED CALENDAR\n\u2014\nSUMMARY\n\u2014\nCREDENTIAL HEALTH\nMissing refresh\n\nNot connected \u2014 owner must authorize Google Calendar\n\nSync queue\n\nEmpty queue (not a failure)\n\nPENDING\n0\nRUNNING\n0\nFAILED\n0\nNotifications\n\nConfigured\n\nDELIVERY STATE\nEmpty queue (not a failure)\n\nprovider_accepted is not inbox receipt \u2014 delivery acknowledged by provider only\n\nTwilio / webhook\n\nUnmapped\n\nWEBHOOK\nWebhook not ready\nMODE\nSIMULATED",
+  "voice_status": 200,
+  "voice_body": {
+    "simulated": true,
+    "live_phone": false,
+    "label": "SIMULATED \u2014 not proof of live phone operation",
+    "organization_id": "50ec4a51-8283-4011-861a-5b2f20a75552",
+    "intent": "general",
+    "utterance": "What are your hours?",
+    "outcomes": [
+      {
+        "status": "processed",
+        "organization_id": "50ec4a51-8283-4011-861a-5b2f20a75552",
+        "event_id": "sim:SIMfaq_answ-2536df64b9:faq_answer:0:841d429c",
+        "session_id": "6dfa3b36-8b01-4ce5-bbf6-031ed6906ffb",
+        "event_type": "faq_answer",
+        "result": {
+          "answer": "Mon-Fri 9-5.",
+          "grounded": true,
+          "faq_id": "faq_hours",
+          "disclosure": "I am an AI assistant for Chromium Receptionist Biz.",
+          "score": 6,
+          "organization_id": "50ec4a51-8283-4011-861a-5b2f20a75552",
+          "simulated": true,
+          "live_phone": false
+        },
+        "meta": {
+          "simulated": true,
+          "label": "SIMULATED_VOICE_WEBHOOK"
+        }
+      }
+    ]
+  },
+  "voice_simulated": true,
+  "voice_live_phone": false,
+  "oauth_get_redirect": {
+    "status": 302,
+    "location": "/nova/growth?calendar_oauth=1&state=st&code=cd"
+  },
+  "after_signout": "Signed out \u2014 receptionist state cleared.",
+  "ok": true
+}

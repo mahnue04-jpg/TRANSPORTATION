@@ -1,0 +1,56 @@
+{
+  "started_at_utc": "2026-11-16T16:32:39.216364+00:00",
+  "procedure": "scripts/receptionist_staging_start.py --migrate-only",
+  "target_revision": "20261116_nova_ga_receptionist",
+  "db": "nova_ga_receptionist_empty",
+  "src_bootstrap": "empty_database_full_alembic_chain",
+  "orm_create_all_used": false,
+  "stamp_parent_used": false,
+  "tables_before_migrate": [],
+  "synthetic_git_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "expected_database_host": "127.0.0.1",
+  "migrate_exit": 0,
+  "migrate_stdout_tail": "[receptionist-staging-start] migrating postgresql://127.0.0.1:5432/nova_ga_receptionist_empty \u2192 20261116_nova_ga_receptionist\n[receptionist-staging-start] + /usr/bin/python3 -m alembic upgrade 20261116_nova_ga_receptionist\n[receptionist-staging-start] revision verified: 20261116_nova_ga_receptionist\n",
+  "migrate_stderr_tail": "gration] Running upgrade 20261010_casting_content_draft -> 20261010_casting_audit_consent, Draft casting consent and audit tables \u2014 staging review only.\nINFO  [alembic.runtime.migration] Running upgrade 20261010_casting_audit_consent -> 20261011_casting_schema_repair, Forward-only repair for casting revisions that stamped without DDL.\nINFO  [alembic.runtime.migration] Running upgrade 20261011_casting_schema_repair -> 20261012_casting_org_name, Unique sandbox organization name per Nova tenant.\nINFO  [alembic.runtime.migration] Running upgrade 20261012_casting_org_name -> 20261112_nova_growth_agent, Nova Growth Agent tenant-safe tables (draft / prod-gated).\nINFO  [alembic.runtime.migration] Running upgrade 20261112_nova_growth_agent -> 20261112_nova_ga_worker, Growth Agent worker leases, shared rate limits, heartbeats (draft / prod-gated).\nINFO  [alembic.runtime.migration] Running upgrade 20261112_nova_ga_worker -> 20261112_nova_ga_retention, Growth Agent scheduled retention durable runs (draft / prod-gated).\nINFO  [alembic.runtime.migration] Running upgrade 20261112_nova_ga_retention -> 20261116_nova_ga_receptionist, Nova Growth Agent receptionist pilot tables (draft / prod-gated).\n",
+  "receptionist_tables": [
+    "nova_ga_calendar_oauth_states",
+    "nova_ga_calendar_connections",
+    "nova_ga_calendar_sync_jobs",
+    "nova_ga_owner_notifications",
+    "nova_ga_handoff_requests",
+    "nova_ga_voice_agent_mappings",
+    "nova_ga_voice_webhook_events",
+    "nova_ga_voice_sessions"
+  ],
+  "parent_marker_tables": [
+    "nova_ga_business_profiles",
+    "nova_ga_contacts",
+    "nova_ga_appointments",
+    "nova_ga_retention_schedule_runs"
+  ],
+  "missing_receptionist_tables": [],
+  "missing_parent_tables": [],
+  "voice_mapping_constraints": [
+    "ix_nova_ga_voice_org",
+    "nova_ga_voice_agent_mappings_pkey",
+    "uq_nova_ga_voice_provider_number"
+  ],
+  "sync_job_constraints": [
+    "ix_nova_ga_sync_claim",
+    "ix_nova_ga_sync_org_appt",
+    "nova_ga_calendar_sync_jobs_pkey",
+    "uq_nova_ga_sync_appt_version"
+  ],
+  "alembic_current": "20261116_nova_ga_receptionist (head)",
+  "readiness": {
+    "http_status": 200,
+    "overall_status": "ready",
+    "traffic_ready": true,
+    "http_probe": "staging_traffic",
+    "database_connected": true,
+    "blocked_reasons": []
+  },
+  "passed": true,
+  "uvicorn_tail": " {'event': 'production_readiness_audit_started'}\n2026-11-16 16:32:50,736 INFO amicor.health_isf.runtime_governor \u2014 {'event': 'runtime_governor_started', 'cleanup_interval_seconds': 60, 'stale_after_seconds': 300}\n2026-11-16 16:32:50,736 INFO amicor.background_startup \u2014 Deferred runtime governor initialized | active_workflows=0\n2026-11-16 16:32:50,736 INFO amicor.health_isf.runtime_governor \u2014 {'event': 'runtime_governor_cleanup_cycle', 'orphans_detected': 0, 'orphans_cleaned': 0, 'expired_locks_cleaned': 0, 'integrity_ok': True}\n2026-11-16 16:32:50,736 INFO amicor.health_isf.runtime_governor \u2014 {'event': 'production_readiness_audit_completed'}\n2026-11-16 16:32:50,762 INFO amicor.background_startup \u2014 Deferred operational bootstrap complete: orgs=2 providers=0 drivers=0\n2026-11-16 16:32:50,778 INFO amicor.background_startup \u2014 Deferred Health ISF sample seed complete.\n2026-11-16 16:32:50,778 INFO amicor.background_startup \u2014 Deferred platform startup complete in 62ms.\n2026-11-16 16:32:50,786 WARNING amicor.runtime_config \u2014 Runtime config validation DEGRADED: missing optional vars \u2014 DEBUG, REDIS_URL, SUPERVISION_LOG_RETENTION_DAYS\n2026-11-16 16:32:50,825 INFO amicor.audit \u2014 REQUEST_START | event=REQUEST_START method=GET request_id=f1d8bf8d-d900-461b-b1d7-21837e6d7f22 route=/api/health/readiness status=started\nINFO:     127.0.0.1:36834 - \"GET /api/health/readiness HTTP/1.1\" 200 OK\n2026-11-16 16:32:51,807 INFO amicor.startup \u2014 Shutdown signal received (signal 15) \u2014 draining requests\u2026\n",
+  "finished_at_utc": "2026-11-16T16:33:06.820948+00:00"
+}

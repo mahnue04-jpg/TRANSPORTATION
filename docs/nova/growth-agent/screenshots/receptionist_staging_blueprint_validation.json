@@ -1,0 +1,8 @@
+{
+  "valid": true,
+  "error_count": 0,
+  "autoDeployTrigger": "off",
+  "startCommand": "python scripts/receptionist_staging_start.py",
+  "has_releaseCommand": false,
+  "schema_url": "https://render.com/schema/render.yaml.json"
+}

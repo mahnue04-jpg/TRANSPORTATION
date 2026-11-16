@@ -1,0 +1,57 @@
+{
+  "started_at_utc": "2026-11-16T16:20:02.728950+00:00",
+  "parent_revision": "20261112_nova_ga_retention",
+  "target_revision": "20261116_nova_ga_receptionist",
+  "src_db": "nova_ga_receptionist_src",
+  "restore_db": "nova_ga_receptionist_restore",
+  "orm_create_all_used_for_receptionist": false,
+  "src_bootstrap": "stamp_parent",
+  "seed": {
+    "organization_id": "org-rehearse-ed0aead1",
+    "profile_id": "8be7233038064c5092eb07bdd526a19c",
+    "contact_id": "743a822ca75e4cdb92487c63aaf6ce0e",
+    "appointment_id": "f1f15a87722646ffb10b01e33ef27fad",
+    "business_name": "Rehearse Biz"
+  },
+  "backup_bytes": 44555,
+  "restore_ok": true,
+  "revision_after_restore": "20261112_nova_ga_retention",
+  "receptionist_present_before_upgrade": [],
+  "receptionist_tables": [
+    "nova_ga_calendar_oauth_states",
+    "nova_ga_calendar_connections",
+    "nova_ga_calendar_sync_jobs",
+    "nova_ga_owner_notifications",
+    "nova_ga_handoff_requests",
+    "nova_ga_voice_agent_mappings",
+    "nova_ga_voice_webhook_events",
+    "nova_ga_voice_sessions"
+  ],
+  "revision_after_upgrade": "20261116_nova_ga_receptionist",
+  "sync_job_indexes": [
+    "ix_nova_ga_sync_claim",
+    "ix_nova_ga_sync_org_appt",
+    "nova_ga_calendar_sync_jobs_pkey",
+    "uq_nova_ga_sync_appt_version"
+  ],
+  "preexisting_intact": {
+    "business_name": "Rehearse Biz",
+    "contact_display_name": "Synthetic Lead",
+    "appointment_status": "confirmed"
+  },
+  "exercised_counts": {
+    "connections": 1,
+    "sync_jobs": 1,
+    "notifications": 1,
+    "handoffs": 1,
+    "voice_mappings": 1
+  },
+  "application_rollback": {
+    "method": "Redeploy previous application SHA; leave additive receptionist tables in place",
+    "compatible": true,
+    "do_not_default_to": "DROP TABLE for receptionist tables",
+    "optional_alembic_downgrade": "Only with separate owner approval; not required for app rollback"
+  },
+  "passed": true,
+  "finished_at_utc": "2026-11-16T16:20:07.600589+00:00"
+}

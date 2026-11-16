@@ -22,3 +22,4 @@ imageio-ffmpeg>=0.6.0
 edge-tts>=6.1.0
 
 Pillow>=10.4
+cryptography>=42.0.0

@@ -64,6 +64,9 @@
     $("leads").className = "empty";
     $("diagnostics-out").textContent = "";
     if ($("diagnostics-flags")) $("diagnostics-flags").textContent = "";
+    if (window.NovaReceptionist && typeof window.NovaReceptionist.clearState === "function") {
+      window.NovaReceptionist.clearState();
+    }
   }
 
   function requireSession() {
