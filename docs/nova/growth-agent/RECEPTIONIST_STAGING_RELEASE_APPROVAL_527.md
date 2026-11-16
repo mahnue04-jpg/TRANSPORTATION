@@ -9,7 +9,7 @@
 | Reviewed prior head | `d588fc5d5bb28a8c9f9d3e509722b6d796622da5` | Green CI; voice mapping flake fixed |
 | Base feature candidate preserved | `03befdea4685209dfdd63649372d688640d43f62` | Prior green Growth Agent CI |
 | **Implementation tip** | `e5689d250f3189e790d684a10630a1f43d06ca1e` | Blueprint/start/readiness/empty-DB code + evidence |
-| **Approval package tip** | branch HEAD of `cursor/nova-receptionist-release-ready-c9ac` (must match CI-green tip before deploy) | Includes approval pin commits after implementation tip |
+| **Approval package / deploy tip** | `0dddb001ec30762c650a86af2e853c54a8adee3a` | Pilot + staging-release branches; require CI green on this tip before deploy |
 | Staging-release branch | `cursor/nova-receptionist-staging-release-c9ac` | Must point at the approved tip; `autoDeployTrigger: off` |
 | Prior green CI must not validate a newer tip | — | Re-run workflows on the deployment candidate before deploy |
 
