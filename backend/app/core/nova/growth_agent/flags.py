@@ -55,6 +55,38 @@ def retention_schedule_enabled() -> bool:
     return _env_enabled("NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED")
 
 
+def calendar_sync_worker_enabled() -> bool:
+    """Process durable calendar sync outbox with injected/mock transport. Default off."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_CALENDAR_SYNC_WORKER")
+
+
+def owner_notification_worker_enabled() -> bool:
+    """Process transactional owner notifications via mock provider. Default off."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_OWNER_NOTIFY_WORKER")
+
+
+def voice_simulator_enabled() -> bool:
+    """Labeled inbound voice simulator routes. Never proves live phone operation."""
+    if not growth_agent_enabled():
+        return False
+    return _env_enabled("NOVA_GROWTH_AGENT_VOICE_SIMULATOR")
+
+
+def google_oauth_configured() -> bool:
+    """True only when OAuth client id/secret/redirect and encryption key are present."""
+    required = (
+        "NOVA_GA_GOOGLE_OAUTH_CLIENT_ID",
+        "NOVA_GA_GOOGLE_OAUTH_CLIENT_SECRET",
+        "NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI",
+        "NOVA_GA_CREDENTIAL_ENCRYPTION_KEY",
+    )
+    return all(str(os.getenv(name) or "").strip() for name in required)
+
+
 # Hard-off live capabilities — cannot be enabled via headers or UI alone.
 REAL_EMAIL_SEND = False
 REAL_SMS_SEND = False
@@ -75,6 +107,10 @@ def live_flags() -> dict[str, bool]:
         "BACKGROUND_WORKER_MOCK": background_worker_enabled(),
         "RETENTION_SCHEDULE_ENABLED": retention_schedule_enabled(),
         "RETENTION_DELETE_ENABLED": retention_delete_enabled(),
+        "CALENDAR_SYNC_WORKER_MOCK": calendar_sync_worker_enabled(),
+        "OWNER_NOTIFY_WORKER_MOCK": owner_notification_worker_enabled(),
+        "VOICE_SIMULATOR": voice_simulator_enabled(),
+        "GOOGLE_OAUTH_CONFIGURED": google_oauth_configured(),
         "REAL_EMAIL_SEND": REAL_EMAIL_SEND,
         "REAL_SMS_SEND": REAL_SMS_SEND,
         "REAL_CALENDAR_WRITE": REAL_CALENDAR_WRITE,

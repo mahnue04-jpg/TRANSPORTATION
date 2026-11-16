@@ -435,6 +435,235 @@ class GaIdempotencyKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
+class GaCalendarOAuthState(Base):
+    """Single-use OAuth state bound to owner session/tenant. Never reusable."""
+
+    __tablename__ = "nova_ga_calendar_oauth_states"
+    __table_args__ = (
+        UniqueConstraint("state_hash", name="uq_nova_ga_oauth_state_hash"),
+        Index("ix_nova_ga_oauth_org_exp", "organization_id", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    session_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    code_verifier_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    redirect_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class GaCalendarConnection(Base):
+    """Trusted Google Calendar connection. Refresh tokens encrypted server-side."""
+
+    __tablename__ = "nova_ga_calendar_connections"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_nova_ga_calendar_org"),
+        Index("ix_nova_ga_calendar_status", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="google")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="not_connected")
+    # not_connected|connected|needs_reconnect|revoked|error
+    calendar_id: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    calendar_summary: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    scopes_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    access_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    disconnected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    meta_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaCalendarSyncJob(Base):
+    """Durable outbox for appointment ↔ Google Calendar operations."""
+
+    __tablename__ = "nova_ga_calendar_sync_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "appointment_id",
+            "operation_version",
+            name="uq_nova_ga_sync_appt_version",
+        ),
+        Index("ix_nova_ga_sync_claim", "status", "available_at", "lease_expires_at"),
+        Index("ix_nova_ga_sync_org_appt", "organization_id", "appointment_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    appointment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    connection_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    calendar_id: Mapped[str] = mapped_column(String(320), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)  # create|reschedule|cancel
+    operation_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    # pending|running|confirmed|failed|suppressed|stale
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    starts_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ends_at_utc: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    provider_etag: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    claimed_by: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class GaOwnerNotification(Base):
+    """Transactional owner notifications — separate from marketing consent."""
+
+    __tablename__ = "nova_ga_owner_notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "idempotency_key",
+            name="uq_nova_ga_owner_notify_idem",
+        ),
+        Index("ix_nova_ga_owner_notify_claim", "status", "available_at", "lease_expires_at"),
+        Index("ix_nova_ga_owner_notify_org", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), nullable=False, default="email")
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False, default="transactional")
+    # transactional only — marketing must use consent workflows
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued")
+    # queued|running|provider_accepted|failed|suppressed
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="mock_email")
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    provider_message_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    payload_redacted_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    claimed_by: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaHandoffRequest(Base):
+    """Owner callback / human escalation queue for incomplete agent requests."""
+
+    __tablename__ = "nova_ga_handoff_requests"
+    __table_args__ = (
+        Index("ix_nova_ga_handoff_org_status", "organization_id", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    contact_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    appointment_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    channel: Mapped[str] = mapped_column(String(40), nullable=False, default="voice")
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="open")
+    # open|acknowledged|resolved|cancelled
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
+    summary: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    payload_redacted_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    acknowledged_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaVoiceAgentMapping(Base):
+    """Server-controlled phone/agent → tenant mapping. Never trust webhook tenant IDs."""
+
+    __tablename__ = "nova_ga_voice_agent_mappings"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_number", name="uq_nova_ga_voice_provider_number"),
+        Index("ix_nova_ga_voice_org", "organization_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="twilio")
+    external_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    agent_label: Mapped[str] = mapped_column(String(120), nullable=False, default="receptionist")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    kill_switch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_call_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    meta_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class GaVoiceWebhookEvent(Base):
+    """Inbound voice webhook dedupe + replay protection ledger."""
+
+    __tablename__ = "nova_ga_voice_webhook_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "event_id",
+            name="uq_nova_ga_voice_event",
+        ),
+        Index("ix_nova_ga_voice_evt_org", "organization_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="twilio")
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    call_sid: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="accepted")
+    # accepted|duplicate|rejected|processed|failed
+    signature_valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payload_redacted_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class GaVoiceSession(Base):
+    """Inbound call session — ownership checks before appointment mutations."""
+
+    __tablename__ = "nova_ga_voice_sessions"
+    __table_args__ = (
+        UniqueConstraint("provider", "call_sid", name="uq_nova_ga_voice_call"),
+        Index("ix_nova_ga_voice_sess_org", "organization_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="twilio")
+    call_sid: Mapped[str] = mapped_column(String(80), nullable=False)
+    caller_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    contact_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    # active|handed_off|completed|killed
+    authorized_appointment_ids_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    meta_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
 GROWTH_AGENT_TABLES = (
     GaBusinessProfile.__table__,
     GaWidgetInstallation.__table__,
@@ -457,6 +686,14 @@ GROWTH_AGENT_TABLES = (
     GaRateLimitCounter.__table__,
     GaWorkerHeartbeat.__table__,
     GaRetentionScheduleRun.__table__,
+    GaCalendarOAuthState.__table__,
+    GaCalendarConnection.__table__,
+    GaCalendarSyncJob.__table__,
+    GaOwnerNotification.__table__,
+    GaHandoffRequest.__table__,
+    GaVoiceAgentMapping.__table__,
+    GaVoiceWebhookEvent.__table__,
+    GaVoiceSession.__table__,
 )
 
 LEAD_STATES = ("new", "contacted", "qualified", "booked", "closed")
