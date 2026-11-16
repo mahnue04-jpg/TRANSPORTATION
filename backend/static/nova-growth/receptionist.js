@@ -1102,21 +1102,25 @@
     const boot = async () => {
       const gen = sessionGeneration;
       if (onTokenChangedFromSnapshot()) return;
-      if (readToken()) {
-        try {
-          await completeCalendarOAuthIfNeeded();
-        } catch {
-          /* errors surfaced in receptionist-status */
-        }
-        if (abortIfStale(gen)) return;
-        await refresh().catch(() => clearState());
-      } else {
+      if (!window.NovaGrowthSession?.isVerified()) {
         const root = $("receptionist-root");
         if (root) root.innerHTML = `<div class="hint">Sign in to load receptionist status.</div>`;
+        return;
       }
+      if (!readToken()) return;
+      try {
+        await completeCalendarOAuthIfNeeded();
+      } catch {
+        /* errors surfaced in receptionist-status */
+      }
+      if (abortIfStale(gen)) return;
+      await refresh().catch(() => clearState());
     };
 
-    boot().catch(() => clearState());
+    window.NovaReceptionist.onAuthenticated = boot;
+    // The owner-session controller calls onAuthenticated only after /api/auth/me
+    // succeeds. Do not fetch owner data from a merely saved localStorage token.
+    if (window.NovaGrowthSession?.isVerified()) boot().catch(() => clearState());
   }
 
   window.NovaReceptionist = {
