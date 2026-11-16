@@ -30,7 +30,7 @@
       "rootDir": "backend",
       "autoDeployTrigger": "off",
       "buildCommand": "test \"$RENDER_GIT_COMMIT\" = f50c2740bec484c7cd6250bcf73e3def9b765418 && pip install -r requirements.txt",
-      "startCommand": "python -c 'import os,runpy; origin=os.environ[\"RENDER_EXTERNAL_URL\"]; os.environ[\"AMICOR_PUBLIC_URL\"]=origin; os.environ[\"ALLOWED_ORIGINS\"]=origin; os.environ[\"NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI\"]=origin+\"/api/nova/growth-agent/calendar/oauth/callback\"; runpy.run_path(\"scripts/receptionist_staging_start.py\",run_name=\"__main__\")'",
+      "startCommand": "python -c 'import os,runpy; exec(\"for key in (\\\"DATABASE_URL\\\",\\\"ALEMBIC_DATABASE_URL\\\"):\\n value=os.environ[key]\\n if value.startswith(\\\"postgres://\\\"): value=\\\"postgresql+psycopg2://\\\"+value[len(\\\"postgres://\\\"):]\\n elif value.startswith(\\\"postgresql://\\\"): value=\\\"postgresql+psycopg2://\\\"+value[len(\\\"postgresql://\\\"):]\\n os.environ[key]=value\"); origin=os.environ[\"RENDER_EXTERNAL_URL\"]; os.environ[\"AMICOR_PUBLIC_URL\"]=origin; os.environ[\"ALLOWED_ORIGINS\"]=origin; os.environ[\"NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI\"]=origin+\"/api/nova/growth-agent/calendar/oauth/callback\"; runpy.run_path(\"scripts/receptionist_staging_start.py\",run_name=\"__main__\")'",
       "healthCheckPath": "/api/health/readiness",
       "envVars": [
         {
