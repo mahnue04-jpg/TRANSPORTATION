@@ -486,7 +486,9 @@ def test_pg_voice_mapping_and_signed_simulator_webhook(db, monkeypatch):
     from app.core.nova.growth_agent.voice.simulator import craft_signed_simulator_webhook
 
     org = _uid("org-pg-voice")
-    number = f"+1555{uuid.uuid4().hex[:7]}"
+    # Digit-only E.164 — hex tails strip to 10 digits and normalize_e164 prepends +1,
+    # which would miss a non-canonical stored value.
+    number = f"+1555{uuid.uuid4().int % 10_000_000:07d}"
     db.add(
         GaVoiceAgentMapping(
             id=str(uuid.uuid4()),

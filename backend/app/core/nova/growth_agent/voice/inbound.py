@@ -116,21 +116,23 @@ def resolve_tenant_from_called_number(
     called_number: str,
 ) -> GaVoiceAgentMapping | None:
     """Map dialed number → tenant via server-controlled rows (never webhook org ids)."""
+    raw = str(called_number or "").strip()
     number = normalize_e164(called_number)
-    if not number:
+    if not number and not raw:
         return None
-    row = (
-        db.query(GaVoiceAgentMapping)
-        .filter_by(provider=provider, external_number=number)
-        .one_or_none()
-    )
-    if row is None and not called_number.startswith("+"):
+    candidates = []
+    for candidate in (number, raw):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
         row = (
             db.query(GaVoiceAgentMapping)
-            .filter_by(provider=provider, external_number=called_number.strip())
+            .filter_by(provider=provider, external_number=candidate)
             .one_or_none()
         )
-    return row
+        if row is not None:
+            return row
+    return None
 
 
 def _utc_start_of_day() -> datetime:
