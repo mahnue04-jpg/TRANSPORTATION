@@ -5,7 +5,7 @@
 
 ## Tested commit
 
-`34999d2276fdb8121ece6dbea5bb147ff2d66d32`
+`65295ccf11240531d5dfe094ab7f0f16f6b107b5`
 
 ## What this package asks of the owner
 
