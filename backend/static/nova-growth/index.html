@@ -67,9 +67,9 @@
         </label>
         <label>Contact email<input id="biz-email" type="email" /></label>
         <label>Handoff phone<input id="biz-phone" /></label>
-        <label class="full">Operating hours (JSON)<textarea id="biz-hours">{"mon_fri":"09:00-17:00"}</textarea></label>
-        <label class="full">Services (JSON)<textarea id="biz-services">[{"code":"consult","name":"Consultation","duration_minutes":30}]</textarea></label>
-        <label class="full">FAQs (JSON)<textarea id="biz-faqs">[{"id":"faq_hours","question":"What are your hours?","keywords":["hours"],"answer":"Mon–Fri 9–5 local time."}]</textarea></label>
+        <label class="full">Operating hours (advanced setup format)<textarea id="biz-hours">{"mon_fri":"09:00-17:00"}</textarea></label>
+        <label class="full">Services (advanced setup format)<textarea id="biz-services">[{"code":"consult","name":"Consultation","duration_minutes":30}]</textarea></label>
+        <label class="full">Common customer questions (advanced setup format)<textarea id="biz-faqs">[{"id":"faq_hours","question":"What are your hours?","keywords":["hours"],"answer":"Mon–Fri 9–5 local time."}]</textarea></label>
       </form>
       <div class="actions">
         <button type="button" id="preview-setup">Preview</button>
@@ -84,7 +84,7 @@
 
     <section class="panel receptionist-panel" aria-label="Receptionist pilot" id="receptionist-panel">
       <h2>Receptionist (pilot)</h2>
-      <p class="hint">Owner status for readiness, voice handoffs, calendar sync, and simulated call flows. Not live telephony. Readiness distinguishes missing configuration, failed connection, and an empty sync queue. Google OAuth returns via server redirect to <code>/nova/growth?calendar_oauth=1&amp;state=&amp;code=</code>; the panel POSTs completion while signed in and strips query params (no tokens in the browser).</p>
+      <p class="hint">Check your AI receptionist, appointments, customer messages, and practice calls here. Real phone calls are not active. Connect your business calendar before accepting real appointments.</p>
       <div class="actions">
         <button type="button" id="recv-refresh" class="secondary">Refresh receptionist</button>
       </div>
@@ -134,7 +134,7 @@
 
     <section class="panel" aria-label="Widget">
       <h2>Add Nova Chat to Your Website</h2>
-      <p class="hint">Signed installation token scoped to domain. Consent required before storing contact details.</p>
+      <p class="hint">Create a website connection for Nova Chat. Visitors must agree before their contact details are saved.</p>
       <div class="grid-2">
         <label>Website address<input id="widget-domain" placeholder="getamicor.com" /></label>
       </div>
