@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-growth/growth.css" />
+  <link rel="stylesheet" href="/static/nova-growth/receptionist.css" />
 </head>
 <body>
   <header class="ga-header">
@@ -43,7 +44,7 @@
       <p id="session-meta" class="hint"></p>
     </section>
 
-    <section class="panel" aria-label="Setup wizard">
+    <section class="panel" aria-label="Setup wizard" id="setup-wizard">
       <h2>Setup wizard</h2>
       <p class="hint">Validate and preview before activation. AI answers only from approved FAQs.</p>
       <form id="setup-form" class="grid-2">
@@ -79,6 +80,16 @@
         <button type="button" id="resume-agent" class="secondary">Resume</button>
       </div>
       <pre id="setup-preview" class="hint" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel receptionist-panel" aria-label="Receptionist pilot" id="receptionist-panel">
+      <h2>Receptionist (pilot)</h2>
+      <p class="hint">Owner status for voice handoffs, calendar sync, and simulated call flows. Not live telephony.</p>
+      <div class="actions">
+        <button type="button" id="recv-refresh" class="secondary">Refresh receptionist</button>
+      </div>
+      <p id="receptionist-status" class="hint" aria-live="polite"></p>
+      <div id="receptionist-root" class="hint">Sign in to load receptionist status.</div>
     </section>
 
     <section class="panel" aria-label="Analytics">
@@ -180,5 +191,6 @@
   </main>
 
   <script src="/static/nova-growth/growth.js"></script>
+  <script src="/static/nova-growth/receptionist.js"></script>
 </body>
 </html>
