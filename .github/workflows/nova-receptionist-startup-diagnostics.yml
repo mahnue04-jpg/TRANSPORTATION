@@ -1,0 +1,29 @@
+name: Receptionist guarded startup diagnostics
+
+on:
+  pull_request:
+    paths:
+      - "backend/scripts/receptionist_staging_start.py"
+      - "backend/tests/test_receptionist_staging_start.py"
+      - ".github/workflows/nova-receptionist-startup-diagnostics.yml"
+  workflow_dispatch:
+
+jobs:
+  no-network-startup-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated test requirements
+        run: python -m pip install pytest psycopg2-binary
+      - name: Validate startup module syntax
+        run: python -m py_compile scripts/receptionist_staging_start.py tests/test_receptionist_staging_start.py
+      - name: Exercise pre-database safety and bounded waits
+        run: |
+          python -m pytest -q tests/test_receptionist_staging_start.py -k "not readiness_http"
