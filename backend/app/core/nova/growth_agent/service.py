@@ -514,7 +514,7 @@ class GrowthAgentService:
         contact = GaContact(
             id=_id(), organization_id=org_id, display_name=fixture_name,
             lead_state="new", notes="Synthetic test record for staging booking only",
-            is_synthetic_demo=True,
+            do_not_contact=True, is_synthetic_demo=True,
         )
         self.db.add(contact)
         self.db.flush()
