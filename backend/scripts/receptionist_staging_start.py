@@ -18,6 +18,7 @@ Migration failure exits non-zero. There is no SQLite or ORM ``create_all`` fallb
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import re
 import subprocess
@@ -31,6 +32,10 @@ TARGET_REVISION = "20261116_nova_ga_receptionist"
 DEFAULT_EXPECTED_DB = "nova_ga_receptionist_dispos"
 LOCK_KEY = 0x4E4F5641474152  # "NOVAGAR" truncated
 LOCK_WAIT_SECONDS = 120
+DB_CONNECT_TIMEOUT_SECONDS = 10
+ALEMBIC_UPGRADE_TIMEOUT_SECONDS = 120
+ALEMBIC_CURRENT_TIMEOUT_SECONDS = 30
+STARTUP_TRACE_TIMEOUT_SECONDS = 180
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SUPPORTED_SCHEMES = {
     "postgresql",
@@ -213,12 +218,15 @@ def _with_advisory_lock(url: str, fn) -> None:
     except ImportError as exc:
         _die(f"psycopg2 required for migrate lock: {exc}")
 
-    conn = psycopg2.connect(_psycopg_url(url))
+    print("[receptionist-staging-start] connecting to approved database", flush=True)
+    conn = psycopg2.connect(_psycopg_url(url), connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
+    print("[receptionist-staging-start] database connection established", flush=True)
     conn.autocommit = True
     cur = conn.cursor()
     deadline = time.time() + LOCK_WAIT_SECONDS
     locked = False
     try:
+        print("[receptionist-staging-start] acquiring migration lock", flush=True)
         while time.time() < deadline:
             cur.execute("SELECT pg_try_advisory_lock(%s)", (LOCK_KEY,))
             locked = bool(cur.fetchone()[0])
@@ -227,6 +235,7 @@ def _with_advisory_lock(url: str, fn) -> None:
             time.sleep(1.0)
         if not locked:
             _die(f"Could not acquire migration advisory lock within {LOCK_WAIT_SECONDS}s")
+        print("[receptionist-staging-start] migration lock acquired", flush=True)
         fn()
     finally:
         if locked:
@@ -245,7 +254,13 @@ def _run_alembic(backend: Path, url: str) -> None:
     env.pop("SQLALCHEMY_DATABASE_URI", None)
     cmd = [sys.executable, "-m", "alembic", "upgrade", TARGET_REVISION]
     print(f"[receptionist-staging-start] + {' '.join(cmd)}", flush=True)
-    completed = subprocess.run(cmd, cwd=str(backend), env=env, check=False)
+    try:
+        completed = subprocess.run(
+            cmd, cwd=str(backend), env=env, check=False,
+            timeout=ALEMBIC_UPGRADE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        _die(f"Alembic upgrade exceeded {ALEMBIC_UPGRADE_TIMEOUT_SECONDS}s")
     if completed.returncode != 0:
         _die(f"alembic upgrade {TARGET_REVISION} failed with exit {completed.returncode}")
 
@@ -254,14 +269,19 @@ def _verify_revision(backend: Path, url: str) -> str:
     env = os.environ.copy()
     env["ALEMBIC_DATABASE_URL"] = url
     env["DATABASE_URL"] = url
-    completed = subprocess.run(
-        [sys.executable, "-m", "alembic", "current"],
-        cwd=str(backend),
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    print("[receptionist-staging-start] checking migration revision", flush=True)
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", "alembic", "current"],
+            cwd=str(backend),
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=ALEMBIC_CURRENT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        _die(f"Alembic current exceeded {ALEMBIC_CURRENT_TIMEOUT_SECONDS}s")
     if completed.returncode != 0:
         _die(
             "alembic current failed after upgrade: "
@@ -278,7 +298,9 @@ def _verify_revision(backend: Path, url: str) -> str:
 def migrate_only() -> str:
     """Apply and verify migrations; used by rehearsals and startCommand."""
     # Commit pin first — fail closed before any database access.
+    print("[receptionist-staging-start] verifying pinned commit", flush=True)
     _assert_commit_guard()
+    print("[receptionist-staging-start] verifying database destination", flush=True)
     url, dest = resolve_approved_database_url()
     backend = _backend_dir()
     print(
@@ -317,12 +339,23 @@ def _exec_uvicorn() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    print("[receptionist-staging-start] bootstrap entered", flush=True)
     argv = list(sys.argv[1:] if argv is None else argv)
     migrate_only_flag = "--migrate-only" in argv
-    migrate_only()
-    if migrate_only_flag:
-        return 0
-    _exec_uvicorn()
+    # Diagnostic only: emit a safe Python traceback if initialization hangs.
+    # Never print environment values, credentials, or connection URLs.
+    faulthandler.enable()
+    faulthandler.dump_traceback_later(
+        STARTUP_TRACE_TIMEOUT_SECONDS, repeat=False, file=sys.stderr
+    )
+    try:
+        migrate_only()
+        faulthandler.cancel_dump_traceback_later()
+        if migrate_only_flag:
+            return 0
+        _exec_uvicorn()
+    finally:
+        faulthandler.cancel_dump_traceback_later()
     return 0  # unreachable after exec
 
 
