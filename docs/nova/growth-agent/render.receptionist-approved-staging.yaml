@@ -29,7 +29,7 @@
       "branch": "release/nova-receptionist-f50c2740",
       "rootDir": "backend",
       "autoDeployTrigger": "off",
-      "buildCommand": "test \"$RENDER_GIT_COMMIT\" = 395cc6d4cb447ef98a92127cb41a67adaf0a7547 && pip install -r requirements.txt",
+      "buildCommand": "test \"$RENDER_GIT_COMMIT\" = 2cbd06e5bd28ba6a33f5880fe20d2aff4c8f4672 && pip install -r requirements.txt",
       "startCommand": "python -c 'import os,runpy; exec(\"for key in (\\\"DATABASE_URL\\\",\\\"ALEMBIC_DATABASE_URL\\\"):\\n value=os.environ[key]\\n if value.startswith(\\\"postgres://\\\"): value=\\\"postgresql+psycopg2://\\\"+value[len(\\\"postgres://\\\"):]\\n elif value.startswith(\\\"postgresql://\\\"): value=\\\"postgresql+psycopg2://\\\"+value[len(\\\"postgresql://\\\"):]\\n os.environ[key]=value\"); origin=os.environ[\"RENDER_EXTERNAL_URL\"]; os.environ[\"AMICOR_PUBLIC_URL\"]=origin; os.environ[\"ALLOWED_ORIGINS\"]=origin; os.environ[\"NOVA_GA_GOOGLE_OAUTH_REDIRECT_URI\"]=origin+\"/api/nova/growth-agent/calendar/oauth/callback\"; runpy.run_path(\"scripts/receptionist_staging_diagnostic_boot.py\",run_name=\"__main__\")'",
       "healthCheckPath": "/api/health/readiness",
       "envVars": [
@@ -55,7 +55,7 @@
         },
         {
           "key": "NOVA_GA_EXPECTED_GIT_COMMIT",
-          "value": "395cc6d4cb447ef98a92127cb41a67adaf0a7547"
+          "value": "2cbd06e5bd28ba6a33f5880fe20d2aff4c8f4672"
         },
         {
           "key": "NOVA_GA_EXPECTED_DATABASE_NAME",
