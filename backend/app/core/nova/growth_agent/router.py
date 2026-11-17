@@ -458,6 +458,7 @@ def prepare_staging_service(
     staging_switch = (os.getenv("NOVA_GA_STAGING_SERVICE_PREP_ENABLED") or "").strip().lower()
     if (
         db_name != "nova_ga_receptionist_dispos"
+        or (os.getenv("RENDER_SERVICE_ID") or "").strip() != "srv-dbtka2ei0phs73dk80dg"
         or staging_switch not in {"true", "1", "yes"}
         or not demo_mode_enabled()
     ):
