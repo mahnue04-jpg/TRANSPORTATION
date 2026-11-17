@@ -8,6 +8,7 @@ on:
       - "backend/static/nova-growth/index.html"
       - "backend/static/nova-growth/growth-session.test.cjs"
       - "backend/static/nova-growth/owner-copy.test.cjs"
+      - "backend/static/nova-growth/test-booking-crm.test.cjs"
       - "backend/static/nova-growth/booking-slots.js"
       - "backend/static/nova-growth/booking-slots.test.cjs"
       - "backend/app/core/nova/growth_agent/service.py"
@@ -40,6 +41,7 @@ jobs:
           node --check backend/static/nova-growth/receptionist.js
           node --check backend/static/nova-growth/growth-session.test.cjs
           node --check backend/static/nova-growth/owner-copy.test.cjs
+          node --check backend/static/nova-growth/test-booking-crm.test.cjs
           node --check backend/static/nova-growth/booking-slots.js
           node --check backend/static/nova-growth/booking-slots.test.cjs
       - name: Owner session UI tests
@@ -48,5 +50,7 @@ jobs:
         run: node --test backend/static/nova-growth/owner-copy.test.cjs
       - name: Safe staging appointment slot tests
         run: node --test backend/static/nova-growth/booking-slots.test.cjs
+      - name: Synthetic CRM selection checks
+        run: node --test backend/static/nova-growth/test-booking-crm.test.cjs
       - name: Receptionist UI regression tests
         run: node --test backend/static/nova-growth/receptionist.test.cjs
