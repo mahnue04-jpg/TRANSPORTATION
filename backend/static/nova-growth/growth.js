@@ -472,26 +472,6 @@
     }
   });
 
-  $("prepare-staging-contact").addEventListener("click", async () => {
-    try {
-      requireSession();
-      const data = await api("/api/nova/growth-agent/staging/booking-contact", {
-        method: "POST",
-        body: "{}",
-      });
-      if (!data.is_synthetic_demo || !data.staging_only || !data.contact_id) {
-        throw new Error("Test customer was not verified as synthetic.");
-      }
-      $("wf-contact").value = data.contact_id;
-      $("book-out").textContent = data.created
-        ? "Synthetic test customer created and selected. No real contact details or messages were used."
-        : "Existing synthetic test customer selected. No real contact details or messages were used.";
-      await refreshLeads();
-    } catch (err) {
-      $("book-out").textContent = err.message;
-    }
-  });
-
   $("load-slots").addEventListener("click", async () => {
     clearBookingSlots();
     const request = slotRequest;
