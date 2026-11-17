@@ -1,0 +1,37 @@
+name: Nova synthetic handoff acceptance (isolated)
+
+on:
+  pull_request:
+    branches: [feature/nova-agent-event-contract-542]
+    paths:
+      - "backend/tests/synthetic_nova_handoff_542.py"
+      - "backend/tests/test_synthetic_nova_handoff_542.py"
+      - ".github/workflows/nova-synthetic-handoff-542.yml"
+      - "backend/app/core/nova/agent_events.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated test runner
+        run: python -m pip install pytest
+      - name: Verify pure synthetic handoff tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "tests"
+        run: |
+          set -euo pipefail
+          python -m py_compile app/core/nova/agent_events.py tests/synthetic_nova_handoff_542.py tests/test_synthetic_nova_handoff_542.py
+          python -m pytest tests/test_synthetic_nova_handoff_542.py -q --tb=short --noconftest
