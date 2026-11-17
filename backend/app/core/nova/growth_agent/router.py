@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -19,7 +18,6 @@ from app.core.nova.growth_agent.schemas import (
     ConsentIn,
     LeadUpdateIn,
     ProfileUpsertIn,
-    StagingServicePrepareIn,
     RescheduleIn,
     StagingBookingServiceIn,
     RetentionIn,
@@ -443,35 +441,6 @@ def list_appointments(
     svc: GrowthAgentService = Depends(_svc),
 ) -> dict[str, Any]:
     return {"appointments": svc.list_appointments(_org(user, organization_id), limit=limit)}
-
-
-@router.post("/staging/prepare-service")
-def prepare_staging_service(
-    body: StagingServicePrepareIn,
-    user: UserContext = Depends(require_growth_owner),
-    svc: GrowthAgentService = Depends(_svc),
-) -> dict[str, Any]:
-    """Staging-only explicit owner action; never auto-prepare via GET availability."""
-    from app.core.nova.growth_agent.flags import demo_mode_enabled
-
-    db_name = (os.getenv("NOVA_GA_EXPECTED_DATABASE_NAME") or "").strip()
-    staging_switch = (os.getenv("NOVA_GA_STAGING_SERVICE_PREP_ENABLED") or "").strip().lower()
-    if (
-        db_name != "nova_ga_receptionist_dispos"
-        or (os.getenv("RENDER_SERVICE_ID") or "").strip() != "srv-dbtka2ei0phs73dk80dg"
-        or staging_switch not in {"true", "1", "yes"}
-        or not demo_mode_enabled()
-    ):
-        raise HTTPException(status_code=404, detail="Staging service preparation is disabled")
-    org = _org(user, body.organization_id)
-    try:
-        return svc.prepare_staging_appointment_service(
-            org, service_code=body.service_code.strip(),
-            actor_user_id=user.user_id,
-        )
-    except GrowthAgentError as exc:
-        _handle(exc)
-        raise
 
 
 @router.post("/staging/booking-service")
