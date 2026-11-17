@@ -274,3 +274,104 @@ def client():
     ensure_auth_schema()
     seed_default_users()
     return TestClient(app)
+
+
+def test_database_connection_has_bounded_timeout(monkeypatch: pytest.MonkeyPatch):
+    """The startup cannot silently wait indefinitely for PostgreSQL."""
+    start = _import_start()
+    seen = {}
+
+    class FakeCursor:
+        def execute(self, _sql, _args):
+            pass
+
+        def fetchone(self):
+            return (True,)
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        autocommit = False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    def fake_connect(url, *, connect_timeout):
+        seen["url"] = url
+        seen["timeout"] = connect_timeout
+        return FakeConnection()
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "psycopg2",
+        type("FakePsycopg", (), {"connect": staticmethod(fake_connect)})(),
+    )
+    ran = []
+    start._with_advisory_lock(APPROVED_URL, lambda: ran.append("migrated"))
+    assert ran == ["migrated"]
+    assert seen["timeout"] == start.DB_CONNECT_TIMEOUT_SECONDS
+    assert seen["url"].startswith("postgresql://")
+
+
+def test_alembic_upgrade_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch):
+    """A hung Alembic upgrade exits rather than falling through to Uvicorn."""
+    import subprocess
+
+    start = _import_start()
+    seen = {}
+
+    def hung_run(cmd, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(start.subprocess, "run", hung_run)
+    with pytest.raises(SystemExit) as exc:
+        start._run_alembic(start._backend_dir(), APPROVED_URL)
+    assert exc.value.code == 1
+    assert seen["timeout"] == start.ALEMBIC_UPGRADE_TIMEOUT_SECONDS
+
+
+def test_alembic_revision_check_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch):
+    import subprocess
+
+    start = _import_start()
+    seen = {}
+
+    def hung_run(cmd, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(start.subprocess, "run", hung_run)
+    with pytest.raises(SystemExit) as exc:
+        start._verify_revision(start._backend_dir(), APPROVED_URL)
+    assert exc.value.code == 1
+    assert seen["timeout"] == start.ALEMBIC_CURRENT_TIMEOUT_SECONDS
+
+
+def test_startup_trace_watchdog_canceled_on_migration_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    start = _import_start()
+    trace = []
+
+    monkeypatch.setattr(start.faulthandler, "enable", lambda: None)
+    monkeypatch.setattr(
+        start.faulthandler, "dump_traceback_later",
+        lambda *args, **kwargs: trace.append("scheduled"),
+    )
+    monkeypatch.setattr(
+        start.faulthandler, "cancel_dump_traceback_later",
+        lambda: trace.append("canceled"),
+    )
+
+    def failed_migration():
+        raise SystemExit(1)
+
+    monkeypatch.setattr(start, "migrate_only", failed_migration)
+    with pytest.raises(SystemExit):
+        start.main(["--migrate-only"])
+    assert trace == ["scheduled", "canceled"]
