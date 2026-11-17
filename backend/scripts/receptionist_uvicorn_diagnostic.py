@@ -21,6 +21,11 @@ def main() -> None:
     faulthandler.dump_traceback_later(
         TRACE_AFTER_SECONDS, repeat=True, file=sys.stderr
     )
+    # Executed by filename from backend/scripts, so sys.path[0] is scripts.
+    # Uvicorn must resolve app.main from the backend package root.
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
     print("[receptionist-staging-uvicorn] loading ASGI application", flush=True)
     import uvicorn
 
