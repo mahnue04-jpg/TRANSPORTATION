@@ -9,7 +9,8 @@
   function formatSlot(value) {
     if (!validSlot(value)) return "";
     return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium", timeStyle: "short", timeZoneName: "short"
+      year: "numeric", month: "short", day: "numeric", hour: "numeric",
+      minute: "2-digit", timeZoneName: "short"
     }).format(new Date(value));
   }
 
