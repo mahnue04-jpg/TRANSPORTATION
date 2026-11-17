@@ -448,6 +448,24 @@
     const selected = slotChoice.value;
     $("book-start").value = availableTimes.includes(selected) ? selected : "";
   });
+  $("prepare-staging-service").addEventListener("click", async () => {
+    try {
+      requireSession();
+      clearBookingSlots();
+      const code = $("book-service").value.trim();
+      if (!code) throw new Error("Enter a service code from the saved business setup.");
+      const response = await api("/api/nova/growth-agent/staging/booking-service", {
+        method: "POST",
+        body: JSON.stringify({ service_code: code }),
+      });
+      $("book-out").textContent = response.created
+        ? "Test service prepared. Now click Load available times. Live calling and Google Calendar remain off."
+        : "Test service is ready. Click Load available times. Live calling and Google Calendar remain off.";
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
+
   $("load-slots").addEventListener("click", async () => {
     clearBookingSlots();
     const request = slotRequest;
