@@ -271,6 +271,7 @@
           const row = btn.closest("tr");
           const id = row?.dataset.leadId;
           if (!id) return;
+          selectedSyntheticContactId = id;
           $("wf-contact").value = id;
           setBanner("Demo customer selected for staging booking. Return to Booking & workflows.", "ok");
         });
@@ -423,6 +424,7 @@
   let slotRequest = 0;
   let fetchedSlotKey = "";
   let availableTimes = [];
+  let selectedSyntheticContactId = "";
 
   function clearBookingSlots() {
     slotRequest += 1;
@@ -447,6 +449,7 @@
       if (!data.is_synthetic_demo || !data.staging_only || !data.contact_id) {
         throw new Error("Synthetic test customer was not verified.");
       }
+      selectedSyntheticContactId = data.contact_id;
       $("wf-contact").value = data.contact_id;
       $("book-out").textContent = "Synthetic test customer prepared and selected. Load available times and choose a slot. No appointment has been created.";
       await refreshLeads();
@@ -516,6 +519,7 @@
           service_code: service,
           starts_at_utc: selected,
           idempotency_key: `ui-${Date.now()}`,
+          is_synthetic_demo: Boolean(selectedSyntheticContactId) && contactId === selectedSyntheticContactId,
         }),
       });
       if (data.id) $("book-appt-id").value = data.id;
