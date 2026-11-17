@@ -157,18 +157,19 @@
 
     <section class="panel" aria-label="Booking and workflows">
       <h2>Booking &amp; workflows</h2>
-      <p class="hint">First-party scheduling + consent-gated mock delivery. Dry-run by default. Cancel / rebook / reschedule supported.</p>
+      <p class="hint">Staging appointment practice only. A booking here is not confirmed on Google Calendar. Choose an available time before booking; customer IDs come from the CRM.</p>
       <div class="grid-2">
-        <label>Contact id<input id="wf-contact" /></label>
-        <label>Service code<input id="book-service" value="consult" /></label>
-        <label>Day (YYYY-MM-DD)<input id="book-day" /></label>
-        <label>Starts at UTC<input id="book-start" placeholder="ISO" /></label>
+        <label>Existing customer ID (from CRM)<input id="wf-contact" /></label>
+        <label>Service code (pilot)<input id="book-service" value="consult" /></label>
+        <label>Appointment day<input id="book-day" type="date" /></label>
+        <label>Available appointment time<select id="book-slot-choice"><option value="">Select Load available times first</option></select></label>
+        <label>Selected start time (UTC, read only)<input id="book-start" placeholder="Select an available time above" readonly /></label>
         <label>Appointment id<input id="book-appt-id" placeholder="After booking" /></label>
         <label>Reschedule to UTC<input id="book-reschedule" placeholder="ISO" /></label>
       </div>
       <div class="actions">
-        <button type="button" id="load-slots">Load slots</button>
-        <button type="button" id="book-slot">Book selected/start</button>
+        <button type="button" id="load-slots">Load available times</button>
+        <button type="button" id="book-slot">Create staging appointment</button>
         <button type="button" id="cancel-appt" class="secondary">Cancel appointment</button>
         <button type="button" id="reschedule-appt" class="secondary">Reschedule</button>
         <button type="button" id="preview-reminder" class="secondary">Preview reminder workflow</button>
@@ -191,6 +192,7 @@
     </section>
   </main>
 
+  <script src="/static/nova-growth/booking-slots.js"></script>
   <script src="/static/nova-growth/growth.js"></script>
   <script src="/static/nova-growth/receptionist.js"></script>
 </body>
