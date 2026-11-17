@@ -19,6 +19,7 @@ from app.core.nova.growth_agent.schemas import (
     LeadUpdateIn,
     ProfileUpsertIn,
     RescheduleIn,
+    StagingBookingServiceIn,
     RetentionIn,
     RetentionScheduleTickIn,
     WidgetChatIn,
@@ -440,6 +441,23 @@ def list_appointments(
     svc: GrowthAgentService = Depends(_svc),
 ) -> dict[str, Any]:
     return {"appointments": svc.list_appointments(_org(user, organization_id), limit=limit)}
+
+
+@router.post("/staging/booking-service")
+def prepare_staging_booking_service(
+    body: StagingBookingServiceIn,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    try:
+        return svc.prepare_staging_booking_service(
+            _org(user, body.organization_id),
+            service_code=body.service_code,
+            actor_user_id=user.user_id,
+        )
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
 
 
 @router.get("/availability")

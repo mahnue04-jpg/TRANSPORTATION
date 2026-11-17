@@ -79,6 +79,10 @@ class AvailabilityIn(OrgScoped):
     day: str  # YYYY-MM-DD
 
 
+class StagingBookingServiceIn(OrgScoped):
+    service_code: str
+
+
 class BookIn(OrgScoped):
     contact_id: str
     service_code: str
