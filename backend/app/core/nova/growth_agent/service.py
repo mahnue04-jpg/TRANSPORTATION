@@ -481,6 +481,56 @@ class GrowthAgentService:
             "external_delivery_enabled": False,
         }
 
+    def prepare_staging_booking_contact(self, org_id: str, *, actor_user_id: str) -> dict[str, Any]:
+        """Create/reuse an explicitly synthetic, uncontactable booking fixture.
+
+        Never reclassify existing leads, alter the business profile or send messages.
+        This is restricted to the isolated disposable receptionist database.
+        """
+        from app.core.nova.growth_agent.flags import demo_mode_enabled
+
+        bind = self.db.get_bind()
+        db_name = str(getattr(getattr(bind, "url", None), "database", "") or "")
+        if not demo_mode_enabled() or db_name != "nova_ga_receptionist_dispos":
+            raise GrowthAgentError(
+                "STAGING_ONLY",
+                "Synthetic booking customer is available only in isolated receptionist staging",
+                http_status=403,
+            )
+        self._require_profile(org_id)
+        fixture_name = "Nova Booking Test (Synthetic)"
+        existing = (
+            self._org_query(GaContact, org_id)
+            .filter_by(display_name=fixture_name, is_synthetic_demo=True)
+            .order_by(GaContact.created_at.asc())
+            .first()
+        )
+        if existing is not None:
+            return {
+                "contact_id": existing.id, "display_name": existing.display_name,
+                "is_synthetic_demo": True, "created": False, "staging_only": True,
+                "live_delivery": False,
+            }
+        contact = GaContact(
+            id=_id(), organization_id=org_id, display_name=fixture_name,
+            lead_state="new", notes="Synthetic test record for staging booking only",
+            do_not_contact=True, is_synthetic_demo=True,
+        )
+        self.db.add(contact)
+        self.db.flush()
+        self.audit(
+            org_id, action="staging.synthetic_booking_contact",
+            entity_type="contact", entity_id=contact.id,
+            actor_user_id=actor_user_id,
+            summary="Created isolated synthetic booking fixture (no communication)",
+        )
+        self.db.commit()
+        return {
+            "contact_id": contact.id, "display_name": contact.display_name,
+            "is_synthetic_demo": True, "created": True, "staging_only": True,
+            "live_delivery": False,
+        }
+
     def _ensure_default_services(self, org_id: str, profile: GaBusinessProfile) -> None:
         services = profile.services_json or [{"code": "consult", "name": "Consultation", "duration_minutes": 30}]
         for svc in services:

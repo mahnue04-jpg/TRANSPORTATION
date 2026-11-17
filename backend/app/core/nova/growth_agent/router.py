@@ -460,6 +460,21 @@ def prepare_staging_booking_service(
         raise
 
 
+@router.post("/staging/booking-contact")
+def prepare_staging_booking_contact(
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Create or reuse a contactable-by-no-one synthetic booking fixture."""
+    try:
+        return svc.prepare_staging_booking_contact(
+            _org(user, None), actor_user_id=user.user_id
+        )
+    except GrowthAgentError as exc:
+        _handle(exc)
+        raise
+
+
 @router.get("/availability")
 def availability(
     service_code: str = Query(...),
