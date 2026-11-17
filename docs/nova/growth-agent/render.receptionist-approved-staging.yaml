@@ -83,7 +83,7 @@
         },
         {
           "key": "NOVA_GROWTH_AGENT_BACKGROUND_WORKER",
-          "value": "true"
+          "value": "false"
         },
         {
           "key": "NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED",
@@ -119,11 +119,11 @@
         },
         {
           "key": "DB_POOL_SIZE",
-          "value": "2"
+          "value": "4"
         },
         {
           "key": "DB_MAX_OVERFLOW",
-          "value": "1"
+          "value": "2"
         },
         {
           "key": "MALLOC_ARENA_MAX",
