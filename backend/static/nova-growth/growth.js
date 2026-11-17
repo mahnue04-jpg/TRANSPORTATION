@@ -68,9 +68,11 @@
     bookingTechnical.open = false;
   }
 
-  new MutationObserver(refreshBookingFeedback).observe(bookingRawOutput, {
-    childList: true, characterData: true, subtree: true,
-  });
+  if (typeof MutationObserver === "function" && bookingRawOutput && bookingSummary && bookingTechnical) {
+    new MutationObserver(refreshBookingFeedback).observe(bookingRawOutput, {
+      childList: true, characterData: true, subtree: true,
+    });
+  }
   const banner = $("status-banner");
   const sessionMeta = $("session-meta");
   const loginForm = $("login-form");
