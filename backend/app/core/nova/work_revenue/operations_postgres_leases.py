@@ -189,3 +189,50 @@ def fail_or_retry(db: Session, *, claimed: LeaseClaim, now: datetime | None = No
     except Exception:
         db.rollback()
         raise
+
+
+def renew(db: Session, *, claimed: LeaseClaim, now: datetime | None = None,
+          lease_seconds: int = 60) -> None:
+    """Extend only the active, unexpired lease held by this exact worker."""
+    _guard(db)
+    if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
+        raise LeaseBlocked("Invalid lease duration")
+    now = now or _now()
+    try:
+        changed = db.execute(sa.update(lease_jobs).where(
+            lease_jobs.c.job_id == claimed.job_id,
+            lease_jobs.c.organization_id == claimed.organization_id,
+            lease_jobs.c.owner_user_id == claimed.owner_user_id,
+            lease_jobs.c.state == "RUNNING",
+            lease_jobs.c.lease_token == claimed.token,
+            lease_jobs.c.lease_until > now,
+        ).values(lease_until=now + timedelta(seconds=lease_seconds),
+                 updated_at=now))
+        if changed.rowcount != 1:
+            raise LeaseBlocked("Stale or expired lease renewal")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def exhaust_expired(db: Session, *, now: datetime | None = None) -> int:
+    """Terminally fail expired workers that have no attempts remaining.
+
+    Does not touch incomplete input/output objects; eventual artifact cleanup
+    and audit reconciliation remain separate required release work.
+    """
+    _guard(db)
+    now = now or _now()
+    try:
+        changed = db.execute(sa.update(lease_jobs).where(
+            lease_jobs.c.state == "RUNNING",
+            lease_jobs.c.lease_until <= now,
+            lease_jobs.c.attempts >= lease_jobs.c.max_attempts,
+        ).values(state="FAILED", lease_token=None, lease_until=None,
+                 updated_at=now))
+        db.commit()
+        return changed.rowcount
+    except Exception:
+        db.rollback()
+        raise
