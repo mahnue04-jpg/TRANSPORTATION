@@ -13,6 +13,7 @@ on:
       - "backend/static/nova-growth/booking-slots.test.cjs"
       - "backend/static/nova-growth/demo-booking-selection.test.cjs"
       - "backend/static/nova-growth/synthetic-contact.test.cjs"
+      - "backend/static/nova-growth/owner-booking-feedback.test.cjs"
       - "backend/app/core/nova/growth_agent/service.py"
       - "backend/app/core/nova/growth_agent/router.py"
       - "backend/app/core/nova/growth_agent/schemas.py"
@@ -48,6 +49,7 @@ jobs:
           node --check backend/static/nova-growth/booking-slots.test.cjs
           node --check backend/static/nova-growth/demo-booking-selection.test.cjs
           node --check backend/static/nova-growth/synthetic-contact.test.cjs
+          node --check backend/static/nova-growth/owner-booking-feedback.test.cjs
       - name: Owner session UI tests
         run: node --test backend/static/nova-growth/growth-session.test.cjs
       - name: Owner-friendly copy checks
@@ -60,5 +62,7 @@ jobs:
         run: node --test backend/static/nova-growth/synthetic-contact.test.cjs
       - name: Synthetic CRM booking selection checks
         run: node --test backend/static/nova-growth/demo-booking-selection.test.cjs
+      - name: Owner booking feedback checks
+        run: node --test backend/static/nova-growth/owner-booking-feedback.test.cjs
       - name: Receptionist UI regression tests
         run: node --test backend/static/nova-growth/receptionist.test.cjs
