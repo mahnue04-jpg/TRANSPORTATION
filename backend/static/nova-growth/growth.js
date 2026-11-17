@@ -6,6 +6,73 @@
   };
 
   const $ = (id) => document.getElementById(id);
+
+  // Owner-friendly booking outcomes keep raw API results available on demand.
+  // Never render API text through innerHTML or imply a Google Calendar confirmation.
+  const bookingRawOutput = $("book-out");
+  const bookingSummary = $("booking-result");
+  const bookingTechnical = $("booking-technical");
+
+  function localBookingTime(utc) {
+    if (!utc || typeof utc !== "string") return "";
+    const date = new Date(utc);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric",
+      hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    }).format(date);
+  }
+
+  function bookingMessage(raw) {
+    if (!raw) return { text: "", tone: "neutral" };
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return {
+        text: raw,
+        tone: /error|failed|not found|must |required|cannot |unable /i.test(raw) ? "error" : "neutral",
+      };
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return { text: "Booking response received. See technical details.", tone: "neutral" };
+    }
+    if (data.error || data.detail) {
+      const detail = data.message || (typeof data.detail === "string" ? data.detail : "Check the technical details.");
+      return { text: `Booking action could not be completed: ${detail}`, tone: "error" };
+    }
+    const time = localBookingTime(data.starts_at_utc);
+    const when = time ? ` for ${time}` : "";
+    const status = String(data.status || "").toLowerCase();
+    let action = "";
+    if (status === "confirmed") action = `Test appointment booked${when}.`;
+    if (status === "rescheduled") action = `Test appointment rescheduled${when}.`;
+    if (status === "cancelled") action = "Test appointment cancelled.";
+    if (!action) return { text: "Booking response received. See technical details.", tone: "neutral" };
+    const external = data.calendar_sync || {};
+    const externalNote = external.live === false || external.status === "suppressed"
+      ? " Not confirmed on Google Calendar; real notifications remain off."
+      : " Check calendar status before treating this as an external confirmation.";
+    return { text: action + externalNote, tone: "ok" };
+  }
+
+  function refreshBookingFeedback() {
+    const raw = bookingRawOutput.textContent.trim();
+    bookingSummary.hidden = !raw;
+    bookingTechnical.hidden = !raw;
+    if (!raw) return;
+    const feedback = bookingMessage(raw);
+    bookingSummary.className = `booking-result ${feedback.tone}`;
+    bookingSummary.textContent = feedback.text;
+    // Technical details stay available but never overwhelm the main workflow.
+    bookingTechnical.open = false;
+  }
+
+  if (typeof MutationObserver === "function" && bookingRawOutput && bookingSummary && bookingTechnical) {
+    new MutationObserver(refreshBookingFeedback).observe(bookingRawOutput, {
+      childList: true, characterData: true, subtree: true,
+    });
+  }
   const banner = $("status-banner");
   const sessionMeta = $("session-meta");
   const loginForm = $("login-form");

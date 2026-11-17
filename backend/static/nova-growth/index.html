@@ -179,7 +179,11 @@
         <button type="button" id="recover-deliveries" class="secondary">Recover pending deliveries</button>
         <button type="button" id="opt-out-email" class="secondary">Marketing email opt-out</button>
       </div>
-      <pre id="book-out" class="hint"></pre>
+      <div id="booking-result" class="booking-result" role="status" aria-live="polite" hidden></div>
+      <details id="booking-technical" class="booking-technical">
+        <summary>Technical booking details</summary>
+        <pre id="book-out" class="hint"></pre>
+      </details>
     </section>
 
     <section class="panel" aria-label="Synthetic demo">

@@ -218,3 +218,35 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   outline: 3px solid var(--ga-gold);
   outline-offset: 2px;
 }
+
+
+/* Staging booking outcomes: readable first, raw diagnostics on demand. */
+.booking-result {
+  margin-top: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--ga-forest);
+  background: var(--ga-mist);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.booking-result.ok {
+  border-left-color: var(--ga-leaf);
+  background: #eef8f1;
+}
+.booking-result.error {
+  border-left-color: var(--ga-danger);
+  background: #fff1f1;
+}
+.booking-technical { margin-top: 0.75rem; }
+.booking-technical summary {
+  cursor: pointer;
+  color: var(--ga-forest);
+  font-weight: 600;
+}
+.booking-technical pre {
+  margin: 0.65rem 0 0;
+  padding: 0.75rem;
+  background: var(--ga-mist);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
