@@ -1,0 +1,30 @@
+name: Receptionist staging startup diagnostic tests
+
+on:
+  pull_request:
+    paths:
+      - "backend/scripts/receptionist_uvicorn_diagnostic.py"
+      - "backend/scripts/receptionist_staging_diagnostic_boot.py"
+      - "backend/tests/test_receptionist_uvicorn_diagnostic.py"
+      - "backend/tests/test_receptionist_staging_diagnostic_boot.py"
+      - ".github/workflows/receptionist-staging-startup-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python syntax
+        run: |
+          python -m py_compile backend/scripts/receptionist_uvicorn_diagnostic.py backend/scripts/receptionist_staging_diagnostic_boot.py backend/tests/test_receptionist_uvicorn_diagnostic.py backend/tests/test_receptionist_staging_diagnostic_boot.py
+      - name: Focused diagnostic unit tests (no runtime services)
+        run: |
+          python -m pip install pytest
+          python -m pytest --noconftest -q backend/tests/test_receptionist_uvicorn_diagnostic.py backend/tests/test_receptionist_staging_diagnostic_boot.py
