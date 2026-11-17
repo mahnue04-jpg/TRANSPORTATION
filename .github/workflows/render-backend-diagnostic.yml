@@ -144,7 +144,8 @@ jobs:
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
-    runs-on: ubuntu-latest
+    # Python 3.11.9 is unavailable on the current ubuntu-latest (26.04) runner.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
