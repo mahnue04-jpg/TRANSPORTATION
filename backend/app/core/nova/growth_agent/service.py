@@ -1685,14 +1685,10 @@ class GrowthAgentService:
     ) -> dict[str, Any]:
         """Explicitly prepare ONE profile-defined service for isolated staging.
 
-        Never activates a profile, calls providers, or creates an appointment.
+        Never changes profile activation, calls providers, or creates an appointment.
         The router is responsible for checking staging environment and demo mode.
         """
         profile = self._require_profile(org_id)
-        if profile.activated:
-            raise GrowthAgentError(
-                "STAGING_ONLY", "Pilot service preparation requires an inactive profile", http_status=409
-            )
         configured = [
             item for item in (profile.services_json or [])
             if isinstance(item, dict)
@@ -1747,7 +1743,7 @@ class GrowthAgentService:
         self.db.commit()
         return {
             "service_code": service_code, "created": created,
-            "staging_only": True, "profile_activated": False,
+            "staging_only": True, "profile_activated": bool(profile.activated),
             "external_calendar_confirmed": False, "live_transports_enabled": False,
         }
 
