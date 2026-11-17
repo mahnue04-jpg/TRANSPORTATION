@@ -1,12 +1,25 @@
 """Unit tests for the isolated Nova cross-agent event envelope.
 
 No database, backend service, network, paid provider or live customer data.
+The module is loaded by path so collection does not execute app.core.nova.
 """
+import importlib.util
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
-from app.core.nova.agent_events import Agent, AgentEvent, EventType, SCHEMA_VERSION
+_EVENTS = Path(__file__).resolve().parents[1] / "app/core/nova/agent_events.py"
+_spec = importlib.util.spec_from_file_location("nova_agent_events_under_test", _EVENTS)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _module
+_spec.loader.exec_module(_module)
+
+Agent = _module.Agent
+AgentEvent = _module.AgentEvent
+EventType = _module.EventType
+SCHEMA_VERSION = _module.SCHEMA_VERSION
 
 
 def event(**changes):
