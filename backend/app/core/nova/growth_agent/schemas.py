@@ -83,6 +83,10 @@ class StagingServicePrepareIn(OrgScoped):
     service_code: str = Field(min_length=1, max_length=80)
 
 
+class StagingBookingServiceIn(OrgScoped):
+    service_code: str
+
+
 class BookIn(OrgScoped):
     contact_id: str
     service_code: str
