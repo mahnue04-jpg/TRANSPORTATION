@@ -79,6 +79,10 @@ class AvailabilityIn(OrgScoped):
     day: str  # YYYY-MM-DD
 
 
+class StagingServicePrepareIn(OrgScoped):
+    service_code: str = Field(min_length=1, max_length=80)
+
+
 class BookIn(OrgScoped):
     contact_id: str
     service_code: str
