@@ -408,32 +408,73 @@
     }
   });
 
+  const slotChoice = $("book-slot-choice");
+  let slotRequest = 0;
+  let fetchedSlotKey = "";
+  let availableTimes = [];
+
+  function clearBookingSlots() {
+    slotRequest += 1;
+    fetchedSlotKey = "";
+    availableTimes = [];
+    $("book-start").value = "";
+    slotChoice.replaceChildren(new Option("Load available times to begin", ""));
+  }
+  $("book-day").addEventListener("change", clearBookingSlots);
+  $("book-service").addEventListener("input", clearBookingSlots);
+  slotChoice.addEventListener("change", () => {
+    const selected = slotChoice.value;
+    $("book-start").value = availableTimes.includes(selected) ? selected : "";
+  });
   $("load-slots").addEventListener("click", async () => {
+    clearBookingSlots();
+    const request = slotRequest;
     try {
-      const day = $("book-day").value || new Date().toISOString().slice(0, 10);
+      requireSession();
+      const day = $("book-day").value;
+      const service = $("book-service").value.trim();
+      if (!day || !service) throw new Error("Choose an appointment day and service first.");
+      const key = `${service}|${day}`;
       const data = await api(
-        `/api/nova/growth-agent/availability?service_code=${encodeURIComponent($("book-service").value)}&day=${encodeURIComponent(day)}`
+        `/api/nova/growth-agent/availability?service_code=${encodeURIComponent(service)}&day=${encodeURIComponent(day)}`
       );
-      if (data.slots && data.slots[0]) $("book-start").value = data.slots[0].starts_at_utc;
-      $("book-out").textContent = JSON.stringify(data, null, 2);
+      if (request !== slotRequest) return;
+      const count = window.NovaBookingSlots.populate(slotChoice, data);
+      availableTimes = window.NovaBookingSlots.availableSlots(data);
+      fetchedSlotKey = key;
+      $("book-out").textContent = count
+        ? `Choose one of the ${count} available times listed above. This is a staging booking, not a Google Calendar confirmation.`
+        : "No available times were returned for this service and date.";
     } catch (err) {
+      if (request !== slotRequest) return;
       $("book-out").textContent = err.message;
     }
   });
 
   $("book-slot").addEventListener("click", async () => {
     try {
+      requireSession();
+      const contactId = $("wf-contact").value.trim();
+      const service = $("book-service").value.trim();
+      const key = `${service}|${$("book-day").value}`;
+      const selected = slotChoice.value;
+      if (!contactId) throw new Error("Select an existing customer ID from the CRM first.");
+      if (!selected || !availableTimes.includes(selected) || key !== fetchedSlotKey ||
+          $("book-start").value !== selected) {
+        throw new Error("Load available times and choose one before creating a staging appointment.");
+      }
       const data = await api("/api/nova/growth-agent/appointments", {
         method: "POST",
         body: JSON.stringify({
-          contact_id: $("wf-contact").value.trim(),
-          service_code: $("book-service").value.trim(),
-          starts_at_utc: $("book-start").value.trim(),
+          contact_id: contactId,
+          service_code: service,
+          starts_at_utc: selected,
           idempotency_key: `ui-${Date.now()}`,
         }),
       });
       if (data.id) $("book-appt-id").value = data.id;
       $("book-out").textContent = JSON.stringify(data, null, 2);
+      clearBookingSlots();
       await refreshAll();
     } catch (err) {
       $("book-out").textContent = err.message;
