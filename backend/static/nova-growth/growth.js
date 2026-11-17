@@ -437,6 +437,23 @@
     const selected = slotChoice.value;
     $("book-start").value = availableTimes.includes(selected) ? selected : "";
   });
+  $("prepare-synthetic-contact").addEventListener("click", async () => {
+    try {
+      requireSession();
+      const data = await api("/api/nova/growth-agent/staging/booking-contact", {
+        method: "POST",
+        body: "{}",
+      });
+      if (!data.is_synthetic_demo || !data.staging_only || !data.contact_id) {
+        throw new Error("Synthetic test customer was not verified.");
+      }
+      $("wf-contact").value = data.contact_id;
+      $("book-out").textContent = "Synthetic test customer prepared and selected. Load available times and choose a slot. No appointment has been created.";
+      await refreshLeads();
+    } catch (err) {
+      $("book-out").textContent = err.message;
+    }
+  });
   $("prepare-staging-service").addEventListener("click", async () => {
     try {
       requireSession();
