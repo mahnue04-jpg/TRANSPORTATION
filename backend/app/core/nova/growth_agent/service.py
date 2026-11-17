@@ -426,6 +426,61 @@ class GrowthAgentService:
                 )
             )
 
+    def prepare_staging_booking_service(
+        self, org_id: str, *, service_code: str, actor_user_id: str
+    ) -> dict[str, Any]:
+        """Explicit owner-only staging setup; never activates a profile or a live provider."""
+        from app.core.nova.growth_agent.flags import demo_mode_enabled
+
+        bind = self.db.get_bind()
+        db_name = str(getattr(getattr(bind, "url", None), "database", "") or "")
+        if not demo_mode_enabled() or db_name != "nova_ga_receptionist_dispos":
+            raise GrowthAgentError("STAGING_ONLY", "Test service setup is available only in isolated receptionist staging", http_status=403)
+        profile = self._require_profile(org_id)
+        code = str(service_code or "").strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", code):
+            raise GrowthAgentError("VALIDATION", "Choose a valid service code", http_status=400)
+        definitions = [
+            item for item in (profile.services_json or [])
+            if str(item.get("code") or "").strip() == code
+        ]
+        if len(definitions) != 1:
+            raise GrowthAgentError("NOT_FOUND", "This service is not in the saved business setup", http_status=404)
+        item = definitions[0]
+        duration = int(item.get("duration_minutes") or 30)
+        buffer = int(item.get("buffer_minutes") or 10)
+        if not 5 <= duration <= 240 or not 0 <= buffer <= 120:
+            raise GrowthAgentError("VALIDATION", "Invalid test service duration or buffer", http_status=400)
+        service = self._org_query(GaAppointmentService, org_id).filter_by(code=code).one_or_none()
+        if service is not None and not service.active:
+            raise GrowthAgentError("CONFLICT", "Inactive service cannot be reactivated by test setup", http_status=409)
+        created = False
+        if service is None:
+            service = GaAppointmentService(
+                id=_id(), organization_id=org_id, code=code,
+                name=str(item.get("name") or code)[:200],
+                duration_minutes=duration, buffer_minutes=buffer, active=True,
+            )
+            self.db.add(service)
+            created = True
+        rules_created = 0
+        if self._org_query(GaAvailabilityRule, org_id).count() == 0:
+            for dow in range(5):
+                self.db.add(GaAvailabilityRule(
+                    id=_id(), organization_id=org_id, day_of_week=dow,
+                    start_minute=9 * 60, end_minute=17 * 60,
+                ))
+                rules_created += 1
+        self.db.commit()
+        return {
+            "service_code": code,
+            "created": created,
+            "availability_rules_created": rules_created,
+            "staging_only": True,
+            "profile_activated": bool(profile.activated),
+            "external_delivery_enabled": False,
+        }
+
     def _ensure_default_services(self, org_id: str, profile: GaBusinessProfile) -> None:
         services = profile.services_json or [{"code": "consult", "name": "Consultation", "duration_minutes": 30}]
         for svc in services:
