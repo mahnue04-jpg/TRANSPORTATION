@@ -10,6 +10,10 @@ on:
       - "backend/static/nova-growth/owner-copy.test.cjs"
       - "backend/static/nova-growth/booking-slots.js"
       - "backend/static/nova-growth/booking-slots.test.cjs"
+      - "backend/app/core/nova/growth_agent/service.py"
+      - "backend/app/core/nova/growth_agent/router.py"
+      - "backend/app/core/nova/growth_agent/schemas.py"
+      - "backend/tests/test_nova_ga_staging_booking_service.py"
       - ".github/workflows/nova-growth-session-ui-check.yml"
   push:
     branches:
