@@ -97,3 +97,39 @@ def test_default_disabled_and_fingerprint_scope_reuse(database, monkeypatch):
         monkeypatch.delenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED")
         with pytest.raises(leases.LeaseBlocked, match="disabled"):
             leases.claim(db)
+
+
+def test_renew_extends_only_current_lease(database):
+    seed(database, "synthetic-renew")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        current = leases.claim(db, now=now, lease_seconds=30)
+        assert current
+        leases.renew(db, claimed=current, now=now + timedelta(seconds=10),
+                     lease_seconds=60)
+        assert leases.claim(db, now=now + timedelta(seconds=40)) is None
+        with pytest.raises(leases.LeaseBlocked, match="expired"):
+            leases.renew(db, claimed=current, now=now + timedelta(seconds=71))
+        leases.complete(db, claimed=current, output_sha256="b" * 64,
+                        now=now + timedelta(seconds=60))
+
+
+def test_expired_exhausted_claim_is_terminal_and_not_reclaimed(database):
+    seed(database, "synthetic-exhaust")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        db.execute(sa.update(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-exhaust"
+        ).values(attempts=2))
+        db.commit()
+        final = leases.claim(db, now=now, lease_seconds=10)
+        assert final and final.attempts == 3
+        assert leases.claim(db, now=now + timedelta(seconds=11)) is None
+        assert leases.exhaust_expired(db, now=now + timedelta(seconds=11)) == 1
+        assert leases.exhaust_expired(db, now=now + timedelta(seconds=12)) == 0
+        with pytest.raises(leases.LeaseBlocked):
+            leases.complete(db, claimed=final, output_sha256="b" * 64,
+                            now=now + timedelta(seconds=12))
+        state = db.execute(sa.select(leases.lease_jobs.c.state).where(
+            leases.lease_jobs.c.job_id == "synthetic-exhaust")).scalar_one()
+        assert state == "FAILED"
