@@ -43,9 +43,14 @@ try {
         .replace('</body>', '<script>' + fixture + '</script><script>' + source + '</script><script>' + check + '</script></body>');
       const file = path.join(tmp, pageName + '-' + signedIn + '.html');
       fs.writeFileSync(file, html);
+      // Isolate Chrome state per render; timeout is a real failure, never a pass.
+      const profile = path.join(tmp, 'chrome-' + pageName + '-' + signedIn);
       const dom = execFileSync(browser, ['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
-        '--no-first-run','--virtual-time-budget=1500','--dump-dom','file://' + file + (signedIn ? '?signin=1' : '')],
-        {encoding:'utf8',timeout:20000,stdio:['ignore','pipe','pipe']});
+        '--no-first-run','--no-default-browser-check','--disable-background-networking',
+        '--disable-component-update','--disable-extensions','--disable-features=MediaRouter',
+        '--user-data-dir=' + profile,
+        '--virtual-time-budget=1500','--dump-dom','file://' + file + (signedIn ? '?signin=1' : '')],
+        {encoding:'utf8',timeout:60000,stdio:['ignore','pipe','pipe']});
       assert.match(dom, /<output id="auth-render-result" data-result="pass">/, pageName + ' signedIn=' + signedIn);
       console.log('PASS rendered ' + pageName + ' signedIn=' + signedIn);
     }

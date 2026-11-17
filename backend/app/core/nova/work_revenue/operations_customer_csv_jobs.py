@@ -225,11 +225,17 @@ def review_job(
     if row["status"] != "AWAITING_REVIEW":
         raise CustomerCSVBlocked("Job is not awaiting owner review")
     status = "APPROVED_FOR_DOWNLOAD" if approve else "REJECTED"
-    db.execute(sa.update(jobs).where(
-        jobs.c.id == job_id, jobs.c.organization_id == org,
-        jobs.c.owner_user_id == owner, jobs.c.status == "AWAITING_REVIEW",
-    ).values(status=status, reviewer_user_id=owner, updated_at=_utc()))
-    db.commit()
+    try:
+        changed = db.execute(sa.update(jobs).where(
+            jobs.c.id == job_id, jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner, jobs.c.status == "AWAITING_REVIEW",
+        ).values(status=status, reviewer_user_id=owner, updated_at=_utc()))
+        if changed.rowcount != 1:
+            raise CustomerCSVBlocked("Job review state changed; retry after refresh", 409)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"job_id": job_id, "status": status, "delivered": False}
 
 

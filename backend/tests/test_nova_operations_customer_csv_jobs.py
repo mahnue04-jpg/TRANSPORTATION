@@ -189,3 +189,25 @@ def test_runtime_guard_remains_default_off(monkeypatch):
             jobs.require_runtime(db)
         assert denied.value.code == 503
     engine.dispose()
+
+
+def test_review_rejects_stale_update_without_approving(state, monkeypatch):
+    """A stale review state must not report approval or leave a transaction open."""
+    db, _ = state
+    job_id = submit(db)["job_id"]
+    real_execute = db.execute
+
+    class StaleUpdate:
+        rowcount = 0
+
+    def simulate_stale_update(statement, *args, **kwargs):
+        if isinstance(statement, jobs.sa.sql.dml.Update) and statement.table.name == jobs.jobs.name:
+            return StaleUpdate()
+        return real_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute", simulate_stale_update)
+    with pytest.raises(jobs.CustomerCSVBlocked) as exc:
+        jobs.review_job(db, org="org-a", owner="owner-a", job_id=job_id, approve=True)
+    assert exc.value.code == 409
+    monkeypatch.setattr(db, "execute", real_execute)
+    assert jobs.job_status(db, org="org-a", owner="owner-a", job_id=job_id)["status"] == "AWAITING_REVIEW"
