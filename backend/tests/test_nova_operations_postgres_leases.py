@@ -72,6 +72,69 @@ def test_two_workers_claim_only_once(database):
     assert sum(claim is not None for claim in claims) == 1
 
 
+def test_expired_worker_cannot_fail_or_requeue(database):
+    seed(database)
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        claimed = leases.claim(db, now=now, lease_seconds=60)
+        assert claimed is not None
+    with Session(database) as db:
+        with pytest.raises(leases.LeaseBlocked, match="Stale"):
+            leases.fail_or_retry(db, claimed=claimed, now=now + timedelta(seconds=61))
+        reclaimed = leases.claim(db, now=now + timedelta(seconds=61))
+        assert reclaimed is not None
+        assert reclaimed.token != claimed.token and reclaimed.attempts == 2
+
+
+def test_enqueue_same_identity_is_idempotent(database):
+    seed(database)
+    with Session(database) as db:
+        leases.enqueue(db, job_id="synthetic-a", organization_id="org-a",
+                       owner_user_id="owner-a", input_sha256="a" * 64)
+        count = db.execute(sa.select(sa.func.count()).select_from(leases.lease_jobs)).scalar()
+    assert count == 1
+
+
+def test_concurrent_enqueue_keeps_one_identity(database):
+    gate = Barrier(2)
+
+    def once(org):
+        with Session(database) as db:
+            gate.wait(timeout=10)
+            leases.enqueue(db, job_id="synthetic-race", organization_id=org,
+                           owner_user_id="owner-a", input_sha256="c" * 64)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        same = [pool.submit(once, "org-a"), pool.submit(once, "org-a")]
+        for job in same:
+            job.result(timeout=15)
+    with Session(database) as db:
+        rows = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-race")).mappings().all()
+    assert len(rows) == 1 and rows[0]["organization_id"] == "org-a"
+
+    gate = Barrier(2)
+    outcomes = []
+
+    def contested(org):
+        with Session(database) as db:
+            gate.wait(timeout=10)
+            try:
+                leases.enqueue(db, job_id="synthetic-contest", organization_id=org,
+                               owner_user_id="owner-a", input_sha256="d" * 64)
+            except leases.LeaseBlocked as exc:
+                outcomes.append(str(exc))
+            else:
+                outcomes.append("ok")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(contested, "org-a"), pool.submit(contested, "org-b")]
+        for job in jobs:
+            job.result(timeout=15)
+    assert outcomes.count("ok") == 1
+    assert any("different" in item for item in outcomes)
+
+
 def test_failed_claim_retries_and_exhausts(database):
     seed(database)
     now = datetime.now(timezone.utc)

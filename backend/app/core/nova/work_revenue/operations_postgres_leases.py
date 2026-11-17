@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 lease_metadata = sa.MetaData()
@@ -80,20 +81,27 @@ def enqueue(db: Session, *, job_id: str, organization_id: str,
         raise LeaseBlocked("Invalid job identity or fingerprint")
     now = now or _now()
     try:
+        # A missing-row FOR UPDATE locks nothing under READ COMMITTED.
+        # Insert first so the primary key serializes a new identity.
+        inserted = db.execute(
+            pg_insert(lease_jobs).values(
+                job_id=job_id, organization_id=organization_id,
+                owner_user_id=owner_user_id, input_sha256=input_sha256,
+                state="QUEUED", attempts=0, max_attempts=3,
+                available_at=now, updated_at=now,
+            ).on_conflict_do_nothing(
+                index_elements=[lease_jobs.c.job_id]
+            ).returning(lease_jobs.c.job_id)
+        ).scalar()
         row = db.execute(sa.select(lease_jobs).where(
             lease_jobs.c.job_id == job_id).with_for_update()).mappings().first()
-        if row:
-            if (row["organization_id"], row["owner_user_id"], row["input_sha256"]) != (
-                organization_id, owner_user_id, input_sha256
-            ):
-                raise LeaseBlocked("Job identity reused with different scope or input")
+        if not row or (
+            row["organization_id"], row["owner_user_id"], row["input_sha256"]
+        ) != (organization_id, owner_user_id, input_sha256):
+            raise LeaseBlocked("Job identity reused with different scope or input")
+        if inserted is None:
             db.rollback()
             return
-        db.execute(sa.insert(lease_jobs).values(
-            job_id=job_id, organization_id=organization_id,
-            owner_user_id=owner_user_id, input_sha256=input_sha256,
-            state="QUEUED", attempts=0, max_attempts=3,
-            available_at=now, updated_at=now))
         db.commit()
     except Exception:
         db.rollback()
@@ -164,26 +172,34 @@ def complete(db: Session, *, claimed: LeaseClaim, output_sha256: str,
 
 def fail_or_retry(db: Session, *, claimed: LeaseClaim, now: datetime | None = None,
                   retry_delay_seconds: int = 30) -> str:
-    """Retry bounded failures; stale workers cannot requeue a newer claim."""
+    """Retry bounded failures; stale or expired workers cannot requeue a lease."""
     _guard(db)
     if type(retry_delay_seconds) is not int or not 0 <= retry_delay_seconds <= 3600:
         raise LeaseBlocked("Invalid retry delay")
     now = now or _now()
     try:
+        held = sa.and_(
+            lease_jobs.c.state == "RUNNING",
+            lease_jobs.c.lease_token == claimed.token,
+            lease_jobs.c.lease_until > now,
+        )
         row = db.execute(sa.select(lease_jobs).where(
             lease_jobs.c.job_id == claimed.job_id,
             lease_jobs.c.organization_id == claimed.organization_id,
             lease_jobs.c.owner_user_id == claimed.owner_user_id,
+            held,
         ).with_for_update()).mappings().first()
-        if not row or row["state"] != "RUNNING" or row["lease_token"] != claimed.token:
+        if not row:
             raise LeaseBlocked("Stale worker failure")
         state = "FAILED" if row["attempts"] >= row["max_attempts"] else "QUEUED"
-        db.execute(sa.update(lease_jobs).where(
+        changed = db.execute(sa.update(lease_jobs).where(
             lease_jobs.c.job_id == claimed.job_id,
-            lease_jobs.c.lease_token == claimed.token,
+            held,
         ).values(state=state, lease_token=None, lease_until=None,
                  available_at=now + timedelta(seconds=retry_delay_seconds),
                  updated_at=now))
+        if changed.rowcount != 1:
+            raise LeaseBlocked("Stale worker failure")
         db.commit()
         return state
     except Exception:
