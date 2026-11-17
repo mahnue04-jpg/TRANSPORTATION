@@ -260,10 +260,21 @@
               l.notes || ""
             )}" /></td>
             <td>${l.is_synthetic_demo ? '<span class="tag demo">Synthetic</span>' : ""}</td>
-            <td><button type="button" class="secondary" data-save-lead>Save</button></td>
+            <td><button type="button" class="secondary" data-save-lead>Save</button>${l.is_synthetic_demo ? ' <button type="button" class="secondary" data-test-booking>Use for test booking</button>' : ""}</td>
           </tr>`;
         })
         .join("")}</tbody></table>`;
+      // Only synthetic demo contacts may be copied into the staging booking form.
+      // Never display or copy a real customer's internal identifier from this control.
+      box.querySelectorAll("[data-test-booking]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const row = btn.closest("tr");
+          const id = row?.dataset.leadId;
+          if (!id) return;
+          $("wf-contact").value = id;
+          setBanner("Demo customer selected for staging booking. Return to Booking & workflows.", "ok");
+        });
+      });
       box.querySelectorAll("[data-save-lead]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const row = btn.closest("tr");
