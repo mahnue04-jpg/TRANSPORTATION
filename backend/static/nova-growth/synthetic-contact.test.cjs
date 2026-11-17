@@ -19,3 +19,9 @@ test("synthetic fixture loads CRM and fills Customer ID, no booking side effect"
   assert.match(section, /await refreshLeads\(\)/);
   assert.doesNotMatch(section, /\/appointments"|\/widget\/chat|create-widget|book-slot/);
 });
+
+test("booked appointment is labeled synthetic only for selected test customer", () => {
+  assert.match(js, /let selectedSyntheticContactId = ""/);
+  assert.match(js, /selectedSyntheticContactId = data\.contact_id/);
+  assert.match(js, /is_synthetic_demo: Boolean\(selectedSyntheticContactId\) && contactId === selectedSyntheticContactId/);
+});
