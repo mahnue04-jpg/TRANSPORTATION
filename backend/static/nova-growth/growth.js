@@ -408,28 +408,6 @@
     }
   });
 
-  $("prepare-staging-service").addEventListener("click", async () => {
-    try {
-      requireSession();
-      const service = $("book-service").value.trim();
-      if (!service) throw new Error("Enter the service code from your saved setup first.");
-      const data = await api("/api/nova/growth-agent/staging/booking-service", {
-        method: "POST",
-        body: JSON.stringify({ service_code: service }),
-      });
-      $("book-out").textContent = data.staging_only
-        ? "Test service is prepared. Click Load available times. No real customer calls or Google Calendar bookings were activated."
-        : "Unexpected service preparation response.";
-    } catch (err) {
-      const detail = String(err.message || "");
-      $("book-out").textContent = detail.includes("NOT_FOUND") || detail.includes("not in the saved business setup")
-        ? "The test service is not in your saved business setup. Save the draft services first; do not use Save & activate."
-        : detail.includes("Staging service preparation is disabled")
-          ? "Test-service preparation is not enabled on this staging environment. No booking was created."
-          : detail;
-    }
-  });
-
   const slotChoice = $("book-slot-choice");
   let slotRequest = 0;
   let fetchedSlotKey = "";
