@@ -15,6 +15,11 @@ from pathlib import Path
 
 
 def main() -> None:
+    # Render may invoke this through runpy from the backend working directory.
+    # Make sibling bootstrap import deterministic in either invocation mode.
+    script_dir = str(Path(__file__).resolve().parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
     import receptionist_staging_start as existing
 
     print("[receptionist-diag-bootstrap] running existing guarded migration checks", flush=True)
