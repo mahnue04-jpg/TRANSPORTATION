@@ -1,0 +1,32 @@
+name: Receptionist synthetic booking contact tests
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/core/nova/growth_agent/service.py"
+      - "backend/app/core/nova/growth_agent/router.py"
+      - "backend/app/core/nova/growth_agent/schemas.py"
+      - "backend/tests/test_nova_receptionist_synthetic_contact.py"
+      - "backend/static/nova-growth/index.html"
+      - "backend/static/nova-growth/growth.js"
+      - ".github/workflows/nova-receptionist-synthetic-contact.yml"
+
+jobs:
+  synthetic-booking-contact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+      - name: Verify Python and browser script syntax
+        run: |
+          python -m py_compile app/core/nova/growth_agent/service.py app/core/nova/growth_agent/router.py app/core/nova/growth_agent/schemas.py
+          node --check static/nova-growth/growth.js
+      - name: Test no-contact synthetic staging fixture
+        run: python -m pytest -q tests/test_nova_receptionist_synthetic_contact.py
