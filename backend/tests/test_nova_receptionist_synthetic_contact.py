@@ -47,11 +47,12 @@ def test_fixture_is_synthetic_and_never_relabels_legacy_lead(db, monkeypatch):
     db.add(legacy)
     db.commit()
 
-    # Only override the database-name read; preserve actual SQLite test DB.
-    real_get_bind = db.get_bind
-    fake_bind = Mock()
-    fake_bind.url.database = "nova_ga_receptionist_dispos"
-    monkeypatch.setattr(db, "get_bind", lambda **kwargs: fake_bind)
+    # Replace only URL metadata on the real in-memory test engine.
+    # Do not fake Session.get_bind; ORM queries must still run against SQLite.
+    real_engine = db.get_bind()
+    fake_url = Mock()
+    fake_url.database = "nova_ga_receptionist_dispos"
+    monkeypatch.setattr(real_engine, "url", fake_url)
     monkeypatch.setattr(svc, "_require_profile", lambda org: object())
     monkeypatch.setattr(svc, "audit", lambda *args, **kwargs: None)
     created = svc.prepare_staging_booking_contact("org-test", actor_user_id="owner-test")
