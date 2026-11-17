@@ -83,10 +83,6 @@ class StagingBookingServiceIn(OrgScoped):
     service_code: str
 
 
-class StagingBookingContactIn(OrgScoped):
-    pass
-
-
 class BookIn(OrgScoped):
     contact_id: str
     service_code: str
