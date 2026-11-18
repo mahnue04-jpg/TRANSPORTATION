@@ -62,3 +62,8 @@ A migration safety audit found that the initial proposed Operations lease revisi
 - The older successful full run #44244423782 verified SHA `230723e0daa6bec9804eb5c3dc9139bff0370755` **before these migration hardening changes**. The newer migration changes have their own CI gate; do not treat the previous success as evidence that the new migration has passed.
 
 This is not permission to apply the migration to any connected database. A dedicated Operations staging service/database, review of Alembic ancestry, approved backup, and separate owner approval are still mandatory.
+
+
+## Staging schema packaging — automatic migrations isolated
+
+The Operations-only proposed schema has been relocated to `backend/staging_migrations/operations_lease_schema.py`, **outside** `backend/migrations/versions`. This prevents routine Alembic upgrades for unrelated products from either creating Operations tables or failing because Operations staging approval is absent. The module still checks the explicit staging environment, approval flag and exact PostgreSQL database name before executing any DDL; it refuses silent downgrade. No automatic staging runner or deployment is configured. It must not be marked applied in the shared Alembic history. A future approved isolated Operations-only migration procedure and backup/rollback plan are still required.
