@@ -326,8 +326,9 @@ def test_growth_preview_is_default_off(monkeypatch):
 
 
 def test_growth_preview_rejects_live_flag(monkeypatch):
+    event = convert(enabled=True)
     monkeypatch.setenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED", "true")
     with pytest.raises(PermissionError):
         adapter.preview_growth_campaign_from_studio(
-            convert(enabled=True), growth_profile(), enabled=True,
+            event, growth_profile(), enabled=True,
         )
