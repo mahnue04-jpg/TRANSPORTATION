@@ -23,6 +23,7 @@
 - `operations_lease_worker.py`: explicit one-job executor, strict bound-input option, uncertainty holds.
 - `operations_owner_task_authorizer.py`: authenticated-owner adapter to the existing live saved-task eligibility check; not a background worker service principal.
 - `operations_owner_csv_api.py`: separately gated `/operations/queued/` owner-only HTTP endpoints for task-specific intake, supervised exact-job process, explicit owner review, sanitized status, and approval-only download. These do not run a background service. Requires `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED=true` plus all existing DB/private-storage gates; default off.
+- `backend/static/nova-work/index.html` and `operations-csv.js`: owner-facing explicit opt-in for the supervised queue, separate process button, status and approval-only download; legacy `/durable/` mode remains default. No unattended processing. JavaScript syntax and static UI contract are CI-gated.
 - `operations_queued_csv_pipeline.py`: verifies private output by readback and SHA-256 before review publication; separately verifies private output integrity before explicit owner approval.
 - `operations_queued_csv_pipeline.py`: explicit development-only queue intake -> processing -> private review -> owner decision coordinator. Requires an injected independent saved-task authorizer.
 - `operations_lease_reconciliation.py` and `operations_csv_reconciliation_bridge.py`: read-only owner-scoped reconciliation helpers.
@@ -51,7 +52,7 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 ## Still REQUIRED before any staging execution
 
 1. **Real authorization integration:** Development-only supervised owner routes now reuse the existing owner guard and saved-task eligibility checks; the runtime gate is default off. A revocable hosted worker service principal remains absent. HTTP acceptance has not yet been established on a deployed isolated staging instance; do not interpret these routes as autonomous customer processing.
-2. **S3 private-object security:** Owner-authorized provider credentials; real private bucket settings; key provenance/scope; immutable or versioned object behavior; non-public ACL; encryption; retention; orphan cleanup; and real storage outage testing. Current tests use fake storage.
+2. **S3 private-object security:** Owner-authorized provider credentials; real private bucket settings; key provenance/scope; immutable or versioned object behavior; non-public ACL; encryption; retention; orphan cleanup; and real storage outage testing. Exact organization/job/owner storage-key prefixes are now checked on write receipt, database binding, and read; this is NOT a substitute for real S3 authorization. Tests still use fake storage.
 3. **Atomicity and crash windows:** Queue and private writes cross two systems. Reservation-before-write may strand jobs; write-before-bind may orphan artifacts; successful output before DB commit may leave an orphan. Add an audited outbox/reconciler and recovery rules. Current code fails closed but cannot automatically repair every window.
 4. **Lease/output reconciliation:** Held jobs whose customer CSV row remains `PROCESSING` need a private-output provenance record and deliberate owner-approved recovery, without automatic retry. SHA alone is not authorization.
 5. **Worker lifecycle:** An explicit script/service, restart loop, shutdown and heartbeat, metrics, rate limits, cancellation and lease renewal, real subprocess kill/restart tests, and isolated hosted worker validation. The current one-job function is not a hosted service.
@@ -68,5 +69,5 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 ## Verification checkpoint
 
 - A consolidated CI run for head `3355642040caecde475a497151d5f123d75c2962` completed successfully (run `44236365391`). This predates the new supervised HTTP endpoints.
-- The new owner-only HTTP routes and tests are on the later PR head; **require latest-head four-job CI success** before acceptance. No assertion of staging or live readiness.
+- The new owner-only HTTP routes, optional UI and tests are on the later PR head; **require latest-head four-job CI success** before acceptance. No assertion of staging or live readiness.
 - Current route flag: `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED` defaults to disabled. No agent background loop or scheduled work is enabled.
