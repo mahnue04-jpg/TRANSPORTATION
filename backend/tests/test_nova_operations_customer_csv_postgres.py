@@ -1456,3 +1456,57 @@ def test_orphan_inventory_detects_missing_bound_object_without_deleting(
         assert result["delete_performed"] is False
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_read_only_s3_orphan_audit_links_to_scoped_postgres_job(
+    postgres, monkeypatch,
+):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import submit_queued_csv
+    from app.core.nova.work_revenue.operations_orphan_audit import (
+        inspect_job_s3_objects, OrphanAuditBlocked,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="orphan-s3-integration", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True,
+        )
+        prefix = "synthetic-org/" + created["job_id"] + "/"
+        keys = list(store.items) + [prefix + "nova-csv-input-synthetic-owner/orphan.bin"]
+
+        class ScopedFakeS3:
+            def __init__(self):
+                self.calls = []
+            def list_objects_v2(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"Contents": [{"Key": k} for k in keys],
+                        "IsTruncated": False}
+
+        private_s3 = ScopedFakeS3()
+        with factory() as db:
+            with pytest.raises(OrphanAuditBlocked, match="exact owner scope"):
+                inspect_job_s3_objects(
+                    db, organization_id="synthetic-org",
+                    owner_user_id="wrong-owner", job_id=created["job_id"],
+                    s3_client=private_s3, private_bucket="synthetic-private")
+            assert private_s3.calls == []
+            result = inspect_job_s3_objects(
+                db, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=created["job_id"],
+                s3_client=private_s3, private_bucket="synthetic-private")
+        assert len(private_s3.calls) == 1
+        assert private_s3.calls[0]["Prefix"] == prefix
+        assert result["bound_objects_present"] == 1
+        assert result["orphan_candidates"] == 1
+        assert result["safe_to_delete"] is False
+        assert result["delete_performed"] is False
+        assert "storage_ref" not in result
+    finally:
+        leases.lease_metadata.drop_all(engine)
