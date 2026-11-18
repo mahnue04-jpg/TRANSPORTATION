@@ -124,9 +124,8 @@ def test_token_org_cannot_override_persisted_user_org(monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(org="org-A")
     reply = get(make_app(user), signed(user, org="org-B"))
-    assert reply.status_code == 200
-    assert reply.json()["journeys"] == []
-    # Authorization is scoped to persisted user.organization_id, not JWT org.
+    assert reply.status_code == 403
+    # Mismatched signed tenant claim is denied rather than silently re-scoped.
     assert user.organization_id == "org-A"
 
 

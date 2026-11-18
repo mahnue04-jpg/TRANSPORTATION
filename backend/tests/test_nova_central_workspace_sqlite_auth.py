@@ -121,10 +121,8 @@ def test_real_orm_support_role_does_not_inherit_customer_owner_rights(sandbox):
 def test_organization_mismatch_token_never_returns_customer_journeys(sandbox):
     app, _ = sandbox
     result = read(app, token(org="org-B"))
-    # This readiness endpoint reads no customer data at all. Actual record-level
-    # organization isolation must be verified before any journey connection.
-    assert result.status_code == 200
-    assert result.json()["journeys"] == []
+    # Even read-only readiness rejects a token claiming a different tenant.
+    assert result.status_code == 403
 
 
 
@@ -167,9 +165,8 @@ def test_two_disposable_org_accounts_do_not_share_identity(sandbox):
         "organization_id": "org-A",
     })
     result = read(app, second_token)
-    assert result.status_code == 200
-    assert result.json()["journeys"] == []
-    # The JWT organization claim is never used to resolve the persisted user.
+    assert result.status_code == 403
+    # Mismatched signed tenant scope is denied before returning readiness.
     with factory() as db:
         first = db.query(User).filter(User.id == "synthetic-owner-1").one()
         second = db.query(User).filter(User.id == "synthetic-owner-2").one()
@@ -184,3 +181,41 @@ def test_known_owner_cannot_impersonate_another_account_with_invalid_signature(s
     assert len(parts) == 3
     damaged = ".".join(parts[:2] + ["invalidsignature"])
     assert read(app, damaged).status_code == 401
+
+
+def test_old_token_denied_after_account_organization_transfer(sandbox):
+    app, factory = sandbox
+    old_token = token(org="org-A")
+    assert read(app, old_token).status_code == 200
+    modify(factory, organization_id="org-B")
+    assert read(app, old_token).status_code == 403
+    assert read(app, token(org="org-B")).status_code == 200
+
+
+def test_signed_admin_cookie_is_tenant_bound(sandbox):
+    from app import auth
+    app, _ = sandbox
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-A"))
+        assert client.get("/central/journeys").status_code == 200
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-B"))
+        assert client.get("/central/journeys").status_code == 403
+
+
+def test_owner_readiness_response_is_not_cacheable(sandbox):
+    app, _ = sandbox
+    response = read(app, token(org="org-A"))
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    vary = {item.strip().lower() for item in response.headers["vary"].split(",")}
+    assert {"authorization", "cookie"} <= vary
+
+
+def test_cookie_owner_readiness_response_is_not_cacheable(sandbox):
+    from app import auth
+    app, _ = sandbox
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-A"))
+        response = client.get("/central/journeys")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
