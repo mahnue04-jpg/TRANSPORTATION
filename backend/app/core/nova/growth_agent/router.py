@@ -630,7 +630,7 @@ def campaign_asset_preview(
 # Review queue APIs are disabled independently from the campaign preview.
 # Explicit schema provisioning is separate and never performed by GET/POST.
 from app.core.nova.growth_agent.campaign_registry import (
-    CampaignReviewRegistry, CampaignRegistryDenied,
+    CampaignReviewRegistry, CampaignRegistryDenied, CampaignRegistryUnavailable,
 )
 import os as _campaign_os
 
@@ -687,6 +687,8 @@ def register_campaign_review(
             project_id=body.studio_project_id, asset_id=body.asset_id,
         )
         return {"outcome": outcome, "review": result}
+    except CampaignRegistryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CampaignRegistryDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -704,6 +706,8 @@ def list_campaign_reviews(
         return {"reviews": CampaignReviewRegistry(db).list_for_owner(
             org=org, owner_id=user.user_id,
         )}
+    except CampaignRegistryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CampaignRegistryDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -723,5 +727,7 @@ def withdraw_campaign_review(
             org=org, owner_id=user.user_id, campaign_id=campaign_id,
         )
         return {"outcome": outcome, "review": result}
+    except CampaignRegistryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CampaignRegistryDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
