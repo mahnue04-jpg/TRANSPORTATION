@@ -5,12 +5,13 @@ Revises: 20261109_nova_csv_jobs
 
 Review-only migration. DDL is permitted only with an exact staging
 environment and an explicit schema approval flag. Ambiguous staging is blocked.
-Outside staging this migration is a no-op, matching the existing CSV revision;
-production release requires its own explicit, separately reviewed migration.
+Outside the explicitly authorized staging target this migration raises and must
+NOT be marked applied. Production needs a separate reviewed migration.
 """
 from __future__ import annotations
 
 import os
+import re
 
 import sqlalchemy as sa
 from alembic import op
@@ -40,14 +41,19 @@ def upgrade() -> None:
         for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")
         if os.getenv(name)
     }
-    if "staging" in environments and not _allowed():
-        raise RuntimeError("Explicit staging-only Operations lease schema approval required")
+    # Never report an unapplied migration as applied in production or other
+    # environments. A silent no-op is unsafe for the Alembic version ledger.
     if not _allowed():
-        # No accidental production/shared-database DDL or worker activation.
-        return
+        raise RuntimeError("Explicit staging-only Operations lease schema approval required")
+    expected_db = os.getenv("NOVA_OPERATIONS_EXPECTED_STAGING_DATABASE", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,63}", expected_db):
+        raise RuntimeError("Exact approved Operations staging database name required")
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         raise RuntimeError("Operations lease metadata requires PostgreSQL")
+    actual_db = bind.execute(sa.text("SELECT current_database()")).scalar_one()
+    if actual_db != expected_db:
+        raise RuntimeError("Connected PostgreSQL database does not match staging approval")
     if TABLE in sa.inspect(bind).get_table_names():
         raise RuntimeError("Lease table already exists; reconcile before migration")
     op.create_table(
