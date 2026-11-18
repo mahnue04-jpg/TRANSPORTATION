@@ -7,6 +7,7 @@ on:
       - feature/nova-workspace-readonly-readiness-542
       - feature/nova-central-tenant-journey-store-542
       - feature/nova-central-token-tenant-binding-542
+      - feature/nova-central-read-model-542
     paths:
       - "backend/app/core/nova/workspace/central_journey_readonly.py"
       - "backend/app/core/nova/workspace/router.py"
@@ -18,6 +19,7 @@ on:
       - "backend/tests/test_synthetic_nova_tenant_http_542.py"
       - "backend/app/core/nova/workspace/central_read_model.py"
       - "backend/tests/test_nova_central_read_model_542.py"
+      - "backend/tests/test_nova_central_staging_read_adapter_542.py"
       - ".github/workflows/nova-central-readonly-http.yml"
   workflow_dispatch:
 
@@ -48,5 +50,5 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Compile and test read-only HTTP boundary
         run: |
-          python -m py_compile app/core/nova/workspace/central_journey_readonly.py app/core/nova/workspace/router.py tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py tests/test_nova_central_workspace_sqlite_auth.py tests/synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_http_542.py app/core/nova/workspace/central_read_model.py tests/test_nova_central_read_model_542.py
-          python -m pytest tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py tests/test_nova_central_workspace_sqlite_auth.py tests/test_synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_http_542.py tests/test_nova_central_read_model_542.py -q --tb=short --noconftest
+          python -m py_compile app/core/nova/workspace/central_journey_readonly.py app/core/nova/workspace/router.py tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py tests/test_nova_central_workspace_sqlite_auth.py tests/synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_http_542.py app/core/nova/workspace/central_read_model.py tests/test_nova_central_read_model_542.py tests/test_nova_central_staging_read_adapter_542.py
+          python -m pytest tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py tests/test_nova_central_workspace_sqlite_auth.py tests/test_synthetic_nova_tenant_journey_store_542.py tests/test_synthetic_nova_tenant_http_542.py tests/test_nova_central_read_model_542.py tests/test_nova_central_staging_read_adapter_542.py -q --tb=short --noconftest
