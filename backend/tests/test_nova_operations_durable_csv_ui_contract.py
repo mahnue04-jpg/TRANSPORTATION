@@ -33,3 +33,16 @@ def test_no_automatic_customer_delivery_claim():
     assert "No customer delivery or payment occurred." in JS
     assert "Not delivered to a client." in JS
     assert "Owner review is not customer delivery" in HTML
+
+
+def test_supervised_queued_ui_is_opt_in_and_explicit():
+    assert 'id="operations-queued-mode"' in HTML
+    assert 'id="operations-queued-process"' in HTML
+    assert 'operations-queued-mode" />' in HTML
+    assert 'const mode = queued ? "queued" : "durable"' in JS
+    assert 'jobPath("/process")' in JS
+    assert '"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"' in JS
+    assert '"X-Nova-Owner-Action": queued ? "queue-csv-for-owner-review"' in JS
+    assert '"review-completed-queued-csv"' in JS
+    assert 'currentLeaseStatus !== "QUEUED"' in JS
+    assert "No customer delivery or payment occurred." in JS
