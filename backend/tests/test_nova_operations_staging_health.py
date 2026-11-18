@@ -1,6 +1,7 @@
 """Synthetic no-provider acceptance for the Operations read-only staging server."""
 from __future__ import annotations
 
+import ast
 import http.client
 import importlib.util
 import json
@@ -28,9 +29,16 @@ def load_diagnostic():
 
 def test_isolated_health_server_never_imports_customer_application():
     source = FILE.read_text(encoding="utf-8")
-    assert "from app" not in source
-    assert "import app" not in source
-    assert "sqlalchemy" not in source.lower().split("from __future__")[1].split("class DiagnosticHandler")[0]
+    # Inspect actual syntax, not docstring/comment text mentioning app imports.
+    imports = []
+    for node in ast.walk(ast.parse(source, filename=str(FILE))):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imports.append(node.module or "")
+    allowed = {"__future__", "json", "os", "http.server"}
+    assert set(imports).issubset(allowed), imports
+    assert "app.main" not in sys.modules
     module = load_diagnostic()
     server = ThreadingHTTPServer(("127.0.0.1", 0), module.DiagnosticHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
