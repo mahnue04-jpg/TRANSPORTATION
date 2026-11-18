@@ -218,7 +218,7 @@
       scopedStatus.textContent = "Submitting authorized CSV to private review processing...";
       try {
         const url = "/api/nova/work/operations/" + mode + "/engagements/" +
-          encodeURIComponent(selected.engagement_id) + "/tasks/"
+          encodeURIComponent(selected.engagement_id) + "/tasks/" +
           encodeURIComponent(selected.task_id) + "/jobs";
         const response = await fetch(url, {
           method: "POST", credentials: "same-origin", body: file,
