@@ -148,3 +148,86 @@ def test_postgres_concurrent_duplicate_key_creates_one_artifact(postgres):
     with Session(engine) as db:
         count = db.execute(sa.select(sa.func.count()).select_from(csvjobs.jobs)).scalar_one()
         assert count == 1
+
+
+def test_held_lease_reads_real_scoped_csv_private_artifact(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_csv_reconciliation_bridge import (
+        inspect_held_csv_artifact,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    try:
+        created = _submit(engine, "pg-held-bridge")
+        assert created["status"] == "AWAITING_REVIEW"
+        with Session(engine) as db:
+            row = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == created["job_id"]
+            )).mappings().one()
+            leases.enqueue(db, job_id=created["job_id"],
+                           organization_id=row["organization_id"],
+                           owner_user_id=row["owner_user_id"],
+                           input_sha256=row["input_sha256"])
+            claimed = leases.claim(db)
+            assert claimed and claimed.job_id == created["job_id"]
+            assert leases.hold_for_reconciliation(
+                db, claimed=claimed,
+                expected_output_sha256=row["output_sha256"])
+            first = inspect_held_csv_artifact(
+                db, job_id=created["job_id"], organization_id="synthetic-org",
+                owner_user_id="synthetic-owner")
+            assert first == {
+                "job_id": created["job_id"], "result": "digest_matches",
+                "may_release": False,
+            }
+            with pytest.raises(leases.LeaseBlocked, match="authorized scope"):
+                inspect_held_csv_artifact(
+                    db, job_id=created["job_id"], organization_id="synthetic-org",
+                    owner_user_id="another-owner")
+            assert db.execute(sa.select(leases.lease_jobs.c.state).where(
+                leases.lease_jobs.c.job_id == created["job_id"]
+            )).scalar_one() == "NEEDS_RECONCILIATION"
+            # Private artifact tampering fails closed; no owner approval.
+            store.items[row["output_ref"]] = b"not the expected cleaned CSV"
+            mismatch = inspect_held_csv_artifact(
+                db, job_id=created["job_id"], organization_id="synthetic-org",
+                owner_user_id="synthetic-owner")
+            assert mismatch["result"] == "digest_mismatch"
+            assert mismatch["may_release"] is False
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_bridge_rejects_linked_input_fingerprint_mismatch(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_csv_reconciliation_bridge import (
+        inspect_held_csv_artifact,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    try:
+        created = _submit(engine, "pg-held-input-mismatch")
+        with Session(engine) as db:
+            row = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == created["job_id"]
+            )).mappings().one()
+            leases.enqueue(db, job_id=created["job_id"],
+                           organization_id=row["organization_id"],
+                           owner_user_id=row["owner_user_id"],
+                           input_sha256="0" * 64)
+            claimed = leases.claim(db)
+            assert claimed
+            assert leases.hold_for_reconciliation(
+                db, claimed=claimed,
+                expected_output_sha256=row["output_sha256"])
+            before = store.put_count
+            outcome = inspect_held_csv_artifact(
+                db, job_id=created["job_id"], organization_id="synthetic-org",
+                owner_user_id="synthetic-owner")
+            assert outcome["result"] == "metadata_digest_mismatch"
+            assert outcome["may_release"] is False
+            assert store.put_count == before
+    finally:
+        leases.lease_metadata.drop_all(engine)
