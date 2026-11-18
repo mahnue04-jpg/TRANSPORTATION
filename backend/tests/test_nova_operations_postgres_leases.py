@@ -215,9 +215,9 @@ def test_reconciliation_hold_blocks_expired_reclaim_and_cancel_remains_possible(
         active = leases.claim(db, now=now, lease_seconds=5)
         assert active is not None
         assert leases.hold_for_reconciliation(
-            db, claimed=active, now=now + timedelta(seconds=6))
+            db, claimed=active, expected_output_sha256="b" * 64, now=now + timedelta(seconds=6))
         assert not leases.hold_for_reconciliation(
-            db, claimed=active, now=now + timedelta(seconds=7))
+            db, claimed=active, expected_output_sha256="b" * 64, now=now + timedelta(seconds=7))
         assert leases.claim(db, now=now + timedelta(days=2)) is None
         assert leases.exhaust_expired(db, now=now + timedelta(days=2)) == 0
         with pytest.raises(leases.LeaseBlocked):
