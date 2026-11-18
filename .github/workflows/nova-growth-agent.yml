@@ -5,7 +5,7 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114]
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114, feature/growth-owner-website-inbox-api-20261115]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
