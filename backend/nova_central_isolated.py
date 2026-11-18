@@ -7,6 +7,7 @@ No startup hooks, migrations, account seeding, workers or provider transports.
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlsplit
 
 # FastAPI request/response annotation classes must be module globals, because
@@ -16,6 +17,11 @@ from fastapi import Request, Response
 
 def _config() -> None:
     """Validate identifiers before importing database/auth modules."""
+    test_mode = os.getenv("NOVA_CENTRAL_ISOLATED_TEST") == "1"
+    if test_mode and (os.getenv("AMICOR_ENVIRONMENT") != "test"
+                      or os.getenv("APP_ENV") != "test"
+                      or os.getenv("RENDER", "").lower() in {"true", "1", "yes"}):
+        raise RuntimeError("Disposable test mode cannot run on staging/Render")
     if os.getenv("AMICOR_ENVIRONMENT") != "staging" or os.getenv("APP_ENV") != "staging":
         # Only isolated unit tests may opt into the test environment.
         if not (os.getenv("NOVA_CENTRAL_ISOLATED_TEST") == "1"
@@ -24,7 +30,7 @@ def _config() -> None:
             raise RuntimeError("Nova Central requires isolated staging environment")
     expected = os.getenv("NOVA_CENTRAL_APPROVED_COMMIT", "")
     actual = os.getenv("RENDER_GIT_COMMIT", "")
-    if not expected or not actual or expected != actual or len(expected) != 40:
+    if not re.fullmatch(r"[0-9a-f]{40}", expected) or expected != actual:
         raise RuntimeError("Nova Central commit pin missing or mismatched")
     if os.getenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "").lower() == "true":
         raise RuntimeError("Nova Central readiness feature must start disabled")
@@ -32,7 +38,7 @@ def _config() -> None:
         raise RuntimeError("Nova Central data preview must start disabled")
 
     database_url = os.getenv("DATABASE_URL", "")
-    if os.getenv("NOVA_CENTRAL_ISOLATED_TEST") == "1" and os.getenv("AMICOR_ENVIRONMENT") == "test":
+    if test_mode:
         if not database_url.startswith("sqlite:///"):
             raise RuntimeError("test mode requires disposable SQLite")
         return
