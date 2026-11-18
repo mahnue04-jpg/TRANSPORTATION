@@ -16,6 +16,50 @@ from app.core.nova.work_revenue.operations_csv_cleanup import (
     SpreadsheetInputError, clean_csv_text,
 )
 
+OWNER_UI = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nova Operations | Supervised CSV Pilot</title>
+<style>body{font:16px system-ui,sans-serif;background:#f6f8fb;color:#142238;margin:0}
+main{max-width:660px;margin:40px auto;padding:28px;background:white;border-radius:16px;box-shadow:0 4px 22px #20304014}
+h1{font-size:1.5rem;margin:0 0 8px}p{line-height:1.5;color:#49596d}
+label{display:block;margin:18px 0 6px;font-weight:650}input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #a5b1be;border-radius:8px}
+button{margin-top:20px;padding:12px 18px;border:0;border-radius:8px;background:#123e74;color:#fff;font-weight:700;cursor:pointer}
+button:disabled{opacity:.55}#message{white-space:pre-wrap;margin-top:18px}a{color:#123e74}
+small{color:#5d6977}</style></head><body><main>
+<h1>Nova Operations — supervised CSV pilot</h1>
+<p><strong>Synthetic staging data only.</strong> This screen is not a live customer upload portal. CSVs are not saved by this pilot; output requires your review before any delivery.</p>
+<label for="token">Owner pilot access token</label><input id="token" type="password" autocomplete="off" placeholder="Staging owner token">
+<label for="csv">Synthetic CSV file (up to 1 MB)</label><input id="csv" type="file" accept=".csv,text/csv">
+<button id="run" type="button">Clean synthetic CSV for review</button>
+<p id="message" role="status" aria-live="polite"></p><a id="download" hidden>Download review-only CSV</a>
+<p><small>No files or access tokens are stored in the browser by this page. Customer processing and automatic delivery remain disabled.</small></p>
+</main><script>
+const run=document.getElementById('run'),msg=document.getElementById('message'),link=document.getElementById('download');
+let prior=null;
+run.addEventListener('click',async()=>{
+ const token=document.getElementById('token').value;
+ const file=document.getElementById('csv').files[0];
+ if(prior){URL.revokeObjectURL(prior);prior=null;}
+ link.hidden=true;msg.textContent='';
+ if(!token||!file){msg.textContent='Owner token and synthetic CSV required.';return;}
+ if(file.size<1||file.size>1000000){msg.textContent='CSV must be 1 to 1,000,000 bytes.';return;}
+ run.disabled=true;msg.textContent='Processing synthetic CSV...';
+ try{
+  const res=await fetch('/operations/pilot/csv-clean',{method:'POST',headers:{
+   'Authorization':'Bearer '+token,'X-Nova-Owner-Action':'process-csv-for-owner-review',
+   'X-Nova-Synthetic-Data':'true','Content-Type':'text/csv'},body:file});
+  if(!res.ok){msg.textContent='Request blocked ('+res.status+'). Check staging authorization and CSV format.';return;}
+  const output=await res.blob();
+  prior=URL.createObjectURL(output);
+  link.href=prior;link.download='nova-cleaned-review.csv';link.hidden=false;
+  msg.textContent='Review candidate ready. Input rows: '+(res.headers.get('X-Nova-Input-Rows')||'?')+
+   '. Output rows: '+(res.headers.get('X-Nova-Output-Rows')||'?')+'. Not delivered to any customer.';
+ }catch(_){msg.textContent='Could not connect to the pilot endpoint.'}
+ finally{run.disabled=false}
+});
+</script></body></html>"""
+
+
 MAX_BYTES = 1_000_000
 PATH = "/operations/pilot/csv-clean"
 
@@ -64,6 +108,8 @@ class PilotHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path == "/pilot":
+            return self._send(200, OWNER_UI.encode("utf-8"), "text/html; charset=utf-8")
         if path != "/health":
             return self._error(503, "Customer routes disabled")
         self._send(200, json.dumps({
