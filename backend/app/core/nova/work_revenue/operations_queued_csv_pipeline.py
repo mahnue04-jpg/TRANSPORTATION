@@ -124,6 +124,15 @@ def submit_queued_csv(
     )
     if not hmac.compare_digest(receipt.sha256, fingerprint):
         raise QueuedCSVBlocked("Private storage returned incorrect fingerprint")
+    # Require actual private storage readback before making the input claimable.
+    # A successful upload receipt alone cannot prove object durability.
+    verified = load_private_csv_input(
+        organization_id=organization_id, owner_user_id=owner_user_id,
+        job_id=job_id, storage_ref=receipt.storage_ref,
+        expected_sha256=fingerprint, store=store,
+    )
+    if len(verified) != receipt.size:
+        raise QueuedCSVBlocked("Private input readback size mismatch")
     with session_factory() as db:
         _runtime(db)
         leases.bind_private_input(
