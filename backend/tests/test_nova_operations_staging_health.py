@@ -38,8 +38,10 @@ def test_isolated_health_server_never_imports_customer_application():
             imports.append(node.module or "")
     allowed = {"__future__", "json", "os", "http.server"}
     assert set(imports).issubset(allowed), imports
-    assert "app.main" not in sys.modules
+    existing_app_modules = {name for name in sys.modules if name == "app" or name.startswith("app.")}
     module = load_diagnostic()
+    newly_loaded = {name for name in sys.modules if name == "app" or name.startswith("app.")} - existing_app_modules
+    assert not newly_loaded, newly_loaded
     server = ThreadingHTTPServer(("127.0.0.1", 0), module.DiagnosticHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
