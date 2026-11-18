@@ -1,0 +1,305 @@
+"""Read-only permission report for a future isolated Nova Central PostgreSQL reader.
+
+No GRANT/REVOKE, schema changes, fixture insertion, or deployment actions.
+Only run against a separately approved, dedicated disposable staging database.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
+
+_ALLOWED_DB = "nova_central_542_dispos"
+_ALLOWED_USER = "nova_central_542_reader"
+_READER_TABLES = ("platform_users", "nova_central_journey_read_model")
+_READER_COLUMNS = (
+    "id", "role", "authorized_roles", "session_role",
+    "organization_id", "auth_version", "is_active",
+)
+
+
+def check_target() -> str:
+    """Fail before opening connections, even if accidentally invoked elsewhere."""
+    if os.getenv("AMICOR_ENVIRONMENT") != "staging" or os.getenv("APP_ENV") != "staging":
+        raise RuntimeError("Dedicated staging flags required")
+    if os.getenv("NOVA_CENTRAL_ISOLATED_TEST") == "1":
+        raise RuntimeError("Test override not allowed for PostgreSQL audit")
+    if os.getenv("NOVA_CENTRAL_PERMISSION_AUDIT_APPROVED") != "true":
+        raise RuntimeError("Separate owner approval required for database audit")
+    approved_sha = os.getenv("NOVA_CENTRAL_APPROVED_COMMIT", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", approved_sha):
+        raise RuntimeError("Missing approved revision")
+    if approved_sha != os.getenv("RENDER_GIT_COMMIT", ""):
+        raise RuntimeError("Commit mismatch")
+    url_value = os.getenv("NOVA_CENTRAL_READER_DATABASE_URL", "")
+    if not url_value:
+        raise RuntimeError("Dedicated reader URL required")
+    url = make_url(url_value)
+    if (url.drivername not in {"postgresql", "postgresql+psycopg2"}
+            or url.host != os.getenv("NOVA_CENTRAL_EXPECTED_DB_HOST")
+            or not url.host
+            or url.database != _ALLOWED_DB
+            or url.username != _ALLOWED_USER
+            or not url.password or url.query):
+        raise RuntimeError("Reader connection identity mismatch")
+    # No credentials are printed or serialized.
+    return url_value
+
+
+def assess_privileges(observed: dict[str, Any]) -> list[str]:
+    """Pure fail-closed privilege decision; isolated from database I/O."""
+    problems = []
+    if observed.get("database") != _ALLOWED_DB:
+        problems.append("wrong_database")
+    if observed.get("principal") != _ALLOWED_USER or observed.get("session_user") != _ALLOWED_USER:
+        problems.append("wrong_role")
+    if observed.get("can_login") is not True:
+        problems.append("login_not_verified")
+    for name in ("superuser", "create_role", "create_db", "replication", "bypass_rls"):
+        if observed.get(name) is not False:
+            problems.append("unsafe_role_" + name)
+    if observed.get("can_create_schema") is not False:
+        problems.append("database_create_allowed")
+    if observed.get("can_create_public_table") is not False:
+        problems.append("public_schema_create_allowed")
+    if observed.get("can_create_temp_table") is not False:
+        problems.append("temporary_table_create_allowed")
+    if observed.get("public_schema_usage") is not True:
+        problems.append("missing_public_schema_usage")
+    schema_grants = observed.get("other_schemas")
+    if not isinstance(schema_grants, dict):
+        problems.append("unknown_other_schema_privileges")
+    else:
+        for schema, grants in schema_grants.items():
+            if not isinstance(grants, dict) or grants.get("CREATE") is not False or grants.get("USAGE") is not False:
+                problems.append("unapproved_schema_privileges_" + str(schema))
+    function_grants = observed.get("non_system_functions")
+    if not isinstance(function_grants, dict):
+        problems.append("unknown_non_system_function_privileges")
+    else:
+        for function, allowed in function_grants.items():
+            if allowed is not False:
+                problems.append("unapproved_function_execute_" + str(function))
+    default_grants = observed.get("default_grants")
+    if not isinstance(default_grants, list):
+        problems.append("unknown_default_acl_inventory")
+    elif default_grants:
+        problems.append("unexpected_default_acl_grants")
+    memberships = observed.get("role_memberships")
+    if not isinstance(memberships, list):
+        problems.append("unknown_role_memberships")
+    elif memberships:
+        problems.append("unexpected_role_memberships")
+    other_tables = observed.get("other_tables")
+    if not isinstance(other_tables, dict):
+        problems.append("unknown_unrelated_table_privileges")
+    else:
+        for table, grants in other_tables.items():
+            if not isinstance(grants, dict) or any(value is not False for value in grants.values()):
+                problems.append("unapproved_table_privileges_" + str(table))
+    for table in _READER_TABLES:
+        permissions = (observed.get("tables") or {}).get(table)
+        if not isinstance(permissions, dict):
+            problems.append("unknown_table_" + table)
+            continue
+        if table == "platform_users":
+            if permissions.get("SELECT") is not False:
+                problems.append("unsafe_full_user_table_SELECT")
+            columns = permissions.get("columns")
+            if not isinstance(columns, dict) or not columns:
+                problems.append("unknown_user_columns")
+            else:
+                for column in _READER_COLUMNS:
+                    if columns.get(column) is not True:
+                        problems.append("missing_user_column_SELECT_" + column)
+                for column, granted in columns.items():
+                    if column not in _READER_COLUMNS and granted is not False:
+                        problems.append("unsafe_user_column_SELECT_" + column)
+        elif permissions.get("SELECT") is not True:
+            problems.append("missing_" + table + "_SELECT")
+        for action in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+            if permissions.get(action) is not False:
+                problems.append("unsafe_" + table + "_" + action)
+    return problems
+
+
+def read_privilege_report(url_value: str) -> dict[str, Any]:
+    """Use catalog SELECTs only. Does not grant privileges or mutate tables."""
+    engine = create_engine(url_value, pool_pre_ping=False)
+    try:
+        with engine.connect() as connection:
+            identity = connection.execute(text(
+                "SELECT current_database() AS db, current_user AS principal, "
+                "session_user AS session_user"
+            )).mappings().one()
+            role = connection.execute(text(
+                "SELECT rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, "
+                "rolreplication, rolbypassrls FROM pg_roles "
+                "WHERE rolname = current_user"
+            )).mappings().one()
+            can_create = connection.execute(text(
+                "SELECT has_database_privilege(current_user, current_database(), 'CREATE')"
+            )).scalar_one()
+            can_create_public_table = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'CREATE')"
+            )).scalar_one()
+            can_create_temp_table = connection.execute(text(
+                "SELECT has_database_privilege(current_user, current_database(), 'TEMP')"
+            )).scalar_one()
+            public_schema_usage = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'USAGE')"
+            )).scalar_one()
+            schemas = connection.execute(text(
+                "SELECT nspname FROM pg_namespace "
+                "WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'public') "
+                "AND nspname NOT LIKE 'pg_toast%' "
+                "AND nspname NOT LIKE 'pg_temp_%'"
+            )).scalars().all()
+            other_schemas = {}
+            for schema in schemas:
+                other_schemas[str(schema)] = {
+                    privilege: bool(connection.execute(
+                        text("SELECT has_schema_privilege(current_user, :schema, :privilege)"),
+                        {"schema": schema, "privilege": privilege},
+                    ).scalar_one()) for privilege in ("USAGE", "CREATE")
+                }
+            custom_routines = connection.execute(text(
+                "SELECT p.oid, n.nspname, p.proname "
+                "FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace "
+                "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%' "
+                "AND n.nspname NOT LIKE 'pg_temp_%'"
+            )).mappings().all()
+            non_system_functions = {}
+            for routine in custom_routines:
+                identity = str(routine["nspname"]) + "." + str(routine["proname"]) + "#" + str(routine["oid"])
+                non_system_functions[identity] = bool(connection.execute(
+                    text("SELECT has_function_privilege(current_user, :routine_oid, 'EXECUTE')"),
+                    {"routine_oid": routine["oid"]},
+                ).scalar_one())
+            # Explicit default ACL grants may widen access to future tables
+            # and routines. Reject any grant to PUBLIC or the exact reader role.
+            # This is a conservative preflight; implicit PostgreSQL defaults
+            # and future ownership still require separate privilege tests.
+            default_grants = connection.execute(text(
+                "SELECT d.defaclobjtype AS object_type, "
+                "COALESCE(n.nspname, '*') AS schema_name, "
+                "priv.privilege_type AS privilege "
+                "FROM pg_default_acl AS d "
+                "LEFT JOIN pg_namespace AS n ON n.oid = d.defaclnamespace "
+                "CROSS JOIN LATERAL aclexplode(d.defaclacl) AS priv "
+                "WHERE priv.grantee = 0 OR priv.grantee = "
+                "(SELECT oid FROM pg_roles WHERE rolname = current_user)"
+            )).mappings().all()
+            # Catch direct and transitive role memberships; inherited grants,
+            # including grants available through SET ROLE, require explicit review.
+            # This conservative initial boundary rejects *any* membership.
+            memberships = connection.execute(text(
+                "WITH RECURSIVE member_roles(roleid) AS ("
+                " SELECT roleid FROM pg_auth_members "
+                " WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
+                " UNION"
+                " SELECT m.roleid FROM pg_auth_members AS m "
+                " JOIN member_roles AS r ON m.member = r.roleid"
+                ") SELECT rolname FROM pg_roles WHERE oid IN "
+                "(SELECT roleid FROM member_roles)"
+            )).scalars().all()
+            # Enumerate relations in non-system schemas; the allowlist
+            # is strict, and even column-level SELECT on other tables fails.
+            relations = connection.execute(text(
+                "SELECT n.nspname AS schema_name, c.relname AS table_name "
+                "FROM pg_class AS c JOIN pg_namespace AS n ON n.oid=c.relnamespace "
+                "WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') "
+                "AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%'"
+            )).mappings().all()
+            other_tables = {}
+            for relation in relations:
+                schema_name, table_name = relation["schema_name"], relation["table_name"]
+                if schema_name == "public" and table_name in _READER_TABLES:
+                    continue
+                qualified = schema_name + "." + table_name
+                other_tables[qualified] = {}
+                for action in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    other_tables[qualified][action] = bool(connection.execute(
+                        text("SELECT has_table_privilege(current_user, :target, :action)"),
+                        {"target": qualified, "action": action},
+                    ).scalar_one())
+                other_tables[qualified]["ANY_COLUMN_SELECT"] = bool(connection.execute(
+                    text("SELECT has_any_column_privilege(current_user, :target, 'SELECT')"),
+                    {"target": qualified},
+                ).scalar_one())
+            tables = {}
+            for table in _READER_TABLES:
+                table_exists = connection.execute(text(
+                    "SELECT to_regclass(:table_name) IS NOT NULL"
+                ), {"table_name": "public." + table}).scalar_one()
+                if not table_exists:
+                    tables[table] = None
+                    continue
+                tables[table] = {}
+                for action in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    tables[table][action] = bool(connection.execute(
+                        text("SELECT has_table_privilege(current_user, :table_name, :action)"),
+                        {"table_name": "public." + table, "action": action},
+                    ).scalar_one())
+                if table == "platform_users":
+                    columns = connection.execute(text(
+                        "SELECT attname FROM pg_attribute "
+                        "WHERE attrelid = to_regclass(:table_name) "
+                        "AND attnum > 0 AND NOT attisdropped"
+                    ), {"table_name": "public.platform_users"}).scalars().all()
+                    tables[table]["columns"] = {
+                        name: bool(connection.execute(
+                            text("SELECT has_column_privilege(current_user, :table_name, :column_name, 'SELECT')"),
+                            {"table_name": "public.platform_users", "column_name": name},
+                        ).scalar_one()) for name in columns
+                    }
+            return {
+                "database": identity["db"],
+                "principal": identity["principal"],
+                "session_user": identity["session_user"],
+                "can_login": role["rolcanlogin"],
+                "superuser": role["rolsuper"],
+                "create_role": role["rolcreaterole"],
+                "create_db": role["rolcreatedb"],
+                "replication": role["rolreplication"],
+                "bypass_rls": role["rolbypassrls"],
+                "can_create_schema": bool(can_create),
+                "can_create_public_table": bool(can_create_public_table),
+                "can_create_temp_table": bool(can_create_temp_table),
+                "public_schema_usage": bool(public_schema_usage),
+                "other_schemas": other_schemas,
+                "non_system_functions": non_system_functions,
+                "default_grants": [
+                    {
+                        "type": str(grant["object_type"]),
+                        "schema": str(grant["schema_name"]),
+                        "privilege": str(grant["privilege"]),
+                    } for grant in default_grants
+                ],
+                "role_memberships": sorted(str(name) for name in memberships),
+                "other_tables": other_tables,
+                "tables": tables,
+            }
+    finally:
+        engine.dispose()
+
+
+def main() -> int:
+    result = read_privilege_report(check_target())
+    failures = assess_privileges(result)
+    print(json.dumps({"status": "blocked" if failures else "review_required",
+                      "checks": failures, "tables_present": sorted(
+                          k for k, v in result["tables"].items() if v is not None)}))
+    # A successful catalog check remains review_required; independent physical
+    # privilege-denial tests and owner approval are still necessary.
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
