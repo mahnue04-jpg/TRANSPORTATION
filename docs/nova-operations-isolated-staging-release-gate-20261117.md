@@ -67,3 +67,33 @@ This is not permission to apply the migration to any connected database. A dedic
 ## Staging schema packaging — automatic migrations isolated
 
 The Operations-only proposed schema has been relocated to `backend/staging_migrations/operations_lease_schema.py`, **outside** `backend/migrations/versions`. This prevents routine Alembic upgrades for unrelated products from either creating Operations tables or failing because Operations staging approval is absent. The module still checks the explicit staging environment, approval flag and exact PostgreSQL database name before executing any DDL; it refuses silent downgrade. No automatic staging runner or deployment is configured. It must not be marked applied in the shared Alembic history. A future approved isolated Operations-only migration procedure and backup/rollback plan are still required.
+
+
+## Dedicated resources provisioned — diagnostic-only acceptance checkpoint (Nov 18 UTC)
+
+The owner separately approved a **maximum $13/month base compute** for a dedicated Operations staging web service and PostgreSQL instance. Both were created in Render workspace `tea-d8oe81b7uimc739gujp0`, Virginia:
+
+| Resource | ID | Verified state |
+|---|---|---|
+| `nova-operations-staging-541` | `srv-dbujmrmk1f9s73afmp6g` | Diagnostic-only initial deploy `dep-dbujms6k1f9s73afmqkg` LIVE |
+| `nova-operations-staging-db-541` | `dpg-dbujmp6k1f9s73afmed0-a` | PostgreSQL 18, `0.1c-256mb`, AVAILABLE; exact database `nova_operations_staging_db_541` |
+
+- Web service plan is Starter and auto-deploy is OFF. Pinned initial commit `3ea5f4ac738d2d36ec8408a8082fc8ff70861fcc`; build command explicitly rejects any other commit.
+- The diagnostic-only startup is a Python standard-library HTTP server on PORT 10000. GET and POST are designed to return HTTP 503 with a disabled-service message; HEAD currently yields HTTP 501 because it is not implemented. Render deployment was LIVE and logs showed successful startup. **No independent public HTTP 503 acceptance was recorded.**
+- Web service currently uses Render's default Python 3.14.10; the backend CI uses Python 3.12. Pin a tested Python version **before** any approved actual-app staging deployment; do not mistake diagnostic runtime success for backend compatibility.
+- No customer application build/dependencies were installed by the diagnostic build; no DATABASE_URL/credentials binding, private S3, schema DDL, background worker, task execution, paid provider, payment workflow or messaging was activated.
+- Production service `srv-d8of2kmrnols73d06h50`, Growth, Studio, Casting, Receptionist and other shared resources were not changed. No new resource creation or plan upgrade is authorized beyond the two approved base-compute resources.
+
+### Next approval boundary — one controlled isolated application acceptance
+
+**Do not execute automatically under the earlier $13/month infrastructure approval.** Prepare an exact-action, owner-reviewed staging-only request covering:
+
+1. Confirm dedicated DB owner and `nova_operations_staging_db_541` identity; verify restorable backup/snapshot mechanism and cost/retention in advance. A bare available DB is **not** backup evidence.
+2. Verify full PR stack (#477 -> #540 -> #541), exact SHA and CI; prepare a build command that installs the correct backend dependencies on pinned Python 3.12 and starts the app with **all Operations job execution/paid/outbound flags OFF**.
+3. Propose connecting only `srv-dbujmrmk1f9s73afmp6g` to `dpg-dbujmp6k1f9s73afmed0-a` via an authorized secret reference. Never print/expose the connection string in GitHub comments, logs, or documents.
+4. Separately approve the guarded standalone DDL in `backend/staging_migrations/operations_lease_schema.py` for that exact DB, with a restore procedure. It is intentionally outside the normal Alembic graph; no automatic migrations.
+5. Use a synthetic-only, isolated private-object store for full CSV processing acceptance. Real private S3 setup is **not** included in the approved $13/month; cost/security design and approval required before any object write.
+6. Run supervised owner-only staging auth/roles/UI, SQL state transitions, private input/output, owner approval/download, cancellation, crash/orphan scenarios, and real process restart after all gates are authorized. No unattended production worker or external delivery.
+7. Capture one PASS/FAIL record: exact web/DB IDs, test SHA, live logs, schema identity, backup/restore proof, access controls, costs and unverified blockers. Do not move production or merge these draft PRs on the strength of a diagnostic LIVE deploy.
+
+**Current verdict:** infrastructure diagnostic stage PASS (Render LIVE / DB AVAILABLE); independent HTTP endpoint response unverified; actual Operations staging application, connected DB migration, S3, hosted worker and customer readiness NOT TESTED.
