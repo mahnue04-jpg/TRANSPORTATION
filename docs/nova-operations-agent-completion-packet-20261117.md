@@ -91,3 +91,12 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 - The gated `POST /operations/queued/jobs/{job_id}/restore-input` endpoint requires the same authenticated owner and saved-task eligibility checks, an explicit owner-action header, a bounded CSV and exact job identity. UI offers restore only after diagnosing `input_binding_incomplete`, with owner confirmation.
 - This is **not** automatic orphan cleanup. Because the adapter uses random object keys, a prior uncertain upload may have left an unknown private object. The response reports `orphan_cleanup_verified=false`; actual object provenance/retention cleanup requires an approved storage service with audit evidence.
 - Integration and UI tests are added to the consolidated CI; verify the latest code SHA before acceptance.
+
+
+## Read-only S3 orphan candidate audit (development acceptance)
+
+- `operations_orphan_audit.py` compares a single job's owner-scoped PostgreSQL input/output refs with an **injected** private prefix listing. It reports only bounded counts of present bound objects, missing bound objects and unknown orphan candidates; no raw object keys or customer content are returned.
+- `operations_orphan_s3_listing.py` implements a bounded, fail-closed S3-compatible `list_objects_v2` adapter restricted to an exact organization/job prefix, including pagination, duplicate, overflow, provider-error and foreign-prefix checks. It neither creates credentials nor exposes a web endpoint.
+- `inspect_job_s3_objects` connects these components, checking exact owner scope against the job and lease records **before** invoking the supplied S3 client. Synthetic tests verify cross-owner denial before any S3 call and no deletion behavior.
+- **Not a verified hosted storage audit:** The tests use a fake client, not AMICOR's actual private bucket. A trusted authenticated caller, least-privilege private bucket credentials, audit logging, retention policy and independently approved cleanup plan are still required.
+- **No automatic deletion or retry:** Candidate discovery is not evidence that an object is safe to delete, and the system does not clean or release uncertain customer work.
