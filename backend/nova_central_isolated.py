@@ -9,6 +9,10 @@ from __future__ import annotations
 import os
 from urllib.parse import urlsplit
 
+# FastAPI request/response annotation classes must be module globals, because
+# FastAPI resolves postponed annotations from the endpoint's global namespace.
+from fastapi import Request, Response
+
 
 def _config() -> None:
     """Validate identifiers before importing database/auth modules."""
@@ -51,9 +55,9 @@ def create_app():
     generic Nova router. It cannot report active coordination or real journeys.
     """
     _config()
-    from fastapi import Depends, FastAPI, HTTPException, Request, Response
+    from fastapi import Depends, FastAPI, HTTPException
     from app import auth
-    from app.auth import ROLE_ADMIN, UserContext, get_current_user_context, require_any_role
+    from app.auth import ROLE_ADMIN, get_current_user_context, require_any_role
 
     app = FastAPI(title="Nova Central isolated readiness", docs_url=None, redoc_url=None,
                   openapi_url=None)
@@ -65,7 +69,7 @@ def create_app():
     @app.get("/api/nova/workspace/central/journeys",
              dependencies=[Depends(require_any_role(ROLE_ADMIN))])
     def readiness(request: Request, response: Response,
-                  user: UserContext = Depends(get_current_user_context)):
+                  user=Depends(get_current_user_context)):
         if os.getenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "").lower() != "true":
             raise HTTPException(status_code=404, detail="Nova Central journey view unavailable")
         if not user.user_id or not user.organization_id or user.organization_id == "global" or user.role != ROLE_ADMIN:
