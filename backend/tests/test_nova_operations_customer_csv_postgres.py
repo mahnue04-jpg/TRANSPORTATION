@@ -1214,3 +1214,87 @@ def test_restore_unbound_csv_private_readback_failure_remains_unclaimable(
             assert leases.claim(db, require_bound_input=True) is None
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_owner_http_restore_unbound_input_after_interrupted_upload(
+    postgres, monkeypatch,
+):
+    """Gated owner HTTP restore reuses one reserved job, no delivery."""
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, QueuedCSVBlocked,
+    )
+    from app.db.session import get_db
+
+    engine, store = postgres
+    leases.lease_metadata.create_all(engine)
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    owner = SimpleNamespace(user_id="synthetic-owner",
+                            organization_id="synthetic-org")
+    engagement = {
+        "engagement_id": "synthetic-eng", "organization_id": "synthetic-org",
+        "owner_user_id": "synthetic-owner", "status": "ACTIVE", "blockers": None,
+        "tasks": [{"task_id": "synthetic-csv-task", "title": "CSV cleanup",
+                   "status": "READY", "classification": "NOVA",
+                   "responsible_party": "NOVA", "review_required": True,
+                   "blocked_reason": None, "required_owner_input": None,
+                   "depends_on_task_id": None}],
+    }
+    monkeypatch.setattr(api.service, "get_engagement",
+                        lambda *a, **k: engagement)
+    factory = lambda: Session(engine)
+    original = b"Name\nAda\nAda\n"
+    decisions = iter([True, False])
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/nova/work")
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[api.require_work_revenue_owner] = lambda: owner
+    def session():
+        with factory() as db:
+            yield db
+    app.dependency_overrides[get_db] = session
+    try:
+        with pytest.raises(QueuedCSVBlocked, match="not authorized"):
+            submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                request_key="http-restore", raw=original, store=store,
+                authorize=lambda *_: next(decisions))
+        with factory() as db:
+            job_id = db.execute(sa.select(csvjobs.jobs.c.id)).scalar_one()
+        url = "/api/nova/work/operations/queued/jobs/" + job_id
+        headers = {"Content-Type": "text/csv", "X-Nova-File-Name": "sample.csv",
+                   "X-Nova-Owner-Action": "restore-unbound-csv-input"}
+        with TestClient(app) as client:
+            assert client.post(url + "/restore-input",
+                               headers={"Content-Type": "text/csv",
+                                        "X-Nova-File-Name": "sample.csv"},
+                               content=original).status_code == 403
+            assert client.post(url + "/restore-input", headers=headers,
+                               content=b"Name\nAltered\n").status_code == 409
+            recovered = client.post(url + "/restore-input",
+                                    headers=headers, content=original)
+            assert recovered.status_code == 200, recovered.text
+            assert recovered.json()["job_id"] == job_id
+            assert recovered.json()["input_restored"] is True
+            assert recovered.json()["orphan_cleanup_verified"] is False
+            assert client.post(url + "/restore-input",
+                               headers=headers, content=original).status_code == 409
+            completed = client.post(
+                url + "/process",
+                headers={"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"})
+            assert completed.status_code == 200, completed.text
+            assert completed.json()["state"] == "completed"
+            assert client.get(url + "/download").status_code == 409
+            with factory() as db:
+                assert db.execute(sa.select(sa.func.count()).select_from(
+                    csvjobs.jobs)).scalar_one() == 1
+    finally:
+        leases.lease_metadata.drop_all(engine)
