@@ -67,6 +67,35 @@ inspect the existing database in the Render Dashboard:
 No additional Render database, public connection, backup, or recovery has
 been created or started by this document.
 
+## Owner-provided Recovery page evidence (November 18, 2026)
+
+From the existing **nova-ga-490-dispos** Render Recovery screen, the owner
+observed these settings (no recovery action performed):
+
+- **Point-in-Time Recovery:** available for timestamps within the previous
+  **3 days**. Render offers a 7-day window with a Pro workspace upgrade;
+  **no upgrade approved or required** for this review.
+- **Logical export list:** two existing entries were visible:
+  - **November 14, 2026 at 4:47 PM**, file shown as `.dir.tar.gz`.
+  - **November 12, 2026 at 9:55 PM**, file shown as `.dir.tar.gz`.
+- Render UI states export files are retained **at least 7 days**.
+  Presence in the list does **not** prove the files were downloaded,
+  integrity-verified, or successfully restored. Their age may matter for a
+  rollback of **current** data.
+- No new logical export or database restore was requested. No current
+  recovery-point test has occurred. As of November 18, the three-day PITR
+  window does **not** reach back to either November 14 or November 12,
+  although these exports are listed separately.
+
+**Revised gate:** Mark recovery controls **OBSERVED**, not
+backup/restore **VERIFIED**. Before any migration/deployment obtain exact
+owner approval to either (a) create a fresh logical export, with its status,
+retention and any cost confirmed, followed by a separately approved isolated
+restore rehearsal, or (b) use a separately approved point-in-time restore to
+a new **isolated** target. Do not click **Restore database**, **Create export**,
+or **Upgrade** until approved, and never restore over the existing staging
+database. Preserve the existing two export entries without deleting them.
+
 ## Required safe evidence before an exact-version staging update
 
 1. Owner authorizes **read-only private diagnosis** of this named staging DB,
