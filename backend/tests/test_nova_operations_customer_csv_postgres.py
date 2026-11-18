@@ -274,3 +274,45 @@ def test_reconciliation_match_never_implicitly_approves_csv_owner_review(postgre
             )).scalar_one() == "NEEDS_RECONCILIATION"
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_bound_private_input_survives_fresh_database_session(postgres, monkeypatch):
+    """Synthetic persisted input reference can be read after session restart."""
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_private_input import (
+        persist_private_csv_input, load_private_csv_input,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    raw = b"Name\\nAda\\n"
+    try:
+        receipt = persist_private_csv_input(
+            organization_id="synthetic-org",
+            owner_user_id="synthetic-owner",
+            job_id="synthetic-restart",
+            raw=raw, store=store)
+        with Session(engine) as db:
+            leases.enqueue(db, job_id="synthetic-restart",
+                           organization_id="synthetic-org",
+                           owner_user_id="synthetic-owner",
+                           input_sha256=receipt.sha256)
+            assert leases.bind_private_input(
+                db, job_id="synthetic-restart",
+                organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                input_sha256=receipt.sha256,
+                storage_ref=receipt.storage_ref, input_size=receipt.size)
+        # Fresh PostgreSQL session (not a true process restart).
+        with Session(engine) as db:
+            claimed = leases.claim(db, lease_seconds=60)
+            assert claimed and claimed.job_id == "synthetic-restart"
+            ref, size = leases.read_bound_input_metadata(db, claimed=claimed)
+            assert size == len(raw)
+            assert load_private_csv_input(
+                organization_id=claimed.organization_id,
+                owner_user_id=claimed.owner_user_id,
+                job_id=claimed.job_id, storage_ref=ref,
+                expected_sha256=claimed.input_sha256, store=store) == raw
+    finally:
+        leases.lease_metadata.drop_all(engine)
