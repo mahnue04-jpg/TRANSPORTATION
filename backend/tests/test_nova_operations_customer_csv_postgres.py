@@ -231,3 +231,46 @@ def test_bridge_rejects_linked_input_fingerprint_mismatch(postgres, monkeypatch)
             assert store.put_count == before
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_reconciliation_match_never_implicitly_approves_csv_owner_review(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_csv_reconciliation_bridge import (
+        inspect_held_csv_artifact,
+    )
+    engine, _store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    try:
+        created = _submit(engine, "pg-read-only-owner-review")
+        with Session(engine) as db:
+            row = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == created["job_id"]
+            )).mappings().one()
+            leases.enqueue(db, job_id=created["job_id"],
+                           organization_id="synthetic-org",
+                           owner_user_id="synthetic-owner",
+                           input_sha256=row["input_sha256"])
+            active = leases.claim(db)
+            assert active is not None
+            assert leases.hold_for_reconciliation(
+                db, claimed=active, expected_output_sha256=row["output_sha256"])
+            result = inspect_held_csv_artifact(
+                db, job_id=created["job_id"], organization_id="synthetic-org",
+                owner_user_id="synthetic-owner")
+            assert result["result"] == "digest_matches"
+            assert result["may_release"] is False
+            assert csvjobs.job_status(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=created["job_id"])["status"] == "AWAITING_REVIEW"
+            # A separate explicit owner review is still necessary.
+            approved = csvjobs.review_job(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=created["job_id"], approve=True)
+            assert approved["status"] == "APPROVED_FOR_DOWNLOAD"
+            assert approved["delivered"] is False
+            assert db.execute(sa.select(leases.lease_jobs.c.state).where(
+                leases.lease_jobs.c.job_id == created["job_id"]
+            )).scalar_one() == "NEEDS_RECONCILIATION"
+    finally:
+        leases.lease_metadata.drop_all(engine)
