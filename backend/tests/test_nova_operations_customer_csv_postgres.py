@@ -1105,3 +1105,112 @@ def test_recovery_api_and_owner_cancellation_are_scoped_and_explicit(
             ).status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_restore_unbound_csv_same_job_exact_bytes_and_private_readback(
+    postgres, monkeypatch,
+):
+    """Owner-assisted restore does not enqueue a second job or auto-deliver."""
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, restore_unbound_queued_csv, process_one_queued_csv,
+        QueuedCSVBlocked,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    decisions = iter([True, False])
+    raw = b"Name\nAda\nAda\n"
+    try:
+        with pytest.raises(QueuedCSVBlocked, match="not authorized"):
+            submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", engagement_id="synthetic-eng",
+                task_id="synthetic-csv-task", request_key="restore-same-job",
+                raw=raw, store=store, authorize=lambda *_: next(decisions))
+        with factory() as db:
+            reserved = db.execute(sa.select(csvjobs.jobs)).mappings().one()
+            job_id = reserved["id"]
+            assert reserved["status"] == "PROCESSING"
+            assert db.execute(sa.select(leases.lease_jobs.c.input_ref)).scalar_one() is None
+        with pytest.raises(QueuedCSVBlocked, match="fingerprint mismatch"):
+            restore_unbound_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=job_id,
+                raw=b"Name\nAltered\n", store=store,
+                authorize=lambda *_: True)
+        with pytest.raises(QueuedCSVBlocked, match="owner scope"):
+            restore_unbound_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="other-owner", job_id=job_id,
+                raw=raw, store=store, authorize=lambda *_: True)
+        assert store.put_count == 0
+        result = restore_unbound_queued_csv(
+            factory, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner", job_id=job_id,
+            raw=raw, store=store, authorize=lambda *_: True)
+        assert result == {"job_id": job_id, "status": "QUEUED",
+                          "input_restored": True, "delivered": False,
+                          "orphan_cleanup_verified": False}
+        assert store.put_count == 1
+        with factory() as db:
+            assert db.execute(sa.select(sa.func.count()).select_from(
+                csvjobs.jobs)).scalar_one() == 1
+            assert db.execute(sa.select(sa.func.count()).select_from(
+                leases.lease_jobs)).scalar_one() == 1
+        with pytest.raises(QueuedCSVBlocked, match="unbound"):
+            restore_unbound_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=job_id, raw=raw,
+                store=store, authorize=lambda *_: True)
+        completed = process_one_queued_csv(
+            factory, store=store, authorize=lambda *_: True,
+            job_id=job_id, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner")
+        assert completed == {"state": "completed", "job_id": job_id}
+        with factory() as db:
+            assert csvjobs.job_status(db, org="synthetic-org",
+                                     owner="synthetic-owner",
+                                     job_id=job_id)["status"] == "AWAITING_REVIEW"
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_restore_unbound_csv_private_readback_failure_remains_unclaimable(
+    postgres, monkeypatch,
+):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, restore_unbound_queued_csv, QueuedCSVBlocked,
+    )
+    from app.core.nova.work_revenue.operations_private_input import PrivateInputBlocked
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    decisions = iter([True, False])
+    factory = lambda: Session(engine)
+    raw = b"Name\nAda\n"
+    try:
+        with pytest.raises(QueuedCSVBlocked):
+            submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", engagement_id="synthetic-eng",
+                task_id="synthetic-csv-task", request_key="restore-readback",
+                raw=raw, store=store, authorize=lambda *_: next(decisions))
+        with factory() as db:
+            job_id = db.execute(sa.select(csvjobs.jobs.c.id)).scalar_one()
+        def unavailable(*args, **kwargs):
+            raise IOError("synthetic private object outage")
+        monkeypatch.setattr(store, "retrieve", unavailable)
+        with pytest.raises(PrivateInputBlocked, match="cannot be retrieved"):
+            restore_unbound_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=job_id,
+                raw=raw, store=store, authorize=lambda *_: True)
+        with factory() as db:
+            row = db.execute(sa.select(leases.lease_jobs)).mappings().one()
+            assert row["state"] == "QUEUED" and row["input_ref"] is None
+            assert leases.claim(db, require_bound_input=True) is None
+    finally:
+        leases.lease_metadata.drop_all(engine)
