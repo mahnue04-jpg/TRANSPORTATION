@@ -35,6 +35,10 @@ lease_jobs = sa.Table(
                        name="ck_nova_operations_lease_state"),
     sa.CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 10",
                        name="ck_nova_operations_lease_attempts"),
+    sa.CheckConstraint(
+        "(input_ref IS NULL AND input_size IS NULL) OR "
+        "(input_ref IS NOT NULL AND input_size BETWEEN 1 AND 1000000)",
+        name="ck_nova_operations_lease_input_binding"),
 )
 sa.Index("ix_nova_operations_lease_ready", lease_jobs.c.state,
          lease_jobs.c.available_at, lease_jobs.c.lease_until)
