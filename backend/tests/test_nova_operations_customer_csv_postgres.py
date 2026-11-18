@@ -436,7 +436,7 @@ def test_queued_csv_full_owner_review_flow(postgres, monkeypatch):
         reviewed = review_processed_csv(
             factory, organization_id="synthetic-org",
             owner_user_id="synthetic-owner", job_id=created["job_id"],
-            approve=True, authorize=approve)
+            approve=True, authorize=approve, store=store)
         assert reviewed["status"] == "APPROVED_FOR_DOWNLOAD"
         assert reviewed["delivered"] is False
         assert store.put_count == 2
