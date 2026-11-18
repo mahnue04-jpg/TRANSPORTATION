@@ -73,3 +73,24 @@ def test_missing_staging_allowlist_is_rejected(config, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/nova_central_542_dispos")
     with pytest.raises(RuntimeError):
         module._config()
+
+
+@pytest.mark.parametrize("value", ["z" * 40, "A" * 40, "a" * 39, "a" * 41])
+def test_reject_noncanonical_commit_pin(config, monkeypatch, value):
+    monkeypatch.setenv("NOVA_CENTRAL_APPROVED_COMMIT", value)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", value)
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+def test_disposable_test_mode_denied_on_render(config, monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+def test_disposable_test_mode_denied_in_staging(config, monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    with pytest.raises(RuntimeError):
+        module._config()
