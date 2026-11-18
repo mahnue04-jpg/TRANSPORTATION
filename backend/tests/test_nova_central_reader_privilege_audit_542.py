@@ -61,6 +61,9 @@ def good_report():
         can_create_schema=False,
         can_create_public_table=False,
         can_create_temp_table=False,
+        public_schema_usage=True,
+        other_schemas={},
+        non_system_functions={},
         role_memberships=[],
         other_tables={},
         tables={
@@ -187,3 +190,37 @@ def test_direct_or_transitive_role_membership_fails_closed(memberships):
     report = good_report()
     report["role_memberships"] = memberships
     assert "unexpected_role_memberships" in audit.assess_privileges(report)
+
+
+def test_missing_public_schema_usage_fails_closed():
+    report = good_report()
+    report["public_schema_usage"] = False
+    assert "missing_public_schema_usage" in audit.assess_privileges(report)
+
+
+def test_unknown_schema_inventory_fails_closed():
+    report = good_report()
+    del report["other_schemas"]
+    assert "unknown_other_schema_privileges" in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("permission", ["CREATE", "USAGE"])
+def test_unapproved_other_schema_permission_fails_closed(permission):
+    report = good_report()
+    report["other_schemas"] = {"private": {
+        "CREATE": permission == "CREATE",
+        "USAGE": permission == "USAGE",
+    }}
+    assert "unapproved_schema_privileges_private" in audit.assess_privileges(report)
+
+
+def test_unapproved_custom_routine_execute_fails_closed():
+    report = good_report()
+    report["non_system_functions"] = {"public.modify_accounts#42": True}
+    assert "unapproved_function_execute_public.modify_accounts#42" in audit.assess_privileges(report)
+
+
+def test_unknown_routine_inventory_fails_closed():
+    report = good_report()
+    del report["non_system_functions"]
+    assert "unknown_non_system_function_privileges" in audit.assess_privileges(report)
