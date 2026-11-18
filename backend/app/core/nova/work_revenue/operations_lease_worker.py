@@ -52,8 +52,16 @@ def run_one(
         # The lease was revoked, expired, or superseded. Never retry work.
         return {"state": "stale", "job_id": claimed.job_id}
     except Exception:
-        # A commit error after work completed can be ambiguous. Do not enqueue
-        # the same processing again; a future reconciler must inspect metadata
-        # and the persisted artifact before any retry.
+        # Completion may have succeeded before the connection failed. Persist
+        # a no-reclaim hold with a fresh session; never retry the handler here.
+        try:
+            with session_factory() as db:
+                held = leases.hold_for_reconciliation(db, claimed=claimed)
+        except Exception:
+            # No persisted hold was verified: an expired lease may be
+            # reclaimed. Stop and escalate instead of claiming recovery safety.
+            return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
+        if not held:
+            return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
         return {"state": "needs_reconciliation", "job_id": claimed.job_id}
     return {"state": "completed", "job_id": claimed.job_id}
