@@ -461,6 +461,24 @@ with TestClient(app) as client:
     assert response.json()["integration_status"] == "not_connected"
     assert client.post("/api/nova/workspace/central/journeys").status_code == 405
 assert observed == [], observed
+
+# Prove the same installed authorizer actively rejects forbidden operations,
+# rather than merely observing that normal application requests avoided them.
+from sqlalchemy.exc import DatabaseError
+with engine.connect() as conn:
+    for forbidden in (
+        "SELECT hashed_password FROM platform_users LIMIT 1",
+        "UPDATE platform_users SET role='staff' WHERE id='owner-A'",
+        "CREATE TABLE forbidden_central_ddl (id INTEGER)",
+    ):
+        try:
+            conn.exec_driver_sql(forbidden)
+        except DatabaseError:
+            pass
+        else:
+            raise AssertionError("Forbidden SQL unexpectedly succeeded: " + forbidden)
+assert any(item[0] == "forbidden_column" for item in observed), observed
+assert any(item[0] == "forbidden_mutation" for item in observed), observed
 """
     proc = subprocess.run(
         [sys.executable, "-c", script, str(dbfile)],
