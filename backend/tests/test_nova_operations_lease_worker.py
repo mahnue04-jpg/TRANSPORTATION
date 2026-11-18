@@ -169,3 +169,41 @@ def test_strict_worker_does_not_run_unbound_input(engine):
             leases.lease_jobs.c.job_id == "synthetic-strict-unbound",
         )).scalar_one()
         assert state == "QUEUED"
+
+
+def test_authenticated_owner_task_callback_rechecks_and_denies_revocation(monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue import operations_owner_task_authorizer as auth
+    owner = SimpleNamespace(organization_id="org-a", user_id="owner-a")
+    approvals = {"allowed": True}
+    calls = []
+
+    def gate(db, *, owner, engagement_id, task_id):
+        calls.append((owner.user_id, engagement_id, task_id))
+        if not approvals["allowed"]:
+            raise ValueError("revoked")
+
+    monkeypatch.setattr(auth, "_check_saved_csv_assignment", gate)
+    callback = auth.owner_task_authorizer(
+        lambda: nullcontext(object()), authenticated_owner=owner)
+    assert callback("org-a", "owner-a", "eng-a", "task-a") is True
+    assert callback("other-org", "owner-a", "eng-a", "task-a") is False
+    assert callback("org-a", "other-owner", "eng-a", "task-a") is False
+    approvals["allowed"] = False
+    assert callback("org-a", "owner-a", "eng-a", "task-a") is False
+    assert calls == [("owner-a", "eng-a", "task-a"),
+                     ("owner-a", "eng-a", "task-a")]
+
+
+def test_owner_task_callback_rejects_unscoped_context():
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue.operations_owner_task_authorizer import (
+        owner_task_authorizer, OwnerTaskAuthorizationBlocked,
+    )
+    with pytest.raises(OwnerTaskAuthorizationBlocked):
+        owner_task_authorizer(
+            lambda: nullcontext(object()),
+            authenticated_owner=SimpleNamespace(user_id="owner-a",
+                                                organization_id="global"))
