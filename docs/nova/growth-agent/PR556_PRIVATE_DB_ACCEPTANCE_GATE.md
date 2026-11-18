@@ -31,7 +31,41 @@ run migrations, or spend money.
   **blocked** by the empty IP allowlist. Migration version, schema integrity,
   tenant counts, existing data retention and backup recovery remain unknown.
 - Do not add an external IP to the allowlist or reveal database passwords.
-  Use a separately approved *in-environment* private diagnostic/backup method.
+  Prefer a read-only inspection of Render's existing Recovery page first; use a separately approved *in-environment* private diagnostic method only if needed.
+
+## First choice: Render's existing Recovery page (no network changes)
+
+Before proposing a new private runner or changing Render service settings,
+inspect the existing database in the Render Dashboard:
+
+1. Open **https://dashboard.render.com/d/dpg-dbqv7mmtlv9c73d7tnb0-a**
+   and select **Recovery**. Confirm the correct database identity.
+2. **Read only:** record whether point-in-time recovery is available and the
+   displayed recovery window; record whether existing logical exports are
+   listed, their completion status and timestamps. Do not reveal backup
+   download URLs, credentials, or database contents.
+3. Render documents built-in continuous backups/PITR for paid Postgres and
+   a **Create export** action on the Recovery page for logical backups.
+   Availability must be checked on THIS account, not assumed from plan alone.
+   Official reference: https://render.com/docs/postgresql-backups
+4. If an export is absent or stale, **do not click Create export** until the
+   owner separately approves it and any costs/retention implications are
+   understood. Creating an export is a write operation against Render's
+   recovery service even when the database records are unchanged.
+5. **Do not click Restore Database** without specific approval. Render's
+   PITR creates a separate database instance that may incur additional
+   charges. A logical backup export alone is not a completed restore test.
+6. After read-only Recovery page inspection, decide whether a separately
+   authorized Render-managed restore to an **isolated disposable database**
+   is feasible within the cost limit. Never restore over the existing
+   `nova_ga_490_dispos` or any production/Studio database.
+7. Only if Render-managed Recovery cannot satisfy the test should we
+   consider the prewritten, separately gated private schema-inventory
+   utility. It has NOT been executed and would require an approved
+   in-environment execution method.
+
+No additional Render database, public connection, backup, or recovery has
+been created or started by this document.
 
 ## Required safe evidence before an exact-version staging update
 
