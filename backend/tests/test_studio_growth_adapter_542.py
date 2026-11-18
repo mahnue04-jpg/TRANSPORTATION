@@ -112,3 +112,70 @@ def test_missing_required_field_is_rejected():
     del row["project_id"]
     with pytest.raises(ValueError):
         convert(row)
+
+
+def studio_rows():
+    from types import SimpleNamespace
+    project = SimpleNamespace(id="project-1", owner_id="owner-1")
+    asset = SimpleNamespace(id="asset-1", project_id="project-1",
+                            owner_id="owner-1", kind="video", status="GENERATED")
+    approval = dict(organization_id="org-A", project_id="project-1",
+                    asset_id="asset-1", owner_id="owner-1", approved=True,
+                    action="share_campaign_asset_with_growth")
+    return project, asset, approval
+
+
+def from_rows(project=None, asset=None, approval=None):
+    p, a, evidence = studio_rows()
+    return adapter.staged_studio_record_event(
+        project=p if project is None else project,
+        asset=a if asset is None else asset,
+        owner_approval=evidence if approval is None else approval,
+        campaign_id="campaign-1", organization_id="org-A",
+        authenticated_owner_id="owner-1",
+        authenticated_studio_principal="studio-service-A",
+        occurred_at=NOW, enabled=True,
+    )
+
+
+def test_actual_studio_record_status_projects_only_opaque_metadata():
+    evt = from_rows()
+    assert evt.event_type == events.EventType.ASSET_READY
+    assert evt.payload_reference == "synthetic:asset-1"
+    assert evt.synthetic is True
+
+
+@pytest.mark.parametrize("field,value", [
+    ("owner_id", "attacker"),
+    ("project_id", "another-project"),
+    ("status", "PLANNING_ONLY"),
+    ("kind", "script"),
+])
+def test_forged_studio_asset_rows_are_denied(field, value):
+    from types import SimpleNamespace
+    p, a, evidence = studio_rows()
+    altered = SimpleNamespace(**{**vars(a), field: value})
+    with pytest.raises(PermissionError):
+        from_rows(project=p, asset=altered, approval=evidence)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("organization_id", "org-B"),
+    ("project_id", "other-project"),
+    ("asset_id", "other-asset"),
+    ("owner_id", "wrong-owner"),
+    ("approved", False),
+    ("action", "post_to_social_media"),
+])
+def test_owner_review_must_exactly_match_asset(field, value):
+    p, a, approval = studio_rows()
+    approval[field] = value
+    with pytest.raises(PermissionError):
+        from_rows(project=p, asset=a, approval=approval)
+
+
+def test_unknown_approval_fields_cannot_authorize():
+    p, a, approval = studio_rows()
+    approval["customer_email"] = "private@example.invalid"
+    with pytest.raises(PermissionError):
+        from_rows(project=p, asset=a, approval=approval)
