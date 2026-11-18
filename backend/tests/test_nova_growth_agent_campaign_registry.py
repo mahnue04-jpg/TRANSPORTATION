@@ -223,3 +223,83 @@ def test_http_queue_refuses_live_flag(http, monkeypatch):
     monkeypatch.setenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED", "true")
     refused = client.post("/api/nova/growth-agent/campaign-assets/reviews", json=payload())
     assert refused.status_code == 404
+
+
+def test_missing_review_table_http_returns_controlled_unavailable(monkeypatch):
+    """An enabled feature flag must not turn absent schema into a 500 or create DDL."""
+    from app.core.nova.growth_agent.campaign_registry import CampaignRegistryUnavailable
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    with Session(engine) as db:
+        monkeypatch.setenv("NOVA_GA_CAMPAIGN_REVIEW_ENABLED", "true")
+        monkeypatch.delenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED", raising=False)
+        principal = SimpleNamespace(user_id="owner-A", organization_id="org-A", role="admin")
+
+        class SyntheticProfile:
+            def __init__(self, session):
+                self.db = session
+
+            def get_profile(self, org):
+                return dict(configured=True, organization_id=org,
+                            is_synthetic_demo=True, activated=False,
+                            agent_disabled=True)
+
+        def scoped_db():
+            yield db
+
+        monkeypatch.setattr(ga_router, "GrowthAgentService", SyntheticProfile)
+        app.dependency_overrides[require_growth_owner] = lambda: principal
+        app.dependency_overrides[get_db] = scoped_db
+        try:
+            client = TestClient(app)
+            for response in (
+                client.post("/api/nova/growth-agent/campaign-assets/reviews",
+                            json=payload()),
+                client.get("/api/nova/growth-agent/campaign-assets/reviews"
+                           "?organization_id=org-A"),
+                client.post("/api/nova/growth-agent/campaign-assets/reviews/"
+                            "campaign-1/withdraw",
+                            json={"organization_id": "org-A"}),
+            ):
+                assert response.status_code == 503, response.text
+                assert response.json()["detail"] == "campaign review storage unavailable"
+            with pytest.raises(CampaignRegistryUnavailable):
+                CampaignReviewRegistry(db)
+            assert engine.dialect.has_table(
+                db.connection(), "nova_ga_campaign_asset_reviews"
+            ) is False
+        finally:
+            app.dependency_overrides.clear()
+    engine.dispose()
+
+
+def test_campaign_revision_creates_table_even_without_feature_flags(monkeypatch):
+    """Stamping this additive revision must never silently skip its schema."""
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+
+    filename = (Path(__file__).resolve().parents[1] / "migrations" / "versions"
+                / "20261118_nova_ga_campaign_review.py")
+    spec = importlib.util.spec_from_file_location("nova_ga_campaign_review_test", filename)
+    revision = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(revision)
+
+    for key in ("NOVA_GA_CAMPAIGN_SCHEMA_APPROVED",
+                "NOVA_GA_CAMPAIGN_SCHEMA_STAGING_ONLY"):
+        monkeypatch.delenv(key, raising=False)
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        context = MigrationContext.configure(conn)
+        monkeypatch.setattr(revision, "op", Operations(context))
+        revision.upgrade()
+        assert inspect(conn).has_table("nova_ga_campaign_asset_reviews")
+        # The additive change is safe if rechecked without downgrading any data.
+        revision.upgrade()
+        assert inspect(conn).has_table("nova_ga_campaign_asset_reviews")
+    engine.dispose()
