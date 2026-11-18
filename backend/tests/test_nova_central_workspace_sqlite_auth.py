@@ -125,3 +125,62 @@ def test_organization_mismatch_token_never_returns_customer_journeys(sandbox):
     # organization isolation must be verified before any journey connection.
     assert result.status_code == 200
     assert result.json()["journeys"] == []
+
+
+
+def test_token_with_unknown_user_subject_rejected(sandbox):
+    app, _ = sandbox
+    bearer = auth.create_access_token({
+        "sub": "nonexistent-synthetic-user",
+        "email": "unknown@example.invalid",
+        "role": "admin", "auth_version": 0, "organization_id": "org-A",
+    })
+    assert read(app, bearer).status_code == 401
+
+
+def test_real_orm_switched_staff_role_cannot_read_owner_status(sandbox):
+    app, factory = sandbox
+    modify(
+        factory, session_role="staff",
+        authorized_roles=json.dumps(["admin", "staff"]),
+    )
+    switched_token = token(role="staff")
+    assert read(app, switched_token).status_code == 403
+
+
+def test_two_disposable_org_accounts_do_not_share_identity(sandbox):
+    app, factory = sandbox
+    with factory() as db:
+        db.add(User(
+            id="synthetic-owner-2", email="other-owner@example.invalid",
+            hashed_password="not-a-login-password", display_name="Other Fake Owner",
+            role="admin", authorized_roles=json.dumps(["admin"]),
+            session_role="admin", auth_version=0,
+            organization_id="org-B", organization_name="Other Fake Organization",
+            is_active=True, is_verified=True,
+        ))
+        db.commit()
+    second_token = auth.create_access_token({
+        "sub": "synthetic-owner-2",
+        "email": "other-owner@example.invalid",
+        "role": "admin", "auth_version": 0,
+        "organization_id": "org-A",
+    })
+    result = read(app, second_token)
+    assert result.status_code == 200
+    assert result.json()["journeys"] == []
+    # The JWT organization claim is never used to resolve the persisted user.
+    with factory() as db:
+        first = db.query(User).filter(User.id == "synthetic-owner-1").one()
+        second = db.query(User).filter(User.id == "synthetic-owner-2").one()
+        assert first.organization_id == "org-A"
+        assert second.organization_id == "org-B"
+
+
+def test_known_owner_cannot_impersonate_another_account_with_invalid_signature(sandbox):
+    app, _ = sandbox
+    signed_token = token()
+    parts = signed_token.split(".")
+    assert len(parts) == 3
+    damaged = ".".join(parts[:2] + ["invalidsignature"])
+    assert read(app, damaged).status_code == 401
