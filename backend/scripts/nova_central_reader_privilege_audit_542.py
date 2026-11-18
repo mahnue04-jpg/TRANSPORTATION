@@ -68,6 +68,22 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
         problems.append("public_schema_create_allowed")
     if observed.get("can_create_temp_table") is not False:
         problems.append("temporary_table_create_allowed")
+    if observed.get("public_schema_usage") is not True:
+        problems.append("missing_public_schema_usage")
+    schema_grants = observed.get("other_schemas")
+    if not isinstance(schema_grants, dict):
+        problems.append("unknown_other_schema_privileges")
+    else:
+        for schema, grants in schema_grants.items():
+            if not isinstance(grants, dict) or grants.get("CREATE") is not False or grants.get("USAGE") is not False:
+                problems.append("unapproved_schema_privileges_" + str(schema))
+    function_grants = observed.get("non_system_functions")
+    if not isinstance(function_grants, dict):
+        problems.append("unknown_non_system_function_privileges")
+    else:
+        for function, allowed in function_grants.items():
+            if allowed is not False:
+                problems.append("unapproved_function_execute_" + str(function))
     memberships = observed.get("role_memberships")
     if not isinstance(memberships, list):
         problems.append("unknown_role_memberships")
@@ -129,6 +145,37 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
             can_create_temp_table = connection.execute(text(
                 "SELECT has_database_privilege(current_user, current_database(), 'TEMP')"
             )).scalar_one()
+            public_schema_usage = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'USAGE')"
+            )).scalar_one()
+            schemas = connection.execute(text(
+                "SELECT nspname FROM pg_namespace "
+                "WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'public') "
+                "AND nspname NOT LIKE 'pg_toast%' "
+                "AND nspname NOT LIKE 'pg_temp_%'"
+            )).scalars().all()
+            other_schemas = {}
+            for schema in schemas:
+                other_schemas[str(schema)] = {
+                    privilege: bool(connection.execute(
+                        text("SELECT has_schema_privilege(current_user, :schema, :privilege)"),
+                        {"schema": schema, "privilege": privilege},
+                    ).scalar_one()) for privilege in ("USAGE", "CREATE")
+                }
+            custom_routines = connection.execute(text(
+                "SELECT p.oid, n.nspname, p.proname "
+                "FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace "
+                "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%' "
+                "AND n.nspname NOT LIKE 'pg_temp_%'"
+            )).mappings().all()
+            non_system_functions = {}
+            for routine in custom_routines:
+                identity = str(routine["nspname"]) + "." + str(routine["proname"]) + "#" + str(routine["oid"])
+                non_system_functions[identity] = bool(connection.execute(
+                    text("SELECT has_function_privilege(current_user, :routine_oid, 'EXECUTE')"),
+                    {"routine_oid": routine["oid"]},
+                ).scalar_one())
             # Catch direct and transitive role memberships; inherited grants,
             # including grants available through SET ROLE, require explicit review.
             # This conservative initial boundary rejects *any* membership.
@@ -206,6 +253,9 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                 "can_create_schema": bool(can_create),
                 "can_create_public_table": bool(can_create_public_table),
                 "can_create_temp_table": bool(can_create_temp_table),
+                "public_schema_usage": bool(public_schema_usage),
+                "other_schemas": other_schemas,
+                "non_system_functions": non_system_functions,
                 "role_memberships": sorted(str(name) for name in memberships),
                 "other_tables": other_tables,
                 "tables": tables,
