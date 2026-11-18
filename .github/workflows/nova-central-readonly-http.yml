@@ -8,6 +8,7 @@ on:
       - "backend/app/core/nova/workspace/central_journey_readonly.py"
       - "backend/app/core/nova/workspace/router.py"
       - "backend/tests/test_nova_central_workspace_readonly.py"
+      - "backend/tests/test_nova_central_workspace_signed_jwt.py"
       - ".github/workflows/nova-central-readonly-http.yml"
   workflow_dispatch:
 
@@ -38,5 +39,5 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Compile and test read-only HTTP boundary
         run: |
-          python -m py_compile app/core/nova/workspace/central_journey_readonly.py app/core/nova/workspace/router.py tests/test_nova_central_workspace_readonly.py
-          python -m pytest tests/test_nova_central_workspace_readonly.py -q --tb=short --noconftest
+          python -m py_compile app/core/nova/workspace/central_journey_readonly.py app/core/nova/workspace/router.py tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py
+          python -m pytest tests/test_nova_central_workspace_readonly.py tests/test_nova_central_workspace_signed_jwt.py -q --tb=short --noconftest
