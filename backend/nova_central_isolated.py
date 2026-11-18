@@ -114,7 +114,12 @@ def create_app():
             token = request.cookies.get(auth.ADMIN_SESSION_COOKIE)
         if not token:
             raise HTTPException(status_code=401, detail="Authentication required")
-        payload = auth._jwt_verify(token)
+        try:
+            payload = auth._jwt_verify(token)
+        except (TypeError, ValueError) as exc:
+            # Shared auth may raise on malformed exp types; reject the token
+            # instead of allowing an unhandled 500 response.
+            raise HTTPException(status_code=401, detail="Invalid token claims") from exc
         # The shared verifier tolerates tokens without an expiry. The isolated
         # owner boundary must require an actual finite future expiration.
         exp = payload.get("exp")
