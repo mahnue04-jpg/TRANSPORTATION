@@ -132,6 +132,9 @@ def submit_queued_csv(
 def process_one_queued_csv(
     session_factory: Callable[[], Session], *, store,
     authorize: Authorization,
+    job_id: str | None = None,
+    organization_id: str | None = None,
+    owner_user_id: str | None = None,
 ) -> dict:
     """Execute one bounded queued CSV using private storage; never deliver.
 
@@ -230,8 +233,11 @@ def process_one_queued_csv(
             raise OutputUncertain(digest) from exc
         return digest
 
-    return run_one(session_factory, handler, require_bound_input=True,
-                   lease_seconds=300, retry_delay_seconds=30)
+    return run_one(
+        session_factory, handler, require_bound_input=True,
+        job_id=job_id, organization_id=organization_id,
+        owner_user_id=owner_user_id, lease_seconds=300, retry_delay_seconds=30,
+    )
 
 
 def review_processed_csv(
