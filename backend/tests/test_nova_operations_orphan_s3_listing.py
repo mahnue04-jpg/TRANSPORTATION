@@ -47,7 +47,7 @@ def test_private_s3_listing_rejects_bucket_wide_and_foreign_key():
         "Contents": [{"Key": "other-org/job-a/secret.csv"}],
         "IsTruncated": False,
     }})
-    with pytest.raises(PrivateListingBlocked, match="exact organization"):
+    with pytest.raises(PrivateListingBlocked, match="Exact organization"):
         list_scoped_s3_keys(client, bucket="synthetic-private", prefix="")
     assert client.calls == []
     with pytest.raises(PrivateListingBlocked, match="outside job scope"):
