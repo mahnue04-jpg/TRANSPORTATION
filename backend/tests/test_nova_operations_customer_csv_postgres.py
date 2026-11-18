@@ -652,3 +652,40 @@ def test_queued_csv_revocation_during_processing_never_approves(postgres, monkey
             assert state == "NEEDS_RECONCILIATION"
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_csv_write_readback_corruption_requires_reconciliation(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, process_one_queued_csv,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    original_retrieve = store.retrieve
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner", engagement_id="synthetic-eng",
+            task_id="synthetic-csv-task", request_key="pipeline-readback",
+            raw=b"Name\nAda\n", store=store, authorize=lambda *_: True)
+        def corrupted_readback(*, storage_ref):
+            if "nova-csv-review" in storage_ref:
+                return b"Name\nBad\n", "text/csv"
+            return original_retrieve(storage_ref=storage_ref)
+        monkeypatch.setattr(store, "retrieve", corrupted_readback)
+        response = process_one_queued_csv(factory, store=store,
+                                          authorize=lambda *_: True)
+        assert response == {"state": "needs_reconciliation",
+                            "job_id": created["job_id"]}
+        with factory() as db:
+            status = csvjobs.job_status(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=created["job_id"])["status"]
+            assert status == "PROCESSING"
+            held = db.execute(sa.select(leases.lease_jobs.c.state).where(
+                leases.lease_jobs.c.job_id == created["job_id"])).scalar_one()
+            assert held == "NEEDS_RECONCILIATION"
+    finally:
+        leases.lease_metadata.drop_all(engine)
