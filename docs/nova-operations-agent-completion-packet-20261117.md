@@ -22,6 +22,7 @@
 - `operations_postgres_leases.py`: atomic enqueue, scoped immutable input reference, claim/renew/fencing, retry limits, cancel, reconciliation hold.
 - `operations_lease_worker.py`: explicit one-job executor, strict bound-input option, uncertainty holds.
 - `operations_owner_task_authorizer.py`: authenticated-owner adapter to the existing live saved-task eligibility check; not a background worker service principal.
+- `operations_owner_csv_api.py`: separately gated `/operations/queued/` owner-only HTTP endpoints for task-specific intake, supervised exact-job process, explicit owner review, sanitized status, and approval-only download. These do not run a background service. Requires `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED=true` plus all existing DB/private-storage gates; default off.
 - `operations_queued_csv_pipeline.py`: verifies private output by readback and SHA-256 before review publication; separately verifies private output integrity before explicit owner approval.
 - `operations_queued_csv_pipeline.py`: explicit development-only queue intake -> processing -> private review -> owner decision coordinator. Requires an injected independent saved-task authorizer.
 - `operations_lease_reconciliation.py` and `operations_csv_reconciliation_bridge.py`: read-only owner-scoped reconciliation helpers.
@@ -43,13 +44,13 @@ python -m pytest -v -rs \
   tests/test_nova_operations_lease_migration.py
 ```
 
-Acceptance matrix: basic successful flow; duplicate request reuses job; changed idempotency input rejected; owner-scope denial; owner review remains pending until explicit approval; private output tampering blocked; private input corruption blocked; cancellation fenced; authorization revocation before upload or while processing; uncertain output held; two-worker concurrency; lease expiration and retries; migration approval gate; fresh DB engine and subprocess recovery.
+Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> status -> explicit review -> approval-gated download; basic successful flow; duplicate request reuses job; changed idempotency input rejected; owner-scope denial; owner review remains pending until explicit approval; private output tampering blocked; private input corruption blocked; cancellation fenced; authorization revocation before upload or while processing; uncertain output held; two-worker concurrency; lease expiration and retries; migration approval gate; fresh DB engine and subprocess recovery.
 
 **Do not mark acceptance passed until the actual latest-head CI run completes successfully.**
 
 ## Still REQUIRED before any staging execution
 
-1. **Real authorization integration:** An authenticated-owner adapter now reuses existing saved-task eligibility checks, but the coordinator is not wired to an HTTP route or revocable hosted worker service principal. Require actual owner-authenticated request integration and recheck revocation at every state transition.
+1. **Real authorization integration:** Development-only supervised owner routes now reuse the existing owner guard and saved-task eligibility checks; the runtime gate is default off. A revocable hosted worker service principal remains absent. HTTP acceptance has not yet been established on a deployed isolated staging instance; do not interpret these routes as autonomous customer processing.
 2. **S3 private-object security:** Owner-authorized provider credentials; real private bucket settings; key provenance/scope; immutable or versioned object behavior; non-public ACL; encryption; retention; orphan cleanup; and real storage outage testing. Current tests use fake storage.
 3. **Atomicity and crash windows:** Queue and private writes cross two systems. Reservation-before-write may strand jobs; write-before-bind may orphan artifacts; successful output before DB commit may leave an orphan. Add an audited outbox/reconciler and recovery rules. Current code fails closed but cannot automatically repair every window.
 4. **Lease/output reconciliation:** Held jobs whose customer CSV row remains `PROCESSING` need a private-output provenance record and deliberate owner-approved recovery, without automatic retry. SHA alone is not authorization.
@@ -63,3 +64,9 @@ Acceptance matrix: basic successful flow; duplicate request reuses job; changed 
 - **Allowed without additional owner approval:** Draft-branch code, CI, offline synthetic fixtures and reviews.
 - **Not authorized by this PR:** Merge, hosted staging or production deployment, real S3 setup/credentials, staging/shared/production database migration, worker activation, customer data, real messaging, paid providers or new charges.
 - **Decision gate:** After CI and isolated staging verification, provide one complete PASS/FAIL table and exact owner approvals needed; do not assert first paying-client readiness on synthetic test results.
+
+## Verification checkpoint
+
+- A consolidated CI run for head `3355642040caecde475a497151d5f123d75c2962` completed successfully (run `44236365391`). This predates the new supervised HTTP endpoints.
+- The new owner-only HTTP routes and tests are on the later PR head; **require latest-head four-job CI success** before acceptance. No assertion of staging or live readiness.
+- Current route flag: `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED` defaults to disabled. No agent background loop or scheduled work is enabled.
