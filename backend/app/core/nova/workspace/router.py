@@ -26,12 +26,16 @@ from app.core.nova.workspace.schemas import (
     NovaWorkspaceTransferCreate,
 )
 from app.db.session import get_db
+from app.core.nova.workspace.central_journey_readonly import router as central_readonly_router
 
 router = APIRouter(
     prefix="/api/nova/workspace",
     tags=["nova-workspace"],
     dependencies=[Depends(require_nova_access)],
 )
+
+# Owner-only Central status; default-off and returns no customer journeys.
+router.include_router(central_readonly_router)
 
 
 @router.post("/transcribe")
