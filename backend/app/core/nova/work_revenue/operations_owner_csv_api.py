@@ -443,6 +443,7 @@ def eligible_csv_tasks(
 import sqlalchemy as _sa
 from sqlalchemy.orm import sessionmaker as _sessionmaker
 from . import operations_postgres_leases as _ops_leases
+from .operations_private_input import PrivateInputBlocked as _PrivateInputBlocked
 from . import operations_queued_csv_pipeline as _queued_csv
 from .operations_owner_task_authorizer import owner_task_authorizer as _owner_task_authorizer
 
@@ -469,7 +470,7 @@ def _queued_error(exc: Exception) -> None:
     if isinstance(exc, durable_csv.CustomerCSVBlocked):
         _durable_error(exc)
     if isinstance(exc, (_queued_csv.QueuedCSVBlocked,
-                        _ops_leases.LeaseBlocked)):
+                        _ops_leases.LeaseBlocked, _PrivateInputBlocked)):
         raise HTTPException(409, "Queued Operations request blocked") from exc
     raise exc
 
