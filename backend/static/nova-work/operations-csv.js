@@ -235,7 +235,9 @@
         currentJobId = job.job_id || "";
         currentJobMode = mode;
         currentLeaseStatus = queued ? "QUEUED" : "";
-        currentRequest = null;
+        // Keep the same key for identical queued resubmissions; an owner must
+        // change task, file or mode to intentionally start new work.
+        if (!queued) currentRequest = null;
         updateJobButtons(job.status);
         scopedStatus.textContent = "Job " + currentJobId + ": " + job.status +
           (job.replayed ? " (existing request)" : "") +
