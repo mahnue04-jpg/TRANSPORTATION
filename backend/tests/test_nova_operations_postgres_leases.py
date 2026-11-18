@@ -246,12 +246,12 @@ def test_private_input_binding_is_immutable_and_owner_scoped(database):
             owner_user_id="owner-a", input_sha256="a" * 64,
             storage_ref="org-a/synthetic-bound/nova-csv-input-owner-a/source.csv",
             input_size=11)
-        with pytest.raises(leases.LeaseBlocked, match="another reference"):
+        with pytest.raises(leases.LeaseBlocked, match="reference scope mismatch"):
             leases.bind_private_input(
                 db, job_id="synthetic-bound", organization_id="org-a",
                 owner_user_id="owner-a", input_sha256="a" * 64,
                 storage_ref="org-a/other/private.csv", input_size=11)
-        with pytest.raises(leases.LeaseBlocked, match="authorized scope"):
+        with pytest.raises(leases.LeaseBlocked, match="reference scope mismatch"):
             leases.bind_private_input(
                 db, job_id="synthetic-bound", organization_id="different-org",
                 owner_user_id="owner-a", input_sha256="a" * 64,
