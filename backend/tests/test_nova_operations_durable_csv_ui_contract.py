@@ -59,6 +59,15 @@ def test_owner_recovery_and_cancel_are_explicit_and_safe():
     assert 'No automatic retry or customer delivery.' in JS
     assert 'currentLeaseStatus !== "QUEUED"' in JS
     assert '["QUEUED", "RUNNING"].includes(currentLeaseStatus)' in JS
+    recovery = JS.split("recoveryQueuedButton.addEventListener", 1)[1]
+    recovery = recovery.split("cancelQueuedButton.addEventListener", 1)[0]
+    assert "Recovery inspection:" in recovery
+    assert "refreshJobStatus" not in recovery
+    cancel = JS.split("cancelQueuedButton.addEventListener", 1)[1]
+    cancel = cancel.split("statusButton.addEventListener", 1)[0]
+    assert "processInFlight" in cancel
+    assert "scopedBusy) return" not in cancel
+    assert "Finish the current CSV request before canceling." in cancel
 
 
 def test_scoped_csv_task_url_contains_both_escaped_identifiers():

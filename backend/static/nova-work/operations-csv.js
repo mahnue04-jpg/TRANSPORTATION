@@ -133,6 +133,8 @@
   let currentJobStatus = "";
   let currentLeaseStatus = "";
   let currentRequest = null;
+  let processInFlight = false;
+  let cancelInFlight = false;
 
   function scopedAuthHeaders() {
     const session = window.AmiCorSession;
@@ -155,7 +157,7 @@
     if (recoveryQueuedButton) recoveryQueuedButton.disabled =
       !currentJobId || currentJobMode !== "queued";
     if (cancelQueuedButton) cancelQueuedButton.disabled =
-      !currentJobId || currentJobMode !== "queued" ||
+      cancelInFlight || !currentJobId || currentJobMode !== "queued" ||
       !["QUEUED", "RUNNING"].includes(currentLeaseStatus);
   }
 
@@ -265,6 +267,7 @@
   if (processQueuedButton) processQueuedButton.addEventListener("click", async function () {
     if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
     scopedBusy = true;
+    processInFlight = true;
     processQueuedButton.disabled = true;
     scopedStatus.textContent = "Processing this saved queued job for owner review...";
     try {
@@ -276,6 +279,7 @@
       });
       if (!response.ok) throw new Error(await safeError(response));
       const result = await response.json();
+      if (currentLeaseStatus === "CANCELLED") return;
       if (result.state === "completed") {
         await refreshJobStatus();
       } else {
@@ -285,10 +289,12 @@
         updateJobButtons("PROCESSING");
       }
     } catch (err) {
+      if (currentLeaseStatus === "CANCELLED") return;
       scopedStatus.textContent = (err && err.message) || "Queued processing unavailable.";
       await refreshJobStatus().catch(function () {});
     } finally {
-      scopedBusy = false;
+      processInFlight = false;
+      if (!cancelInFlight) scopedBusy = false;
       updateJobButtons(currentJobStatus);
     }
   });
@@ -301,10 +307,11 @@
       });
       if (!response.ok) throw new Error(await safeError(response));
       const result = await response.json();
+      currentLeaseStatus = result.lease_status || "";
+      updateJobButtons(result.job_status || currentJobStatus);
       scopedStatus.textContent = "Recovery inspection: " + result.recovery_result +
         (result.owner_action_required ? ". Owner review required." : ".") +
         " No automatic retry or customer delivery.";
-      await refreshJobStatus();
     } catch (err) {
       scopedStatus.textContent = (err && err.message) || "Recovery inspection unavailable.";
     } finally {
@@ -312,9 +319,15 @@
     }
   });
   if (cancelQueuedButton) cancelQueuedButton.addEventListener("click", async function () {
-    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    if (!currentJobId || currentJobMode !== "queued" || cancelInFlight) return;
+    if (scopedBusy && !processInFlight) {
+      scopedStatus.textContent = "Finish the current CSV request before canceling.";
+      return;
+    }
     if (!window.confirm("Cancel this queued job? This cannot undo any private output already written.")) return;
-    scopedBusy = true;
+    const ownsBusy = !scopedBusy;
+    if (ownsBusy) scopedBusy = true;
+    cancelInFlight = true;
     cancelQueuedButton.disabled = true;
     try {
       const response = await fetch(jobPath("/cancel"), {
@@ -332,7 +345,8 @@
       scopedStatus.textContent = (err && err.message) || "Cancellation unavailable.";
       await refreshJobStatus().catch(function () {});
     } finally {
-      scopedBusy = false;
+      cancelInFlight = false;
+      if (ownsBusy || !processInFlight) scopedBusy = false;
       updateJobButtons(currentJobStatus);
     }
   });

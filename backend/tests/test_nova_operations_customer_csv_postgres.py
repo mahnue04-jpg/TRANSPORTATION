@@ -1105,3 +1105,64 @@ def test_recovery_api_and_owner_cancellation_are_scoped_and_explicit(
             ).status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_cancel_after_finalized_output_still_completes_for_review(
+    postgres, monkeypatch,
+):
+    """A cancel in the post-commit window must not strand the review copy."""
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, process_one_queued_csv, review_processed_csv,
+    )
+    from app.core.nova.work_revenue.operations_recovery_diagnostics import (
+        inspect_recovery,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    real_complete = leases.complete
+    seen = {}
+
+    def cancel_before_complete(db, *, claimed, output_sha256, now=None):
+        with Session(engine) as other:
+            seen["cancelled"] = leases.cancel(
+                other, job_id=claimed.job_id,
+                organization_id=claimed.organization_id,
+                owner_user_id=claimed.owner_user_id,
+            )
+        return real_complete(
+            db, claimed=claimed, output_sha256=output_sha256, now=now)
+
+    monkeypatch.setattr(leases, "complete", cancel_before_complete)
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner", engagement_id="synthetic-eng",
+            task_id="synthetic-csv-task", request_key="cancel-after-finalize",
+            raw=b"Name\nAda\n", store=store, authorize=lambda *_: True)
+        finished = process_one_queued_csv(
+            factory, store=store, authorize=lambda *_: True,
+            job_id=created["job_id"], organization_id="synthetic-org",
+            owner_user_id="synthetic-owner")
+        assert seen["cancelled"] is False
+        assert finished == {"state": "completed", "job_id": created["job_id"]}
+        reviewed = review_processed_csv(
+            factory, organization_id="synthetic-org",
+            owner_user_id="synthetic-owner", job_id=created["job_id"],
+            approve=True, authorize=lambda *_: True, store=store)
+        assert reviewed["status"] == "APPROVED_FOR_DOWNLOAD"
+        with factory() as db:
+            db.execute(sa.update(leases.lease_jobs).where(
+                leases.lease_jobs.c.job_id == created["job_id"],
+            ).values(state="CANCELLED", output_sha256=None,
+                     lease_token=None, lease_until=None))
+            db.commit()
+            diagnosed = inspect_recovery(
+                db, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=created["job_id"])
+        assert diagnosed["recovery_result"] == "output_finalized_without_completed_lease"
+        assert diagnosed["owner_action_required"] is True
+    finally:
+        leases.lease_metadata.drop_all(engine)

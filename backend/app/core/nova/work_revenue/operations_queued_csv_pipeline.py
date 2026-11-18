@@ -213,6 +213,19 @@ def process_one_queued_csv(
                 raise QueuedCSVBlocked("Private output read-back integrity failed")
             with session_factory() as db:
                 _runtime(db)
+                # Hold the lease row until the review copy commits. Otherwise a
+                # cancel can mark the lease CANCELLED after this write and
+                # before complete(), which strands the private artifact.
+                held = db.execute(sa.select(leases.lease_jobs.c.job_id).where(
+                    leases.lease_jobs.c.job_id == claim.job_id,
+                    leases.lease_jobs.c.organization_id == claim.organization_id,
+                    leases.lease_jobs.c.owner_user_id == claim.owner_user_id,
+                    leases.lease_jobs.c.state == "RUNNING",
+                    leases.lease_jobs.c.lease_token == claim.token,
+                    leases.lease_jobs.c.lease_until > leases._now(),
+                ).with_for_update()).first()
+                if held is None:
+                    raise QueuedCSVBlocked("Lease changed before review finalize")
                 _authorized(authorize, claim.organization_id, claim.owner_user_id,
                             row["engagement_id"], row["task_id"])
                 updated = db.execute(sa.update(csvjobs.jobs).where(

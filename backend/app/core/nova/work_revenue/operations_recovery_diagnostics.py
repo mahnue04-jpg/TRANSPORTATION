@@ -50,8 +50,12 @@ def inspect_recovery(
         job["input_sha256"] == lease["input_sha256"])
     same_output = output_ready and leases._sha(lease["output_sha256"]) and (
         job["output_sha256"] == lease["output_sha256"])
+    finalized = status in ("AWAITING_REVIEW", "APPROVED_FOR_DOWNLOAD")
 
-    if state == "CANCELLED":
+    # A cancel that lands after the review copy is committed is not a clean
+    # cancel. Owners need the finalized-output classification so the private
+    # artifact is not reported as if no review copy exists.
+    if state == "CANCELLED" and not finalized:
         result = "cancelled"
     elif state == "NEEDS_RECONCILIATION":
         result = "owner_reconciliation_required"
@@ -61,10 +65,9 @@ def inspect_recovery(
         result = "metadata_mismatch"
     elif state == "COMPLETED":
         result = ("completed_for_owner_review"
-                  if same_output and status in
-                  ("AWAITING_REVIEW", "APPROVED_FOR_DOWNLOAD")
+                  if same_output and finalized
                   else "completed_metadata_mismatch")
-    elif status in ("AWAITING_REVIEW", "APPROVED_FOR_DOWNLOAD"):
+    elif finalized:
         result = "output_finalized_without_completed_lease"
     elif state == "QUEUED":
         result = ("queued_ready_for_supervised_processing" if bound

@@ -265,6 +265,28 @@ def exhaust_expired(db: Session, *, now: datetime | None = None) -> int:
         raise
 
 
+def _customer_output_finalized(
+    db: Session, *, job_id: str, organization_id: str, owner_user_id: str,
+) -> bool:
+    """True when this owner already has a committed private review copy.
+
+    Lease-only databases have no customer CSV table. A missing table is not a
+    finalized artifact and must not abort the surrounding lease transaction.
+    """
+    from .operations_customer_csv_jobs import jobs as csv_jobs
+    present = db.execute(
+        sa.text("SELECT to_regclass(:name)"), {"name": csv_jobs.name},
+    ).scalar()
+    if present is None:
+        return False
+    status = db.execute(sa.select(csv_jobs.c.status).where(
+        csv_jobs.c.id == job_id,
+        csv_jobs.c.organization_id == organization_id,
+        csv_jobs.c.owner_user_id == owner_user_id,
+    )).scalar()
+    return status in ("AWAITING_REVIEW", "APPROVED_FOR_DOWNLOAD")
+
+
 def cancel(db: Session, *, job_id: str, organization_id: str,
            owner_user_id: str, now: datetime | None = None) -> bool:
     """Cancel queued or running work, fencing any worker that holds a lease.
@@ -272,10 +294,26 @@ def cancel(db: Session, *, job_id: str, organization_id: str,
     The authenticated HTTP/controller layer must independently verify that the
     actor may cancel the underlying customer task. This function accepts only
     explicit owner/organization scope; it is not a public authorization check.
+    A review copy already committed on the customer job is not canceled: the
+    worker must still be able to complete that lease so the owner can review it.
     """
     _guard(db)
     now = now or _now()
     try:
+        row = db.execute(sa.select(lease_jobs.c.state).where(
+            lease_jobs.c.job_id == job_id,
+            lease_jobs.c.organization_id == organization_id,
+            lease_jobs.c.owner_user_id == owner_user_id,
+        ).with_for_update()).scalar()
+        if row not in ("QUEUED", "RUNNING"):
+            db.rollback()
+            return False
+        if _customer_output_finalized(
+            db, job_id=job_id, organization_id=organization_id,
+            owner_user_id=owner_user_id,
+        ):
+            db.rollback()
+            return False
         changed = db.execute(sa.update(lease_jobs).where(
             lease_jobs.c.job_id == job_id,
             lease_jobs.c.organization_id == organization_id,
