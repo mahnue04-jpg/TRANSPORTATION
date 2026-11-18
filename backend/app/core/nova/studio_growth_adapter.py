@@ -74,3 +74,65 @@ def staging_asset_event(
         idempotency_key="studio-asset:" + asset_id,
         payload_reference="synthetic:" + asset_id,
     )
+
+
+def staged_studio_record_event(
+    *,
+    project: object,
+    asset: object,
+    owner_approval: Mapping[str, object],
+    campaign_id: str,
+    organization_id: str,
+    authenticated_owner_id: str,
+    authenticated_studio_principal: str,
+    occurred_at: datetime,
+    enabled: bool | None = None,
+) -> AgentEvent:
+    """Project trusted Studio model rows to a *synthetic* event; no I/O.
+
+    The caller must independently authenticate the Studio service principal,
+    load project/asset from a tenant/owner scoped store and read a persisted
+    owner approval. No user-supplied raw JSON is authorization evidence.
+
+    Actual Studio CreativeAsset uses status=GENERATED, not completed. A real
+    owner-approval record is NOT currently part of that model, so a future
+    staging wrapper must introduce/verify that record before calling here.
+    """
+    if (not authenticated_owner_id or not _ID.fullmatch(authenticated_owner_id)
+            or not authenticated_studio_principal
+            or not _ID.fullmatch(authenticated_studio_principal)):
+        raise PermissionError("trusted owner and Studio service identities required")
+    if (getattr(project, "owner_id", None) != authenticated_owner_id
+            or getattr(asset, "owner_id", None) != authenticated_owner_id
+            or getattr(asset, "project_id", None) != getattr(project, "id", None)):
+        raise PermissionError("Studio asset and project ownership mismatch")
+    if getattr(asset, "status", None) != "GENERATED":
+        raise PermissionError("Studio asset must be generated")
+    if getattr(asset, "kind", None) not in ("video", "image"):
+        raise PermissionError("non-campaign Studio asset type")
+    required_approval = {"organization_id", "project_id", "asset_id", "owner_id",
+                         "approved", "action"}
+    if not isinstance(owner_approval, Mapping) or set(owner_approval) != required_approval:
+        raise PermissionError("trusted persisted approval evidence required")
+    if (owner_approval["organization_id"] != organization_id
+            or owner_approval["project_id"] != getattr(project, "id", None)
+            or owner_approval["asset_id"] != getattr(asset, "id", None)
+            or owner_approval["owner_id"] != authenticated_owner_id
+            or owner_approval["approved"] is not True
+            or owner_approval["action"] != "share_campaign_asset_with_growth"):
+        raise PermissionError("owner approval does not cover this asset handoff")
+    return staging_asset_event(
+        {
+            "organization_id": organization_id,
+            "campaign_id": campaign_id,
+            "asset_id": getattr(asset, "id", None),
+            "project_id": getattr(project, "id", None),
+            "status": "completed",
+            "asset_kind": getattr(asset, "kind", None),
+            "review_state": "owner_approved",
+        },
+        organization_id=organization_id,
+        source_identity=authenticated_studio_principal,
+        occurred_at=occurred_at,
+        enabled=enabled,
+    )
