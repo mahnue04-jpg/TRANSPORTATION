@@ -12,6 +12,27 @@ from sqlalchemy.orm import Session
 
 from . import operations_postgres_leases as leases
 
+class OutputUncertain(RuntimeError):
+    """Private output may exist; automatic retry is not safe."""
+
+    def __init__(self, expected_sha256: str):
+        self.expected_sha256 = expected_sha256
+        super().__init__("Private output requires reconciliation")
+
+
+def _hold_uncertain(session_factory, claimed, expected_sha256):
+    try:
+        with session_factory() as db:
+            held = leases.hold_for_reconciliation(
+                db, claimed=claimed, expected_output_sha256=expected_sha256
+            )
+    except Exception:
+        return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
+    if not held:
+        return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
+    return {"state": "needs_reconciliation", "job_id": claimed.job_id}
+
+
 
 def run_one(
     session_factory: Callable[[], Session],
@@ -36,6 +57,8 @@ def run_one(
         return {"state": "idle", "job_id": None}
     try:
         output_sha256 = handler(claimed)
+    except OutputUncertain as exc:
+        return _hold_uncertain(session_factory, claimed, exc.expected_sha256)
     except Exception:
         # Only handler failures follow the synthetic retry path. A real handler
         # must reconcile any possibly-written artifact before enabling retry.
@@ -55,18 +78,5 @@ def run_one(
         # The lease was revoked, expired, or superseded. Never retry work.
         return {"state": "stale", "job_id": claimed.job_id}
     except Exception:
-        # Completion may have succeeded before the connection failed. Persist
-        # a no-reclaim hold with a fresh session; never retry the handler here.
-        try:
-            with session_factory() as db:
-                held = leases.hold_for_reconciliation(
-                    db, claimed=claimed, expected_output_sha256=output_sha256
-                )
-        except Exception:
-            # No persisted hold was verified: an expired lease may be
-            # reclaimed. Stop and escalate instead of claiming recovery safety.
-            return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
-        if not held:
-            return {"state": "reconciliation_hold_unverified", "job_id": claimed.job_id}
-        return {"state": "needs_reconciliation", "job_id": claimed.job_id}
+        return _hold_uncertain(session_factory, claimed, output_sha256)
     return {"state": "completed", "job_id": claimed.job_id}
