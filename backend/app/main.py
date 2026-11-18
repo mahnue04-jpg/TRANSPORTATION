@@ -496,6 +496,9 @@ app.include_router(nova_communications_router)
 app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_work_router)
+# Owner-scoped CSV endpoints remain disabled until explicitly configured.
+from app.core.nova.work_revenue.operations_owner_csv_api import router as nova_operations_owner_csv_router
+app.include_router(nova_operations_owner_csv_router)
 app.include_router(nova_v3_router)
 app.include_router(nova_today_router)
 app.include_router(nova_autonomy_router)
