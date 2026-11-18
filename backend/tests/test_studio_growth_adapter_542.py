@@ -179,3 +179,99 @@ def test_unknown_approval_fields_cannot_authorize():
     approval["customer_email"] = "private@example.invalid"
     with pytest.raises(PermissionError):
         from_rows(project=p, asset=a, approval=approval)
+
+
+def test_owner_scoped_store_and_persisted_approval_reader_required():
+    project, asset, approval = studio_rows()
+
+    class ReadOnlyStore:
+        def __init__(self):
+            self.calls = []
+        def get_project(self, project_id, owner_id):
+            self.calls.append(("project", project_id, owner_id))
+            return project if (project_id, owner_id) == ("project-1", "owner-1") else None
+        def list_assets(self, project_id, owner_id):
+            self.calls.append(("assets", project_id, owner_id))
+            return [asset] if (project_id, owner_id) == ("project-1", "owner-1") else []
+
+    calls = []
+    def approval_reader(**kwargs):
+        calls.append(kwargs)
+        return approval
+
+    store = ReadOnlyStore()
+    event = adapter.read_studio_asset_for_growth(
+        studio_store=store, approval_reader=approval_reader,
+        project_id="project-1", asset_id="asset-1",
+        campaign_id="campaign-1", organization_id="org-A",
+        authenticated_owner_id="owner-1",
+        authenticated_studio_principal="studio-service-A",
+        occurred_at=NOW, enabled=True,
+    )
+    assert event.synthetic and event.payload_reference == "synthetic:asset-1"
+    assert store.calls == [
+        ("project", "project-1", "owner-1"),
+        ("assets", "project-1", "owner-1"),
+    ]
+    assert calls == [dict(
+        organization_id="org-A", owner_id="owner-1", project_id="project-1",
+        asset_id="asset-1", action="share_campaign_asset_with_growth",
+    )]
+
+
+@pytest.mark.parametrize("failure", [
+    "disabled", "missing_project", "missing_asset", "missing_approval",
+    "denied_approval", "duplicate_asset", "wrong_owner",
+])
+def test_server_side_source_of_truth_boundary_fails_closed(failure):
+    project, asset, approval = studio_rows()
+    from types import SimpleNamespace
+
+    class Store:
+        def get_project(self, project_id, owner_id):
+            if failure == "missing_project":
+                return None
+            return project
+        def list_assets(self, project_id, owner_id):
+            if failure == "missing_asset":
+                return []
+            if failure == "duplicate_asset":
+                return [asset, asset]
+            if failure == "wrong_owner":
+                return [SimpleNamespace(**{**vars(asset), "owner_id": "other"})]
+            return [asset]
+
+    def reader(**kwargs):
+        if failure == "missing_approval":
+            return None
+        if failure == "denied_approval":
+            return {**approval, "approved": False}
+        return approval
+
+    with pytest.raises(PermissionError):
+        adapter.read_studio_asset_for_growth(
+            studio_store=Store(), approval_reader=reader,
+            project_id="project-1", asset_id="asset-1",
+            campaign_id="campaign-1", organization_id="org-A",
+            authenticated_owner_id="owner-1",
+            authenticated_studio_principal="studio-service-A",
+            occurred_at=NOW, enabled=failure != "disabled",
+        )
+
+
+def test_untrusted_approval_dictionary_cannot_be_used_as_reader():
+    project, asset, approval = studio_rows()
+    from types import SimpleNamespace
+    store = SimpleNamespace(
+        get_project=lambda *args: project,
+        list_assets=lambda *args: [asset],
+    )
+    with pytest.raises(PermissionError):
+        adapter.read_studio_asset_for_growth(
+            studio_store=store, approval_reader=approval,
+            project_id="project-1", asset_id="asset-1",
+            campaign_id="campaign-1", organization_id="org-A",
+            authenticated_owner_id="owner-1",
+            authenticated_studio_principal="studio-service-A",
+            occurred_at=NOW, enabled=True,
+        )
