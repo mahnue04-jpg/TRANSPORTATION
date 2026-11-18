@@ -1,0 +1,75 @@
+"""No-service smoke checks for the Nova Central isolated staging factory.
+
+These do not prove database zero-writes or deployed security, which require
+separate disposable-ORM and runtime acceptance tests before staging approval.
+"""
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+
+
+PATH = Path(__file__).resolve().parents[1] / "nova_central_isolated.py"
+spec = importlib.util.spec_from_file_location("nova_central_isolated_under_test", PATH)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+
+@pytest.fixture
+def config(monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "test")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("NOVA_CENTRAL_ISOLATED_TEST", "1")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/nova-central-disposable-test.db")
+    monkeypatch.setenv("NOVA_CENTRAL_APPROVED_COMMIT", "a" * 40)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "a" * 40)
+    monkeypatch.delenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", raising=False)
+    monkeypatch.delenv("NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED", raising=False)
+
+
+def test_import_is_side_effect_free():
+    assert "app.main" not in sys.modules
+    assert not hasattr(module, "app")
+
+
+def test_disposable_test_config_only(config):
+    module._config()
+
+
+@pytest.mark.parametrize("name,value", [
+    ("APP_ENV", "production"),
+    ("AMICOR_ENVIRONMENT", "production"),
+    ("NOVA_CENTRAL_ISOLATED_TEST", "0"),
+    ("NOVA_CENTRAL_APPROVED_COMMIT", "b" * 40),
+    ("RENDER_GIT_COMMIT", ""),
+    ("DATABASE_URL", "postgresql://example.invalid/unapproved"),
+    ("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true"),
+    ("NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED", "true"),
+])
+def test_reject_insecure_config(config, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+def test_staging_requires_explicit_new_postgres(config, monkeypatch):
+    monkeypatch.setenv("NOVA_CENTRAL_ISOLATED_TEST", "0")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/nova_central_542_dispos")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "central-only.internal")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "nova_central_542_dispos")
+    module._config()
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/amicor")
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+def test_missing_staging_allowlist_is_rejected(config, monkeypatch):
+    monkeypatch.setenv("NOVA_CENTRAL_ISOLATED_TEST", "0")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/nova_central_542_dispos")
+    with pytest.raises(RuntimeError):
+        module._config()
