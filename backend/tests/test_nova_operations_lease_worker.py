@@ -152,3 +152,20 @@ def test_ambiguous_completion_with_failed_hold_is_not_claimed_safe(engine, monke
             leases.lease_jobs.c.job_id == "synthetic-worker-hold-failed",
         )).mappings().one()
         assert row["state"] == "RUNNING"
+
+
+def test_strict_worker_does_not_run_unbound_input(engine):
+    seed(engine, "synthetic-strict-unbound")
+    invoked = []
+    result = run_one(
+        lambda: Session(engine),
+        lambda claim: invoked.append(claim.job_id) or "b" * 64,
+        require_bound_input=True,
+    )
+    assert result == {"state": "idle", "job_id": None}
+    assert invoked == []
+    with Session(engine) as db:
+        state = db.execute(sa.select(leases.lease_jobs.c.state).where(
+            leases.lease_jobs.c.job_id == "synthetic-strict-unbound",
+        )).scalar_one()
+        assert state == "QUEUED"
