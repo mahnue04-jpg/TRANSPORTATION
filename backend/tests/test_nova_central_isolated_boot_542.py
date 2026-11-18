@@ -94,3 +94,9 @@ def test_disposable_test_mode_denied_in_staging(config, monkeypatch):
     monkeypatch.setenv("APP_ENV", "staging")
     with pytest.raises(RuntimeError):
         module._config()
+
+
+def test_disposable_test_mode_denied_with_render_service_id(config, monkeypatch):
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-disallowed-runtime")
+    with pytest.raises(RuntimeError):
+        module._config()
