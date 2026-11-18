@@ -22,7 +22,9 @@ from app.core.nova.workspace.central_journey_readonly import router
 def preview(tmp_path, monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED", "true")
-    monkeypatch.setenv("AMICOR_ENVIRONMENT", "test")
+    # Pin every name the gate reads so a local APP_ENV/ENVIRONMENT cannot 503.
+    for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
+        monkeypatch.setenv(name, "test")
     engine = create_engine(
         "sqlite:///" + str(tmp_path / "preview.sqlite"),
         connect_args={"check_same_thread": False},
@@ -156,4 +158,23 @@ def test_conflicting_environment_flags_fail_closed(preview, monkeypatch, primary
     app, _, _ = preview
     monkeypatch.setenv("AMICOR_ENVIRONMENT", primary)
     monkeypatch.setenv("APP_ENV", secondary)
+    assert _read(app).status_code == 503
+
+
+@pytest.mark.parametrize("environment", ["production", "prod"])
+def test_environment_production_denies_when_other_names_allow(preview, monkeypatch, environment):
+    app, _, _ = preview
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "test")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    assert _read(app).status_code == 503
+
+
+def test_inferred_https_postgres_production_denies_preview(preview, monkeypatch):
+    app, _, _ = preview
+    monkeypatch.delenv("AMICOR_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("AMICOR_PUBLIC_URL", "https://amicor-health-isf-py.onrender.com")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://amicor:amicor@localhost:5432/amicor")
     assert _read(app).status_code == 503

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app import auth
 from app.auth import ROLE_ADMIN, UserContext, get_current_user_context, require_any_role
 from app.db.session import get_db
+from app.runtime_contract import _resolve_runtime_environment
 from app.core.nova.workspace.central_read_model import JOURNEY_READ_ROWS, list_journeys
 
 router = APIRouter(prefix="/central", tags=["nova-central-readonly"])
@@ -82,12 +83,19 @@ def list_central_journeys(
         return CentralJourneyReadiness()
     configured_environments = [
         value.strip().lower() for value in (
-            os.getenv("AMICOR_ENVIRONMENT"), os.getenv("APP_ENV"),
+            os.getenv("AMICOR_ENVIRONMENT"),
+            os.getenv("ENVIRONMENT"),
+            os.getenv("APP_ENV"),
         ) if value is not None
     ]
-    # Any conflicting non-staging/test environment indicator blocks preview.
-    if not configured_environments or any(
-        value not in {"staging", "test"} for value in configured_environments
+    # Any non-staging/test name blocks preview. ENVIRONMENT is a production
+    # signal elsewhere, and an unset name pair still infers production from a
+    # public HTTPS URL plus a non-SQLite database.
+    runtime_environment = str(_resolve_runtime_environment() or "").strip().lower()
+    if (
+        not configured_environments
+        or any(value not in {"staging", "test"} for value in configured_environments)
+        or runtime_environment in {"production", "prod"}
     ):
         raise HTTPException(status_code=503, detail="Journey read model unavailable")
     try:
