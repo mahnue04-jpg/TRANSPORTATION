@@ -231,7 +231,7 @@ def process_one_queued_csv(
 def review_processed_csv(
     session_factory: Callable[[], Session], *, organization_id: str,
     owner_user_id: str, job_id: str, approve: bool,
-    authorize: Authorization,
+    authorize: Authorization, store,
 ) -> dict:
     """Require completed lease, valid task authorization and explicit review."""
     with session_factory() as db:
@@ -251,6 +251,17 @@ def review_processed_csv(
                 or not row["output_sha256"]
                 or held.output_sha256 != row["output_sha256"]):
             raise QueuedCSVBlocked("Completed lease and artifact are required for review")
+        if not row["output_ref"] or not leases._sha(row["output_sha256"]):
+            raise QueuedCSVBlocked("Verified private output required for review")
+        try:
+            content, content_type = store.retrieve(storage_ref=row["output_ref"])
+        except Exception as exc:
+            raise QueuedCSVBlocked("Private review artifact unavailable") from exc
+        if (not isinstance(content, bytes) or len(content) > 1_000_000
+                or content_type != "text/csv"
+                or not hmac.compare_digest(
+                    hashlib.sha256(content).hexdigest(), row["output_sha256"])):
+            raise QueuedCSVBlocked("Private review artifact integrity failed")
         return csvjobs.review_job(
             db, org=organization_id, owner=owner_user_id,
             job_id=job_id, approve=approve,
