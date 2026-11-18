@@ -27,6 +27,9 @@
 - `operations_queued_csv_pipeline.py`: verifies private output by readback and SHA-256 before review publication; separately verifies private output integrity before explicit owner approval.
 - `operations_queued_csv_pipeline.py`: explicit development-only queue intake -> processing -> private review -> owner decision coordinator. Requires an injected independent saved-task authorizer.
 - `operations_lease_reconciliation.py` and `operations_csv_reconciliation_bridge.py`: read-only owner-scoped reconciliation helpers.
+- `operations_recovery_diagnostics.py`: read-only owner-scoped job-state assessment for missing input binding, active/expired lease, uncertain output, metadata mismatch, failed/cancelled, and completed-for-review records. No raw refs, hashes, contents, automatic retry, approval or release are returned.
+- `operations_owner_csv_api.py`: development-only `/operations/queued/jobs/{id}/recovery` and explicit `/cancel` routes (same owner auth, saved-task recheck and default-off gate). Only queued/running leases can be cancelled; held/completed jobs require separate reconciliation.
+- Owner UI: separate recovery inspection and confirmed cancellation controls; no hidden automated processing.
 - `20261117_nova_operations_leases.py`: proposed explicit staging-only gated PostgreSQL schema migration; not applied.
 
 ## Consolidated acceptance tests
@@ -73,3 +76,10 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 - Current route flag: `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED` defaults to disabled. No agent background loop or scheduled work is enabled.
 
 - Legacy-route bypass tests now cover status, recover, approval and download of queued jobs, including records whose private input has not yet been bound. Queued owner review remains available only through the separately gated supervised route.
+
+## Recovery triage safety checkpoint
+
+- The owner can inspect a known scoped job and distinguish waiting for input, processing, expired lease, completed-but-held, cancellation and integrity mismatch without changing job state.
+- Explicit cancellation invalidates queued/running lease claims; a running worker cannot then publish a new completion. Cancellation is not proof that an already-written private artifact has been deleted.
+- The recovery status is diagnostic only; no automatic cleanup, retry, release, customer notification, invoice, or delivery is implemented.
+- Latest recovery and owner UI tests are part of CI and require successful full-head verification before staging signoff.
