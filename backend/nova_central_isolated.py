@@ -44,6 +44,17 @@ def _config() -> None:
             raise RuntimeError("test mode requires disposable SQLite")
         return
 
+    # Staging must never silently use auth.py's ephemeral JWT key.
+    # The signing key, issuer and audience must be separately provisioned
+    # for the isolated service, with no production/shared secret reuse.
+    jwt_secret = os.getenv("JWT_SECRET", "")
+    legacy_secret = os.getenv("SECRET_KEY", "")
+    if (len(jwt_secret) < 32 or jwt_secret != jwt_secret.strip()
+            or legacy_secret and legacy_secret != jwt_secret
+            or not os.getenv("JWT_ISSUER", "").strip()
+            or not os.getenv("JWT_AUDIENCE", "").strip()):
+        raise RuntimeError("Isolated staging JWT settings are missing or inconsistent")
+
     # Allow only an independently provisioned PostgreSQL host/database.
     expected_host = os.getenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "").strip()
     expected_name = os.getenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "").strip()
