@@ -88,7 +88,8 @@ def _completed_task_ids(engagement: dict) -> set[str]:
     }
 
 
-@router.post("/csv-clean")
+# Internal helper only: do not expose the unscoped CSV operation over HTTP.
+# Real submissions must use /engagements/{engagement_id}/tasks/{task_id}/csv-clean.
 async def owner_csv_cleanup(
     request: Request,
     owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
