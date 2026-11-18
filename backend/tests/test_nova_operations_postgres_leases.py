@@ -133,3 +133,54 @@ def test_expired_exhausted_claim_is_terminal_and_not_reclaimed(database):
         state = db.execute(sa.select(leases.lease_jobs.c.state).where(
             leases.lease_jobs.c.job_id == "synthetic-exhaust")).scalar_one()
         assert state == "FAILED"
+
+
+def test_cancel_fences_active_worker_and_prevents_reclaim(database):
+    seed(database, "synthetic-cancel")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        active = leases.claim(db, now=now, lease_seconds=120)
+        assert active is not None
+    with Session(database) as db:
+        assert leases.cancel(db, job_id=active.job_id,
+                             organization_id=active.organization_id,
+                             owner_user_id=active.owner_user_id,
+                             now=now + timedelta(seconds=1))
+        assert not leases.cancel(db, job_id=active.job_id,
+                                 organization_id=active.organization_id,
+                                 owner_user_id=active.owner_user_id,
+                                 now=now + timedelta(seconds=2))
+        assert leases.claim(db, now=now + timedelta(seconds=200)) is None
+        with pytest.raises(leases.LeaseBlocked, match="Stale"):
+            leases.complete(db, claimed=active, output_sha256="b" * 64,
+                            now=now + timedelta(seconds=3))
+        with pytest.raises(leases.LeaseBlocked, match="Stale"):
+            leases.renew(db, claimed=active, now=now + timedelta(seconds=3))
+
+
+def test_cancel_wrong_tenant_is_noop_and_current_worker_can_complete(database):
+    seed(database, "synthetic-other-tenant")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        active = leases.claim(db, now=now, lease_seconds=60)
+        assert active is not None
+        assert not leases.cancel(db, job_id=active.job_id,
+                                 organization_id="another-org",
+                                 owner_user_id=active.owner_user_id,
+                                 now=now + timedelta(seconds=1))
+        leases.complete(db, claimed=active, output_sha256="b" * 64,
+                        now=now + timedelta(seconds=2))
+
+
+def test_expired_worker_cannot_retry_before_new_claim(database):
+    seed(database, "synthetic-expired-fail")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        active = leases.claim(db, now=now, lease_seconds=5)
+        assert active is not None
+        with pytest.raises(leases.LeaseBlocked, match="Stale"):
+            leases.fail_or_retry(db, claimed=active,
+                                 now=now + timedelta(seconds=6))
+        recovered = leases.claim(db, now=now + timedelta(seconds=7),
+                                 lease_seconds=60)
+        assert recovered is not None and recovered.token != active.token
