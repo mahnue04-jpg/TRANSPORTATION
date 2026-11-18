@@ -175,7 +175,8 @@ def fail_or_retry(db: Session, *, claimed: LeaseClaim, now: datetime | None = No
             lease_jobs.c.organization_id == claimed.organization_id,
             lease_jobs.c.owner_user_id == claimed.owner_user_id,
         ).with_for_update()).mappings().first()
-        if not row or row["state"] != "RUNNING" or row["lease_token"] != claimed.token:
+        if (not row or row["state"] != "RUNNING" or row["lease_token"] != claimed.token
+                or row["lease_until"] is None or row["lease_until"] <= now):
             raise LeaseBlocked("Stale worker failure")
         state = "FAILED" if row["attempts"] >= row["max_attempts"] else "QUEUED"
         db.execute(sa.update(lease_jobs).where(
@@ -233,6 +234,31 @@ def exhaust_expired(db: Session, *, now: datetime | None = None) -> int:
                  updated_at=now))
         db.commit()
         return changed.rowcount
+    except Exception:
+        db.rollback()
+        raise
+
+
+def cancel(db: Session, *, job_id: str, organization_id: str,
+           owner_user_id: str, now: datetime | None = None) -> bool:
+    """Cancel queued or running work, fencing any worker that holds a lease.
+
+    The authenticated HTTP/controller layer must independently verify that the
+    actor may cancel the underlying customer task. This function accepts only
+    explicit owner/organization scope; it is not a public authorization check.
+    """
+    _guard(db)
+    now = now or _now()
+    try:
+        changed = db.execute(sa.update(lease_jobs).where(
+            lease_jobs.c.job_id == job_id,
+            lease_jobs.c.organization_id == organization_id,
+            lease_jobs.c.owner_user_id == owner_user_id,
+            lease_jobs.c.state.in_(("QUEUED", "RUNNING")),
+        ).values(state="CANCELLED", lease_token=None, lease_until=None,
+                 updated_at=now))
+        db.commit()
+        return changed.rowcount == 1
     except Exception:
         db.rollback()
         raise
