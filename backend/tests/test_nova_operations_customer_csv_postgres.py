@@ -969,3 +969,139 @@ def test_existing_legacy_csv_remains_eligible_with_new_lease_schema(postgres):
                 job_id=legacy["job_id"])["status"] == "AWAITING_REVIEW"
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_recovery_diagnostic_classifies_unbound_expired_held_and_completed(
+    postgres, monkeypatch,
+):
+    from datetime import datetime, timedelta, timezone
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_recovery_diagnostics import inspect_recovery
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, process_one_queued_csv,
+    )
+    engine, store = postgres
+    leases.lease_metadata.create_all(engine)
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    factory = lambda: Session(engine)
+    base = dict(organization_id="synthetic-org", owner_user_id="synthetic-owner",
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                raw=b"Name\nAda\n", store=store, authorize=lambda *_: True)
+    def diagnose(job_id, now=None):
+        with factory() as db:
+            return inspect_recovery(db, organization_id="synthetic-org",
+                                    owner_user_id="synthetic-owner",
+                                    job_id=job_id, now=now)
+    try:
+        ready = submit_queued_csv(factory, request_key="diagnostic-ready", **base)
+        job_id = ready["job_id"]
+        assert diagnose(job_id)["recovery_result"] == "queued_ready_for_supervised_processing"
+        assert diagnose(job_id)["safe_to_auto_retry"] is False
+        assert diagnose(job_id)["may_release"] is False
+        with factory() as db:
+            active = leases.claim(
+                db, job_id=job_id, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", require_bound_input=True,
+                lease_seconds=5)
+            assert active is not None
+        assert diagnose(job_id)["recovery_result"] == "processing_in_progress"
+        assert diagnose(job_id, now=datetime.now(timezone.utc) +
+                        timedelta(seconds=20))["recovery_result"] == "expired_processing_lease"
+        with factory() as db:
+            assert leases.hold_for_reconciliation(
+                db, claimed=active, expected_output_sha256="b" * 64)
+        assert diagnose(job_id)["recovery_result"] == "owner_reconciliation_required"
+        with factory() as db:
+            with pytest.raises(leases.LeaseBlocked, match="authorized scope"):
+                inspect_recovery(db, organization_id="synthetic-org",
+                                 owner_user_id="wrong-owner", job_id=job_id)
+        completed = submit_queued_csv(factory, request_key="diagnostic-completed", **base)
+        assert process_one_queued_csv(
+            factory, store=store, authorize=lambda *_: True,
+            job_id=completed["job_id"], organization_id="synthetic-org",
+            owner_user_id="synthetic-owner")["state"] == "completed"
+        result = diagnose(completed["job_id"])
+        assert result["recovery_result"] == "completed_for_owner_review"
+        assert result["may_release"] is False
+        assert "input_ref" not in result and "output_sha256" not in result
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_recovery_api_and_owner_cancellation_are_scoped_and_explicit(
+    postgres, monkeypatch,
+):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.db.session import get_db
+
+    engine, store = postgres
+    leases.lease_metadata.create_all(engine)
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    owner = SimpleNamespace(user_id="synthetic-owner", organization_id="synthetic-org")
+    eng = {
+        "engagement_id": "synthetic-eng", "organization_id": "synthetic-org",
+        "owner_user_id": "synthetic-owner", "status": "ACTIVE", "blockers": None,
+        "tasks": [{"task_id": "synthetic-csv-task", "title": "CSV cleanup",
+                   "status": "READY", "classification": "NOVA",
+                   "responsible_party": "NOVA", "review_required": True,
+                   "blocked_reason": None, "required_owner_input": None,
+                   "depends_on_task_id": None}],
+    }
+    monkeypatch.setattr(api.service, "get_engagement", lambda *a, **k: eng)
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/nova/work")
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[api.require_work_revenue_owner] = lambda: owner
+    def database():
+        with Session(engine) as db:
+            yield db
+    app.dependency_overrides[get_db] = database
+    prefix = "/api/nova/work/operations/queued"
+    headers = {
+        "Content-Type": "text/csv", "X-Nova-File-Name": "sample.csv",
+        "Idempotency-Key": "recovery-api",
+        "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization",
+        "X-Nova-Owner-Action": "queue-csv-for-owner-review",
+    }
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                prefix + "/engagements/synthetic-eng/tasks/synthetic-csv-task/jobs",
+                headers=headers, content=b"Name\nAda\n")
+            assert created.status_code == 202, created.text
+            job_id = created.json()["job_id"]
+            job_url = prefix + "/jobs/" + job_id
+            diagnosed = client.get(job_url + "/recovery")
+            assert diagnosed.status_code == 200, diagnosed.text
+            assert diagnosed.json()["recovery_result"] == "queued_ready_for_supervised_processing"
+            assert diagnosed.json()["may_release"] is False
+            assert client.post(job_url + "/cancel").status_code == 403
+            stopped = client.post(
+                job_url + "/cancel",
+                headers={"X-Nova-Owner-Action": "cancel-queued-csv-job"})
+            assert stopped.status_code == 200, stopped.text
+            assert stopped.json()["lease_status"] == "CANCELLED"
+            assert client.get(job_url + "/recovery").json()["recovery_result"] == "cancelled"
+            assert client.post(
+                job_url + "/process",
+                headers={"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"}
+            ).json()["state"] == "idle"
+            assert client.post(
+                job_url + "/cancel",
+                headers={"X-Nova-Owner-Action": "cancel-queued-csv-job"}
+            ).status_code == 409
+            assert client.get(prefix + "/jobs/unknown/recovery").status_code == 404
+            eng["status"] = "BLOCKED"
+            assert client.get(job_url + "/recovery").status_code == 409
+            assert client.post(
+                job_url + "/cancel",
+                headers={"X-Nova-Owner-Action": "cancel-queued-csv-job"}
+            ).status_code == 409
+    finally:
+        leases.lease_metadata.drop_all(engine)
