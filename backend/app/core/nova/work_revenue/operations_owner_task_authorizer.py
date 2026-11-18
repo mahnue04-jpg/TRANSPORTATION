@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from sqlalchemy.orm import Session
 
-from .operations_owner_csv_api import _check_saved_csv_assignment
 
 
 class OwnerTaskAuthorizationBlocked(ValueError):
@@ -36,6 +35,8 @@ def owner_task_authorizer(
             return False
         try:
             with session_factory() as db:
+                # Import only at invocation to prevent a router/adapter cycle.
+                from .operations_owner_csv_api import _check_saved_csv_assignment
                 _check_saved_csv_assignment(
                     db, owner=authenticated_owner,
                     engagement_id=engagement, task_id=task)
