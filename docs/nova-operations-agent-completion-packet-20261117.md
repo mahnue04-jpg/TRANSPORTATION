@@ -9,7 +9,7 @@
 
 1. Customer chooses an authorized, owner-approved saved task.
 2. Authenticated controller verifies organization, owner, engagement, task, and idempotency key.
-3. Queue coordinator reserves one CSV job; private input is persisted, hash-verified and bound to a durable job reference. A duplicate request must reuse the same job, never create another charged task.
+3. Queue coordinator atomically reserves the CSV record AND its unbound lease in one PostgreSQL transaction before private upload. Thus the original `/durable/` routes cannot bypass queued authorization, even in an interrupted upload. Private input is then persisted, hash-verified and bound to the existing lease. A duplicate request must reuse the same job, never create another charged task.
 4. An explicitly invoked worker claims ONLY input-bound jobs, verifies current authorization, loads the private input by database reference, checks length and SHA-256, and performs bounded CSV cleanup.
 5. Worker writes the private cleaned CSV, verifies its length, publishes a review-only artifact record while the lease still belongs to that worker, and finalizes the lease. It **never** delivers automatically.
 6. Authenticated owner can inspect the output; approve/reject only after matching lease completion and private artifact integrity. Any customer delivery must be a separately authorized action.
@@ -53,7 +53,7 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 
 1. **Real authorization integration:** Development-only supervised owner routes now reuse the existing owner guard and saved-task eligibility checks; the runtime gate is default off. A revocable hosted worker service principal remains absent. HTTP acceptance has not yet been established on a deployed isolated staging instance; do not interpret these routes as autonomous customer processing.
 2. **S3 private-object security:** Owner-authorized provider credentials; real private bucket settings; key provenance/scope; immutable or versioned object behavior; non-public ACL; encryption; retention; orphan cleanup; and real storage outage testing. Exact organization/job/owner storage-key prefixes are now checked on write receipt, database binding, and read; this is NOT a substitute for real S3 authorization. Tests still use fake storage.
-3. **Atomicity and crash windows:** Queue and private writes cross two systems. Reservation-before-write may strand jobs; write-before-bind may orphan artifacts; successful output before DB commit may leave an orphan. Add an audited outbox/reconciler and recovery rules. Current code fails closed but cannot automatically repair every window.
+3. **Atomicity and crash windows:** The CSV and lease reservation are now one PostgreSQL transaction and legacy `/durable/` endpoints reject queued records. Private objects and database records still cross two systems: reservation-before-write may strand an unbound job; write-before-bind may orphan input; successful output before DB commit may orphan output. An audited outbox/reconciler and explicit owner recovery rules remain required. Never misrepresent current fail-closed behavior as automatic repair.
 4. **Lease/output reconciliation:** Held jobs whose customer CSV row remains `PROCESSING` need a private-output provenance record and deliberate owner-approved recovery, without automatic retry. SHA alone is not authorization.
 5. **Worker lifecycle:** An explicit script/service, restart loop, shutdown and heartbeat, metrics, rate limits, cancellation and lease renewal, real subprocess kill/restart tests, and isolated hosted worker validation. The current one-job function is not a hosted service.
 6. **Migration approval:** Verify Alembic revision ordering and isolated staging DB identity, backup and recovery. Migration is gated and has not been run. Never deploy it to the existing production or shared DB as a workaround.
@@ -71,3 +71,5 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 - A consolidated CI run for head `3355642040caecde475a497151d5f123d75c2962` completed successfully (run `44236365391`). This predates the new supervised HTTP endpoints.
 - The new owner-only HTTP routes, optional UI and tests are on the later PR head; **require latest-head four-job CI success** before acceptance. No assertion of staging or live readiness.
 - Current route flag: `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED` defaults to disabled. No agent background loop or scheduled work is enabled.
+
+- Legacy-route bypass tests now cover status, recover, approval and download of queued jobs, including records whose private input has not yet been bound. Queued owner review remains available only through the separately gated supervised route.
