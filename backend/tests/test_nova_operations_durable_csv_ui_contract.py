@@ -21,7 +21,8 @@ def test_durable_csv_ui_controls_are_present():
 
 
 def test_owner_ui_targets_gated_durable_api():
-    assert "/api/nova/work/operations/durable/engagements/" in JS
+    assert '"/api/nova/work/operations/" + mode + "/engagements/"' in JS
+    assert 'const mode = queued ? "queued" : "durable"' in JS
     assert 'jobPath("/download")' in JS
     assert 'jobPath("/review")' in JS
     assert '"Idempotency-Key": currentRequest.key' in JS
