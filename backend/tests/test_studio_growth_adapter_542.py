@@ -275,3 +275,59 @@ def test_untrusted_approval_dictionary_cannot_be_used_as_reader():
             authenticated_studio_principal="studio-service-A",
             occurred_at=NOW, enabled=True,
         )
+
+
+def growth_profile(**changes):
+    value = {
+        "configured": True, "organization_id": "org-A",
+        "is_synthetic_demo": True, "activated": False,
+        "agent_disabled": True, "contact_email": "private@example.invalid",
+        "handoff_phone": "555-0100", "website": "https://example.invalid",
+    }
+    value.update(changes)
+    return value
+
+
+def test_growth_read_only_campaign_preview_excludes_contacts_and_network():
+    result = adapter.preview_growth_campaign_from_studio(
+        convert(), growth_profile(), enabled=True,
+    )
+    assert result == {
+        "mode": "synthetic_read_only_preview",
+        "organization_id": "org-A", "campaign_id": "campaign-1",
+        "asset_reference": "synthetic:asset-1", "target_agent": "growth",
+        "growth_campaign_intake_connected": False, "lead_created": False,
+        "publishing_enabled": False, "outbound_messages_enabled": False,
+    }
+    assert "private@example.invalid" not in str(result)
+    assert "https://example.invalid" not in str(result)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("configured", False),
+    ("organization_id", "org-B"),
+    ("is_synthetic_demo", False),
+    ("activated", True),
+    ("agent_disabled", False),
+])
+def test_growth_profile_must_be_isolated_inactive_and_fictional(field, value):
+    with pytest.raises(PermissionError):
+        adapter.preview_growth_campaign_from_studio(
+            convert(), growth_profile(**{field: value}), enabled=True,
+        )
+
+
+def test_growth_preview_is_default_off(monkeypatch):
+    monkeypatch.delenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED", raising=False)
+    with pytest.raises(PermissionError):
+        adapter.preview_growth_campaign_from_studio(
+            convert(), growth_profile(), enabled=None,
+        )
+
+
+def test_growth_preview_rejects_live_flag(monkeypatch):
+    monkeypatch.setenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED", "true")
+    with pytest.raises(PermissionError):
+        adapter.preview_growth_campaign_from_studio(
+            convert(enabled=True), growth_profile(), enabled=True,
+        )
