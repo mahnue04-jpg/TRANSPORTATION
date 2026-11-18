@@ -121,10 +121,8 @@ def test_real_orm_support_role_does_not_inherit_customer_owner_rights(sandbox):
 def test_organization_mismatch_token_never_returns_customer_journeys(sandbox):
     app, _ = sandbox
     result = read(app, token(org="org-B"))
-    # This readiness endpoint reads no customer data at all. Actual record-level
-    # organization isolation must be verified before any journey connection.
-    assert result.status_code == 200
-    assert result.json()["journeys"] == []
+    # Even read-only readiness rejects a token claiming a different tenant.
+    assert result.status_code == 403
 
 
 
