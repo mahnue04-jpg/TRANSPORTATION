@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 # FastAPI request/response annotation classes must be module globals, because
 # FastAPI resolves postponed annotations from the endpoint's global namespace.
@@ -45,14 +45,25 @@ def _config() -> None:
         return
 
     # Allow only an independently provisioned PostgreSQL host/database.
-    expected_host = os.getenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "")
-    expected_name = os.getenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "")
-    if not expected_host or not expected_name or expected_name != "nova_central_542_dispos":
+    expected_host = os.getenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "").strip()
+    expected_name = os.getenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "").strip()
+    expected_user = os.getenv("NOVA_CENTRAL_EXPECTED_DB_USER", "").strip()
+    if (not expected_host or expected_name != "nova_central_542_dispos"
+            or not expected_user):
         raise RuntimeError("approved isolated database identity is required")
     value = database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
-    p = urlsplit(value)
-    if p.scheme != "postgresql" or p.hostname != expected_host or p.path != "/" + expected_name:
-        raise RuntimeError("database target is not the isolated Nova Central database")
+    try:
+        p = urlsplit(value)
+        actual_user = unquote(p.username or "")
+        actual_host = p.hostname
+        actual_port = p.port
+    except ValueError as exc:
+        raise RuntimeError("invalid isolated database address") from exc
+    if (p.scheme != "postgresql" or actual_host != expected_host
+            or p.path != "/" + expected_name or actual_user != expected_user
+            or not p.password or p.query or p.fragment
+            or (actual_port is not None and actual_port != 5432)):
+        raise RuntimeError("database account or target is not the isolated Nova Central database")
 
 
 def create_app():
