@@ -342,6 +342,12 @@ def bind_private_input(
         raise LeaseBlocked("Invalid private input reference")
     if type(input_size) is not int or not 0 < input_size <= 1_000_000:
         raise LeaseBlocked("Invalid private input size")
+    if (not all(isinstance(v, str) and v.isascii() and 0 < len(v) <= 36
+                and all(c.isalnum() or c in "-_" for c in v)
+                for v in (job_id, organization_id, owner_user_id))
+            or not storage_ref.startswith(
+                f"{organization_id}/{job_id}/nova-csv-input-{owner_user_id}/")):
+        raise LeaseBlocked("Private input reference scope mismatch")
     try:
         row = db.execute(sa.select(lease_jobs).where(
             lease_jobs.c.job_id == job_id,
