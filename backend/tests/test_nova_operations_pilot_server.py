@@ -114,3 +114,13 @@ def test_staging_runtime_restrictions(pilot, monkeypatch):
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
     with pytest.raises(RuntimeError, match="disabled"):
         pilot._validate_runtime()
+
+
+def test_pilot_owner_ui_is_available_and_labeled_synthetic(server):
+    status, headers, body = request(server, "GET", "/pilot")
+    assert status == 200
+    assert "text/html" in headers["Content-Type"]
+    assert b"Synthetic staging data only" in body
+    assert b"Clean synthetic CSV for review" in body
+    assert b"/operations/pilot/csv-clean" in body
+    assert b"Not delivered to any customer" in body
