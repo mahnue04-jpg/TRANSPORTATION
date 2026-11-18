@@ -18,6 +18,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 EXPECTED_DB = "nova_operations_staging_db_541"
+EXPECTED_USER = "nova_operations_staging_db_541_user"
 TABLE = "nova_operations_processing_leases"
 MIGRATION = Path(__file__).with_name("staging_migrations") / "operations_lease_schema.py"
 
@@ -88,9 +89,13 @@ def main() -> None:
         with engine.connect() as conn:
             if conn.dialect.name != "postgresql":
                 raise RuntimeError("PostgreSQL required")
-            db_name = conn.execute(sa.text("SELECT current_database()")).scalar_one()
-            if db_name != EXPECTED_DB:
-                raise RuntimeError("Connected to unexpected database")
+            identity = conn.execute(sa.text(
+                "SELECT current_database(), current_user, pg_is_in_recovery()"
+            )).one()
+            if identity[0] != EXPECTED_DB or identity[1] != EXPECTED_USER:
+                raise RuntimeError("Connected to unexpected dedicated staging DB or role")
+            if identity[2]:
+                raise RuntimeError("Migration must not target a recovery replica")
             existing = sa.inspect(conn).get_table_names()
             if TABLE in existing:
                 raise RuntimeError("Lease table already exists; reconcile, never reapply")
@@ -100,8 +105,13 @@ def main() -> None:
         _restore_evidence(args.restore_evidence)
         migration = _load_migration()
         with engine.begin() as conn:
-            if conn.execute(sa.text("SELECT current_database()")).scalar_one() != EXPECTED_DB:
-                raise RuntimeError("Database identity changed")
+            identity = conn.execute(sa.text(
+                "SELECT current_database(), current_user, pg_is_in_recovery()"
+            )).one()
+            if (identity[0], identity[1], identity[2]) != (
+                EXPECTED_DB, EXPECTED_USER, False
+            ):
+                raise RuntimeError("Database identity or primary status changed")
             if TABLE in sa.inspect(conn).get_table_names():
                 raise RuntimeError("Lease table appeared since preflight")
             migration.op = Operations(MigrationContext.configure(conn))
