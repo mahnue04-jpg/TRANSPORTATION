@@ -124,7 +124,11 @@
   const downloadButton = document.getElementById("operations-durable-download");
   const approveButton = document.getElementById("operations-durable-approve");
   const rejectButton = document.getElementById("operations-durable-reject");
+  const queuedToggle = document.getElementById("operations-queued-mode");
+  const processQueuedButton = document.getElementById("operations-queued-process");
   let currentJobId = "";
+  let currentJobMode = "durable";
+  let currentJobStatus = "";
   let currentRequest = null;
 
   function scopedAuthHeaders() {
@@ -135,15 +139,21 @@
   }
 
   function updateJobButtons(status) {
+    currentJobStatus = status;
     if (statusButton) statusButton.disabled = !currentJobId;
-    const canDownload = status === "AWAITING_REVIEW" || status === "APPROVED_FOR_DOWNLOAD";
+    const canDownload = currentJobMode === "queued"
+      ? status === "APPROVED_FOR_DOWNLOAD"
+      : status === "AWAITING_REVIEW" || status === "APPROVED_FOR_DOWNLOAD";
     if (downloadButton) downloadButton.disabled = !currentJobId || !canDownload;
     if (approveButton) approveButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
     if (rejectButton) rejectButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
+    if (processQueuedButton) processQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" ||
+      !["QUEUED", "PROCESSING"].includes(status);
   }
 
   function jobPath(suffix) {
-    return "/api/nova/work/operations/durable/jobs/" +
+    return "/api/nova/work/operations/" + currentJobMode + "/jobs/" +
       encodeURIComponent(currentJobId) + (suffix || "");
   }
 
@@ -165,7 +175,8 @@
     const job = await response.json();
     updateJobButtons(job.status);
     scopedStatus.textContent = "Saved Nova job " + job.job_id + " · " +
-      job.status + ". Owner review only. Not delivered or paid.";
+      job.status + (job.lease_status ? " (" + job.lease_status + ")" : "") +
+      ". Owner review only. Not delivered or paid.";
   }
 
   if (scoped && scopedStatus) {
@@ -188,8 +199,10 @@
       if (!file.name.toLowerCase().endsWith(".csv") || file.size < 1 || file.size > 1000000) {
         scopedStatus.textContent = "CSV file must be nonempty and no larger than 1 MB."; return;
       }
+      const queued = Boolean(queuedToggle && queuedToggle.checked);
+      const mode = queued ? "queued" : "durable";
       const signature = [selected.engagement_id, selected.task_id,
-        file.name, file.size, file.lastModified].join("|");
+        file.name, file.size, file.lastModified, mode].join("|");
       if (!currentRequest || currentRequest.signature !== signature) {
         if (!window.crypto || typeof window.crypto.randomUUID !== "function") {
           scopedStatus.textContent = "Secure request ID unavailable in this browser."; return;
@@ -203,8 +216,8 @@
       if (loadEligible) loadEligible.disabled = true;
       scopedStatus.textContent = "Submitting authorized CSV to private review processing...";
       try {
-        const url = "/api/nova/work/operations/durable/engagements/" +
-          encodeURIComponent(selected.engagement_id) + "/tasks/" +
+        const url = "/api/nova/work/operations/" + mode + "/engagements/" +
+          encodeURIComponent(selected.engagement_id) + "/tasks/"
           encodeURIComponent(selected.task_id) + "/jobs";
         const response = await fetch(url, {
           method: "POST", credentials: "same-origin", body: file,
@@ -212,17 +225,20 @@
             "Content-Type": "text/csv",
             "X-Nova-File-Name": file.name,
             "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization",
+            "X-Nova-Owner-Action": queued ? "queue-csv-for-owner-review" : "process-csv-for-owner-review",
             "Idempotency-Key": currentRequest.key
           })
         });
         if (!response.ok) throw new Error(await safeError(response));
         const job = await response.json();
         currentJobId = job.job_id || "";
+        currentJobMode = mode;
         currentRequest = null;
         updateJobButtons(job.status);
         scopedStatus.textContent = "Job " + currentJobId + ": " + job.status +
           (job.replayed ? " (existing request)" : "") +
-          ". Review or download privately; nothing delivered.";
+          (queued ? ". Click Process queued job when authorized." :
+            ". Review or download privately.") + " Nothing delivered.";
         document.getElementById("operations-scope-confirmed").checked = false;
       } catch (err) {
         scopedStatus.textContent = (err && err.message) ||
@@ -235,6 +251,35 @@
       }
     });
   }
+  if (processQueuedButton) processQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    scopedBusy = true;
+    processQueuedButton.disabled = true;
+    scopedStatus.textContent = "Processing this saved queued job for owner review...";
+    try {
+      const response = await fetch(jobPath("/process"), {
+        method: "POST", credentials: "same-origin",
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "X-Nova-Owner-Action": "process-queued-csv-for-owner-review"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      if (result.state === "completed") {
+        await refreshJobStatus();
+      } else {
+        scopedStatus.textContent = "Job " + currentJobId + ": " + result.state +
+          ". Processing not confirmed; review status before any action.";
+        updateJobButtons("PROCESSING");
+      }
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Queued processing unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
+      updateJobButtons(currentJobStatus);
+    }
+  });
   if (statusButton) statusButton.addEventListener("click", async function () {
     try { await refreshJobStatus(); }
     catch (err) { scopedStatus.textContent = err.message; }
@@ -264,7 +309,11 @@
     if (!currentJobId) return;
     const response = await fetch(jobPath("/review"), {
       method: "POST", credentials: "same-origin",
-      headers: Object.assign({}, scopedAuthHeaders(), {"Content-Type": "application/json"}),
+      headers: Object.assign({}, scopedAuthHeaders(), {
+        "Content-Type": "application/json",
+        "X-Nova-Owner-Action": currentJobMode === "queued"
+          ? "review-completed-queued-csv" : "review-durable-csv"
+      }),
       body: JSON.stringify({approve: approve})
     });
     if (!response.ok) throw new Error(await safeError(response));
