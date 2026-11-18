@@ -746,6 +746,12 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert created.status_code == 202, created.text
             job_id = created.json()["job_id"]
             assert created.json()["status"] == "QUEUED"
+            status = client.get(prefix + "/jobs/" + job_id)
+            assert status.status_code == 200
+            assert status.json()["lease_status"] == "QUEUED"
+            assert status.json()["delivered"] is False
+            assert "input_ref" not in status.json()
+            assert client.get(prefix + "/jobs/" + job_id + "/download").status_code == 409
             duplicate = client.post(url, headers=create_headers, content=b"Name\nAda\nAda\n")
             assert duplicate.status_code == 202
             assert duplicate.json()["job_id"] == job_id
@@ -768,6 +774,10 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert approved.status_code == 200, approved.text
             assert approved.json()["status"] == "APPROVED_FOR_DOWNLOAD"
             assert approved.json()["delivered"] is False
+            downloaded = client.get(prefix + "/jobs/" + job_id + "/download")
+            assert downloaded.status_code == 200
+            assert downloaded.content == b"Name\\nAda\\n".replace(b"\\n", b"\n")
+            assert downloaded.headers["X-Nova-Delivery-Status"] == "not-delivered"
             assert store.put_count == 2
             # Authorization revocation blocks even an already-completed job.
             eng["status"] = "BLOCKED"
@@ -775,5 +785,6 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
                 prefix + "/jobs/" + job_id + "/review", json={"approve": False},
                 headers={"X-Nova-Owner-Action": "review-completed-queued-csv"})
             assert blocked.status_code == 409
+            assert client.get(prefix + "/jobs/" + job_id + "/download").status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
