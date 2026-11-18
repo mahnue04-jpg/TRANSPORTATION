@@ -90,11 +90,11 @@ def test_real_http_route_default_off(monkeypatch):
         user_id="owner-1", organization_id="org-A", role="admin",
     )
     try:
-        with TestClient(app) as client:
-            response = client.post(
-                "/api/nova/growth-agent/campaign-assets/preview",
-                json=request_body(),
-            )
+        client = TestClient(app)
+        response = client.post(
+            "/api/nova/growth-agent/campaign-assets/preview",
+            json=request_body(),
+        )
         assert response.status_code == 404
     finally:
         app.dependency_overrides.clear()
@@ -117,19 +117,19 @@ def test_http_auth_and_tenant_gates_with_no_crm_writes(monkeypatch):
     )
     app.dependency_overrides[growth_router._svc] = lambda: svc
     try:
-        with TestClient(app) as client:
-            good = client.post(
-                "/api/nova/growth-agent/campaign-assets/preview",
-                json=request_body(),
-            )
-            denied_tenant = client.post(
-                "/api/nova/growth-agent/campaign-assets/preview",
-                json=request_body(organization_id="org-B"),
-            )
-            denied_extras = client.post(
-                "/api/nova/growth-agent/campaign-assets/preview",
-                json={**request_body(), "customer_email": "private@example.invalid"},
-            )
+        client = TestClient(app)
+        good = client.post(
+            "/api/nova/growth-agent/campaign-assets/preview",
+            json=request_body(),
+        )
+        denied_tenant = client.post(
+            "/api/nova/growth-agent/campaign-assets/preview",
+            json=request_body(organization_id="org-B"),
+        )
+        denied_extras = client.post(
+            "/api/nova/growth-agent/campaign-assets/preview",
+            json={**request_body(), "customer_email": "private@example.invalid"},
+        )
         assert good.status_code == 200, good.text
         assert good.headers["cache-control"] == "private, no-store"
         assert good.json()["lead_created"] is False
@@ -153,11 +153,11 @@ def test_http_nonadmin_denied_before_profile_lookup(monkeypatch):
     )
     app.dependency_overrides[growth_router._svc] = lambda: NeverReadProfile()
     try:
-        with TestClient(app) as client:
-            denied = client.post(
-                "/api/nova/growth-agent/campaign-assets/preview",
-                json=request_body(),
-            )
+        client = TestClient(app)
+        denied = client.post(
+            "/api/nova/growth-agent/campaign-assets/preview",
+            json=request_body(),
+        )
         assert denied.status_code == 403
     finally:
         app.dependency_overrides.clear()
