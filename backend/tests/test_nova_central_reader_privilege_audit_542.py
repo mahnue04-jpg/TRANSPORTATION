@@ -1,0 +1,107 @@
+"""No-connection checks for a future Nova Central PostgreSQL reader audit."""
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+SCRIPT = (Path(__file__).resolve().parents[1] /
+          "scripts/nova_central_reader_privilege_audit_542.py")
+spec = importlib.util.spec_from_file_location("central_privilege_audit", SCRIPT)
+audit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(audit)
+
+
+@pytest.fixture
+def config(monkeypatch):
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.delenv("NOVA_CENTRAL_ISOLATED_TEST", raising=False)
+    monkeypatch.setenv("NOVA_CENTRAL_PERMISSION_AUDIT_APPROVED", "true")
+    monkeypatch.setenv("NOVA_CENTRAL_APPROVED_COMMIT", "a" * 40)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "a" * 40)
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "central-only.internal")
+    monkeypatch.setenv("NOVA_CENTRAL_READER_DATABASE_URL",
+                       "postgresql://nova_central_542_reader:fictional@central-only.internal/nova_central_542_dispos")
+
+
+def test_valid_fictional_configuration_is_parsed_without_connecting(config):
+    url = audit.check_target()
+    assert "fictional@" in url
+
+
+@pytest.mark.parametrize("field,value", [
+    ("AMICOR_ENVIRONMENT", "production"),
+    ("APP_ENV", "test"),
+    ("NOVA_CENTRAL_ISOLATED_TEST", "1"),
+    ("NOVA_CENTRAL_PERMISSION_AUDIT_APPROVED", "false"),
+    ("NOVA_CENTRAL_APPROVED_COMMIT", "b" * 40),
+    ("RENDER_GIT_COMMIT", "b" * 40),
+    ("NOVA_CENTRAL_EXPECTED_DB_HOST", "foreign.internal"),
+    ("NOVA_CENTRAL_READER_DATABASE_URL", "postgresql://prod:pw@central-only.internal/amicor"),
+    ("NOVA_CENTRAL_READER_DATABASE_URL", "postgresql://nova_central_542_reader:pw@central-only.internal/nova_central_542_dispos?options=-crole%3Dadmin"),
+    ("NOVA_CENTRAL_READER_DATABASE_URL", "sqlite:////tmp/unsafe.db"),
+])
+def test_unapproved_target_or_runtime_never_connects(config, monkeypatch, field, value):
+    monkeypatch.setenv(field, value)
+    with pytest.raises(RuntimeError):
+        audit.check_target()
+
+
+def good_report():
+    return dict(
+        database="nova_central_542_dispos",
+        principal="nova_central_542_reader",
+        session_user="nova_central_542_reader",
+        can_login=True,
+        superuser=False,
+        create_role=False,
+        create_db=False,
+        replication=False,
+        bypass_rls=False,
+        can_create_schema=False,
+        tables={
+            name: {
+                "SELECT": True,
+                "INSERT": False,
+                "UPDATE": False,
+                "DELETE": False,
+                "TRUNCATE": False,
+                "REFERENCES": False,
+                "TRIGGER": False,
+            } for name in ("platform_users", "nova_central_journey_read_model")
+        },
+    )
+
+
+def test_expected_read_only_catalog_is_reviewable():
+    assert audit.assess_privileges(good_report()) == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("database", "amicor"),
+    ("principal", "postgres"),
+    ("session_user", "postgres"),
+    ("superuser", True),
+    ("create_role", True),
+    ("create_db", True),
+    ("replication", True),
+    ("bypass_rls", True),
+    ("can_create_schema", True),
+])
+def test_unsafe_role_or_database_fails_closed(field, value):
+    report = good_report()
+    report[field] = value
+    assert audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("action", ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"])
+def test_each_forbidden_table_privilege_fails_closed(action):
+    report = good_report()
+    report["tables"]["platform_users"][action] = True
+    assert audit.assess_privileges(report)
+
+
+def test_missing_table_fails_closed():
+    report = good_report()
+    del report["tables"]["platform_users"]
+    assert audit.assess_privileges(report)
