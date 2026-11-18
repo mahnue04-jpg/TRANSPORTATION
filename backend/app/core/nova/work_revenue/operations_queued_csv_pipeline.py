@@ -135,6 +135,72 @@ def submit_queued_csv(
             "replayed": False, "delivered": False}
 
 
+
+def restore_unbound_queued_csv(
+    session_factory: Callable[[], Session], *, organization_id: str,
+    owner_user_id: str, job_id: str, raw: bytes, store,
+    authorize: Authorization,
+) -> dict:
+    """Explicit owner-assisted restore for an unclaimed job missing input_ref.
+
+    Does not guess or delete earlier random private objects; their possible
+    orphaning needs a separate audited retention workflow. Only rebinds the
+    same reserved job with an exact byte fingerprint; never creates work.
+    """
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= 1_000_000:
+        raise QueuedCSVBlocked("Original bounded CSV input required")
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    with session_factory() as db:
+        _runtime(db)
+        row = _load_csv_row(db, organization_id, owner_user_id, job_id)
+        lease = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == job_id,
+            leases.lease_jobs.c.organization_id == organization_id,
+            leases.lease_jobs.c.owner_user_id == owner_user_id,
+        )).mappings().first()
+        if row is None or lease is None:
+            raise QueuedCSVBlocked("Reserved job not found in owner scope")
+        _authorized(authorize, organization_id, owner_user_id,
+                    row["engagement_id"], row["task_id"])
+        if (row["status"] != "PROCESSING" or lease["state"] != "QUEUED"
+                or lease["attempts"] != 0 or lease["input_ref"] is not None
+                or lease["input_size"] is not None):
+            raise QueuedCSVBlocked("Only an unbound, unclaimed job may be restored")
+        if (not hmac.compare_digest(row["input_sha256"], fingerprint)
+                or not hmac.compare_digest(lease["input_sha256"], fingerprint)):
+            raise QueuedCSVBlocked("Original input fingerprint mismatch")
+
+    # A previous private write might have succeeded before crashing, leaving
+    # an unreachable object. We cannot safely clean it without provenance.
+    receipt = persist_private_csv_input(
+        organization_id=organization_id, owner_user_id=owner_user_id,
+        job_id=job_id, raw=raw, store=store,
+    )
+    reread = load_private_csv_input(
+        organization_id=organization_id, owner_user_id=owner_user_id,
+        job_id=job_id, storage_ref=receipt.storage_ref,
+        expected_sha256=fingerprint, store=store,
+    )
+    if len(reread) != len(raw):
+        raise QueuedCSVBlocked("Restored private input size mismatch")
+    with session_factory() as db:
+        _runtime(db)
+        row = _load_csv_row(db, organization_id, owner_user_id, job_id)
+        if row is None:
+            raise QueuedCSVBlocked("Reserved job no longer exists")
+        _authorized(authorize, organization_id, owner_user_id,
+                    row["engagement_id"], row["task_id"])
+        # Scoped immutable binding verifies QUEUED and zero attempts again.
+        leases.bind_private_input(
+            db, job_id=job_id, organization_id=organization_id,
+            owner_user_id=owner_user_id, input_sha256=fingerprint,
+            storage_ref=receipt.storage_ref, input_size=receipt.size,
+        )
+    return {"job_id": job_id, "status": "QUEUED",
+            "input_restored": True, "delivered": False,
+            "orphan_cleanup_verified": False}
+
+
 def process_one_queued_csv(
     session_factory: Callable[[], Session], *, store,
     authorize: Authorization,
