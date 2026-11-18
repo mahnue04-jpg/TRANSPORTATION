@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from urllib.parse import unquote, urlsplit
 
 # FastAPI request/response annotation classes must be module globals, because
@@ -114,6 +115,13 @@ def create_app():
         if not token:
             raise HTTPException(status_code=401, detail="Authentication required")
         payload = auth._jwt_verify(token)
+        # The shared verifier tolerates tokens without an expiry. The isolated
+        # owner boundary must require an actual finite future expiration.
+        exp = payload.get("exp")
+        if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not (
+            time.time() < exp < time.time() + 86400
+        ):
+            raise HTTPException(status_code=401, detail="Session expiration invalid")
         uid = payload.get("sub")
         if not uid:
             raise HTTPException(status_code=401, detail="Token missing subject")
