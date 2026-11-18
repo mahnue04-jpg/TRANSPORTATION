@@ -352,3 +352,60 @@ def test_pg_retention_schedule_dry_run(Session, db, monkeypatch):
     again = scheduler.run_once(window_key=window)
     assert again["claimed"] == 0
     assert again.get("already_completed_window")
+
+
+def test_pg_campaign_review_migration_and_tenant_scoped_registry(pg_engine, Session):
+    """Exercise the optional campaign review table against disposable PostgreSQL.
+
+    No production database, Studio asset, outbound provider, or real customer.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+    from app.core.nova.growth_agent.campaign_registry import (
+        CampaignReviewRegistry, CampaignRegistryDenied,
+    )
+
+    path = (Path(__file__).resolve().parents[1] / "migrations" / "versions"
+            / "20261118_nova_ga_campaign_review.py")
+    spec = importlib.util.spec_from_file_location("nova_ga_campaign_pg_test", path)
+    revision = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(revision)
+    with pg_engine.begin() as conn:
+        migration = MigrationContext.configure(conn)
+        revision.op = Operations(migration)
+        revision.upgrade()
+        revision.upgrade()
+        assert inspect(conn).has_table("nova_ga_campaign_asset_reviews")
+
+    org_a, org_b = _uid("campaign-org-a"), _uid("campaign-org-b")
+    with Session() as db:
+        registry = CampaignReviewRegistry(db)
+        def register(org, owner):
+            return registry.register(
+                org=org, owner_id=owner, campaign_id="demo-campaign",
+                project_id="demo-project", asset_id="demo-asset",
+            )
+        first, outcome = register(org_a, "owner-a")
+        assert outcome == "recorded"
+        assert first["studio_verified"] is False
+        assert first["published"] is False
+        assert first["billing_triggered"] is False
+        assert register(org_a, "owner-a")[1] == "duplicate"
+        assert register(org_b, "owner-b")[1] == "recorded"
+        assert registry.list_for_owner(org=org_a, owner_id="owner-b") == []
+        assert len(registry.list_for_owner(org=org_b, owner_id="owner-b")) == 1
+        with pytest.raises(CampaignRegistryDenied):
+            registry.withdraw(org=org_a, owner_id="owner-b",
+                              campaign_id="demo-campaign")
+        withdrawn, outcome = registry.withdraw(
+            org=org_a, owner_id="owner-a", campaign_id="demo-campaign",
+        )
+        assert outcome == "withdrawn"
+        assert withdrawn["status"] == "withdrawn"
+        with pytest.raises(CampaignRegistryDenied):
+            register(org_a, "owner-a")
