@@ -7,8 +7,16 @@
     return { label, state, detail };
   }
 
+  // Backend stores the flag on profile and the HTTP handler adds demo_mode_flag.
+  function confirmedSyntheticDemo(data) {
+    if (!data || typeof data !== "object") return false;
+    if (data.is_synthetic_demo === true || data.demo_mode_flag === true) return true;
+    const profile = data.profile;
+    return !!(profile && typeof profile === "object" && profile.is_synthetic_demo === true);
+  }
+
   function report(data) {
-    if (!data || typeof data !== "object" || data.is_synthetic_demo !== true) {
+    if (!confirmedSyntheticDemo(data)) {
       return {
         title: "Demonstration not verified",
         rows: [record("Synthetic demonstration", "not verified", "No confirmed synthetic demo result was returned.")],
