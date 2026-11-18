@@ -1,0 +1,33 @@
+name: Nova Central isolated startup config gate
+
+on:
+  pull_request:
+    branches:
+      - docs/nova-central-isolated-startup-542-20261117
+    paths:
+      - "backend/nova_central_isolated.py"
+      - "backend/tests/test_nova_central_isolated_boot_542.py"
+      - ".github/workflows/nova-central-isolated-startup-542.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install isolated runner only
+        run: python -m pip install pytest
+      - name: Compile and verify no-service startup configuration checks
+        run: |
+          python -m py_compile nova_central_isolated.py tests/test_nova_central_isolated_boot_542.py
+          python -m pytest tests/test_nova_central_isolated_boot_542.py -q --tb=short --noconftest
