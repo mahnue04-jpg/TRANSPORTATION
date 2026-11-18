@@ -59,7 +59,9 @@ class CampaignReviewRegistry:
             "studio_project_id": row["studio_project_id"],
             "asset_id": row["asset_id"], "status": row["status"],
             "studio_verified": False, "publishing_enabled": False,
-            "messages_sent": False, "lead_created": False,
+            "published": False, "messages_sent": False,
+            "outbound_messages_sent": False, "lead_created": False,
+            "billing_triggered": False,
         }
 
     def register(self, *, org: str, owner_id: str, campaign_id: str,
