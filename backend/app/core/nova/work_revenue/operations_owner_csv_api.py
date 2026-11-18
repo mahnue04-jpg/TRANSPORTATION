@@ -409,6 +409,7 @@ def eligible_csv_tasks(
 
 # Supervised queued CSV routes. These are a new, separately gated path and do
 # not change the legacy synchronous owner CSV API. No hosted worker is started.
+import sqlalchemy as _sa
 from sqlalchemy.orm import sessionmaker as _sessionmaker
 from . import operations_postgres_leases as _ops_leases
 from . import operations_queued_csv_pipeline as _queued_csv
@@ -554,7 +555,7 @@ def supervised_queued_csv_status(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=row["engagement_id"],
             task_id=row["task_id"])
-        lease = db.execute(__import__("sqlalchemy").select(
+        lease = db.execute(_sa.select(
             _ops_leases.lease_jobs.c.state,
             _ops_leases.lease_jobs.c.attempts,
         ).where(
@@ -589,7 +590,7 @@ def supervised_queued_csv_download(
             task_id=row["task_id"])
         if row["status"] != "APPROVED_FOR_DOWNLOAD":
             raise HTTPException(409, "Explicit owner approval required")
-        lease = db.execute(__import__("sqlalchemy").select(
+        lease = db.execute(_sa.select(
             _ops_leases.lease_jobs.c.state,
             _ops_leases.lease_jobs.c.output_sha256,
         ).where(
