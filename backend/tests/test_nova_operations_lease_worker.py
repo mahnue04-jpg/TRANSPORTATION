@@ -81,3 +81,51 @@ def test_default_off_does_not_claim(engine, monkeypatch):
     monkeypatch.delenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED")
     with pytest.raises(leases.LeaseBlocked, match="disabled"):
         run_one(lambda: Session(engine), lambda _: "b" * 64)
+
+
+def test_handler_success_with_ambiguous_db_completion_requires_reconciliation(engine, monkeypatch):
+    seed(engine, "synthetic-worker-uncertain")
+    factory = lambda: Session(engine)
+    actual_complete = leases.complete
+    calls = {"complete": 0, "handler": 0}
+
+    def uncertain_commit(*args, **kwargs):
+        calls["complete"] += 1
+        raise RuntimeError("synthetic database connection lost after handler")
+
+    def handler(_claimed):
+        calls["handler"] += 1
+        return "b" * 64
+
+    monkeypatch.setattr(leases, "complete", uncertain_commit)
+    result = run_one(factory, handler, retry_delay_seconds=0)
+    assert result == {"state": "needs_reconciliation", "job_id": "synthetic-worker-uncertain"}
+    assert calls == {"complete": 1, "handler": 1}
+    monkeypatch.setattr(leases, "complete", actual_complete)
+    with Session(engine) as db:
+        row = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-worker-uncertain"
+        )).mappings().one()
+        assert row["state"] == "RUNNING"
+        assert row["attempts"] == 1
+
+
+def test_revoked_lease_at_completion_is_not_requeued(engine):
+    seed(engine, "synthetic-worker-revoked")
+    factory = lambda: Session(engine)
+
+    def revoke_before_complete(claim):
+        with factory() as db:
+            assert leases.cancel(db, job_id=claim.job_id,
+                                 organization_id=claim.organization_id,
+                                 owner_user_id=claim.owner_user_id)
+        return "b" * 64
+
+    assert run_one(factory, revoke_before_complete) == {
+        "state": "stale", "job_id": "synthetic-worker-revoked"
+    }
+    with Session(engine) as db:
+        row = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-worker-revoked"
+        )).mappings().one()
+        assert row["state"] == "CANCELLED" and row["attempts"] == 1
