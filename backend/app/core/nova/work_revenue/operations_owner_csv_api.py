@@ -498,7 +498,10 @@ def process_supervised_queued_csv_job(
     if owner_action != "process-queued-csv-for-owner-review":
         raise HTTPException(403, "Explicit supervised processing action required")
     org, owner_id = str(owner.organization_id), str(owner.user_id)
-    row = durable_csv._owned(db, job_id, org, owner_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
     factory = _queued_factory(db)
@@ -527,7 +530,10 @@ async def review_supervised_queued_csv_job(
     if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
         raise HTTPException(400, "Boolean approve required")
     org, owner_id = str(owner.organization_id), str(owner.user_id)
-    row = durable_csv._owned(db, job_id, org, owner_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
     factory = _queued_factory(db)
