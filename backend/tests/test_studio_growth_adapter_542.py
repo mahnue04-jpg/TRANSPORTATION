@@ -1,0 +1,114 @@
+"""Offline contract acceptance for Studio -> Growth. No app package imports."""
+from datetime import datetime, timezone
+import importlib.util
+from pathlib import Path
+import sys
+import types
+
+import pytest
+
+CORE = Path(__file__).resolve().parents[1] / "app/core/nova"
+PACKAGE = "_test_only_nova_studio_contract"
+pkg = types.ModuleType(PACKAGE)
+pkg.__path__ = [str(CORE)]
+sys.modules[PACKAGE] = pkg
+
+
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(PACKAGE + "." + name, CORE / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+events = load("agent_events", "agent_events.py")
+adapter = load("studio_growth_adapter", "studio_growth_adapter.py")
+NOW = datetime(2026, 11, 17, 20, 0, tzinfo=timezone.utc)
+
+
+def metadata():
+    return dict(organization_id="org-A", campaign_id="campaign-1",
+                asset_id="asset-1", project_id="project-1",
+                status="completed", asset_kind="video",
+                review_state="owner_approved")
+
+
+def convert(raw=None, enabled=True, **kwargs):
+    return adapter.staging_asset_event(
+        metadata() if raw is None else raw,
+        organization_id=kwargs.pop("organization_id", "org-A"),
+        source_identity=kwargs.pop("source_identity", "studio-service-A"),
+        occurred_at=NOW, enabled=enabled,
+    )
+
+
+def test_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED", raising=False)
+    with pytest.raises(PermissionError):
+        convert(enabled=None)
+
+
+def test_completed_owner_approved_asset_maps_to_synthetic_event(monkeypatch):
+    monkeypatch.delenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED", raising=False)
+    evt = convert()
+    assert evt.synthetic is True
+    assert evt.event_type == events.EventType.ASSET_READY
+    assert (evt.source_agent, evt.target_agent) == (
+        events.Agent.CREATIVE_STUDIO, events.Agent.GROWTH
+    )
+    assert evt.payload_reference == "synthetic:asset-1"
+    assert evt.correlation_id == "campaign-1"
+    assert evt.organization_id == "org-A"
+    assert not any(key in evt.to_mapping() for key in ("url", "email", "media_bytes"))
+    assert "app.main" not in sys.modules
+
+
+@pytest.mark.parametrize("key,value", [
+    ("customer_email", "private@example.invalid"),
+    ("download_url", "https://example.invalid/video.mp4"),
+    ("api_key", "secret"),
+    ("media_bytes", b"fake"),
+    ("script", "private script"),
+])
+def test_reject_extra_sensitive_and_media_fields(key, value):
+    row = metadata()
+    row[key] = value
+    with pytest.raises(ValueError):
+        convert(row)
+
+
+@pytest.mark.parametrize("key,value", [
+    ("status", "pending"),
+    ("review_state", "not_reviewed"),
+    ("asset_kind", "audio"),
+])
+def test_reject_unapproved_or_unsupported_assets(key, value):
+    row = metadata()
+    row[key] = value
+    with pytest.raises((ValueError, PermissionError)):
+        convert(row)
+
+
+def test_wrong_tenant_and_identity_fail_closed():
+    with pytest.raises(PermissionError):
+        convert(organization_id="org-B")
+    with pytest.raises(PermissionError):
+        convert(source_identity="not authorized to act")
+
+
+def test_no_live_adapter_even_if_synthetic_enabled(monkeypatch):
+    monkeypatch.setenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED", "true")
+    with pytest.raises(PermissionError):
+        convert()
+
+
+def test_duplicate_input_is_deterministic():
+    assert convert() == convert()
+
+
+def test_missing_required_field_is_rejected():
+    row = metadata()
+    del row["project_id"]
+    with pytest.raises(ValueError):
+        convert(row)
