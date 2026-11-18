@@ -1330,3 +1330,129 @@ def test_initial_queued_csv_private_readback_failure_never_enqueues_claimable_wo
             assert db.execute(sa.select(csvjobs.jobs.c.status)).scalar_one() == "PROCESSING"
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_orphan_inventory_is_read_only_and_only_counts_scoped_candidates(
+    postgres, monkeypatch,
+):
+    """An unknown prior upload is flagged, never deleted or exposed."""
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import submit_queued_csv
+    from app.core.nova.work_revenue.operations_orphan_audit import inspect_job_private_objects
+
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        reserved = submit_queued_csv(
+            factory, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="orphan-readonly", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True,
+        )
+        job_id = reserved["job_id"]
+        prefix = "synthetic-org/" + job_id + "/"
+        prior_unknown = prefix + "nova-csv-input-synthetic-owner/unknown-orphan.bin"
+        observed = list(store.items.keys()) + [prior_unknown]
+        with factory() as db:
+            before = db.execute(sa.select(leases.lease_jobs).where(
+                leases.lease_jobs.c.job_id == job_id)).mappings().one()
+            csv_before = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == job_id)).mappings().one()
+            result = inspect_job_private_objects(
+                db, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+                job_id=job_id, list_private_keys=lambda asked: (
+                    observed if asked == prefix else []))
+            after = db.execute(sa.select(leases.lease_jobs).where(
+                leases.lease_jobs.c.job_id == job_id)).mappings().one()
+            csv_after = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == job_id)).mappings().one()
+        assert result["objects_seen"] == 2
+        assert result["bound_objects_present"] == 1
+        assert result["orphan_candidates"] == 1
+        assert result["bound_objects_missing"] == 0
+        assert result["requires_manual_reconciliation"] is True
+        assert result["safe_to_delete"] is False
+        assert result["delete_performed"] is False
+        assert "storage_ref" not in result
+        assert prior_unknown not in str(result)
+        assert dict(before) == dict(after)
+        assert dict(csv_before) == dict(csv_after)
+        assert len(store.items) == 1
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_orphan_inventory_blocks_cross_owner_and_escaped_prefix(
+    postgres, monkeypatch,
+):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import submit_queued_csv
+    from app.core.nova.work_revenue.operations_orphan_audit import (
+        inspect_job_private_objects, OrphanAuditBlocked,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        reserved = submit_queued_csv(
+            factory, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="orphan-invalid", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True,
+        )
+        job_id = reserved["job_id"]
+        called = []
+        with factory() as db:
+            with pytest.raises(OrphanAuditBlocked, match="exact owner scope"):
+                inspect_job_private_objects(
+                    db, organization_id="synthetic-org", owner_user_id="wrong-owner",
+                    job_id=job_id,
+                    list_private_keys=lambda prefix: called.append(prefix) or [])
+            assert not called
+            with pytest.raises(OrphanAuditBlocked, match="escaped job prefix"):
+                inspect_job_private_objects(
+                    db, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+                    job_id=job_id,
+                    list_private_keys=lambda prefix: ["other-org/forbidden.csv"])
+            with pytest.raises(OrphanAuditBlocked, match="audit limit"):
+                inspect_job_private_objects(
+                    db, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+                    job_id=job_id,
+                    list_private_keys=lambda prefix: [prefix + str(i) for i in range(3)],
+                    max_objects=2)
+        assert store.put_count == 1
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_orphan_inventory_detects_missing_bound_object_without_deleting(
+    postgres, monkeypatch,
+):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import submit_queued_csv
+    from app.core.nova.work_revenue.operations_orphan_audit import inspect_job_private_objects
+
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="orphan-missing", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True,
+        )
+        with factory() as db:
+            result = inspect_job_private_objects(
+                db, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+                job_id=created["job_id"], list_private_keys=lambda prefix: [])
+        assert result["objects_seen"] == 0
+        assert result["bound_objects_missing"] == 1
+        assert result["requires_manual_reconciliation"] is True
+        assert result["delete_performed"] is False
+    finally:
+        leases.lease_metadata.drop_all(engine)
