@@ -30,7 +30,7 @@ class PrivateInputReceipt:
 
 def _valid_identity(value: str, maximum: int = 36) -> bool:
     return (isinstance(value, str) and 0 < len(value) <= maximum
-            and value.isascii() and value.isalnum())
+            and value.isascii() and all(c.isalnum() or c in "-_" for c in value))
 
 
 def persist_private_csv_input(
