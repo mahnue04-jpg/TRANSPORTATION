@@ -69,6 +69,8 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
         if not isinstance(permissions, dict):
             problems.append("unknown_table_" + table)
             continue
+        if permissions.get("SELECT") is not True:
+            problems.append("missing_" + table + "_SELECT")
         for action in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
             if permissions.get(action) is not False:
                 problems.append("unsafe_" + table + "_" + action)
