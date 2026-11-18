@@ -8,7 +8,10 @@
   }
 
   function report(data) {
-    if (!data || typeof data !== "object" || data.is_synthetic_demo !== true) {
+    if (!data || typeof data !== "object" || Array.isArray(data) ||
+        data.demo_mode_flag !== true || !data.profile ||
+        data.profile.is_synthetic_demo !== true ||
+        data.label !== "SYNTHETIC DEMO — not live customers") {
       return {
         title: "Demonstration not verified",
         rows: [record("Synthetic demonstration", "not verified", "No confirmed synthetic demo result was returned.")],
