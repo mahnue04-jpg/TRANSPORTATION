@@ -332,7 +332,7 @@ def test_synthetic_worker_reloads_private_input_after_engine_reconnect(postgres,
     original_engine, store = postgres
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
     leases.lease_metadata.create_all(original_engine)
-    raw = b"Name\\nAda\\nAda\\n"
+    raw = b"Name\nAda\nAda\n"
     job_id = "synthetic-reconnect"
     try:
         receipt = persist_private_csv_input(
@@ -380,7 +380,7 @@ def test_synthetic_worker_reloads_private_input_after_engine_reconnect(postgres,
             assert result == {"state": "completed", "job_id": job_id}
             assert len(output_refs) == 1
             output, _kind = store.retrieve(storage_ref=output_refs[0])
-            assert output == b"Name\\nAda\\n"
+            assert output == b"Name\nAda\n"
             with Session(fresh_engine) as db:
                 row = db.execute(sa.select(leases.lease_jobs).where(
                     leases.lease_jobs.c.job_id == job_id)).mappings().one()
