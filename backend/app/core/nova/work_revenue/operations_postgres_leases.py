@@ -108,13 +108,19 @@ def enqueue(db: Session, *, job_id: str, organization_id: str,
 
 
 def claim(db: Session, *, now: datetime | None = None,
-          lease_seconds: int = 60, require_bound_input: bool = False) -> LeaseClaim | None:
+          lease_seconds: int = 60, require_bound_input: bool = False,
+          job_id: str | None = None, organization_id: str | None = None,
+          owner_user_id: str | None = None) -> LeaseClaim | None:
     """Claim at most one ready job with PostgreSQL row locking and fencing."""
     _guard(db)
     if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
         raise LeaseBlocked("Invalid lease duration")
     if type(require_bound_input) is not bool:
         raise LeaseBlocked("Invalid input binding requirement")
+    if any(value is not None for value in (job_id, organization_id, owner_user_id)):
+        if not all(isinstance(value, str) and value.strip() and len(value) <= 36
+                   for value in (job_id, organization_id, owner_user_id)):
+            raise LeaseBlocked("Exact job, organization and owner scope required")
     now = now or _now()
     ready = sa.or_(
         sa.and_(lease_jobs.c.state == "QUEUED", lease_jobs.c.available_at <= now),
@@ -122,6 +128,12 @@ def claim(db: Session, *, now: datetime | None = None,
     )
     try:
         conditions = [ready, lease_jobs.c.attempts < lease_jobs.c.max_attempts]
+        if job_id is not None:
+            conditions.extend((
+                lease_jobs.c.job_id == job_id,
+                lease_jobs.c.organization_id == organization_id,
+                lease_jobs.c.owner_user_id == owner_user_id,
+            ))
         if require_bound_input:
             conditions.extend((
                 lease_jobs.c.input_ref.is_not(None),
