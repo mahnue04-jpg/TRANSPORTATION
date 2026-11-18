@@ -182,6 +182,59 @@ hashing or restore is authorized or yet performed.
   ownership, missing recovery timestamp, backup format mismatch, schema
   divergence, external-network exposure, or any request to alter primary.
 
+## Owner-delegated recovery follow-up — verified status, execution limitations
+
+At the owner's request to finish the recovery inspection and arrange cleanup,
+a **read-only Render audit** confirmed:
+
+- **ORIGINAL / PROTECT**: `nova-ga-490-dispos`,
+  instance `dpg-dbqv7mmtlv9c73d7tnb0-a`, **available**.
+- **TEMPORARY PITR COPY ONLY**: `nova-ga-490-dispos-copy`,
+  instance `dpg-dbuku8dckfvc73ch22e0-a`, internal DB
+  `nova_ga_490_dispos_nu6s`, PostgreSQL 18, 1 GB,
+  tier `0.1c-256mb`, **available**, created
+  `2026-11-18T07:09:21.352984Z`, external IP allowlist empty.
+- Render metrics show post-provisioning memory measurements for the
+  temporary instance and normal connections on the original; **metrics do
+  not prove restored data integrity**.
+- A read-only SQL probe to the temporary database could **not connect**
+  through the hosted Render tool because its IP allowlist is empty.
+  That is a security safeguard; **DO NOT weaken it**.
+- The connected Render API has **no private SQL execution, PITR/schema
+  inspection, or PostgreSQL deletion action**. No alternate signed-in
+  Render browser profile was available. No unapproved service or database
+  was created to work around this.
+- Consequently no verified migration head, restored row-count comparison,
+  retention of customer records, or restored export integrity was obtained.
+  The PITR instance being "available" is **not full restore acceptance**.
+- Keep the Nov 18 logical export and existing source intact. The PITR
+  rehearsal does NOT verify the exact Nov 18 export archive.
+
+### Private validation and cost-stop handoff
+
+1. Use an **already authorized** private-network console/runner to read
+   only the temporary copy: confirm `current_database()` equals
+   `nova_ga_490_dispos_nu6s`, PostgreSQL version, Alembic revision,
+   table presence, and aggregate counts without exposing rows/secrets.
+   A private diagnostic cannot reuse a hardcoded **original DB** identity
+   guard unchanged; change/test the scope for the disposable copy without
+   altering the original service or its security checks.
+2. If no safe private inspection path is available, report **PITR created,
+   data verification unproven**; do not claim PASS.
+3. Stop temporary charges once the owner has preserved the necessary
+   evidence. Deletion must target **ONLY**
+   `dpg-dbuku8dckfvc73ch22e0-a` after independently re-checking both
+   instance names and IDs. Never delete `dpg-dbqv7mmtlv9c73d7tnb0-a`.
+   Render deletion permanently removes the copy; the connected tools
+   cannot perform this action. Confirm the owner explicitly authorized
+   the destructive cleanup and its exact target before the final Delete.
+4. Record the deletion outcome or continued billing accurately. Until then,
+   the temporary restore is **available and potentially still accruing
+   prorated charges** (owner-confirmed checkout displayed $6.30/month).
+   No automatic cleanup is configured.
+5. Keep PR #556 draft and Render web deployment pinned until a separate
+   migration/deploy acceptance. Do not merge or enable outbound providers.
+
 ## Required safe evidence before an exact-version staging update
 
 1. Owner authorizes **read-only private diagnosis** of this named staging DB,
