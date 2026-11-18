@@ -218,7 +218,7 @@
       scopedStatus.textContent = "Submitting authorized CSV to private review processing...";
       try {
         const url = "/api/nova/work/operations/" + mode + "/engagements/" +
-          encodeURIComponent(selected.engagement_id) + "/tasks/"
+          encodeURIComponent(selected.engagement_id) + "/tasks/" +
           encodeURIComponent(selected.task_id) + "/jobs";
         const response = await fetch(url, {
           method: "POST", credentials: "same-origin", body: file,
@@ -269,13 +269,10 @@
       });
       if (!response.ok) throw new Error(await safeError(response));
       const result = await response.json();
-      if (result.state === "completed") {
-        await refreshJobStatus();
-      } else {
+      await refreshJobStatus();
+      if (result.state !== "completed") {
         scopedStatus.textContent = "Job " + currentJobId + ": " + result.state +
           ". Processing not confirmed; review status before any action.";
-        currentLeaseStatus = result.state === "queued" ? "QUEUED" : "NEEDS_RECONCILIATION";
-        updateJobButtons("PROCESSING");
       }
     } catch (err) {
       scopedStatus.textContent = (err && err.message) || "Queued processing unavailable.";
