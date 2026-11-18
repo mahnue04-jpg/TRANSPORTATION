@@ -6,7 +6,6 @@ All lookups are owner-scoped and both runtime flags must be explicitly enabled.
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 
 import sqlalchemy as sa
@@ -59,7 +58,9 @@ def inspect_held_csv_artifact(
     )).mappings().first()
     if held is None or held["state"] != "NEEDS_RECONCILIATION":
         raise leases.LeaseBlocked("Linked lease is not held for owner reconciliation")
-    if (not hmac.compare_digest(held["input_sha256"], row["input_sha256"])
+    if (not leases._sha(held["input_sha256"])
+            or not leases._sha(held["output_sha256"])
+            or not hmac.compare_digest(held["input_sha256"], row["input_sha256"])
             or not hmac.compare_digest(held["output_sha256"], row["output_sha256"])):
         return {"job_id": job_id, "result": "metadata_digest_mismatch",
                 "may_release": False}
