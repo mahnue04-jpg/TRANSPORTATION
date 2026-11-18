@@ -86,3 +86,40 @@ def test_route_requires_actual_auth_dependencies():
 
 def test_readonly_only_get_route():
     assert [r.methods for r in module.router.routes] == [{"GET"}]
+
+
+def test_mounted_workspace_route_defaults_off(monkeypatch):
+    """Exercise the real Workspace router mount, not just the nested router."""
+    from app.auth import get_current_user_context
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.workspace.router import router as workspace_router
+
+    monkeypatch.delenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", raising=False)
+    app = FastAPI()
+    app.include_router(workspace_router)
+    app.dependency_overrides[get_current_user_context] = lambda: _user()
+    app.dependency_overrides[require_nova_access] = lambda: object()
+    guard = inspect.signature(module.list_central_journeys).parameters["_role_guard"].default.dependency
+    app.dependency_overrides[guard] = lambda: object()
+    with TestClient(app) as client:
+        response = client.get("/api/nova/workspace/central/journeys")
+    assert response.status_code == 404
+
+
+def test_mounted_workspace_route_is_empty_on_opt_in(monkeypatch):
+    from app.auth import get_current_user_context
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.workspace.router import router as workspace_router
+
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    app = FastAPI()
+    app.include_router(workspace_router)
+    app.dependency_overrides[get_current_user_context] = lambda: _user()
+    app.dependency_overrides[require_nova_access] = lambda: object()
+    guard = inspect.signature(module.list_central_journeys).parameters["_role_guard"].default.dependency
+    app.dependency_overrides[guard] = lambda: object()
+    with TestClient(app) as client:
+        response = client.get("/api/nova/workspace/central/journeys")
+    assert response.status_code == 200
+    assert response.json()["integration_status"] == "not_connected"
+    assert response.json()["journeys"] == []
