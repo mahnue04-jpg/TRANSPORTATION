@@ -564,3 +564,91 @@ def test_queued_csv_cancelled_job_is_never_processed(postgres, monkeypatch):
         assert store.put_count == 1
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_csv_rejects_changed_idempotency_payload(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, QueuedCSVBlocked,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    params = dict(
+        organization_id="synthetic-org", owner_user_id="synthetic-owner",
+        engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+        request_key="pipeline-idempotency", store=store, authorize=lambda *_: True,
+    )
+    try:
+        submit_queued_csv(factory, raw=b"Name\nAda\n", **params)
+        with pytest.raises(QueuedCSVBlocked, match="different work"):
+            submit_queued_csv(factory, raw=b"Name\nMallory\n", **params)
+        assert store.put_count == 1
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_csv_owner_review_denies_tampered_private_output(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, process_one_queued_csv, review_processed_csv,
+        QueuedCSVBlocked,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="pipeline-tamper-output", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True)
+        assert process_one_queued_csv(factory, store=store,
+                                      authorize=lambda *_: True)["state"] == "completed"
+        with factory() as db:
+            row = db.execute(sa.select(csvjobs.jobs).where(
+                csvjobs.jobs.c.id == created["job_id"])).mappings().one()
+            store.items[row["output_ref"]] = b"Name\nAltered\n"
+        with pytest.raises(QueuedCSVBlocked, match="integrity failed"):
+            review_processed_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", job_id=created["job_id"],
+                approve=True, authorize=lambda *_: True, store=store)
+        with factory() as db:
+            assert csvjobs.job_status(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=created["job_id"])["status"] == "AWAITING_REVIEW"
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_csv_revocation_during_processing_never_approves(postgres, monkeypatch):
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, process_one_queued_csv,
+    )
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        created = submit_queued_csv(
+            factory, organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+            request_key="pipeline-revoke-processing", raw=b"Name\nAda\n",
+            store=store, authorize=lambda *_: True)
+        decisions = iter([True, False])
+        result = process_one_queued_csv(
+            factory, store=store, authorize=lambda *_: next(decisions))
+        assert result["state"] == "needs_reconciliation"
+        with factory() as db:
+            assert csvjobs.job_status(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=created["job_id"])["status"] == "PROCESSING"
+            state = db.execute(sa.select(leases.lease_jobs.c.state).where(
+                leases.lease_jobs.c.job_id == created["job_id"])).scalar_one()
+            assert state == "NEEDS_RECONCILIATION"
+    finally:
+        leases.lease_metadata.drop_all(engine)
