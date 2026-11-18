@@ -64,6 +64,17 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
             problems.append("unsafe_role_" + name)
     if observed.get("can_create_schema") is not False:
         problems.append("database_create_allowed")
+    if observed.get("can_create_public_table") is not False:
+        problems.append("public_schema_create_allowed")
+    if observed.get("can_create_temp_table") is not False:
+        problems.append("temporary_table_create_allowed")
+    other_tables = observed.get("other_tables")
+    if not isinstance(other_tables, dict):
+        problems.append("unknown_unrelated_table_privileges")
+    else:
+        for table, grants in other_tables.items():
+            if not isinstance(grants, dict) or any(value is not False for value in grants.values()):
+                problems.append("unapproved_table_privileges_" + str(table))
     for table in _READER_TABLES:
         permissions = (observed.get("tables") or {}).get(table)
         if not isinstance(permissions, dict):
@@ -107,6 +118,37 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
             can_create = connection.execute(text(
                 "SELECT has_database_privilege(current_user, current_database(), 'CREATE')"
             )).scalar_one()
+            can_create_public_table = connection.execute(text(
+                "SELECT has_schema_privilege(current_user, 'public', 'CREATE')"
+            )).scalar_one()
+            can_create_temp_table = connection.execute(text(
+                "SELECT has_database_privilege(current_user, current_database(), 'TEMP')"
+            )).scalar_one()
+            # Enumerate relations in non-system schemas; the allowlist
+            # is strict, and even column-level SELECT on other tables fails.
+            relations = connection.execute(text(
+                "SELECT n.nspname AS schema_name, c.relname AS table_name "
+                "FROM pg_class AS c JOIN pg_namespace AS n ON n.oid=c.relnamespace "
+                "WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') "
+                "AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%'"
+            )).mappings().all()
+            other_tables = {}
+            for relation in relations:
+                schema_name, table_name = relation["schema_name"], relation["table_name"]
+                if schema_name == "public" and table_name in _READER_TABLES:
+                    continue
+                qualified = schema_name + "." + table_name
+                other_tables[qualified] = {}
+                for action in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    other_tables[qualified][action] = bool(connection.execute(
+                        text("SELECT has_table_privilege(current_user, :target, :action)"),
+                        {"target": qualified, "action": action},
+                    ).scalar_one())
+                other_tables[qualified]["ANY_COLUMN_SELECT"] = bool(connection.execute(
+                    text("SELECT has_any_column_privilege(current_user, :target, 'SELECT')"),
+                    {"target": qualified},
+                ).scalar_one())
             tables = {}
             for table in _READER_TABLES:
                 table_exists = connection.execute(text(
@@ -144,6 +186,9 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                 "replication": role["rolreplication"],
                 "bypass_rls": role["rolbypassrls"],
                 "can_create_schema": bool(can_create),
+                "can_create_public_table": bool(can_create_public_table),
+                "can_create_temp_table": bool(can_create_temp_table),
+                "other_tables": other_tables,
                 "tables": tables,
             }
     finally:
