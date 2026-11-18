@@ -20,7 +20,8 @@ def _config() -> None:
     test_mode = os.getenv("NOVA_CENTRAL_ISOLATED_TEST") == "1"
     if test_mode and (os.getenv("AMICOR_ENVIRONMENT") != "test"
                       or os.getenv("APP_ENV") != "test"
-                      or os.getenv("RENDER", "").lower() in {"true", "1", "yes"}):
+                      or os.getenv("RENDER", "").lower() in {"true", "1", "yes"}
+                      or bool(os.getenv("RENDER_SERVICE_ID", "").strip())):
         raise RuntimeError("Disposable test mode cannot run on staging/Render")
     if os.getenv("AMICOR_ENVIRONMENT") != "staging" or os.getenv("APP_ENV") != "staging":
         # Only isolated unit tests may opt into the test environment.
