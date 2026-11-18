@@ -176,8 +176,8 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
             )).mappings().all()
             non_system_functions = {}
             for routine in custom_routines:
-                identity = str(routine["nspname"]) + "." + str(routine["proname"]) + "#" + str(routine["oid"])
-                non_system_functions[identity] = bool(connection.execute(
+                routine_key = str(routine["nspname"]) + "." + str(routine["proname"]) + "#" + str(routine["oid"])
+                non_system_functions[routine_key] = bool(connection.execute(
                     text("SELECT has_function_privilege(current_user, :routine_oid, 'EXECUTE')"),
                     {"routine_oid": routine["oid"]},
                 ).scalar_one())
