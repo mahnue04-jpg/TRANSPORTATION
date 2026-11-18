@@ -13,8 +13,10 @@ from app.core.nova.work_revenue import operations_postgres_leases as leases
 
 @pytest.fixture
 def migration():
-    path = (Path(__file__).resolve().parents[1] / "migrations" / "versions"
-            / "20261117_nova_operations_leases.py")
+    # Explicit standalone Operations staging DDL; not in Alembic's
+    # ordinary migration discovery path.
+    path = (Path(__file__).resolve().parents[1] / "staging_migrations"
+            / "operations_lease_schema.py")
     spec = spec_from_file_location("nova_ops_lease_migration_ci", path)
     mod = module_from_spec(spec)
     spec.loader.exec_module(mod)
