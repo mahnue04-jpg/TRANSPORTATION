@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 _EXPECTED_HOST = "dpg-dbqv7mmtlv9c73d7tnb0-a"
 _EXPECTED_DATABASE = "nova_ga_490_dispos"
+_RESTORED_HOST = "dpg-dbuku8dckfvc73ch22e0-a"
+_RESTORED_DATABASE = "nova_ga_490_dispos_nu6s"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -27,12 +29,21 @@ def validate_private_diagnostic_env(env: dict[str, str]) -> str:
     running = env.get("RENDER_GIT_COMMIT", "").strip().lower()
     if not _SHA.fullmatch(approved) or running != approved:
         raise ValueError("Exact staging commit pin required")
+    target = env.get("NOVA_GA_DIAGNOSTIC_TARGET", "original")
+    if target == "original":
+        expected_host, expected_database = _EXPECTED_HOST, _EXPECTED_DATABASE
+    elif target == "restored_copy":
+        if env.get("NOVA_GA_RESTORED_COPY_READ_ONLY_APPROVED") != "true":
+            raise ValueError("Restored-copy schema inspection not authorized")
+        expected_host, expected_database = _RESTORED_HOST, _RESTORED_DATABASE
+    else:
+        raise ValueError("Unrecognized private diagnostic target")
     raw = env.get("DATABASE_URL", "")
     try:
         parsed = urlsplit(raw)
         if parsed.scheme not in ("postgres", "postgresql", "postgresql+psycopg2"):
             raise ValueError("PostgreSQL staging URL required")
-        if parsed.hostname != _EXPECTED_HOST or parsed.path != "/" + _EXPECTED_DATABASE:
+        if parsed.hostname != expected_host or parsed.path != "/" + expected_database:
             raise ValueError("Private staging database identity mismatch")
         if not parsed.username or not parsed.password or parsed.query or parsed.fragment:
             raise ValueError("Invalid private staging connection configuration")
@@ -45,7 +56,7 @@ def validate_private_diagnostic_env(env: dict[str, str]) -> str:
     return raw
 
 
-def inspect_schema(connect, url: str) -> dict:
+def inspect_schema(connect, url: str, *, expected_database: str = _EXPECTED_DATABASE) -> dict:
     """Use a read-only PostgreSQL transaction; fetch only schema metadata."""
     conn = connect(url, connect_timeout=8, application_name="nova-ga-private-schema-inventory")
     try:
@@ -53,7 +64,7 @@ def inspect_schema(connect, url: str) -> dict:
         with conn.cursor() as cur:
             cur.execute("SELECT current_database(), current_setting('server_version_num')::integer")
             db_name, version = cur.fetchone()
-            if db_name != _EXPECTED_DATABASE:
+            if db_name != expected_database:
                 raise ValueError("Unexpected connected database")
             cur.execute(
                 "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
@@ -77,7 +88,7 @@ def inspect_schema(connect, url: str) -> dict:
             campaign_table_exists = bool(cur.fetchone()[0])
         conn.rollback()
         return {
-            "database_identity": "nova_ga_490_dispos",
+            "database_identity": expected_database,
             "server_version_num": version,
             "alembic_version_table_exists": has_alembic,
             "alembic_heads": versions,
@@ -95,7 +106,9 @@ def main() -> int:
     try:
         url = validate_private_diagnostic_env(dict(os.environ))
         import psycopg2
-        summary = inspect_schema(psycopg2.connect, url)
+        target = os.environ.get("NOVA_GA_DIAGNOSTIC_TARGET", "original")
+        expected = _RESTORED_DATABASE if target == "restored_copy" else _EXPECTED_DATABASE
+        summary = inspect_schema(psycopg2.connect, url, expected_database=expected)
     except Exception:
         # Never leak connection strings, account names, SQL diagnostics, or secrets.
         print("Private staging schema inspection unavailable or denied", file=sys.stderr)
