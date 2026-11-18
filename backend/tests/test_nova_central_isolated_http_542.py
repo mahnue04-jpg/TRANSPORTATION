@@ -382,3 +382,89 @@ with SessionLocal() as db:
     )
     assert proc.returncode == 0, proc.stderr[-2600:]
     assert dbfile.exists()
+
+
+def test_fresh_process_sqlite_authorizer_enforces_minimal_auth_permissions(tmp_path):
+    """Deny sensitive account column reads and all SQL mutations at DB level.
+
+    This tests a disposable SQLite permission simulation, not actual Postgres
+    GRANTs. The unmodified ASGI auth dependency must succeed with that policy.
+    """
+    import os
+    import subprocess
+    import sys
+
+    dbfile = tmp_path / "reader-only-simulation.sqlite"
+    env = dict(os.environ)
+    env.update({
+        "AMICOR_ENVIRONMENT": "test", "APP_ENV": "test",
+        "NOVA_CENTRAL_ISOLATED_TEST": "1",
+        "DATABASE_URL": "sqlite:///" + str(dbfile),
+        "NOVA_CENTRAL_APPROVED_COMMIT": "a" * 40,
+        "RENDER_GIT_COMMIT": "a" * 40,
+        "NOVA_CENTRAL_JOURNEY_READONLY_ENABLED": "false",
+        "NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED": "false",
+    })
+    script = """
+import json, os, sqlite3, sys
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from app import auth
+from app.db.models import User
+from app.db.session import SessionLocal, engine
+from nova_central_isolated import create_app
+
+assert engine.url.database == sys.argv[1]
+User.__table__.create(engine)
+with SessionLocal() as db:
+    db.add(User(id="owner-A", email="owner@example.invalid",
+                hashed_password="fictional-hash", role="admin",
+                authorized_roles=json.dumps(["admin"]), session_role="admin",
+                organization_id="org-A", auth_version=0,
+                is_active=True, is_verified=True))
+    db.commit()
+engine.dispose()
+
+private = {"hashed_password", "email", "display_name"}
+allowed = {"id", "role", "authorized_roles", "session_role",
+           "organization_id", "auth_version", "is_active"}
+denied_ops = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE,
+              sqlite3.SQLITE_DELETE, sqlite3.SQLITE_CREATE_TABLE,
+              sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_ALTER_TABLE}
+observed = []
+def install_policy(connection, record):
+    def authorize(op, table, column, database, source):
+        if op in denied_ops:
+            observed.append(("forbidden_mutation", table, column))
+            return sqlite3.SQLITE_DENY
+        if op == sqlite3.SQLITE_READ and table == "platform_users":
+            if column not in allowed:
+                observed.append(("forbidden_column", table, column))
+                return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    connection.set_authorizer(authorize)
+event.listen(engine, "connect", install_policy)
+
+app = create_app()
+assert not app.dependency_overrides
+token = auth.create_access_token({
+    "sub":"owner-A", "email":"owner@example.invalid", "role":"admin",
+    "organization_id":"org-A", "auth_version":0,
+})
+with TestClient(app) as client:
+    assert client.get("/health/live").status_code == 200
+    os.environ["NOVA_CENTRAL_JOURNEY_READONLY_ENABLED"] = "true"
+    response = client.get("/api/nova/workspace/central/journeys",
+                          headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 200, response.text
+    assert response.json()["journeys"] == []
+    assert response.json()["integration_status"] == "not_connected"
+    assert client.post("/api/nova/workspace/central/journeys").status_code == 405
+assert observed == [], observed
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(dbfile)],
+        cwd=str(FILE.parent), env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, timeout=25,
+    )
+    assert proc.returncode == 0, proc.stderr[-2600:]
