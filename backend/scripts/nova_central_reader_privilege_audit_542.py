@@ -69,7 +69,20 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
         if not isinstance(permissions, dict):
             problems.append("unknown_table_" + table)
             continue
-        if permissions.get("SELECT") is not True:
+        if table == "platform_users":
+            if permissions.get("SELECT") is not False:
+                problems.append("unsafe_full_user_table_SELECT")
+            columns = permissions.get("columns")
+            if not isinstance(columns, dict) or not columns:
+                problems.append("unknown_user_columns")
+            else:
+                for column in _READER_COLUMNS:
+                    if columns.get(column) is not True:
+                        problems.append("missing_user_column_SELECT_" + column)
+                for column, granted in columns.items():
+                    if column not in _READER_COLUMNS and granted is not False:
+                        problems.append("unsafe_user_column_SELECT_" + column)
+        elif permissions.get("SELECT") is not True:
             problems.append("missing_" + table + "_SELECT")
         for action in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
             if permissions.get(action) is not False:
@@ -108,6 +121,18 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                         text("SELECT has_table_privilege(current_user, :table_name, :action)"),
                         {"table_name": "public." + table, "action": action},
                     ).scalar_one())
+                if table == "platform_users":
+                    columns = connection.execute(text(
+                        "SELECT attname FROM pg_attribute "
+                        "WHERE attrelid = to_regclass(:table_name) "
+                        "AND attnum > 0 AND NOT attisdropped"
+                    ), {"table_name": "public.platform_users"}).scalars().all()
+                    tables[table]["columns"] = {
+                        name: bool(connection.execute(
+                            text("SELECT has_column_privilege(current_user, :table_name, :column_name, 'SELECT')"),
+                            {"table_name": "public.platform_users", "column_name": name},
+                        ).scalar_one()) for name in columns
+                    }
             return {
                 "database": identity["db"],
                 "principal": identity["principal"],
