@@ -82,11 +82,18 @@
           <label><input id="operations-scope-confirmed" type="checkbox" required />
             I confirm AMICOR has the client's authorization to process this data, and I will review the result before delivery.
           </label>
+          <label><input type="checkbox" id="operations-queued-mode" />
+            Use supervised queued workflow (development/staging only; separately enabled by AMICOR)
+          </label>
           <button type="submit">Create secure CSV review job</button>
         </form>
         <p class="hint" id="operations-scoped-csv-result" aria-live="polite">No task has been processed. Production job service is unavailable until approved and enabled.</p>
         <div class="command-actions">
           <button type="button" class="secondary" id="operations-durable-status" disabled>Check job status</button>
+          <button type="button" class="secondary" id="operations-queued-process" disabled>Process queued job for owner review</button>
+          <button type="button" class="secondary" id="operations-queued-recovery" disabled>Inspect queued recovery</button>
+          <button type="button" class="secondary" id="operations-queued-restore" disabled>Restore original CSV input</button>
+          <button type="button" class="secondary" id="operations-queued-cancel" disabled>Cancel queued processing</button>
           <button type="button" class="secondary" id="operations-durable-download" disabled>Download private review copy</button>
           <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
           <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>

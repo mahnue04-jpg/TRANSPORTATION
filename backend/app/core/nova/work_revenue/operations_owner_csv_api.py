@@ -282,6 +282,33 @@ async def create_durable_csv_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+
+def _reject_queued_job_in_legacy_path(
+    db: Session, *, job_id: str, owner: UserContext,
+) -> None:
+    """Prevent legacy review/download/recover from bypassing queued lease gates.
+
+    The original synchronous path remains available if the lease table has not
+    been migrated. Database inspection errors fail closed instead of treating
+    queued jobs as unguarded legacy work.
+    """
+    import sqlalchemy as sa
+    from . import operations_postgres_leases as queued_leases
+
+    try:
+        if not sa.inspect(db.get_bind()).has_table(queued_leases.lease_jobs.name):
+            return
+        scoped = db.execute(sa.select(queued_leases.lease_jobs.c.job_id).where(
+            queued_leases.lease_jobs.c.job_id == job_id,
+            queued_leases.lease_jobs.c.organization_id == str(owner.organization_id),
+            queued_leases.lease_jobs.c.owner_user_id == str(owner.user_id),
+        )).first()
+    except Exception as exc:
+        raise HTTPException(503, "CSV job mode cannot be verified") from exc
+    if scoped is not None:
+        raise HTTPException(409, "Queued job requires supervised owner workflow")
+
+
 @router.get("/durable/jobs/{job_id}")
 def durable_csv_job_status(
     job_id: str,
@@ -295,6 +322,7 @@ def durable_csv_job_status(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         return data
     except durable_csv.CustomerCSVBlocked as exc:
         _durable_error(exc)
@@ -314,6 +342,7 @@ async def durable_csv_review(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         payload = await request.json()
         if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
             raise HTTPException(400, "Boolean approve required")
@@ -338,6 +367,7 @@ def recover_durable_csv_job(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         return durable_csv.recover_stale_job(
             db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
         )
@@ -358,6 +388,7 @@ def durable_csv_download(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         content = durable_csv.download_review(
             db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
         )
@@ -405,3 +436,321 @@ def eligible_csv_tasks(
             break
     return {"tasks": eligible, "count": len(eligible), "owner_only": True,
             "execution_authorized": False, "handoff_created": False}
+
+
+# Supervised queued CSV routes. These are a new, separately gated path and do
+# not change the legacy synchronous owner CSV API. No hosted worker is started.
+import sqlalchemy as _sa
+from sqlalchemy.orm import sessionmaker as _sessionmaker
+from . import operations_postgres_leases as _ops_leases
+from .operations_private_input import PrivateInputBlocked as _PrivateInputBlocked
+from . import operations_queued_csv_pipeline as _queued_csv
+from .operations_owner_task_authorizer import owner_task_authorizer as _owner_task_authorizer
+
+
+def _queued_csv_gate(db: Session) -> None:
+    if os.getenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "").lower() != "true":
+        raise HTTPException(503, "Supervised queued CSV workflow disabled")
+    try:
+        durable_csv.require_runtime(db)
+        _ops_leases._guard(db)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(503, "Supervised queue unavailable") from exc
+
+
+def _queued_factory(db: Session):
+    # SessionLocal would accidentally use the application's default database
+    # in isolated tests; keep the exact injected, guarded PostgreSQL bind.
+    return _sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+
+
+def _queued_error(exc: Exception) -> None:
+    if isinstance(exc, durable_csv.CustomerCSVBlocked):
+        _durable_error(exc)
+    if isinstance(exc, (_queued_csv.QueuedCSVBlocked,
+                        _ops_leases.LeaseBlocked, _PrivateInputBlocked)):
+        raise HTTPException(409, "Queued Operations request blocked") from exc
+    raise exc
+
+
+@router.post("/queued/engagements/{engagement_id}/tasks/{task_id}/jobs", status_code=202)
+async def create_supervised_queued_csv_job(
+    engagement_id: str,
+    task_id: str,
+    request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    scope_confirmed: str | None = Header(default=None, alias="X-Nova-Scope-Confirmed"),
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if (owner_action != "queue-csv-for-owner-review"
+            or scope_confirmed != "owner-confirmed-client-authorization"):
+        raise HTTPException(403, "Explicit owner action and processing authority required")
+    if (not isinstance(filename, str) or len(filename) > 180
+            or not filename.lower().endswith(".csv")
+            or any(ord(c) < 32 or ord(c) == 127 or c in "/\\"
+                   for c in filename)):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id)
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB limit")
+        content.extend(chunk)
+    factory = _queued_factory(db)
+    authorize = _owner_task_authorizer(factory, authenticated_owner=owner)
+    try:
+        return _queued_csv.submit_queued_csv(
+            factory,
+            organization_id=str(owner.organization_id),
+            owner_user_id=str(owner.user_id),
+            engagement_id=engagement_id, task_id=task_id,
+            request_key=request_key or "", raw=bytes(content),
+            store=durable_csv._store(), authorize=authorize)
+    except Exception as exc:
+        _queued_error(exc)
+
+
+@router.post("/queued/jobs/{job_id}/process")
+def process_supervised_queued_csv_job(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if owner_action != "process-queued-csv-for-owner-review":
+        raise HTTPException(403, "Explicit supervised processing action required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    factory = _queued_factory(db)
+    try:
+        result = _queued_csv.process_one_queued_csv(
+            factory, store=durable_csv._store(),
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner),
+            job_id=job_id, organization_id=org, owner_user_id=owner_id)
+        return {**result, "delivered": False}
+    except Exception as exc:
+        _queued_error(exc)
+
+
+@router.post("/queued/jobs/{job_id}/review")
+async def review_supervised_queued_csv_job(
+    job_id: str,
+    request: Request,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if owner_action != "review-completed-queued-csv":
+        raise HTTPException(403, "Explicit owner review action required")
+    payload = await request.json()
+    if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
+        raise HTTPException(400, "Boolean approve required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    factory = _queued_factory(db)
+    try:
+        return _queued_csv.review_processed_csv(
+            factory, organization_id=org, owner_user_id=owner_id, job_id=job_id,
+            approve=payload["approve"],
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner),
+            store=durable_csv._store())
+    except Exception as exc:
+        _queued_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}")
+def supervised_queued_csv_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-scoped status without exposing private object references."""
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        lease = db.execute(_sa.select(
+            _ops_leases.lease_jobs.c.state,
+            _ops_leases.lease_jobs.c.attempts,
+        ).where(
+            _ops_leases.lease_jobs.c.job_id == job_id,
+            _ops_leases.lease_jobs.c.organization_id == org,
+            _ops_leases.lease_jobs.c.owner_user_id == owner_id,
+        )).first()
+        return {
+            "job_id": job_id,
+            "status": row["status"],
+            "lease_status": lease.state if lease else "INPUT_NOT_BOUND",
+            "attempts": lease.attempts if lease else 0,
+            "delivered": False,
+        }
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}/download")
+def supervised_queued_csv_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """No download until explicit approval and confirmed lease completion."""
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        if row["status"] != "APPROVED_FOR_DOWNLOAD":
+            raise HTTPException(409, "Explicit owner approval required")
+        lease = db.execute(_sa.select(
+            _ops_leases.lease_jobs.c.state,
+            _ops_leases.lease_jobs.c.output_sha256,
+        ).where(
+            _ops_leases.lease_jobs.c.job_id == job_id,
+            _ops_leases.lease_jobs.c.organization_id == org,
+            _ops_leases.lease_jobs.c.owner_user_id == owner_id,
+        )).first()
+        if (lease is None or lease.state != "COMPLETED"
+                or lease.output_sha256 != row["output_sha256"]):
+            raise HTTPException(409, "Verified completed job required")
+        content = durable_csv.download_review(
+            db, org=org, owner=owner_id, job_id=job_id)
+        return Response(content=content, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-cleaned-review.csv"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+        })
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}/recovery")
+def supervised_queued_csv_recovery(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Read-only, scoped diagnostics; never retry, release or deliver."""
+    from .operations_recovery_diagnostics import inspect_recovery
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        return inspect_recovery(
+            db, organization_id=org, owner_user_id=owner_id,
+            job_id=job_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(409, "Queued job recovery unavailable") from exc
+
+
+@router.post("/queued/jobs/{job_id}/cancel")
+def cancel_supervised_queued_csv_job(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit authorized cancellation fences an outstanding lease.
+
+    Held/completed jobs cannot be silently canceled through this route:
+    their private artifacts need separate owner reconciliation.
+    """
+    _queued_csv_gate(db)
+    if owner_action != "cancel-queued-csv-job":
+        raise HTTPException(403, "Explicit owner cancellation required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    try:
+        cancelled = _ops_leases.cancel(
+            db, job_id=job_id, organization_id=org, owner_user_id=owner_id)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(409, "Queued cancellation unavailable") from exc
+    if not cancelled:
+        raise HTTPException(409, "Job cannot be canceled in its current state")
+    return {"job_id": job_id, "lease_status": "CANCELLED",
+            "delivered": False, "safe_to_auto_retry": False}
+
+
+@router.post("/queued/jobs/{job_id}/restore-input")
+async def restore_supervised_queued_csv_input(
+    job_id: str,
+    request: Request,
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit owner reupload for the same unbound, never-claimed job.
+
+    A past uncertain private upload may remain orphaned. This route never
+    guesses its reference, lists objects or deletes anything.
+    """
+    _queued_csv_gate(db)
+    if owner_action != "restore-unbound-csv-input":
+        raise HTTPException(403, "Explicit owner input recovery required")
+    if (not isinstance(filename, str) or len(filename) > 180
+            or not filename.lower().endswith(".csv")
+            or any(ord(c) < 32 or ord(c) == 127 or c in "/\\"
+                   for c in filename)):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"],
+        task_id=row["task_id"])
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB limit")
+        content.extend(chunk)
+    factory = _queued_factory(db)
+    try:
+        return _queued_csv.restore_unbound_queued_csv(
+            factory, organization_id=org, owner_user_id=owner_id,
+            job_id=job_id, raw=bytes(content), store=durable_csv._store(),
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner))
+    except Exception as exc:
+        _queued_error(exc)

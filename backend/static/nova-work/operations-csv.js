@@ -124,7 +124,16 @@
   const downloadButton = document.getElementById("operations-durable-download");
   const approveButton = document.getElementById("operations-durable-approve");
   const rejectButton = document.getElementById("operations-durable-reject");
+  const queuedToggle = document.getElementById("operations-queued-mode");
+  const processQueuedButton = document.getElementById("operations-queued-process");
+  const recoveryQueuedButton = document.getElementById("operations-queued-recovery");
+  const restoreQueuedButton = document.getElementById("operations-queued-restore");
+  const cancelQueuedButton = document.getElementById("operations-queued-cancel");
   let currentJobId = "";
+  let currentJobMode = "durable";
+  let currentJobStatus = "";
+  let currentLeaseStatus = "";
+  let currentRecoveryResult = "";
   let currentRequest = null;
 
   function scopedAuthHeaders() {
@@ -135,15 +144,28 @@
   }
 
   function updateJobButtons(status) {
+    currentJobStatus = status;
     if (statusButton) statusButton.disabled = !currentJobId;
-    const canDownload = status === "AWAITING_REVIEW" || status === "APPROVED_FOR_DOWNLOAD";
+    const canDownload = currentJobMode === "queued"
+      ? status === "APPROVED_FOR_DOWNLOAD"
+      : status === "AWAITING_REVIEW" || status === "APPROVED_FOR_DOWNLOAD";
     if (downloadButton) downloadButton.disabled = !currentJobId || !canDownload;
     if (approveButton) approveButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
     if (rejectButton) rejectButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
+    if (processQueuedButton) processQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" || currentLeaseStatus !== "QUEUED";
+    if (recoveryQueuedButton) recoveryQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued";
+    if (restoreQueuedButton) restoreQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" ||
+      currentRecoveryResult !== "input_binding_incomplete";
+    if (cancelQueuedButton) cancelQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" ||
+      !["QUEUED", "RUNNING"].includes(currentLeaseStatus);
   }
 
   function jobPath(suffix) {
-    return "/api/nova/work/operations/durable/jobs/" +
+    return "/api/nova/work/operations/" + currentJobMode + "/jobs/" +
       encodeURIComponent(currentJobId) + (suffix || "");
   }
 
@@ -163,9 +185,12 @@
     });
     if (!response.ok) throw new Error(await safeError(response));
     const job = await response.json();
+    currentLeaseStatus = job.lease_status || "";
+    if (currentLeaseStatus !== "QUEUED") currentRecoveryResult = "";
     updateJobButtons(job.status);
     scopedStatus.textContent = "Saved Nova job " + job.job_id + " · " +
-      job.status + ". Owner review only. Not delivered or paid.";
+      job.status + (job.lease_status ? " (" + job.lease_status + ")" : "") +
+      ". Owner review only. Not delivered or paid.";
   }
 
   if (scoped && scopedStatus) {
@@ -188,8 +213,10 @@
       if (!file.name.toLowerCase().endsWith(".csv") || file.size < 1 || file.size > 1000000) {
         scopedStatus.textContent = "CSV file must be nonempty and no larger than 1 MB."; return;
       }
+      const queued = Boolean(queuedToggle && queuedToggle.checked);
+      const mode = queued ? "queued" : "durable";
       const signature = [selected.engagement_id, selected.task_id,
-        file.name, file.size, file.lastModified].join("|");
+        file.name, file.size, file.lastModified, mode].join("|");
       if (!currentRequest || currentRequest.signature !== signature) {
         if (!window.crypto || typeof window.crypto.randomUUID !== "function") {
           scopedStatus.textContent = "Secure request ID unavailable in this browser."; return;
@@ -203,7 +230,7 @@
       if (loadEligible) loadEligible.disabled = true;
       scopedStatus.textContent = "Submitting authorized CSV to private review processing...";
       try {
-        const url = "/api/nova/work/operations/durable/engagements/" +
+        const url = "/api/nova/work/operations/" + mode + "/engagements/" +
           encodeURIComponent(selected.engagement_id) + "/tasks/" +
           encodeURIComponent(selected.task_id) + "/jobs";
         const response = await fetch(url, {
@@ -212,17 +239,24 @@
             "Content-Type": "text/csv",
             "X-Nova-File-Name": file.name,
             "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization",
+            "X-Nova-Owner-Action": queued ? "queue-csv-for-owner-review" : "process-csv-for-owner-review",
             "Idempotency-Key": currentRequest.key
           })
         });
         if (!response.ok) throw new Error(await safeError(response));
         const job = await response.json();
         currentJobId = job.job_id || "";
-        currentRequest = null;
+        currentJobMode = mode;
+        currentLeaseStatus = queued ? "QUEUED" : "";
+        currentRecoveryResult = "";
+        // Keep the same key for identical queued resubmissions; an owner must
+        // change task, file or mode to intentionally start new work.
+        if (!queued) currentRequest = null;
         updateJobButtons(job.status);
         scopedStatus.textContent = "Job " + currentJobId + ": " + job.status +
           (job.replayed ? " (existing request)" : "") +
-          ". Review or download privately; nothing delivered.";
+          (queued ? ". Click Process queued job when authorized." :
+            ". Review or download privately.") + " Nothing delivered.";
         document.getElementById("operations-scope-confirmed").checked = false;
       } catch (err) {
         scopedStatus.textContent = (err && err.message) ||
@@ -235,6 +269,117 @@
       }
     });
   }
+  if (processQueuedButton) processQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    scopedBusy = true;
+    processQueuedButton.disabled = true;
+    scopedStatus.textContent = "Processing this saved queued job for owner review...";
+    try {
+      const response = await fetch(jobPath("/process"), {
+        method: "POST", credentials: "same-origin",
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "X-Nova-Owner-Action": "process-queued-csv-for-owner-review"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      if (result.state === "completed") {
+        await refreshJobStatus();
+      } else {
+        scopedStatus.textContent = "Job " + currentJobId + ": " + result.state +
+          ". Processing not confirmed; review status before any action.";
+        currentLeaseStatus = result.state === "queued" ? "QUEUED" : "NEEDS_RECONCILIATION";
+        updateJobButtons("PROCESSING");
+      }
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Queued processing unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (recoveryQueuedButton) recoveryQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    recoveryQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/recovery"), {
+        credentials: "same-origin", headers: scopedAuthHeaders()
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      currentRecoveryResult = result.recovery_result || "";
+      scopedStatus.textContent = "Recovery inspection: " + result.recovery_result +
+        (result.owner_action_required ? ". Owner review required." : ".") +
+        " No automatic retry or customer delivery.";
+      await refreshJobStatus();
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Recovery inspection unavailable.";
+    } finally {
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (restoreQueuedButton) restoreQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy ||
+        currentRecoveryResult !== "input_binding_incomplete") return;
+    const fileInput = document.getElementById("operations-scoped-csv-file");
+    const file = fileInput && fileInput.files[0];
+    if (!file || !file.name.toLowerCase().endsWith(".csv") || file.size === 0 ||
+        file.size > 1000000) {
+      scopedStatus.textContent = "Choose the original CSV file (1 MB maximum) for this reserved job.";
+      return;
+    }
+    if (!window.confirm("Restore the original CSV to this existing job? Previous interrupted uploads may leave private objects requiring separate cleanup.")) return;
+    scopedBusy = true;
+    restoreQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/restore-input"), {
+        method: "POST", credentials: "same-origin", body: file,
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "Content-Type": "text/csv",
+          "X-Nova-File-Name": file.name,
+          "X-Nova-Owner-Action": "restore-unbound-csv-input"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      currentRecoveryResult = "";
+      scopedStatus.textContent = "Original CSV input restored to job " + result.job_id +
+        ". No work delivered. Separate orphan cleanup may still be needed.";
+      await refreshJobStatus();
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "CSV restore unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (cancelQueuedButton) cancelQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    if (!window.confirm("Cancel this queued job? This cannot undo any private output already written.")) return;
+    scopedBusy = true;
+    cancelQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/cancel"), {
+        method: "POST", credentials: "same-origin",
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "X-Nova-Owner-Action": "cancel-queued-csv-job"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      currentLeaseStatus = result.lease_status || "CANCELLED";
+      scopedStatus.textContent = "Queued job canceled. No automatic retry or delivery.";
+      updateJobButtons(currentJobStatus);
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Cancellation unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
+      updateJobButtons(currentJobStatus);
+    }
+  });
   if (statusButton) statusButton.addEventListener("click", async function () {
     try { await refreshJobStatus(); }
     catch (err) { scopedStatus.textContent = err.message; }
@@ -264,7 +409,11 @@
     if (!currentJobId) return;
     const response = await fetch(jobPath("/review"), {
       method: "POST", credentials: "same-origin",
-      headers: Object.assign({}, scopedAuthHeaders(), {"Content-Type": "application/json"}),
+      headers: Object.assign({}, scopedAuthHeaders(), {
+        "Content-Type": "application/json",
+        "X-Nova-Owner-Action": currentJobMode === "queued"
+          ? "review-completed-queued-csv" : "review-durable-csv"
+      }),
       body: JSON.stringify({approve: approve})
     });
     if (!response.ok) throw new Error(await safeError(response));
