@@ -107,6 +107,7 @@ def submit_queued_csv(
 
     # The reserved job is NOT visible to strict claimers until its input has
     # been privately stored, fingerprinted, and durably bound.
+    _authorized(authorize, organization_id, owner_user_id, engagement_id, task_id)
     receipt = persist_private_csv_input(
         organization_id=organization_id, owner_user_id=owner_user_id,
         job_id=job_id, raw=raw, store=store,
@@ -197,6 +198,8 @@ def process_one_queued_csv(
                 raise QueuedCSVBlocked("Private output write size mismatch")
             with session_factory() as db:
                 _runtime(db)
+                _authorized(authorize, claim.organization_id, claim.owner_user_id,
+                            row["engagement_id"], row["task_id"])
                 updated = db.execute(sa.update(csvjobs.jobs).where(
                     csvjobs.jobs.c.id == claim.job_id,
                     csvjobs.jobs.c.organization_id == claim.organization_id,
