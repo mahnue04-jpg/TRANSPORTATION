@@ -85,6 +85,7 @@ jobs:
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
           python -m pytest -q -rs tests/test_nova_operations_staging_health.py
+          python -m pytest -q -rs tests/test_nova_operations_pilot_server.py
           python -m pytest -q -rs \
             tests/test_nova_operations_csv_eligibility.py \
             tests/test_nova_operations_csv_http.py \
