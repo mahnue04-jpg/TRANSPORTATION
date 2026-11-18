@@ -83,3 +83,11 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 - Explicit cancellation invalidates queued/running lease claims; a running worker cannot then publish a new completion. Cancellation is not proof that an already-written private artifact has been deleted.
 - The recovery status is diagnostic only; no automatic cleanup, retry, release, customer notification, invoice, or delivery is implemented.
 - Latest recovery and owner UI tests are part of CI and require successful full-head verification before staging signoff.
+
+## Interrupted private-input restoration (development only)
+
+- A new owner-supervised `restore_unbound_queued_csv` path accepts an explicit reupload of the **original** CSV for the **same** reserved job; it rejects another owner, changed bytes, claimed jobs, completed jobs and already-bound inputs.
+- The private adapter writes the reuploaded input and reads it back to verify SHA-256 and size **before** binding its reference. That job remains unclaimable until the binding succeeds.
+- The gated `POST /operations/queued/jobs/{job_id}/restore-input` endpoint requires the same authenticated owner and saved-task eligibility checks, an explicit owner-action header, a bounded CSV and exact job identity. UI offers restore only after diagnosing `input_binding_incomplete`, with owner confirmation.
+- This is **not** automatic orphan cleanup. Because the adapter uses random object keys, a prior uncertain upload may have left an unknown private object. The response reports `orphan_cleanup_verified=false`; actual object provenance/retention cleanup requires an approved storage service with audit evidence.
+- Integration and UI tests are added to the consolidated CI; verify the latest code SHA before acceptance.
