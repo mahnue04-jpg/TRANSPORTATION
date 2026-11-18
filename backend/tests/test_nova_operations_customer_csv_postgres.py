@@ -316,3 +316,78 @@ def test_bound_private_input_survives_fresh_database_session(postgres, monkeypat
                 expected_sha256=claimed.input_sha256, store=store) == raw
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_synthetic_worker_reloads_private_input_after_engine_reconnect(postgres, monkeypatch):
+    """Disposable PG + fake private store; engine reconnect is not an OS restart."""
+    from io import BytesIO
+    import hashlib
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_private_input import (
+        persist_private_csv_input, load_private_csv_input,
+    )
+    from app.core.nova.work_revenue.operations_lease_worker import run_one
+    from app.core.nova.work_revenue.operations_csv_cleanup import clean_csv_text
+
+    original_engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(original_engine)
+    raw = b"Name\\nAda\\nAda\\n"
+    job_id = "synthetic-reconnect"
+    try:
+        receipt = persist_private_csv_input(
+            organization_id="synthetic-org", owner_user_id="synthetic-owner",
+            job_id=job_id, raw=raw, store=store)
+        with Session(original_engine) as db:
+            leases.enqueue(db, job_id=job_id, organization_id="synthetic-org",
+                           owner_user_id="synthetic-owner",
+                           input_sha256=receipt.sha256)
+            assert leases.bind_private_input(
+                db, job_id=job_id, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                input_sha256=receipt.sha256,
+                storage_ref=receipt.storage_ref, input_size=receipt.size)
+
+        # Close all pooled connections and recreate the engine to model a
+        # disconnected process using the same durable database and fake bucket.
+        original_engine.dispose()
+        fresh_engine = sa.create_engine(os.environ["NOVA_CSV_CI_DATABASE_URL"])
+        try:
+            output_refs = []
+            def deterministic_handler(claim):
+                with Session(fresh_engine) as db:
+                    ref, size = leases.read_bound_input_metadata(db, claimed=claim)
+                source = load_private_csv_input(
+                    organization_id=claim.organization_id,
+                    owner_user_id=claim.owner_user_id,
+                    job_id=claim.job_id, storage_ref=ref,
+                    expected_sha256=claim.input_sha256, store=store)
+                assert len(source) == size
+                cleaned = clean_csv_text(source.decode("utf-8-sig"))
+                output = cleaned.cleaned_csv.encode("utf-8")
+                saved = store.store(
+                    organization_id=claim.organization_id,
+                    application_id=claim.job_id,
+                    category="nova-csv-test-worker-output",
+                    filename="cleaned.csv", content_type="text/csv",
+                    stream=BytesIO(output))
+                assert saved[2] == len(output)
+                output_refs.append(saved[1])
+                return hashlib.sha256(output).hexdigest()
+
+            result = run_one(lambda: Session(fresh_engine),
+                             deterministic_handler)
+            assert result == {"state": "completed", "job_id": job_id}
+            assert len(output_refs) == 1
+            output, _kind = store.retrieve(storage_ref=output_refs[0])
+            assert output == b"Name\\nAda\\n"
+            with Session(fresh_engine) as db:
+                row = db.execute(sa.select(leases.lease_jobs).where(
+                    leases.lease_jobs.c.job_id == job_id)).mappings().one()
+                assert row["state"] == "COMPLETED"
+                assert row["output_sha256"] == hashlib.sha256(output).hexdigest()
+                assert leases.claim(db) is None
+        finally:
+            fresh_engine.dispose()
+    finally:
+        leases.lease_metadata.drop_all(original_engine)
