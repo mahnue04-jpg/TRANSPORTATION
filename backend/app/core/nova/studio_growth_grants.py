@@ -97,7 +97,7 @@ class OwnerGrantLedger:
             raise PermissionError("verified owner session mismatch")
         existing = self.db.execute(
             """SELECT grant_id, owner_user_id, project_id, asset_id, campaign_id,
-                      action, approved_at, expires_at, schema_version
+                      action, approved_at, expires_at, schema_version, revoked_at
                FROM studio_growth_owner_grants
                WHERE organization_id=? AND idempotency_key=?""",
             (grant.organization_id, grant.idempotency_key),
@@ -108,7 +108,11 @@ class OwnerGrantLedger:
             _stamp(grant.expires_at), grant.schema_version,
         )
         if existing is not None:
-            if tuple(existing) == expected:
+            # Never represent a revoked grant as a successful approval replay.
+            # A new authorization requires a separately reviewed grant lifecycle.
+            if tuple(existing[:-1]) == expected:
+                if existing[-1] is not None:
+                    raise PermissionError("revoked owner grant cannot be replayed")
                 return "duplicate"
             raise PermissionError("owner grant idempotency collision")
         self.db.execute(
