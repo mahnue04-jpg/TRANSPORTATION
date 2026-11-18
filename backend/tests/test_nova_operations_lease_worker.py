@@ -107,6 +107,7 @@ def test_handler_success_with_ambiguous_db_completion_requires_reconciliation(en
             leases.lease_jobs.c.job_id == "synthetic-worker-uncertain"
         )).mappings().one()
         assert row["state"] == "NEEDS_RECONCILIATION"
+        assert row["output_sha256"] == "b" * 64
         assert row["lease_token"] is None
         assert row["attempts"] == 1
         assert leases.claim(db) is None
