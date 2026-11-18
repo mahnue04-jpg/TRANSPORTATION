@@ -196,6 +196,12 @@ def process_one_queued_csv(
                     or not isinstance(saved[1], str) or not saved[1]
                     or saved[2] != len(output)):
                 raise QueuedCSVBlocked("Private output write size mismatch")
+            reread, reread_type = store.retrieve(storage_ref=saved[1])
+            if (not isinstance(reread, bytes) or reread_type != "text/csv"
+                    or len(reread) != len(output)
+                    or not hmac.compare_digest(
+                        hashlib.sha256(reread).hexdigest(), digest)):
+                raise QueuedCSVBlocked("Private output read-back integrity failed")
             with session_factory() as db:
                 _runtime(db)
                 _authorized(authorize, claim.organization_id, claim.owner_user_id,
