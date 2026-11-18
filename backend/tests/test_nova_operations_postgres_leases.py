@@ -284,3 +284,26 @@ def test_unbound_or_invalid_input_reference_is_blocked(database):
         assert claimed is not None
         with pytest.raises(leases.LeaseBlocked, match="not bound"):
             leases.read_bound_input_metadata(db, claimed=claimed)
+
+
+def test_strict_worker_claim_skips_unbound_input(database):
+    seed(database, "a-unbound")
+    seed(database, "b-bound")
+    with Session(database) as db:
+        assert leases.bind_private_input(
+            db, job_id="b-bound", organization_id="org-a",
+            owner_user_id="owner-a", input_sha256="a" * 64,
+            storage_ref="org-a/b-bound/nova-csv-input-owner-a/source.csv",
+            input_size=11)
+        claimed = leases.claim(db, require_bound_input=True)
+        assert claimed and claimed.job_id == "b-bound"
+        assert leases.claim(db, require_bound_input=True) is None
+        # Legacy/development-only caller can still see an unbound job.
+        legacy = leases.claim(db, require_bound_input=False)
+        assert legacy and legacy.job_id == "a-unbound"
+
+
+def test_strict_worker_claim_bad_flag_fails_closed(database):
+    with Session(database) as db:
+        with pytest.raises(leases.LeaseBlocked, match="binding requirement"):
+            leases.claim(db, require_bound_input="true")
