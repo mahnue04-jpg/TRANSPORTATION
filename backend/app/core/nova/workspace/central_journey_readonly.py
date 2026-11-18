@@ -80,8 +80,15 @@ def list_central_journeys(
     # acceptance on STAGING/TEST only; production cannot opt in accidentally.
     if os.getenv("NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED", "").lower() != "true":
         return CentralJourneyReadiness()
-    environment = (os.getenv("AMICOR_ENVIRONMENT") or os.getenv("APP_ENV") or "").lower()
-    if environment not in {"staging", "test"}:
+    configured_environments = [
+        value.strip().lower() for value in (
+            os.getenv("AMICOR_ENVIRONMENT"), os.getenv("APP_ENV"),
+        ) if value is not None
+    ]
+    # Any conflicting non-staging/test environment indicator blocks preview.
+    if not configured_environments or any(
+        value not in {"staging", "test"} for value in configured_environments
+    ):
         raise HTTPException(status_code=503, detail="Journey read model unavailable")
     try:
         if not inspect(db.get_bind()).has_table(JOURNEY_READ_ROWS.name):
