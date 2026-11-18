@@ -126,8 +126,15 @@ def test_mounted_workspace_route_is_empty_on_opt_in(monkeypatch):
     app.dependency_overrides[require_nova_access] = lambda: object()
     guard = inspect.signature(module.list_central_journeys).parameters["_role_guard"].default.dependency
     app.dependency_overrides[guard] = lambda: object()
+    token = create_access_token({
+        "sub": "synthetic-owner", "role": "admin",
+        "organization_id": "org-A", "auth_version": 0,
+    })
     with TestClient(app) as client:
-        response = client.get("/api/nova/workspace/central/journeys")
+        response = client.get(
+            "/api/nova/workspace/central/journeys",
+            headers={"Authorization": "Bearer " + token},
+        )
     assert response.status_code == 200
     assert response.json()["integration_status"] == "not_connected"
     assert response.json()["journeys"] == []
