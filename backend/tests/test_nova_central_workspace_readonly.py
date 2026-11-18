@@ -123,3 +123,27 @@ def test_mounted_workspace_route_is_empty_on_opt_in(monkeypatch):
     assert response.status_code == 200
     assert response.json()["integration_status"] == "not_connected"
     assert response.json()["journeys"] == []
+
+
+
+def test_real_auth_dependency_rejects_anonymous_request(monkeypatch):
+    """No auth overrides: exercise the actual JWT-aware dependency chain."""
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    app = FastAPI()
+    app.include_router(module.router)
+    with TestClient(app) as client:
+        response = client.get("/central/journeys")
+    assert response.status_code == 401
+
+
+def test_real_auth_dependency_rejects_invalid_bearer(monkeypatch):
+    """Malformed credentials must not reach a read-only data response."""
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    app = FastAPI()
+    app.include_router(module.router)
+    with TestClient(app) as client:
+        response = client.get(
+            "/central/journeys",
+            headers={"Authorization": "Bearer definitely-not-a-valid-jwt"},
+        )
+    assert response.status_code == 401
