@@ -32,7 +32,7 @@ class SyntheticDiskStore:
         target = self.directory / "synthetic-input.csv"
         raw = stream.read()
         target.write_bytes(raw)
-        return "fake-private", "synthetic-input.csv", len(raw)
+        return "fake-private", f"{organization_id}/{application_id}/{category}/synthetic-input.csv", len(raw)
 
 
 @pytest.fixture
@@ -81,9 +81,9 @@ from app.core.nova.work_revenue.operations_lease_worker import run_one
 
 class SyntheticDiskStore:
     def retrieve(self, *, storage_ref):
-        if storage_ref != "synthetic-input.csv":
+        if storage_ref != "synthetic-org/subprocess-job/nova-csv-input-synthetic-owner/synthetic-input.csv":
             raise ValueError("unknown synthetic fixture")
-        return (Path(os.environ["SYNTHETIC_CSV_TEST_DIR"]) / storage_ref).read_bytes(), "text/csv"
+        return (Path(os.environ["SYNTHETIC_CSV_TEST_DIR"]) / "synthetic-input.csv").read_bytes(), "text/csv"
 
 engine = sa.create_engine(os.environ["NOVA_CSV_CI_DATABASE_URL"])
 def handler(claim):
