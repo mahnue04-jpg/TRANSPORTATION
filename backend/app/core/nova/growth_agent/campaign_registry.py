@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import re
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -19,6 +19,11 @@ TABLE = "nova_ga_campaign_asset_reviews"
 
 
 class CampaignRegistryDenied(PermissionError):
+    pass
+
+
+class CampaignRegistryUnavailable(CampaignRegistryDenied):
+    """The optional review schema has not been provisioned."""
     pass
 
 
@@ -41,6 +46,10 @@ class CampaignReviewRegistry:
 
     def __init__(self, db):
         self.db = db
+        # The feature flag alone never provisions the optional review schema.
+        # Report a controlled unavailable outcome rather than an unhandled SQL error.
+        if not inspect(db.get_bind()).has_table(TABLE):
+            raise CampaignRegistryUnavailable("campaign review storage unavailable")
 
     def _row(self, org: str, campaign_id: str):
         return self.db.execute(text(
