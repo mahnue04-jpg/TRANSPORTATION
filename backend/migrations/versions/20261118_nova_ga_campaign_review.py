@@ -1,12 +1,10 @@
-"""Optional Growth campaign review table. Draft; no automatic activation.
+"""Additive Growth campaign review table; draft, not authorized for deployment.
 
-Revision is additive and returns without DDL unless a future owner-approved
-staging migration run explicitly sets NOVA_GA_CAMPAIGN_SCHEMA_APPROVED=true.
-Production is always locked. Existing Growth/Studio tables remain untouched.
+Alembic must not stamp this revision without applying its schema. Deploying or
+running migrations against an existing environment requires a separate owner
+approval and backup review. No runtime route creates or modifies this schema.
 """
 from __future__ import annotations
-
-import os
 
 from alembic import op
 import sqlalchemy as sa
@@ -17,19 +15,7 @@ branch_labels = None
 depends_on = None
 
 
-def _approved() -> bool:
-    if any(os.getenv(name, "").strip().lower() in {"prod", "production"}
-           for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")):
-        return False
-    return (
-        os.getenv("NOVA_GA_CAMPAIGN_SCHEMA_APPROVED") == "true"
-        and os.getenv("NOVA_GA_CAMPAIGN_SCHEMA_STAGING_ONLY") == "true"
-    )
-
-
 def upgrade() -> None:
-    if not _approved():
-        return
     bind = op.get_bind()
     if "nova_ga_campaign_asset_reviews" in sa.inspect(bind).get_table_names():
         return
