@@ -706,3 +706,50 @@ def cancel_supervised_queued_csv_job(
         raise HTTPException(409, "Job cannot be canceled in its current state")
     return {"job_id": job_id, "lease_status": "CANCELLED",
             "delivered": False, "safe_to_auto_retry": False}
+
+
+@router.post("/queued/jobs/{job_id}/restore-input")
+async def restore_supervised_queued_csv_input(
+    job_id: str,
+    request: Request,
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit owner reupload for the same unbound, never-claimed job.
+
+    A past uncertain private upload may remain orphaned. This route never
+    guesses its reference, lists objects or deletes anything.
+    """
+    _queued_csv_gate(db)
+    if owner_action != "restore-unbound-csv-input":
+        raise HTTPException(403, "Explicit owner input recovery required")
+    if (not isinstance(filename, str) or len(filename) > 180
+            or not filename.lower().endswith(".csv")
+            or any(ord(c) < 32 or ord(c) == 127 or c in "/\\"
+                   for c in filename)):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"],
+        task_id=row["task_id"])
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB limit")
+        content.extend(chunk)
+    factory = _queued_factory(db)
+    try:
+        return _queued_csv.restore_unbound_queued_csv(
+            factory, organization_id=org, owner_user_id=owner_id,
+            job_id=job_id, raw=bytes(content), store=durable_csv._store(),
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner))
+    except Exception as exc:
+        _queued_error(exc)
