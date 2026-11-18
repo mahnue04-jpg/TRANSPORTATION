@@ -465,8 +465,10 @@ def test_queued_csv_revoked_before_upload_fails_closed(postgres, monkeypatch):
         with Session(engine) as db:
             row = db.execute(sa.select(csvjobs.jobs.c.status)).scalar_one()
             assert row == "PROCESSING"
-            assert db.execute(sa.select(sa.func.count()).select_from(
-                leases.lease_jobs)).scalar_one() == 0
+            saved_lease = db.execute(sa.select(leases.lease_jobs)).mappings().one()
+            assert saved_lease["state"] == "QUEUED"
+            assert saved_lease["input_ref"] is None
+            assert leases.claim(db, require_bound_input=True) is None
     finally:
         leases.lease_metadata.drop_all(engine)
 
@@ -835,5 +837,73 @@ def test_supervised_http_routes_default_off_and_unknown_job_404(postgres, monkey
                 json={"approve": True},
                 headers={"X-Nova-Owner-Action": "review-completed-queued-csv"}
             ).status_code == 404
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_reservation_fences_legacy_routes_before_private_input_bound(
+    postgres, monkeypatch,
+):
+    """A reserved but unbound job cannot use the legacy review/download path."""
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
+        submit_queued_csv, QueuedCSVBlocked,
+    )
+    from app.db.session import get_db
+
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    owner = SimpleNamespace(user_id="synthetic-owner",
+                            organization_id="synthetic-org")
+    engagement = {
+        "engagement_id": "synthetic-eng",
+        "organization_id": "synthetic-org",
+        "owner_user_id": "synthetic-owner",
+        "status": "ACTIVE", "blockers": None,
+        "tasks": [{"task_id": "synthetic-csv-task", "title": "CSV cleanup",
+                   "status": "READY", "classification": "NOVA",
+                   "responsible_party": "NOVA", "review_required": True,
+                   "blocked_reason": None, "required_owner_input": None,
+                   "depends_on_task_id": None}],
+    }
+    monkeypatch.setattr(api.service, "get_engagement",
+                        lambda *args, **kwargs: engagement)
+    approvals = iter([True, False])
+    factory = lambda: Session(engine)
+    try:
+        with pytest.raises(QueuedCSVBlocked, match="not authorized"):
+            submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                request_key="reserved-unbound", raw=b"Name\nAda\n",
+                store=store, authorize=lambda *_: next(approvals))
+        with factory() as db:
+            pending = db.execute(sa.select(csvjobs.jobs)).mappings().one()
+            job_id = pending["id"]
+            lease = db.execute(sa.select(leases.lease_jobs)).mappings().one()
+            assert lease["job_id"] == job_id and lease["input_ref"] is None
+
+        app = FastAPI()
+        app.include_router(api.router, prefix="/api/nova/work")
+        app.dependency_overrides[require_nova_access] = lambda: owner
+        app.dependency_overrides[api.require_work_revenue_owner] = lambda: owner
+        def get_test_db():
+            with factory() as db:
+                yield db
+        app.dependency_overrides[get_db] = get_test_db
+        base = "/api/nova/work/operations/durable/jobs/" + job_id
+        with TestClient(app) as client:
+            assert client.get(base).status_code == 409
+            assert client.get(base + "/download").status_code == 409
+            assert client.post(base + "/review",
+                               json={"approve": True}).status_code == 409
+            assert client.post(base + "/recover").status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
