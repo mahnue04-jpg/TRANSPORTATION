@@ -432,7 +432,7 @@ def test_queued_csv_full_owner_review_flow(postgres, monkeypatch):
         with pytest.raises(QueuedCSVBlocked):
             review_processed_csv(
                 factory, organization_id="synthetic-org", owner_user_id="someone-else",
-                job_id=created["job_id"], approve=True, authorize=approve)
+                job_id=created["job_id"], approve=True, authorize=approve, store=store)
         reviewed = review_processed_csv(
             factory, organization_id="synthetic-org",
             owner_user_id="synthetic-owner", job_id=created["job_id"],
