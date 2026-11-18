@@ -167,9 +167,8 @@ def test_two_disposable_org_accounts_do_not_share_identity(sandbox):
         "organization_id": "org-A",
     })
     result = read(app, second_token)
-    assert result.status_code == 200
-    assert result.json()["journeys"] == []
-    # The JWT organization claim is never used to resolve the persisted user.
+    assert result.status_code == 403
+    # Mismatched signed tenant scope is denied before returning readiness.
     with factory() as db:
         first = db.query(User).filter(User.id == "synthetic-owner-1").one()
         second = db.query(User).filter(User.id == "synthetic-owner-2").one()
@@ -184,3 +183,12 @@ def test_known_owner_cannot_impersonate_another_account_with_invalid_signature(s
     assert len(parts) == 3
     damaged = ".".join(parts[:2] + ["invalidsignature"])
     assert read(app, damaged).status_code == 401
+
+
+def test_old_token_denied_after_account_organization_transfer(sandbox):
+    app, factory = sandbox
+    old_token = token(org="org-A")
+    assert read(app, old_token).status_code == 200
+    modify(factory, organization_id="org-B")
+    assert read(app, old_token).status_code == 403
+    assert read(app, token(org="org-B")).status_code == 200
