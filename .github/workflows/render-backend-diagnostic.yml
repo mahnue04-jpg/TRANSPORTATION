@@ -146,6 +146,7 @@ jobs:
           python -m pytest -v -rs tests/test_nova_operations_lease_reconciliation.py
           python -m pytest -v -rs tests/test_nova_operations_private_input.py
           python -m pytest -v -rs tests/test_nova_operations_lease_migration.py
+          python -m pytest -v -rs tests/test_nova_operations_worker_subprocess.py
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
