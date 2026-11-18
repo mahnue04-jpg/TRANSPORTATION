@@ -2,7 +2,7 @@ name: Nova synthetic handoff acceptance (isolated)
 
 on:
   pull_request:
-    branches: [feature/nova-agent-event-contract-542]
+    branches: [feature/nova-agent-event-contract-542, feature/nova-synthetic-handoff-542]
     paths:
       - "backend/tests/synthetic_nova_handoff_542.py"
       - "backend/tests/test_synthetic_nova_handoff_542.py"
