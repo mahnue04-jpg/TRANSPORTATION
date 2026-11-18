@@ -80,8 +80,8 @@ def test_route_requires_actual_auth_dependencies():
     assert "get_current_user_context" in dependency_names
     assert "_dependency" in dependency_names
     guard = inspect.signature(module.list_central_journeys).parameters["_role_guard"].default.dependency
-    assert ROLE_ADMIN in [v.cell_contents for v in (guard.__closure__ or ())
-                          if isinstance(v.cell_contents, set)]
+    assert any(ROLE_ADMIN in v.cell_contents for v in (guard.__closure__ or ())
+               if isinstance(v.cell_contents, set))
 
 
 def test_readonly_only_get_route():
