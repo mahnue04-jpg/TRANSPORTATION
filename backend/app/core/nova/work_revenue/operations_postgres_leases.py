@@ -29,7 +29,7 @@ lease_jobs = sa.Table(
     sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("output_sha256", sa.String(64)),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("state IN ('QUEUED','RUNNING','COMPLETED','FAILED','CANCELLED')",
+    sa.CheckConstraint("state IN ('QUEUED','RUNNING','COMPLETED','FAILED','CANCELLED','NEEDS_RECONCILIATION')",
                        name="ck_nova_operations_lease_state"),
     sa.CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 10",
                        name="ck_nova_operations_lease_attempts"),
@@ -262,6 +262,35 @@ def cancel(db: Session, *, job_id: str, organization_id: str,
             lease_jobs.c.state.in_(("QUEUED", "RUNNING")),
         ).values(state="CANCELLED", lease_token=None, lease_until=None,
                  updated_at=now))
+        db.commit()
+        return changed.rowcount == 1
+    except Exception:
+        db.rollback()
+        raise
+
+
+def hold_for_reconciliation(
+    db: Session, *, claimed: LeaseClaim, now: datetime | None = None,
+) -> bool:
+    """Persist an explicit no-reclaim hold when a completion outcome is uncertain.
+
+    Returns False if another worker or owner already changed the job. Never
+    changes COMPLETED or CANCELLED states. The hold requires separately verified
+    artifact and authorization evidence before any future release decision.
+    """
+    _guard(db)
+    now = now or _now()
+    try:
+        changed = db.execute(sa.update(lease_jobs).where(
+            lease_jobs.c.job_id == claimed.job_id,
+            lease_jobs.c.organization_id == claimed.organization_id,
+            lease_jobs.c.owner_user_id == claimed.owner_user_id,
+            lease_jobs.c.state == "RUNNING",
+            lease_jobs.c.lease_token == claimed.token,
+        ).values(
+            state="NEEDS_RECONCILIATION", lease_token=None,
+            lease_until=None, updated_at=now,
+        ))
         db.commit()
         return changed.rowcount == 1
     except Exception:
