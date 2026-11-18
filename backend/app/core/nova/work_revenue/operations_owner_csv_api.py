@@ -405,3 +405,136 @@ def eligible_csv_tasks(
             break
     return {"tasks": eligible, "count": len(eligible), "owner_only": True,
             "execution_authorized": False, "handoff_created": False}
+
+
+# Supervised queued CSV routes. These are a new, separately gated path and do
+# not change the legacy synchronous owner CSV API. No hosted worker is started.
+from sqlalchemy.orm import sessionmaker as _sessionmaker
+from . import operations_postgres_leases as _ops_leases
+from . import operations_queued_csv_pipeline as _queued_csv
+from .operations_owner_task_authorizer import owner_task_authorizer as _owner_task_authorizer
+
+
+def _queued_csv_gate(db: Session) -> None:
+    if os.getenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "").lower() != "true":
+        raise HTTPException(503, "Supervised queued CSV workflow disabled")
+    try:
+        durable_csv.require_runtime(db)
+        _ops_leases._guard(db)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(503, "Supervised queue unavailable") from exc
+
+
+def _queued_factory(db: Session):
+    # SessionLocal would accidentally use the application's default database
+    # in isolated tests; keep the exact injected, guarded PostgreSQL bind.
+    return _sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+
+
+def _queued_error(exc: Exception) -> None:
+    if isinstance(exc, durable_csv.CustomerCSVBlocked):
+        _durable_error(exc)
+    if isinstance(exc, (_queued_csv.QueuedCSVBlocked,
+                        _ops_leases.LeaseBlocked)):
+        raise HTTPException(409, "Queued Operations request blocked") from exc
+    raise exc
+
+
+@router.post("/queued/engagements/{engagement_id}/tasks/{task_id}/jobs", status_code=202)
+async def create_supervised_queued_csv_job(
+    engagement_id: str,
+    task_id: str,
+    request: Request,
+    request_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    filename: str | None = Header(default=None, alias="X-Nova-File-Name"),
+    scope_confirmed: str | None = Header(default=None, alias="X-Nova-Scope-Confirmed"),
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if (owner_action != "queue-csv-for-owner-review"
+            or scope_confirmed != "owner-confirmed-client-authorization"):
+        raise HTTPException(403, "Explicit owner action and processing authority required")
+    if (not isinstance(filename, str) or len(filename) > 180
+            or not filename.lower().endswith(".csv")
+            or any(ord(c) < 32 or ord(c) == 127 or c in "/\\"
+                   for c in filename)):
+        raise HTTPException(400, "Safe CSV filename required")
+    if (request.headers.get("content-type") or "").split(";")[0].strip().lower() not in CSV_MIME_TYPES:
+        raise HTTPException(415, "Only CSV supported")
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=engagement_id, task_id=task_id)
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > LIMIT_BYTES:
+            raise HTTPException(413, "CSV exceeds 1 MB limit")
+        content.extend(chunk)
+    factory = _queued_factory(db)
+    authorize = _owner_task_authorizer(factory, authenticated_owner=owner)
+    try:
+        return _queued_csv.submit_queued_csv(
+            factory,
+            organization_id=str(owner.organization_id),
+            owner_user_id=str(owner.user_id),
+            engagement_id=engagement_id, task_id=task_id,
+            request_key=request_key or "", raw=bytes(content),
+            store=durable_csv._store(), authorize=authorize)
+    except Exception as exc:
+        _queued_error(exc)
+
+
+@router.post("/queued/jobs/{job_id}/process")
+def process_supervised_queued_csv_job(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if owner_action != "process-queued-csv-for-owner-review":
+        raise HTTPException(403, "Explicit supervised processing action required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    row = durable_csv._owned(db, job_id, org, owner_id)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    factory = _queued_factory(db)
+    try:
+        result = _queued_csv.process_one_queued_csv(
+            factory, store=durable_csv._store(),
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner),
+            job_id=job_id, organization_id=org, owner_user_id=owner_id)
+        return {**result, "delivered": False}
+    except Exception as exc:
+        _queued_error(exc)
+
+
+@router.post("/queued/jobs/{job_id}/review")
+async def review_supervised_queued_csv_job(
+    job_id: str,
+    request: Request,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    _queued_csv_gate(db)
+    if owner_action != "review-completed-queued-csv":
+        raise HTTPException(403, "Explicit owner review action required")
+    payload = await request.json()
+    if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
+        raise HTTPException(400, "Boolean approve required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    row = durable_csv._owned(db, job_id, org, owner_id)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    factory = _queued_factory(db)
+    try:
+        return _queued_csv.review_processed_csv(
+            factory, organization_id=org, owner_user_id=owner_id, job_id=job_id,
+            approve=payload["approve"],
+            authorize=_owner_task_authorizer(factory, authenticated_owner=owner),
+            store=durable_csv._store())
+    except Exception as exc:
+        _queued_error(exc)
