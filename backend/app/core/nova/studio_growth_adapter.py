@@ -201,3 +201,48 @@ def read_studio_asset_for_growth(
         occurred_at=occurred_at,
         enabled=True,
     )
+
+
+def preview_growth_campaign_from_studio(
+    event: AgentEvent,
+    growth_profile: Mapping[str, object],
+    *,
+    enabled: bool | None = None,
+) -> dict[str, object]:
+    """Read-only synthetic Growth profile compatibility preview.
+
+    Accepts the dict shape returned by GrowthAgentService.get_profile(org_id).
+    Does not POST a lead, send a message, change a profile, publish an asset,
+    or store a campaign. There is no current Growth campaign intake endpoint.
+    A real integration requires a separately reviewed server-side API.
+    """
+    if enabled is None:
+        enabled = os.getenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED") == "true"
+    if enabled is not True or os.getenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED") == "true":
+        raise PermissionError("Growth campaign preview disabled")
+    if (not isinstance(event, AgentEvent) or event.synthetic is not True
+            or event.event_type != EventType.ASSET_READY
+            or event.source_agent != Agent.CREATIVE_STUDIO
+            or event.target_agent != Agent.GROWTH):
+        raise PermissionError("approved fictional Studio handoff required")
+    if not isinstance(growth_profile, Mapping):
+        raise PermissionError("trusted Growth profile snapshot required")
+    if (growth_profile.get("configured") is not True
+            or growth_profile.get("organization_id") != event.organization_id
+            or growth_profile.get("is_synthetic_demo") is not True
+            or growth_profile.get("activated") is not False
+            or growth_profile.get("agent_disabled") is not True):
+        raise PermissionError("only inactive, disabled, fictional Growth profile allowed")
+    # Crucially exclude all Growth profile contact fields, customer records,
+    # provider credentials, website URLs, and raw Studio content.
+    return {
+        "mode": "synthetic_read_only_preview",
+        "organization_id": event.organization_id,
+        "campaign_id": event.correlation_id,
+        "asset_reference": event.payload_reference,
+        "target_agent": Agent.GROWTH.value,
+        "growth_campaign_intake_connected": False,
+        "lead_created": False,
+        "publishing_enabled": False,
+        "outbound_messages_enabled": False,
+    }
