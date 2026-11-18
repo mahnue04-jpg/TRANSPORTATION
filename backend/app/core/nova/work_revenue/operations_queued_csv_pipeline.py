@@ -23,7 +23,7 @@ from .operations_csv_cleanup import clean_csv_text
 from .operations_private_input import (
     PrivateInputBlocked, persist_private_csv_input, load_private_csv_input,
 )
-from .operations_lease_worker import run_one
+from .operations_lease_worker import OutputUncertain, run_one
 
 Authorization = Callable[[str, str, str, str], bool]
 
@@ -182,35 +182,43 @@ def process_one_queued_csv(
         digest = hashlib.sha256(output).hexdigest()
         # Deterministic object identity is required of the injected store for
         # retry safety. No automatic delete on ambiguous DB commit.
-        saved = store.store(
-            organization_id=claim.organization_id,
-            application_id=claim.job_id, category="nova-csv-review",
-            filename="cleaned.csv", content_type="text/csv",
-            stream=BytesIO(output),
-        )
-        if saved[2] != len(output):
-            raise QueuedCSVBlocked("Private output write size mismatch")
-        with session_factory() as db:
-            _runtime(db)
-            changed = db.execute(sa.update(csvjobs.jobs).where(
-                csvjobs.jobs.c.id == claim.job_id,
-                csvjobs.jobs.c.organization_id == claim.organization_id,
-                csvjobs.jobs.c.owner_user_id == claim.owner_user_id,
-                csvjobs.jobs.c.status == "PROCESSING",
-                csvjobs.jobs.c.input_sha256 == claim.input_sha256,
-                # Verify ownership of current lease before publishing review.
-                sa.exists(sa.select(1).select_from(leases.lease_jobs).where(
-                    leases.lease_jobs.c.job_id == claim.job_id,
-                    leases.lease_jobs.c.state == "RUNNING",
-                    leases.lease_jobs.c.lease_token == claim.token,
-                    leases.lease_jobs.c.lease_until > leases._now(),
-                )),
-            ).values(status="AWAITING_REVIEW", output_ref=saved[1],
-                     output_sha256=digest, updated_at=csvjobs._utc()))
-            if changed.rowcount != 1:
-                db.rollback()
-                raise QueuedCSVBlocked("Job lease changed before private review finalize")
-            db.commit()
+        # From this point onward an object may have been written, even when
+        # the storage call fails. Never automatically retry ambiguous output.
+        try:
+            saved = store.store(
+                organization_id=claim.organization_id,
+                application_id=claim.job_id, category="nova-csv-review",
+                filename="cleaned.csv", content_type="text/csv",
+                stream=BytesIO(output),
+            )
+            if (not isinstance(saved, (tuple, list)) or len(saved) < 3
+                    or not isinstance(saved[1], str) or not saved[1]
+                    or saved[2] != len(output)):
+                raise QueuedCSVBlocked("Private output write size mismatch")
+            with session_factory() as db:
+                _runtime(db)
+                updated = db.execute(sa.update(csvjobs.jobs).where(
+                    csvjobs.jobs.c.id == claim.job_id,
+                    csvjobs.jobs.c.organization_id == claim.organization_id,
+                    csvjobs.jobs.c.owner_user_id == claim.owner_user_id,
+                    csvjobs.jobs.c.status == "PROCESSING",
+                    csvjobs.jobs.c.input_sha256 == claim.input_sha256,
+                    sa.exists().where(
+                        leases.lease_jobs.c.job_id == claim.job_id,
+                        leases.lease_jobs.c.organization_id == claim.organization_id,
+                        leases.lease_jobs.c.owner_user_id == claim.owner_user_id,
+                        leases.lease_jobs.c.state == "RUNNING",
+                        leases.lease_jobs.c.lease_token == claim.token,
+                        leases.lease_jobs.c.lease_until > leases._now(),
+                    ),
+                ).values(status="AWAITING_REVIEW", output_ref=saved[1],
+                         output_sha256=digest, updated_at=csvjobs._utc()))
+                if updated.rowcount != 1:
+                    db.rollback()
+                    raise QueuedCSVBlocked("Lease changed before review finalize")
+                db.commit()
+        except Exception as exc:
+            raise OutputUncertain(digest) from exc
         return digest
 
     return run_one(session_factory, handler, require_bound_input=True,
