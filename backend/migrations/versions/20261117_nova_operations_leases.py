@@ -94,6 +94,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Do not silently drop records/forensics or release any held jobs.
-    # Rollback requires a separately approved retention plan.
-    pass
+    # An Alembic no-op downgrade would falsely lower alembic_version while
+    # retaining the lease table and its forensic records. Explicitly refuse
+    # until a separately approved retention-safe rollback is implemented.
+    raise RuntimeError("Operations lease rollback requires separate owner approval")
