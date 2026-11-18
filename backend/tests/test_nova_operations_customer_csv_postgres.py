@@ -776,7 +776,7 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert approved.json()["delivered"] is False
             downloaded = client.get(prefix + "/jobs/" + job_id + "/download")
             assert downloaded.status_code == 200
-            assert downloaded.content == b"Name\\nAda\\n".replace(b"\\n", b"\n")
+            assert downloaded.content == b"Name\nAda\n"
             assert downloaded.headers["X-Nova-Delivery-Status"] == "not-delivered"
             assert store.put_count == 2
             # Authorization revocation blocks even an already-completed job.
