@@ -184,7 +184,8 @@ def test_authenticated_owner_task_callback_rechecks_and_denies_revocation(monkey
         if not approvals["allowed"]:
             raise ValueError("revoked")
 
-    monkeypatch.setattr(auth, "_check_saved_csv_assignment", gate)
+    from app.core.nova.work_revenue import operations_owner_csv_api as owner_csv_api
+    monkeypatch.setattr(owner_csv_api, "_check_saved_csv_assignment", gate)
     callback = auth.owner_task_authorizer(
         lambda: nullcontext(object()), authenticated_owner=owner)
     assert callback("org-a", "owner-a", "eng-a", "task-a") is True
