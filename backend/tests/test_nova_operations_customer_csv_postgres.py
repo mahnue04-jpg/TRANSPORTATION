@@ -907,3 +907,65 @@ def test_queued_reservation_fences_legacy_routes_before_private_input_bound(
             assert client.post(base + "/recover").status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_queued_reservation_rolls_back_csv_if_lease_insert_conflicts(postgres, monkeypatch):
+    """One PostgreSQL transaction must reserve both records or neither."""
+    from datetime import datetime, timezone
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue import operations_queued_csv_pipeline as pipeline
+
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    collision_id = "reserved-job-collision"
+    monkeypatch.setattr(pipeline.secrets, "token_hex", lambda _: collision_id)
+    factory = lambda: Session(engine)
+    try:
+        with factory() as db:
+            now = datetime.now(timezone.utc)
+            db.execute(sa.insert(leases.lease_jobs).values(
+                job_id=collision_id, organization_id="other-org",
+                owner_user_id="other-owner", input_sha256="a" * 64,
+                state="QUEUED", attempts=0, max_attempts=3,
+                available_at=now, updated_at=now,
+            ))
+            db.commit()
+        with pytest.raises(pipeline.QueuedCSVBlocked, match="Request collision"):
+            pipeline.submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner",
+                engagement_id="synthetic-eng", task_id="synthetic-csv-task",
+                request_key="failed-atomic-reservation",
+                raw=b"Name\nAda\n", store=store, authorize=lambda *_: True)
+        with factory() as db:
+            assert db.execute(sa.select(sa.func.count()).select_from(
+                csvjobs.jobs)).scalar_one() == 0
+            assert db.execute(sa.select(sa.func.count()).select_from(
+                leases.lease_jobs)).scalar_one() == 1
+        assert store.put_count == 0
+    finally:
+        leases.lease_metadata.drop_all(engine)
+
+
+def test_existing_legacy_csv_remains_eligible_with_new_lease_schema(postgres):
+    """New queued-mode routing must not disrupt existing synchronous jobs."""
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_owner_csv_api import (
+        _reject_queued_job_in_legacy_path,
+    )
+    engine, _store = postgres
+    leases.lease_metadata.create_all(engine)
+    try:
+        legacy = _submit(engine, "old-durable-still-works")
+        owner = SimpleNamespace(organization_id="synthetic-org",
+                                user_id="synthetic-owner")
+        with Session(engine) as db:
+            assert _reject_queued_job_in_legacy_path(
+                db, job_id=legacy["job_id"], owner=owner) is None
+            assert csvjobs.job_status(
+                db, org="synthetic-org", owner="synthetic-owner",
+                job_id=legacy["job_id"])["status"] == "AWAITING_REVIEW"
+    finally:
+        leases.lease_metadata.drop_all(engine)
