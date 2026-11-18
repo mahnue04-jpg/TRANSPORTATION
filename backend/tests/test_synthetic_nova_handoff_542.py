@@ -1,6 +1,5 @@
 """Synthetic-only Nova handoff acceptance tests; no services or credentials."""
 from datetime import datetime, timedelta, timezone
-from dataclasses import replace
 
 import synthetic_nova_handoff_542 as h
 
@@ -9,7 +8,7 @@ NOW = datetime(2026, 11, 17, 20, 0, tzinfo=timezone.utc)
 
 def setup():
     flow = h.SyntheticHandoff("org-A", NOW)
-    flow.register_payload("synthetic:lead-1")
+    flow.register_payload("synthetic:lead-1", "lead-1")
     flow.stage_consent(h.Consent("consent-1", "org-A", "lead-1", NOW + timedelta(hours=1)))
     owner = h.Principal("owner-1", "org-A", "owner")
     flow.stage_approval(h.Approval("approval-1", "org-A", "lead-1",
@@ -152,3 +151,23 @@ def test_no_dispatch_apis_on_harness():
     assert not hasattr(flow, "send")
     assert not hasattr(flow, "execute")
     assert not hasattr(flow, "deploy")
+
+
+def test_payload_reference_cannot_access_another_subject():
+    flow, owner = setup()
+    flow.register_payload("synthetic:other", "other-lead")
+    assert_denied(lambda: flow.handle(make_event(0, payload_reference="synthetic:other"), principal(0, owner)))
+
+
+def test_reused_event_id_with_different_payload_is_rejected():
+    flow, owner = setup()
+    flow.handle(make_event(0), principal(0, owner))
+    assert_denied(lambda: flow.handle(make_event(1, event_id="evt-0"), principal(1, owner)))
+
+
+def test_duplicate_event_does_not_reapply_after_journey_progresses():
+    flow, owner = setup()
+    flow.handle(make_event(0), principal(0, owner))
+    flow.handle(make_event(1), principal(1, owner))
+    assert flow.handle(make_event(0), principal(0, owner)) == "duplicate"
+    assert flow.journey("journey-1", owner) == ("qualified", "pending_approval")
