@@ -68,6 +68,11 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
         problems.append("public_schema_create_allowed")
     if observed.get("can_create_temp_table") is not False:
         problems.append("temporary_table_create_allowed")
+    memberships = observed.get("role_memberships")
+    if not isinstance(memberships, list):
+        problems.append("unknown_role_memberships")
+    elif memberships:
+        problems.append("unexpected_role_memberships")
     other_tables = observed.get("other_tables")
     if not isinstance(other_tables, dict):
         problems.append("unknown_unrelated_table_privileges")
@@ -124,6 +129,19 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
             can_create_temp_table = connection.execute(text(
                 "SELECT has_database_privilege(current_user, current_database(), 'TEMP')"
             )).scalar_one()
+            # Catch direct and transitive role memberships; inherited grants,
+            # including grants available through SET ROLE, require explicit review.
+            # This conservative initial boundary rejects *any* membership.
+            memberships = connection.execute(text(
+                "WITH RECURSIVE member_roles(roleid) AS ("
+                " SELECT roleid FROM pg_auth_members "
+                " WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user)"
+                " UNION"
+                " SELECT m.roleid FROM pg_auth_members AS m "
+                " JOIN member_roles AS r ON m.member = r.roleid"
+                ") SELECT rolname FROM pg_roles WHERE oid IN "
+                "(SELECT roleid FROM member_roles)"
+            )).scalars().all()
             # Enumerate relations in non-system schemas; the allowlist
             # is strict, and even column-level SELECT on other tables fails.
             relations = connection.execute(text(
@@ -188,6 +206,7 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                 "can_create_schema": bool(can_create),
                 "can_create_public_table": bool(can_create_public_table),
                 "can_create_temp_table": bool(can_create_temp_table),
+                "role_memberships": sorted(str(name) for name in memberships),
                 "other_tables": other_tables,
                 "tables": tables,
             }
