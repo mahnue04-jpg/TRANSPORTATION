@@ -127,11 +127,13 @@
   const queuedToggle = document.getElementById("operations-queued-mode");
   const processQueuedButton = document.getElementById("operations-queued-process");
   const recoveryQueuedButton = document.getElementById("operations-queued-recovery");
+  const restoreQueuedButton = document.getElementById("operations-queued-restore");
   const cancelQueuedButton = document.getElementById("operations-queued-cancel");
   let currentJobId = "";
   let currentJobMode = "durable";
   let currentJobStatus = "";
   let currentLeaseStatus = "";
+  let currentRecoveryResult = "";
   let currentRequest = null;
 
   function scopedAuthHeaders() {
@@ -154,6 +156,9 @@
       !currentJobId || currentJobMode !== "queued" || currentLeaseStatus !== "QUEUED";
     if (recoveryQueuedButton) recoveryQueuedButton.disabled =
       !currentJobId || currentJobMode !== "queued";
+    if (restoreQueuedButton) restoreQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" ||
+      currentRecoveryResult !== "input_binding_incomplete";
     if (cancelQueuedButton) cancelQueuedButton.disabled =
       !currentJobId || currentJobMode !== "queued" ||
       !["QUEUED", "RUNNING"].includes(currentLeaseStatus);
@@ -181,6 +186,7 @@
     if (!response.ok) throw new Error(await safeError(response));
     const job = await response.json();
     currentLeaseStatus = job.lease_status || "";
+    if (currentLeaseStatus !== "QUEUED") currentRecoveryResult = "";
     updateJobButtons(job.status);
     scopedStatus.textContent = "Saved Nova job " + job.job_id + " · " +
       job.status + (job.lease_status ? " (" + job.lease_status + ")" : "") +
@@ -242,6 +248,7 @@
         currentJobId = job.job_id || "";
         currentJobMode = mode;
         currentLeaseStatus = queued ? "QUEUED" : "";
+        currentRecoveryResult = "";
         // Keep the same key for identical queued resubmissions; an owner must
         // change task, file or mode to intentionally start new work.
         if (!queued) currentRequest = null;
@@ -301,6 +308,7 @@
       });
       if (!response.ok) throw new Error(await safeError(response));
       const result = await response.json();
+      currentRecoveryResult = result.recovery_result || "";
       scopedStatus.textContent = "Recovery inspection: " + result.recovery_result +
         (result.owner_action_required ? ". Owner review required." : ".") +
         " No automatic retry or customer delivery.";
@@ -308,6 +316,42 @@
     } catch (err) {
       scopedStatus.textContent = (err && err.message) || "Recovery inspection unavailable.";
     } finally {
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (restoreQueuedButton) restoreQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy ||
+        currentRecoveryResult !== "input_binding_incomplete") return;
+    const fileInput = document.getElementById("operations-scoped-csv-file");
+    const file = fileInput && fileInput.files[0];
+    if (!file || !file.name.toLowerCase().endsWith(".csv") || file.size === 0 ||
+        file.size > 1000000) {
+      scopedStatus.textContent = "Choose the original CSV file (1 MB maximum) for this reserved job.";
+      return;
+    }
+    if (!window.confirm("Restore the original CSV to this existing job? Previous interrupted uploads may leave private objects requiring separate cleanup.")) return;
+    scopedBusy = true;
+    restoreQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/restore-input"), {
+        method: "POST", credentials: "same-origin", body: file,
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "Content-Type": "text/csv",
+          "X-Nova-File-Name": file.name,
+          "X-Nova-Owner-Action": "restore-unbound-csv-input"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      currentRecoveryResult = "";
+      scopedStatus.textContent = "Original CSV input restored to job " + result.job_id +
+        ". No work delivered. Separate orphan cleanup may still be needed.";
+      await refreshJobStatus();
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "CSV restore unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
       updateJobButtons(currentJobStatus);
     }
   });
