@@ -334,7 +334,7 @@ with SessionLocal() as db:
                 auth_version=0, is_active=True, is_verified=True))
     db.commit()
 
-connections, unexpected_sql = [], []
+connections, unexpected_sql, owner_selects = [], [], []
 def inspect_connection(conn, branch):
     connections.append(str(conn.engine.url.database))
     assert conn.engine.url.database == target, "Unexpected DB connection target"
@@ -342,6 +342,8 @@ def inspect_sql(conn, cursor, statement, params, context, many):
     operation = statement.lstrip().split(None, 1)[0].upper()
     if operation not in {"SELECT", "PRAGMA"}:
         unexpected_sql.append(operation)
+    if operation == "SELECT" and "platform_users" in statement.lower():
+        owner_selects.append(statement.lower())
 event.listen(Engine, "engine_connect", inspect_connection)
 event.listen(Engine, "before_cursor_execute", inspect_sql)
 
@@ -367,6 +369,9 @@ with TestClient(app) as client:
     assert read.headers["cache-control"] == "private, no-store"
 assert connections and set(connections) == {target}
 assert not unexpected_sql, unexpected_sql
+assert owner_selects, "Expected actual persisted-owner SELECT"
+assert all("hashed_password" not in statement and "email" not in statement
+           and "display_name" not in statement for statement in owner_selects), owner_selects
 with SessionLocal() as db:
     assert db.query(User).count() == 1
 """
