@@ -108,6 +108,80 @@ archives or their signed URLs into GitHub, CI, public storage or chat.
 separate, isolated destination with a known cost and cleanup plan.
 Do not restore over the existing staging database.
 
+## Read-only restoration options review — 2026-11-18 (NO ACTION PERFORMED)
+
+The approved fresh logical export (Nov 18, 2026 12:42 AM) is now listed
+with a downloadable .dir.tar.gz archive. Only its **availability** is proven.
+Its signed download URL is sensitive and must not be stored in this repo.
+
+### Option A — Render managed point-in-time recovery, preferred for fastest isolation
+
+Render docs confirm a PITR restore creates a **new** PostgreSQL instance, not
+an overwrite of the original. Current Hobby recovery window is three days.
+It tests recovery from managed PITR, **not the Nov 18 logical export**.
+No PITR restore is approved. If authorized in a separate step:
+
+1. Preflight: verify existing primary is available and original ID
+   `dpg-dbqv7mmtlv9c73d7tnb0-a`; preserve unchanged DNS, credentials,
+   networking, and service `srv-dbqv8ip5efls73dtpmo0`.
+2. Review UI's new database name (suggest a clearly distinct
+   `nova-ga-restore-verification-20261118`) and precise recovery timestamp
+   **within the last three days**, not less than Render's minimum time lag.
+   Do **not** select production, change the existing Growth service connection,
+   or click Restore until the owner approves the exact configuration.
+3. Exact billing preflight: source instance tier `0.1c-256mb` is listed
+   publicly at **$6/month** plus included 1 GB storage; new restore instance
+   likely bills separately while it exists. This is only a planning benchmark,
+   NOT a verified checkout price or permission to incur a charge. If the
+   UI demands a higher tier, additional storage, a Pro upgrade, or cost beyond
+   the separately approved cap, stop with NO CHANGE.
+4. Upon separately authorized restore, use read-only private diagnostics
+   against the **new instance only**: database identity/version, Alembic
+   version, tables and aggregate counts, synthetic-only acceptance. Do not
+   print or export customer rows, passwords, or signed URLs.
+5. Compare row/table counts and migrations with an authorized read-only
+   original baseline; document mismatch explicitly. Success requires a
+   usable restored instance plus comparable data, not merely "Available".
+6. Deletion of the **named disposable restored instance** is a separate
+   destructive operation requiring authorization and confirmation of its
+   exact ID. Never delete the original or a production instance. Billing can
+   continue until cleanup.
+
+Official docs:
+- https://render.com/docs/postgresql-backups
+- https://render.com/articles/how-to-backup-and-restore-postgresql-databases
+- https://render.com/pricing
+
+### Option B — Validate the exact Nov 18 Render logical export
+
+The downloaded `.dir.tar.gz` file contains sensitive database contents.
+An exact-export recovery rehearsal would require a separately authorized
+secure, isolated PostgreSQL 18 target and private archive transfer; avoid
+public repositories, support tickets, CI artifacts, third-party file shares,
+chat attachments and log output. Render exports use directory-format
+`pg_restore` after extraction. Restore only to a newly empty disposable
+target; options like `--clean` can delete existing data. Verify internal
+archive structure and hash **without printing records**, restore into the
+isolated target, inspect database structure/counts with read-only queries,
+and preserve original staging connectivity. No actual archive download,
+hashing or restore is authorized or yet performed.
+
+### Decision boundary and safeguards
+
+- **Existing approvals:** one fresh logical export only, already visible.
+- **Not approved:** another export, download to another service, PITR or
+  logical restore, new database, paid instance, migration, public networking,
+  changing pinned Render service commit, customer processing or deletion.
+- **Code checks:** PR #556 additive candidate passed prior CI and diagnostic,
+  but passing source tests does not demonstrate real staging DB recovery.
+- **Recommendation:** prefer a separately scoped, minimum-tier PITR rehearsal
+  if the goal is proving Render recovery, or an exact logical export restore
+  if the goal is proving the actual downloaded archive. Neither was attempted.
+  Any approval must specify which proof is needed, cost cap, target and cleanup.
+- **STOP** on wrong service/DB identity, new costs outside the cap, unknown
+  ownership, missing recovery timestamp, backup format mismatch, schema
+  divergence, external-network exposure, or any request to alter primary.
+
 ## Required safe evidence before an exact-version staging update
 
 1. Owner authorizes **read-only private diagnosis** of this named staging DB,
