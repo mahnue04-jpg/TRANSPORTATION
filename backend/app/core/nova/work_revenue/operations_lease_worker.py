@@ -56,7 +56,9 @@ def run_one(
         # a no-reclaim hold with a fresh session; never retry the handler here.
         try:
             with session_factory() as db:
-                held = leases.hold_for_reconciliation(db, claimed=claimed)
+                held = leases.hold_for_reconciliation(
+                    db, claimed=claimed, expected_output_sha256=output_sha256
+                )
         except Exception:
             # No persisted hold was verified: an expired lease may be
             # reclaimed. Stop and escalate instead of claiming recovery safety.
