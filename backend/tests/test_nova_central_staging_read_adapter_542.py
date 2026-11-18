@@ -144,3 +144,16 @@ def test_revoked_role_denied_by_real_orm_auth(preview):
 
 def test_no_journey_write_routes():
     assert all(route.methods == {"GET"} for route in router.routes)
+
+
+@pytest.mark.parametrize("primary,secondary", [
+    ("test", "production"),
+    ("production", "test"),
+    ("staging", "prod"),
+    ("", "staging"),
+])
+def test_conflicting_environment_flags_fail_closed(preview, monkeypatch, primary, secondary):
+    app, _, _ = preview
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", primary)
+    monkeypatch.setenv("APP_ENV", secondary)
+    assert _read(app).status_code == 503
