@@ -103,3 +103,60 @@ def test_wrong_connected_db_fails_closed():
     with pytest.raises(ValueError, match="Unexpected connected database"):
         inspect_schema(lambda *args, **kwargs: conn, "test-only")
     assert conn.closed
+
+
+def test_restored_copy_requires_independent_approval_and_exact_identity():
+    env = valid_env()
+    env["NOVA_GA_DIAGNOSTIC_TARGET"] = "restored_copy"
+    env["DATABASE_URL"] = (
+        "postgresql+psycopg2://fixture:secret@"
+        "dpg-dbuku8dckfvc73ch22e0-a/nova_ga_490_dispos_nu6s"
+    )
+    with pytest.raises(ValueError, match="not authorized"):
+        validate_private_diagnostic_env(env)
+    env["NOVA_GA_RESTORED_COPY_READ_ONLY_APPROVED"] = "true"
+    assert validate_private_diagnostic_env(env).startswith("postgresql://")
+    env["DATABASE_URL"] = (
+        "postgresql+psycopg2://fixture:secret@"
+        "dpg-dbqv7mmtlv9c73d7tnb0-a/nova_ga_490_dispos"
+    )
+    with pytest.raises(ValueError, match="identity mismatch"):
+        validate_private_diagnostic_env(env)
+
+
+def test_reject_unknown_target_and_copy_as_original():
+    env = valid_env()
+    env["NOVA_GA_DIAGNOSTIC_TARGET"] = "anything"
+    with pytest.raises(ValueError, match="Unrecognized"):
+        validate_private_diagnostic_env(env)
+    env["NOVA_GA_DIAGNOSTIC_TARGET"] = "original"
+    env["DATABASE_URL"] = (
+        "postgresql://fixture:secret@"
+        "dpg-dbuku8dckfvc73ch22e0-a/nova_ga_490_dispos_nu6s"
+    )
+    with pytest.raises(ValueError, match="identity mismatch"):
+        validate_private_diagnostic_env(env)
+
+
+def test_copy_inventory_uses_exact_connected_database():
+    conn = Connection(database="nova_ga_490_dispos_nu6s")
+    result = inspect_schema(
+        lambda *args, **kwargs: conn,
+        "fixture-only",
+        expected_database="nova_ga_490_dispos_nu6s",
+    )
+    assert result["database_identity"] == "nova_ga_490_dispos_nu6s"
+    assert result["read_only"] is True
+    assert result["backup_verified"] is False
+    assert conn.rolled_back and conn.closed
+
+
+def test_copy_inventory_rejects_original_connection():
+    conn = Connection(database="nova_ga_490_dispos")
+    with pytest.raises(ValueError, match="Unexpected connected database"):
+        inspect_schema(
+            lambda *args, **kwargs: conn,
+            "fixture-only",
+            expected_database="nova_ga_490_dispos_nu6s",
+        )
+    assert conn.closed
