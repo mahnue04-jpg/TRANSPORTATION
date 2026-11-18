@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app import auth
@@ -32,6 +32,7 @@ def _readiness_disabled() -> bool:
 @router.get("/journeys", response_model=CentralJourneyReadiness)
 def list_central_journeys(
     request: Request,
+    response: Response,
     user: UserContext = Depends(get_current_user_context),
     _role_guard=Depends(require_any_role(ROLE_ADMIN)),
 ):
@@ -56,4 +57,8 @@ def list_central_journeys(
     token_organization = auth._jwt_verify(token).get("organization_id")
     if not token_organization or token_organization != user.organization_id:
         raise HTTPException(status_code=403, detail="Session organization mismatch")
+    # Treat future journey metadata as private, even while the current response
+    # intentionally has no connected customer records.
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Authorization, Cookie"
     return CentralJourneyReadiness()
