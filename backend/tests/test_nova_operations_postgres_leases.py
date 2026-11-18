@@ -231,3 +231,55 @@ def test_reconciliation_hold_blocks_expired_reclaim_and_cancel_remains_possible(
         row = db.execute(sa.select(leases.lease_jobs).where(
             leases.lease_jobs.c.job_id == "synthetic-hold")).mappings().one()
         assert row["state"] == "NEEDS_RECONCILIATION"
+
+
+def test_private_input_binding_is_immutable_and_owner_scoped(database):
+    seed(database, "synthetic-bound")
+    with Session(database) as db:
+        assert leases.bind_private_input(
+            db, job_id="synthetic-bound", organization_id="org-a",
+            owner_user_id="owner-a", input_sha256="a" * 64,
+            storage_ref="org-a/synthetic-bound/nova-csv-input-owner-a/source.csv",
+            input_size=11)
+        assert not leases.bind_private_input(
+            db, job_id="synthetic-bound", organization_id="org-a",
+            owner_user_id="owner-a", input_sha256="a" * 64,
+            storage_ref="org-a/synthetic-bound/nova-csv-input-owner-a/source.csv",
+            input_size=11)
+        with pytest.raises(leases.LeaseBlocked, match="another reference"):
+            leases.bind_private_input(
+                db, job_id="synthetic-bound", organization_id="org-a",
+                owner_user_id="owner-a", input_sha256="a" * 64,
+                storage_ref="org-a/other/private.csv", input_size=11)
+        with pytest.raises(leases.LeaseBlocked, match="authorized scope"):
+            leases.bind_private_input(
+                db, job_id="synthetic-bound", organization_id="different-org",
+                owner_user_id="owner-a", input_sha256="a" * 64,
+                storage_ref="org-a/synthetic-bound/nova-csv-input-owner-a/source.csv",
+                input_size=11)
+        claimed = leases.claim(db, lease_seconds=60)
+        assert claimed is not None and claimed.job_id == "synthetic-bound"
+        ref, size = leases.read_bound_input_metadata(db, claimed=claimed)
+        assert ref == "org-a/synthetic-bound/nova-csv-input-owner-a/source.csv"
+        assert size == 11
+        with pytest.raises(leases.LeaseBlocked, match="before processing"):
+            leases.bind_private_input(
+                db, job_id="synthetic-bound", organization_id="org-a",
+                owner_user_id="owner-a", input_sha256="a" * 64,
+                storage_ref="org-a/synthetic-bound/nova-csv-input-owner-a/new.csv",
+                input_size=11)
+
+
+def test_unbound_or_invalid_input_reference_is_blocked(database):
+    seed(database, "synthetic-unbound")
+    with Session(database) as db:
+        for ref in ("", "https://public.example/input.csv", "bad\nref"):
+            with pytest.raises(leases.LeaseBlocked, match="reference"):
+                leases.bind_private_input(
+                    db, job_id="synthetic-unbound", organization_id="org-a",
+                    owner_user_id="owner-a", input_sha256="a" * 64,
+                    storage_ref=ref, input_size=1)
+        claimed = leases.claim(db, lease_seconds=60)
+        assert claimed is not None
+        with pytest.raises(leases.LeaseBlocked, match="not bound"):
+            leases.read_bound_input_metadata(db, claimed=claimed)
