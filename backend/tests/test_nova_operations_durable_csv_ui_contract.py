@@ -64,3 +64,14 @@ def test_owner_recovery_and_cancel_are_explicit_and_safe():
 def test_scoped_csv_task_url_contains_both_escaped_identifiers():
     assert 'encodeURIComponent(selected.engagement_id) + "/tasks/" +' in JS
     assert 'encodeURIComponent(selected.task_id) + "/jobs"' in JS
+
+
+def test_owner_restore_control_requires_explicit_recovery_diagnosis():
+    assert 'id="operations-queued-restore"' in HTML
+    assert 'currentRecoveryResult !== "input_binding_incomplete"' in JS
+    assert 'jobPath("/restore-input")' in JS
+    assert '"X-Nova-Owner-Action": "restore-unbound-csv-input"' in JS
+    assert 'window.confirm("Restore the original CSV' in JS
+    assert 'previous interrupted uploads may leave private objects' in JS.lower()
+    assert 'currentRecoveryResult = result.recovery_result || ""' in JS
+    assert 'currentRecoveryResult = ""' in JS
