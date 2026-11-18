@@ -150,3 +150,53 @@ def test_no_pii_or_payload_reference_in_http_response(context):
     assert set(result.json()) == {
         "correlation_id", "state", "assigned_agent", "owner_action", "revision",
     }
+
+
+
+def test_changed_database_tenant_controls_old_signed_token(context):
+    app, factory = context
+    original_token = jwt("owner-A", "org-A")
+    assert read(app, "private-B", original_token).status_code == 404
+    with factory() as db:
+        owner = db.query(User).filter(User.id == "owner-A").one()
+        owner.organization_id = "org-B"
+        db.commit()
+    # Even with a still-valid original token, tenant scope is read from
+    # persisted user context, not the stale token's organization claim.
+    response = read(app, "private-B", original_token)
+    assert response.status_code == 200
+    assert response.json()["state"] == "qualified"
+
+
+def test_inactive_owner_denied_before_tenant_lookup(context):
+    app, factory = context
+    token = jwt("owner-A", "org-A")
+    with factory() as db:
+        owner = db.query(User).filter(User.id == "owner-A").one()
+        owner.is_active = False
+        db.commit()
+    assert read(app, "shared", token).status_code == 401
+
+
+def test_support_role_does_not_bypass_tenant_owner_gate(context):
+    app, factory = context
+    with factory() as db:
+        owner = db.query(User).filter(User.id == "owner-A").one()
+        owner.role = "super_admin_support"
+        owner.session_role = "super_admin_support"
+        owner.authorized_roles = json.dumps(["super_admin_support"])
+        db.commit()
+    token = jwt("owner-A", "org-A", role="super_admin_support")
+    assert read(app, "shared", token).status_code == 403
+
+
+def test_client_org_parameter_cannot_select_foreign_journey(context):
+    app, _ = context
+    token = jwt("owner-A", "org-A")
+    with TestClient(app) as client:
+        response = client.get(
+            "/test-only/journeys/private-B",
+            params={"organization_id": "org-B"},
+            headers={"Authorization": "Bearer " + token},
+        )
+    assert response.status_code == 404
