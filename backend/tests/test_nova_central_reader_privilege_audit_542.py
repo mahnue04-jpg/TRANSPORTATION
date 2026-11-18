@@ -60,15 +60,21 @@ def good_report():
         bypass_rls=False,
         can_create_schema=False,
         tables={
-            name: {
+            "platform_users": {
+                "SELECT": False,
+                "columns": {
+                    **{col: True for col in audit._READER_COLUMNS},
+                    "email": False, "hashed_password": False,
+                    "display_name": False,
+                },
+                "INSERT": False, "UPDATE": False, "DELETE": False,
+                "TRUNCATE": False, "REFERENCES": False, "TRIGGER": False,
+            },
+            "nova_central_journey_read_model": {
                 "SELECT": True,
-                "INSERT": False,
-                "UPDATE": False,
-                "DELETE": False,
-                "TRUNCATE": False,
-                "REFERENCES": False,
-                "TRIGGER": False,
-            } for name in ("platform_users", "nova_central_journey_read_model")
+                "INSERT": False, "UPDATE": False, "DELETE": False,
+                "TRUNCATE": False, "REFERENCES": False, "TRIGGER": False,
+            },
         },
     )
 
@@ -105,3 +111,29 @@ def test_missing_table_fails_closed():
     report = good_report()
     del report["tables"]["platform_users"]
     assert audit.assess_privileges(report)
+
+
+def test_full_user_table_select_is_rejected():
+    report = good_report()
+    report["tables"]["platform_users"]["SELECT"] = True
+    assert "unsafe_full_user_table_SELECT" in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("column", audit._READER_COLUMNS)
+def test_missing_required_user_column_is_rejected(column):
+    report = good_report()
+    report["tables"]["platform_users"]["columns"][column] = False
+    assert "missing_user_column_SELECT_" + column in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("column", ["email", "hashed_password", "display_name"])
+def test_sensitive_user_column_grant_is_rejected(column):
+    report = good_report()
+    report["tables"]["platform_users"]["columns"][column] = True
+    assert "unsafe_user_column_SELECT_" + column in audit.assess_privileges(report)
+
+
+def test_missing_column_inventory_is_rejected():
+    report = good_report()
+    del report["tables"]["platform_users"]["columns"]
+    assert "unknown_user_columns" in audit.assess_privileges(report)
