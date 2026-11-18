@@ -648,3 +648,61 @@ def supervised_queued_csv_download(
         })
     except durable_csv.CustomerCSVBlocked as exc:
         _durable_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}/recovery")
+def supervised_queued_csv_recovery(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Read-only, scoped diagnostics; never retry, release or deliver."""
+    from .operations_recovery_diagnostics import inspect_recovery
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        return inspect_recovery(
+            db, organization_id=org, owner_user_id=owner_id,
+            job_id=job_id)
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(409, "Queued job recovery unavailable") from exc
+
+
+@router.post("/queued/jobs/{job_id}/cancel")
+def cancel_supervised_queued_csv_job(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Explicit authorized cancellation fences an outstanding lease.
+
+    Held/completed jobs cannot be silently canceled through this route:
+    their private artifacts need separate owner reconciliation.
+    """
+    _queued_csv_gate(db)
+    if owner_action != "cancel-queued-csv-job":
+        raise HTTPException(403, "Explicit owner cancellation required")
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+    try:
+        cancelled = _ops_leases.cancel(
+            db, job_id=job_id, organization_id=org, owner_user_id=owner_id)
+    except _ops_leases.LeaseBlocked as exc:
+        raise HTTPException(409, "Queued cancellation unavailable") from exc
+    if not cancelled:
+        raise HTTPException(409, "Job cannot be canceled in its current state")
+    return {"job_id": job_id, "lease_status": "CANCELLED",
+            "delivered": False, "safe_to_auto_retry": False}
