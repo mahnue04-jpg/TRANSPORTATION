@@ -126,6 +126,8 @@
   const rejectButton = document.getElementById("operations-durable-reject");
   const queuedToggle = document.getElementById("operations-queued-mode");
   const processQueuedButton = document.getElementById("operations-queued-process");
+  const recoveryQueuedButton = document.getElementById("operations-queued-recovery");
+  const cancelQueuedButton = document.getElementById("operations-queued-cancel");
   let currentJobId = "";
   let currentJobMode = "durable";
   let currentJobStatus = "";
@@ -150,6 +152,11 @@
     if (rejectButton) rejectButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
     if (processQueuedButton) processQueuedButton.disabled =
       !currentJobId || currentJobMode !== "queued" || currentLeaseStatus !== "QUEUED";
+    if (recoveryQueuedButton) recoveryQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued";
+    if (cancelQueuedButton) cancelQueuedButton.disabled =
+      !currentJobId || currentJobMode !== "queued" ||
+      !["QUEUED", "RUNNING"].includes(currentLeaseStatus);
   }
 
   function jobPath(suffix) {
@@ -279,6 +286,50 @@
       }
     } catch (err) {
       scopedStatus.textContent = (err && err.message) || "Queued processing unavailable.";
+      await refreshJobStatus().catch(function () {});
+    } finally {
+      scopedBusy = false;
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (recoveryQueuedButton) recoveryQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    recoveryQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/recovery"), {
+        credentials: "same-origin", headers: scopedAuthHeaders()
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      scopedStatus.textContent = "Recovery inspection: " + result.recovery_result +
+        (result.owner_action_required ? ". Owner review required." : ".") +
+        " No automatic retry or customer delivery.";
+      await refreshJobStatus();
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Recovery inspection unavailable.";
+    } finally {
+      updateJobButtons(currentJobStatus);
+    }
+  });
+  if (cancelQueuedButton) cancelQueuedButton.addEventListener("click", async function () {
+    if (!currentJobId || currentJobMode !== "queued" || scopedBusy) return;
+    if (!window.confirm("Cancel this queued job? This cannot undo any private output already written.")) return;
+    scopedBusy = true;
+    cancelQueuedButton.disabled = true;
+    try {
+      const response = await fetch(jobPath("/cancel"), {
+        method: "POST", credentials: "same-origin",
+        headers: Object.assign({}, scopedAuthHeaders(), {
+          "X-Nova-Owner-Action": "cancel-queued-csv-job"
+        })
+      });
+      if (!response.ok) throw new Error(await safeError(response));
+      const result = await response.json();
+      currentLeaseStatus = result.lease_status || "CANCELLED";
+      scopedStatus.textContent = "Queued job canceled. No automatic retry or delivery.";
+      updateJobButtons(currentJobStatus);
+    } catch (err) {
+      scopedStatus.textContent = (err && err.message) || "Cancellation unavailable.";
       await refreshJobStatus().catch(function () {});
     } finally {
       scopedBusy = false;
