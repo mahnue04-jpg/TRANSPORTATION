@@ -129,6 +129,7 @@
   let currentJobId = "";
   let currentJobMode = "durable";
   let currentJobStatus = "";
+  let currentLeaseStatus = "";
   let currentRequest = null;
 
   function scopedAuthHeaders() {
@@ -148,8 +149,7 @@
     if (approveButton) approveButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
     if (rejectButton) rejectButton.disabled = !currentJobId || status !== "AWAITING_REVIEW";
     if (processQueuedButton) processQueuedButton.disabled =
-      !currentJobId || currentJobMode !== "queued" ||
-      !["QUEUED", "PROCESSING"].includes(status);
+      !currentJobId || currentJobMode !== "queued" || currentLeaseStatus !== "QUEUED";
   }
 
   function jobPath(suffix) {
@@ -173,6 +173,7 @@
     });
     if (!response.ok) throw new Error(await safeError(response));
     const job = await response.json();
+    currentLeaseStatus = job.lease_status || "";
     updateJobButtons(job.status);
     scopedStatus.textContent = "Saved Nova job " + job.job_id + " · " +
       job.status + (job.lease_status ? " (" + job.lease_status + ")" : "") +
@@ -233,6 +234,7 @@
         const job = await response.json();
         currentJobId = job.job_id || "";
         currentJobMode = mode;
+        currentLeaseStatus = queued ? "QUEUED" : "";
         currentRequest = null;
         updateJobButtons(job.status);
         scopedStatus.textContent = "Job " + currentJobId + ": " + job.status +
@@ -270,6 +272,7 @@
       } else {
         scopedStatus.textContent = "Job " + currentJobId + ": " + result.state +
           ". Processing not confirmed; review status before any action.";
+        currentLeaseStatus = result.state === "queued" ? "QUEUED" : "NEEDS_RECONCILIATION";
         updateJobButtons("PROCESSING");
       }
     } catch (err) {
