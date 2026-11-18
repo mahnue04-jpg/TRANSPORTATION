@@ -34,3 +34,18 @@
 - **Paid customer release:** BLOCKED.
 
 **Permitted work without new deployment approval:** Draft code, read-only audits, CI and synthetic fixtures. Any new Render resource, database, paid plan, private bucket, schema migration, worker activation, merge, production deploy, real customer processing, outbound message or payment requires separate explicit approval.
+
+
+## Verified GitHub dependency chain and scope (read-only audit)
+
+The Operations package is **not** a self-contained pull request against `main`. The reviewed stack is:
+
+1. PR #477 `feat/nova-saved-task-selector-issue-476`, base `feat/nova-operations-engagement-scoped-csv-20261109`, open draft, 54 commits, 27 changed files.
+2. PR #540 `fix/operations-review-atomic-20261117`, base `feat/nova-saved-task-selector-issue-476`, open draft, 4 commits, 4 changed files.
+3. PR #541 `feat/operations-postgres-lease-foundation-20261117`, base `fix/operations-review-atomic-20261117`, open draft, 124 commits, 26 changed files at head `230723e0daa6bec9804eb5c3dc9139bff0370755`.
+
+**Do not merge PR #541 into `main`, rebase it blindly, or move a production Render commit pin.** Verify the exact ancestor commits, migrations and runtime flags across the entire stacked branch before any isolated staging release. The current PR mergeable status is a GitHub mergeability check, **not** authorization to deploy.
+
+The dedicated CI for PR #541 at SHA `230723e0daa6bec9804eb5c3dc9139bff0370755`, run #44244423782, passed Operations PostgreSQL integration, CSV regression, and Work & Revenue qualification; the broad backend diagnostic was still running when last inspected. Do not declare the full latest-head CI green until that job completes successfully.
+
+**Staging plan prerequisite:** produce a read-only combined diff manifest from all ancestor PRs and confirm no unrelated module, database, secret, paid-provider, Render resource, or production auto-deploy is altered. Then make a single owner approval request naming precise staging-only resources, expected charges, migration target, recovery method and SHA.
