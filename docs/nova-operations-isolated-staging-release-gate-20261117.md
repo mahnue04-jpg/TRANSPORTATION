@@ -137,3 +137,20 @@ Read-only inspection of the exact PR stack identified concrete writes and backgr
 **Safe next technical deliverable:** Prepare a minimal Operations-only *read-only* health entrypoint, using a pinned Python 3.12 runtime, without importing the shared `app.main` lifespan, creating a DB connection, running schema ensure routines, registering any hosted workers or importing paid-provider clients. Test it in disposable CI first. This entrypoint would verify only application packaging/runtime and `GET /health` readiness, returning 503 for any customer route. It would NOT be full Operations E2E acceptance; that still requires separately approved schema, credentials, real private storage, authentication and worker tests.
 
 **Next owner authorization required:** One controlled staging-only deployment of that minimal health entrypoint to web `srv-dbujmrmk1f9s73afmp6g`, after complete CI and exact commit verification. This does not include DB binding/migration, S3, outbound integrations, a job worker, or customer data. Do not deploy the shared application startup under the initial $13/month provisioning approval.
+
+
+## Minimal read-only app packaging candidate — reviewed source, NOT deployed
+
+**Purpose:** Verify only a Python 3.12 application artifact, boot/readiness, and refusal of customer API traffic without importing the shared `app.main` lifespan or its DB/schema seeding.
+
+- New standalone entrypoint: `backend/operations_staging_health.py`. It imports only Python standard library, with no SQLAlchemy, shared AMICOR app, paid providers, object storage, migrations, workers or customer authentication. It is a smoke-server **not the real Operations Agent**.
+- Under a Render staging service with rootDir `backend` and tested Python 3.12, candidate launch command is `python operations_staging_health.py` with port from `PORT`. The service should have a health probe `/health`.
+- Mandatory runtime flags: `AMICOR_ENVIRONMENT=staging`; `NOVA_OPERATIONS_STAGING_DIAGNOSTIC_ONLY=true`; `NOVA_OPERATIONS_LEASE_WORKER_ENABLED=false`; `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED=false`; `NOVA_OPERATIONS_DURABLE_CSV_ENABLED=false`; `NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED=false`.
+- Expected `GET /health` and `HEAD /health`: HTTP 200 with `diagnostic_only` state; customer processing, DB, storage and worker indicators all false. Every other GET and all POST/PUT/DELETE return HTTP 503, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`.
+- It refuses startup if the environment isn't staging, diagnostic-only flag is absent, or any of those four work/storage switches is enabled. Unit tests run the HTTP server on loopback and check this behavior, then verify bad-flag subprocesses terminate without listening.
+- New CI gate: `backend/tests/test_nova_operations_staging_health.py`, added to Operations CSV regression workflow. **Do not deploy until CI passes on the precise commit** and a separate exact-action smoke-test approval is granted.
+- **Build configuration caution:** Existing Render web build command is pinned to older SHA `3ea5f4ac...` and must be explicitly replaced during an approved deployment; merely pushing draft changes will not update it because autoDeploy is disabled. No releaseCommand or `render.yaml` Blueprint may be used.
+- A minimal diagnostic server does not verify Operations FastAPI owner auth, PostgreSQL, queues, artifacts, private S3 or revenue. The dedicated PostgreSQL stays unconnected; no schema DDL or customer data.
+- Rollback for the eventual isolated smoke test: revert web build/start settings and pin to the known successful diagnostic commit `3ea5f4ac...`; verify disabled-service behavior. Never touch production or other Nova services.
+
+**Authorization boundary:** At this checkpoint this is code and documentation only. The earlier $13/month compute approval does not authorize deploying this new service entrypoint. The owner must separately approve one controlled staging-only web deployment with precise SHA, configuration and unchanged database/worker/storage restrictions.
