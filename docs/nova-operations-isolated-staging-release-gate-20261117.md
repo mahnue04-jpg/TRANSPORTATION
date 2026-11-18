@@ -120,3 +120,20 @@ G. Record exact service/DB/commit IDs, pass/fail logs, backup/restore proof, no-
 ### Current boundary
 
 The $13/month compute approval **does not approve** changing the running diagnostic startup, connecting the database, staging schema DDL, private S3, hosted workers, actual client processing, or third-party charges. Resource provisioning is complete; application acceptance is pending an explicit separate approval. The correct next decision is a single controlled staging-only application smoke-test request after reviewed startup side effects and final CI verification.
+
+
+## Shared application startup safety audit — required before any actual-app smoke test
+
+Read-only inspection of the exact PR stack identified concrete writes and background behavior in the normal `uvicorn app.main:app` lifespan:
+
+- `backend/app/main.py` calls `app_startup.startup_recovery` and `init_db()` (local chat SQLite writes), `init_platform_db()`, `auth_module.ensure_auth_schema()` and `auth_module.seed_default_users()` (auth/database writes), Health ISF schema ensure functions, and Nova Today schema ensure.
+- The same lifespan schedules `run_deferred_platform_startup()` in a background thread. `backend/app/deployment/background_startup.py` uses `Base.metadata.create_all`, `ensure_customer_payment_tables()`, initializes real-time/runtime governor facilities, creates or syncs the default organization and operational bootstrap, and **seeds Health ISF sample data for every runtime environment other than production**.
+- `backend/app/db/session.py:init_platform_db()` also calls `Base.metadata.create_all` and Nova Today, autonomy, and freight schema ensure functions. None are isolated Operations-only DDL.
+- Merely setting `NOVA_OPERATIONS_LEASE_WORKER_ENABLED=false`, `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED=false`, or disabling paid providers does **NOT** make `app.main` startup read-only. Setting staging environment may itself activate sample-data seeding.
+- `render.yaml` additionally has production-oriented release-command migrations and dispatch settings and must not be used.
+
+**Gate raised:** Do NOT start the shared `app.main` against either the dedicated Operations staging PostgreSQL or another product's database until a reviewed, isolated startup design prevents these unrelated writes and background tasks. No trusted flag currently proved sufficient in this inspection.
+
+**Safe next technical deliverable:** Prepare a minimal Operations-only *read-only* health entrypoint, using a pinned Python 3.12 runtime, without importing the shared `app.main` lifespan, creating a DB connection, running schema ensure routines, registering any hosted workers or importing paid-provider clients. Test it in disposable CI first. This entrypoint would verify only application packaging/runtime and `GET /health` readiness, returning 503 for any customer route. It would NOT be full Operations E2E acceptance; that still requires separately approved schema, credentials, real private storage, authentication and worker tests.
+
+**Next owner authorization required:** One controlled staging-only deployment of that minimal health entrypoint to web `srv-dbujmrmk1f9s73afmp6g`, after complete CI and exact commit verification. This does not include DB binding/migration, S3, outbound integrations, a job worker, or customer data. Do not deploy the shared application startup under the initial $13/month provisioning approval.
