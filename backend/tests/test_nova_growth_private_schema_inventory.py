@@ -120,7 +120,7 @@ def test_restored_copy_requires_independent_approval_and_exact_identity():
         "postgresql+psycopg2://fixture:secret@"
         "dpg-dbqv7mmtlv9c73d7tnb0-a/nova_ga_490_dispos"
     )
-    with pytest.raises(ValueError, match="identity mismatch"):
+    with pytest.raises(ValueError, match="Invalid private staging connection configuration"):
         validate_private_diagnostic_env(env)
 
 
@@ -134,7 +134,7 @@ def test_reject_unknown_target_and_copy_as_original():
         "postgresql://fixture:secret@"
         "dpg-dbuku8dckfvc73ch22e0-a/nova_ga_490_dispos_nu6s"
     )
-    with pytest.raises(ValueError, match="identity mismatch"):
+    with pytest.raises(ValueError, match="Invalid private staging connection configuration"):
         validate_private_diagnostic_env(env)
 
 
