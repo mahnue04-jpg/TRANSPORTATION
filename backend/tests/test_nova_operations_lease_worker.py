@@ -106,8 +106,10 @@ def test_handler_success_with_ambiguous_db_completion_requires_reconciliation(en
         row = db.execute(sa.select(leases.lease_jobs).where(
             leases.lease_jobs.c.job_id == "synthetic-worker-uncertain"
         )).mappings().one()
-        assert row["state"] == "RUNNING"
+        assert row["state"] == "NEEDS_RECONCILIATION"
+        assert row["lease_token"] is None
         assert row["attempts"] == 1
+        assert leases.claim(db) is None
 
 
 def test_revoked_lease_at_completion_is_not_requeued(engine):
@@ -129,3 +131,23 @@ def test_revoked_lease_at_completion_is_not_requeued(engine):
             leases.lease_jobs.c.job_id == "synthetic-worker-revoked"
         )).mappings().one()
         assert row["state"] == "CANCELLED" and row["attempts"] == 1
+
+
+def test_ambiguous_completion_with_failed_hold_is_not_claimed_safe(engine, monkeypatch):
+    seed(engine, "synthetic-worker-hold-failed")
+    factory = lambda: Session(engine)
+    def uncertain(*args, **kwargs):
+        raise RuntimeError("synthetic completion connection loss")
+    def hold_fails(*args, **kwargs):
+        raise RuntimeError("synthetic reconciliation database outage")
+    monkeypatch.setattr(leases, "complete", uncertain)
+    monkeypatch.setattr(leases, "hold_for_reconciliation", hold_fails)
+    assert run_one(factory, lambda _claim: "b" * 64) == {
+        "state": "reconciliation_hold_unverified",
+        "job_id": "synthetic-worker-hold-failed",
+    }
+    with Session(engine) as db:
+        row = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-worker-hold-failed",
+        )).mappings().one()
+        assert row["state"] == "RUNNING"
