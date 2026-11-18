@@ -136,3 +136,68 @@ def staged_studio_record_event(
         occurred_at=occurred_at,
         enabled=enabled,
     )
+
+
+def read_studio_asset_for_growth(
+    *,
+    studio_store: object,
+    approval_reader: object,
+    project_id: str,
+    asset_id: str,
+    campaign_id: str,
+    organization_id: str,
+    authenticated_owner_id: str,
+    authenticated_studio_principal: str,
+    occurred_at: datetime,
+    enabled: bool | None = None,
+) -> AgentEvent:
+    """Owner-scoped repository lookup, default-off, no outbound transport.
+
+    studio_store is expected to be the trusted server-side CreativeStudioStore
+    with get_project(project_id, owner_id) and list_assets(project_id, owner_id).
+    approval_reader must be a *trusted server-side* callable returning a
+    persisted approval for this exact tenant/owner/project/asset/action.
+    No such persistent approval mechanism is wired in this PR. Missing
+    approvals fail closed; this is not a route or service integration.
+    """
+    if enabled is None:
+        enabled = os.getenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED") == "true"
+    if enabled is not True or os.getenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED") == "true":
+        raise PermissionError("Studio-Growth adapter disabled")
+    for label, value in (
+        ("project_id", project_id), ("asset_id", asset_id),
+        ("campaign_id", campaign_id), ("organization_id", organization_id),
+        ("owner_id", authenticated_owner_id),
+        ("studio_principal", authenticated_studio_principal),
+    ):
+        if not isinstance(value, str) or not _ID.fullmatch(value):
+            raise PermissionError("invalid verified " + label)
+    if not callable(approval_reader):
+        raise PermissionError("trusted approval reader required")
+    # Never inspect source media paths, project text or external URLs.
+    project = studio_store.get_project(project_id, authenticated_owner_id)
+    if project is None:
+        raise PermissionError("no owner-scoped project")
+    assets = studio_store.list_assets(project_id, authenticated_owner_id)
+    matches = [item for item in assets if getattr(item, "id", None) == asset_id]
+    if len(matches) != 1:
+        raise PermissionError("asset missing or ambiguous")
+    # Approval must come from the server-side reader, not client-supplied JSON.
+    approval = approval_reader(
+        organization_id=organization_id,
+        owner_id=authenticated_owner_id,
+        project_id=project_id,
+        asset_id=asset_id,
+        action="share_campaign_asset_with_growth",
+    )
+    return staged_studio_record_event(
+        project=project,
+        asset=matches[0],
+        owner_approval=approval,
+        campaign_id=campaign_id,
+        organization_id=organization_id,
+        authenticated_owner_id=authenticated_owner_id,
+        authenticated_studio_principal=authenticated_studio_principal,
+        occurred_at=occurred_at,
+        enabled=True,
+    )
