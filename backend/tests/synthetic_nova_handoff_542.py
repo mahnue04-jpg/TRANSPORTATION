@@ -7,8 +7,7 @@ reviewed for authenticated identities, durable audit, restart safety and RBAC.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Mapping
+from datetime import datetime
 
 # Import the event envelope without importing Nova's backend package or conftest.
 import importlib.util
@@ -67,13 +66,14 @@ class SyntheticHandoff:
         self._seen: dict[str, AgentEvent] = {}
         self._journeys: dict[str, str] = {}
         self._subjects: dict[str, str] = {}
-        self._payloads: set[str] = set()
+        self._payloads: dict[str, tuple[str, str]] = {}
+        self._event_ids: dict[str, AgentEvent] = {}
         self._used_approvals: set[str] = set()
 
-    def register_payload(self, reference: str):
-        if not reference.startswith("synthetic:"):
-            raise ValueError("only synthetic payload references allowed")
-        self._payloads.add(reference)
+    def register_payload(self, reference: str, subject_id: str):
+        if not reference.startswith("synthetic:") or not subject_id:
+            raise ValueError("only subject-scoped synthetic payload references allowed")
+        self._payloads[reference] = (self.organization_id, subject_id)
 
     def stage_consent(self, item: Consent):
         if item.organization_id != self.organization_id:
@@ -100,8 +100,11 @@ class SyntheticHandoff:
             raise PermissionError("authenticated source mismatch")
         if event.occurred_at > self.now or (self.now - event.occurred_at).total_seconds() > 300:
             raise PermissionError("stale or future event")
-        if event.payload_reference not in self._payloads:
-            raise PermissionError("unauthorized payload reference")
+        if self._payloads.get(event.payload_reference) != (self.organization_id, event.subject_id):
+            raise PermissionError("unauthorized or mismatched payload reference")
+        existing_id = self._event_ids.get(event.event_id)
+        if existing_id is not None and existing_id != event:
+            raise PermissionError("event id collision")
         if event.idempotency_key in self._seen:
             if self._seen[event.idempotency_key] != event:
                 raise PermissionError("idempotency collision")
@@ -136,6 +139,7 @@ class SyntheticHandoff:
 
         self._subjects[event.correlation_id] = event.subject_id
         self._seen[event.idempotency_key] = event
+        self._event_ids[event.event_id] = event
         self._journeys[event.correlation_id] = next_state
         self.audit.append((event.correlation_id, next_state))
         return next_state
