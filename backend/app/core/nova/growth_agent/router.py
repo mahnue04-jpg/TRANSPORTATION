@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -632,6 +632,7 @@ def campaign_asset_preview(
 from app.core.nova.growth_agent.campaign_registry import (
     CampaignReviewRegistry, CampaignRegistryDenied,
 )
+from sqlalchemy.exc import OperationalError, ProgrammingError
 import os as _campaign_os
 
 
@@ -640,6 +641,33 @@ def _campaign_review_enabled() -> bool:
         _campaign_os.getenv("NOVA_GA_CAMPAIGN_REVIEW_ENABLED") == "true"
         and _campaign_os.getenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED") != "true"
     )
+
+
+def _campaign_review_schema_unavailable(exc: Exception) -> bool:
+    """Missing review table, not a generic database outage."""
+    if not isinstance(exc, (OperationalError, ProgrammingError)):
+        return False
+    orig = getattr(exc, "orig", None)
+    kind = type(orig).__name__.lower() if orig is not None else ""
+    if "undefinedtable" in kind or kind == "nosuchtableerror":
+        return True
+    detail = f"{orig if orig is not None else ''} {exc}".lower()
+    if "no such table" in detail:
+        return True
+    return "does not exist" in detail and "nova_ga_campaign_asset_reviews" in detail
+
+
+def _raise_campaign_review_failure(
+    exc: Exception, db: Session, denied_status: int,
+) -> NoReturn:
+    if isinstance(exc, (OperationalError, ProgrammingError)):
+        db.rollback()
+        if _campaign_review_schema_unavailable(exc):
+            raise HTTPException(
+                status_code=404, detail="Campaign review queue disabled",
+            ) from exc
+        raise exc
+    raise HTTPException(status_code=denied_status, detail=str(exc)) from exc
 
 
 def _campaign_review_owner(user: UserContext, organization_id: str) -> str:
@@ -687,8 +715,8 @@ def register_campaign_review(
             project_id=body.studio_project_id, asset_id=body.asset_id,
         )
         return {"outcome": outcome, "review": result}
-    except CampaignRegistryDenied as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (CampaignRegistryDenied, OperationalError, ProgrammingError) as exc:
+        _raise_campaign_review_failure(exc, db, 409)
 
 
 @router.get("/campaign-assets/reviews")
@@ -704,8 +732,8 @@ def list_campaign_reviews(
         return {"reviews": CampaignReviewRegistry(db).list_for_owner(
             org=org, owner_id=user.user_id,
         )}
-    except CampaignRegistryDenied as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (CampaignRegistryDenied, OperationalError, ProgrammingError) as exc:
+        _raise_campaign_review_failure(exc, db, 403)
 
 
 @router.post("/campaign-assets/reviews/{campaign_id}/withdraw")
@@ -723,5 +751,5 @@ def withdraw_campaign_review(
             org=org, owner_id=user.user_id, campaign_id=campaign_id,
         )
         return {"outcome": outcome, "review": result}
-    except CampaignRegistryDenied as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (CampaignRegistryDenied, OperationalError, ProgrammingError) as exc:
+        _raise_campaign_review_failure(exc, db, 403)

@@ -223,3 +223,117 @@ def test_http_queue_refuses_live_flag(http, monkeypatch):
     monkeypatch.setenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED", "true")
     refused = client.post("/api/nova/growth-agent/campaign-assets/reviews", json=payload())
     assert refused.status_code == 404
+
+
+def test_http_missing_review_schema_is_disabled_not_server_error(monkeypatch):
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with Session(engine) as db:
+        monkeypatch.setenv("NOVA_GA_CAMPAIGN_REVIEW_ENABLED", "true")
+        monkeypatch.delenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED", raising=False)
+        principal = SimpleNamespace(user_id="owner-A", organization_id="org-A", role="admin")
+
+        class Profile:
+            def __init__(self, _db):
+                pass
+
+            def get_profile(self, org):
+                return dict(
+                    configured=True, organization_id=org,
+                    is_synthetic_demo=True, activated=False, agent_disabled=True,
+                )
+
+        def scoped_db():
+            yield db
+
+        monkeypatch.setattr(ga_router, "GrowthAgentService", Profile)
+        app.dependency_overrides[require_growth_owner] = lambda: principal
+        app.dependency_overrides[get_db] = scoped_db
+        try:
+            client = TestClient(app)
+            created = client.post(
+                "/api/nova/growth-agent/campaign-assets/reviews", json=payload(),
+            )
+            listed = client.get(
+                "/api/nova/growth-agent/campaign-assets/reviews?organization_id=org-A",
+            )
+            withdrawn = client.post(
+                "/api/nova/growth-agent/campaign-assets/reviews/campaign-1/withdraw",
+                json={"organization_id": "org-A"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+    assert created.status_code == 404, created.text
+    assert created.json()["detail"] == "Campaign review queue disabled"
+    assert listed.status_code == 404, listed.text
+    assert withdrawn.status_code == 404, withdrawn.text
+    with engine.connect() as connection:
+        tables = connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()
+        assert tables == []
+    engine.dispose()
+
+
+def _campaign_migration():
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations/versions/20261118_nova_ga_campaign_review.py"
+    )
+    spec = importlib.util.spec_from_file_location("_nova_ga_campaign_review_mig", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_campaign_upgrade(module, connection):
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    module.op = Operations(MigrationContext.configure(connection))
+    module.upgrade()
+
+
+def test_campaign_migration_provisions_table_without_approval_flags(monkeypatch):
+    for name in (
+        "NOVA_GA_CAMPAIGN_SCHEMA_APPROVED",
+        "NOVA_GA_CAMPAIGN_SCHEMA_STAGING_ONLY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
+        monkeypatch.setenv(name, "test")
+    module = _campaign_migration()
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        _run_campaign_upgrade(module, connection)
+        names = set(connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).scalars())
+        assert "nova_ga_campaign_asset_reviews" in names
+        _run_campaign_upgrade(module, connection)
+        module.downgrade()
+        names = set(connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).scalars())
+        assert "nova_ga_campaign_asset_reviews" in names
+    engine.dispose()
+
+
+def test_campaign_migration_stays_inert_in_production_even_if_flags_set(monkeypatch):
+    monkeypatch.setenv("NOVA_GA_CAMPAIGN_SCHEMA_APPROVED", "true")
+    monkeypatch.setenv("NOVA_GA_CAMPAIGN_SCHEMA_STAGING_ONLY", "true")
+    monkeypatch.setenv("APP_ENV", "production")
+    module = _campaign_migration()
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        _run_campaign_upgrade(module, connection)
+        names = set(connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).scalars())
+        assert "nova_ga_campaign_asset_reviews" not in names
+    engine.dispose()

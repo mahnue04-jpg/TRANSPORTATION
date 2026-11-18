@@ -1,8 +1,14 @@
-"""Optional Growth campaign review table. Draft; no automatic activation.
+"""Growth campaign review table (draft / prod-gated).
 
-Revision is additive and returns without DDL unless a future owner-approved
-staging migration run explicitly sets NOVA_GA_CAMPAIGN_SCHEMA_APPROVED=true.
-Production is always locked. Existing Growth/Studio tables remain untouched.
+Additive only. Staging, dev, and disposable databases create the table.
+Production is locked: when AMICOR_ENVIRONMENT, ENVIRONMENT, or APP_ENV is
+production or prod, upgrade returns without DDL and Alembic stamps the
+revision. Downgrade does not drop the table. Existing Growth/Studio tables
+remain untouched.
+
+DDL cannot wait on a later env-flag flip. Alembic records this revision as
+soon as upgrade() returns, so a no-op on the first non-production run would
+skip create_table forever.
 """
 from __future__ import annotations
 
@@ -17,18 +23,15 @@ branch_labels = None
 depends_on = None
 
 
-def _approved() -> bool:
-    if any(os.getenv(name, "").strip().lower() in {"prod", "production"}
-           for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV")):
-        return False
-    return (
-        os.getenv("NOVA_GA_CAMPAIGN_SCHEMA_APPROVED") == "true"
-        and os.getenv("NOVA_GA_CAMPAIGN_SCHEMA_STAGING_ONLY") == "true"
-    )
+def _production_schema_locked() -> bool:
+    for name in ("AMICOR_ENVIRONMENT", "ENVIRONMENT", "APP_ENV"):
+        if os.getenv(name, "").strip().lower() in {"production", "prod"}:
+            return True
+    return False
 
 
 def upgrade() -> None:
-    if not _approved():
+    if _production_schema_locked():
         return
     bind = op.get_bind()
     if "nova_ga_campaign_asset_reviews" in sa.inspect(bind).get_table_names():
