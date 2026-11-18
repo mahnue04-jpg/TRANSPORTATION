@@ -200,3 +200,22 @@ def test_signed_admin_cookie_is_tenant_bound(sandbox):
         assert client.get("/central/journeys").status_code == 200
         client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-B"))
         assert client.get("/central/journeys").status_code == 403
+
+
+def test_owner_readiness_response_is_not_cacheable(sandbox):
+    app, _ = sandbox
+    response = read(app, token(org="org-A"))
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    vary = {item.strip().lower() for item in response.headers["vary"].split(",")}
+    assert {"authorization", "cookie"} <= vary
+
+
+def test_cookie_owner_readiness_response_is_not_cacheable(sandbox):
+    from app import auth
+    app, _ = sandbox
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-A"))
+        response = client.get("/central/journeys")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
