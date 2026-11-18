@@ -33,19 +33,27 @@ def run_one(
         return {"state": "idle", "job_id": None}
     try:
         output_sha256 = handler(claimed)
-        with session_factory() as db:
-            leases.complete(db, claimed=claimed, output_sha256=output_sha256)
-        return {"state": "completed", "job_id": claimed.job_id}
     except Exception:
-        # The handler may have written an artifact before failing. Retrying
-        # without artifact reconciliation is NOT safe for real customer work.
-        # This runner is synthetic-only until an idempotent handler is wired.
+        # Only handler failures follow the synthetic retry path. A real handler
+        # must reconcile any possibly-written artifact before enabling retry.
         with session_factory() as db:
             try:
                 state = leases.fail_or_retry(
                     db, claimed=claimed, retry_delay_seconds=retry_delay_seconds
                 )
             except leases.LeaseBlocked:
-                # Lost lease/cancellation: never requeue a superseded claim.
                 return {"state": "stale", "job_id": claimed.job_id}
         return {"state": state.lower(), "job_id": claimed.job_id}
+
+    try:
+        with session_factory() as db:
+            leases.complete(db, claimed=claimed, output_sha256=output_sha256)
+    except leases.LeaseBlocked:
+        # The lease was revoked, expired, or superseded. Never retry work.
+        return {"state": "stale", "job_id": claimed.job_id}
+    except Exception:
+        # A commit error after work completed can be ambiguous. Do not enqueue
+        # the same processing again; a future reconciler must inspect metadata
+        # and the persisted artifact before any retry.
+        return {"state": "needs_reconciliation", "job_id": claimed.job_id}
+    return {"state": "completed", "job_id": claimed.job_id}
