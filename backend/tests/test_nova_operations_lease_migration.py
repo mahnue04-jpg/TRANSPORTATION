@@ -84,6 +84,13 @@ def test_migration_creates_matching_schema_only_in_isolated_staging(monkeypatch,
         assert "ix_nova_operations_lease_ready" in {
             i["name"] for i in inspector.get_indexes(leases.lease_jobs.name)
         }
+        # Disposable metadata and the reviewed migration must enforce the
+        # same private-input binding constraint.
+        expected_checks = {
+            c.name for c in leases.lease_jobs.constraints
+            if isinstance(c, sa.CheckConstraint)
+        }
+        assert expected_checks.issubset(constraints)
     finally:
         leases.lease_metadata.drop_all(engine)
         engine.dispose()
@@ -123,3 +130,8 @@ def test_no_environment_migration_must_fail_instead_of_no_op(monkeypatch, migrat
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_SCHEMA_APPROVED", "staging-only")
     with pytest.raises(RuntimeError, match="staging-only"):
         migration.upgrade()
+
+
+def test_downgrade_refuses_silent_alembic_version_change(monkeypatch, migration):
+    with pytest.raises(RuntimeError, match="separate owner approval"):
+        migration.downgrade()
