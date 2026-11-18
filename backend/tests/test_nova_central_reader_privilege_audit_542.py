@@ -59,6 +59,9 @@ def good_report():
         replication=False,
         bypass_rls=False,
         can_create_schema=False,
+        can_create_public_table=False,
+        can_create_temp_table=False,
+        other_tables={},
         tables={
             "platform_users": {
                 "SELECT": False,
@@ -137,3 +140,32 @@ def test_missing_column_inventory_is_rejected():
     report = good_report()
     del report["tables"]["platform_users"]["columns"]
     assert "unknown_user_columns" in audit.assess_privileges(report)
+
+
+def test_public_schema_create_fails_closed():
+    report = good_report()
+    report["can_create_public_table"] = True
+    assert "public_schema_create_allowed" in audit.assess_privileges(report)
+
+
+def test_temp_table_create_fails_closed():
+    report = good_report()
+    report["can_create_temp_table"] = True
+    assert "temporary_table_create_allowed" in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("grant", ["SELECT", "ANY_COLUMN_SELECT", "INSERT", "UPDATE", "DELETE"])
+def test_unrelated_table_grant_fails_closed(grant):
+    report = good_report()
+    report["other_tables"] = {"public.unrelated_private_records": {
+        action: action == grant for action in
+        ("SELECT", "ANY_COLUMN_SELECT", "INSERT", "UPDATE", "DELETE",
+         "TRUNCATE", "REFERENCES", "TRIGGER")
+    }}
+    assert "unapproved_table_privileges_public.unrelated_private_records" in audit.assess_privileges(report)
+
+
+def test_unrelated_table_inventory_must_be_present():
+    report = good_report()
+    del report["other_tables"]
+    assert "unknown_unrelated_table_privileges" in audit.assess_privileges(report)
