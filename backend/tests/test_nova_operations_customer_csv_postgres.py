@@ -788,3 +788,45 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert client.get(prefix + "/jobs/" + job_id + "/download").status_code == 409
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_supervised_http_routes_default_off_and_unknown_job_404(postgres, monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.db.session import get_db
+    engine, store = postgres
+    leases.lease_metadata.create_all(engine)
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    monkeypatch.delenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", raising=False)
+    user = SimpleNamespace(user_id="synthetic-owner",
+                           organization_id="synthetic-org")
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/nova/work")
+    app.dependency_overrides[require_nova_access] = lambda: user
+    app.dependency_overrides[api.require_work_revenue_owner] = lambda: user
+    def db_session():
+        with Session(engine) as db:
+            yield db
+    app.dependency_overrides[get_db] = db_session
+    url = "/api/nova/work/operations/queued/jobs/absent"
+    try:
+        with TestClient(app) as client:
+            assert client.get(url).status_code == 503
+            assert client.post(url + "/process",
+                headers={"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"}
+            ).status_code == 503
+            monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+            assert client.get(url).status_code == 404
+            assert client.post(url + "/process",
+                headers={"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"}
+            ).status_code == 404
+            assert client.post(url + "/review",
+                json={"approve": True},
+                headers={"X-Nova-Owner-Action": "review-completed-queued-csv"}
+            ).status_code == 404
+    finally:
+        leases.lease_metadata.drop_all(engine)
