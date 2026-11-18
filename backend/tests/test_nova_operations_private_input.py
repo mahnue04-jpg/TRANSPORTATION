@@ -94,3 +94,29 @@ def test_bad_store_receipt_never_claims_success():
             return bucket, key, size - 1
     with pytest.raises(PrivateInputBlocked, match="not confirmed"):
         _save(TruncatedStore())
+
+
+def test_private_input_rejects_cross_tenant_reference_before_object_read():
+    store = FakePrivateStore()
+    receipt = _save(store)
+    attempted = []
+    actual_retrieve = store.retrieve
+    def guarded_retrieve(*, storage_ref):
+        attempted.append(storage_ref)
+        return actual_retrieve(storage_ref=storage_ref)
+    store.retrieve = guarded_retrieve
+    with pytest.raises(PrivateInputBlocked, match="scope mismatch"):
+        load_private_csv_input(
+            organization_id="another-org", owner_user_id="owner-1",
+            job_id="synthetic-job", storage_ref=receipt.storage_ref,
+            expected_sha256=receipt.sha256, store=store)
+    assert attempted == []
+
+
+def test_private_input_rejects_unscoped_storage_receipt():
+    class BadRefStore(FakePrivateStore):
+        def store(self, **kwargs):
+            bucket, _key, size = super().store(**kwargs)
+            return bucket, "other-org/other-job/unscoped.csv", size
+    with pytest.raises(PrivateInputBlocked, match="not confirmed"):
+        _save(BadRefStore())
