@@ -73,27 +73,32 @@ def _guard(db: Session) -> None:
 
 def enqueue(db: Session, *, job_id: str, organization_id: str,
             owner_user_id: str, input_sha256: str, now: datetime | None = None) -> None:
-    """Queue exactly one authorized job identity; caller verifies engagement/scope."""
+    """Atomically deduplicate simultaneous submissions with PostgreSQL upsert.
+
+    The caller separately verifies engagement authorization and work type.
+    Reusing an identifier with different scope/content always fails closed.
+    """
     _guard(db)
     if not all(isinstance(v, str) and v.strip() and len(v) <= 36
                for v in (job_id, organization_id, owner_user_id)) or not _sha(input_sha256):
         raise LeaseBlocked("Invalid job identity or fingerprint")
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     now = now or _now()
     try:
-        row = db.execute(sa.select(lease_jobs).where(
-            lease_jobs.c.job_id == job_id).with_for_update()).mappings().first()
-        if row:
-            if (row["organization_id"], row["owner_user_id"], row["input_sha256"]) != (
-                organization_id, owner_user_id, input_sha256
-            ):
-                raise LeaseBlocked("Job identity reused with different scope or input")
-            db.rollback()
-            return
-        db.execute(sa.insert(lease_jobs).values(
+        insertion = pg_insert(lease_jobs).values(
             job_id=job_id, organization_id=organization_id,
             owner_user_id=owner_user_id, input_sha256=input_sha256,
             state="QUEUED", attempts=0, max_attempts=3,
-            available_at=now, updated_at=now))
+            available_at=now, updated_at=now,
+        ).on_conflict_do_nothing(index_elements=[lease_jobs.c.job_id])
+        db.execute(insertion)
+        row = db.execute(sa.select(
+            lease_jobs.c.organization_id, lease_jobs.c.owner_user_id,
+            lease_jobs.c.input_sha256,
+        ).where(lease_jobs.c.job_id == job_id)).one()
+        if tuple(row) != (organization_id, owner_user_id, input_sha256):
+            raise LeaseBlocked("Job identity reused with different scope or input")
         db.commit()
     except Exception:
         db.rollback()
