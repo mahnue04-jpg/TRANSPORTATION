@@ -137,3 +137,22 @@ def test_grant_type_does_not_expose_customer_or_media_fields():
         "approved_at", "expires_at", "idempotency_key",
         "action", "schema_version",
     }
+
+
+def test_revoked_grant_cannot_be_revived_by_exact_idempotent_replay(tmp_path):
+    book, con = ledger(tmp_path)
+    original = grant()
+    assert book.record(original, authenticated_owner_id="owner-A") == "recorded"
+    assert book.revoke(
+        organization_id="org-A", grant_id="grant-1",
+        authenticated_owner_id="owner-A", now=NOW + timedelta(minutes=2),
+    ) is True
+    with pytest.raises(PermissionError, match="revoked"):
+        book.record(original, authenticated_owner_id="owner-A")
+    assert read(book) is None
+    row = con.execute(
+        "SELECT revoked_at FROM studio_growth_owner_grants WHERE grant_id=?",
+        ("grant-1",),
+    ).fetchone()
+    assert row[0] is not None
+    con.close()
