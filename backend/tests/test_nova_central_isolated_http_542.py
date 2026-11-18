@@ -423,6 +423,10 @@ with SessionLocal() as db:
                 organization_id="org-A", auth_version=0,
                 is_active=True, is_verified=True))
     db.commit()
+# A fictional unrelated table confirms that this reader cannot see other data.
+with engine.begin() as conn:
+    conn.exec_driver_sql("CREATE TABLE unrelated_private_records (secret TEXT)")
+    conn.exec_driver_sql("INSERT INTO unrelated_private_records VALUES ('fictional')")
 engine.dispose()
 
 private = {"hashed_password", "email", "display_name"}
@@ -437,7 +441,10 @@ def install_policy(connection, record):
         if op in denied_ops:
             observed.append(("forbidden_mutation", table, column))
             return sqlite3.SQLITE_DENY
-        if op == sqlite3.SQLITE_READ and table == "platform_users":
+        if op == sqlite3.SQLITE_READ:
+            if table != "platform_users":
+                observed.append(("forbidden_table", table, column))
+                return sqlite3.SQLITE_DENY
             if column not in allowed:
                 observed.append(("forbidden_column", table, column))
                 return sqlite3.SQLITE_DENY
@@ -468,6 +475,7 @@ from sqlalchemy.exc import DatabaseError
 with engine.connect() as conn:
     for forbidden in (
         "SELECT hashed_password FROM platform_users LIMIT 1",
+        "SELECT secret FROM unrelated_private_records LIMIT 1",
         "UPDATE platform_users SET role='staff' WHERE id='owner-A'",
         "CREATE TABLE forbidden_central_ddl (id INTEGER)",
     ):
@@ -478,6 +486,7 @@ with engine.connect() as conn:
         else:
             raise AssertionError("Forbidden SQL unexpectedly succeeded: " + forbidden)
 assert any(item[0] == "forbidden_column" for item in observed), observed
+assert any(item[0] == "forbidden_table" for item in observed), observed
 assert any(item[0] == "forbidden_mutation" for item in observed), observed
 """
     proc = subprocess.run(
