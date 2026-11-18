@@ -142,6 +142,7 @@ jobs:
         run: |
           python -m pytest -v -rs tests/test_nova_operations_customer_csv_postgres.py
           python -m pytest -v -rs tests/test_nova_operations_postgres_leases.py
+          python -m pytest -v -rs tests/test_nova_operations_lease_worker.py
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
