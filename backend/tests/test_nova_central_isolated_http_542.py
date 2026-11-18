@@ -560,11 +560,14 @@ print(auth.create_access_token({
 }))
 """
     request = """
-import sys
+import os, sys
 from fastapi.testclient import TestClient
 from nova_central_isolated import create_app
 app = create_app()
 assert not app.dependency_overrides
+# Boot remains feature-off. Enable only disposable empty readiness after
+# creating the ASGI app; never bypass the runtime startup guard.
+os.environ["NOVA_CENTRAL_JOURNEY_READONLY_ENABLED"] = "true"
 with TestClient(app) as client:
     r = client.get("/api/nova/workspace/central/journeys",
                    headers={"Authorization": "Bearer " + sys.argv[1]})
@@ -581,12 +584,11 @@ with TestClient(app) as client:
         return result.stdout.strip()
 
     token = run(setup, env).splitlines()[-1]
-    enabled = dict(env, NOVA_CENTRAL_JOURNEY_READONLY_ENABLED="true")
     # A new process with the same key must accept the original owner token.
-    assert run(request, enabled, token).splitlines()[-1] == "200"
+    assert run(request, env, token).splitlines()[-1] == "200"
     # The unchanged token must be rejected on a separate process with
     # a different valid signing secret (no fallback to a shared key).
-    changed = dict(enabled)
+    changed = dict(env)
     changed["JWT_SECRET"] = changed["SECRET_KEY"] = (
         "fictional-isolated-staging-key-" + "b" * 48
     )
