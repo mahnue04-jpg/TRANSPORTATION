@@ -192,3 +192,13 @@ def test_old_token_denied_after_account_organization_transfer(sandbox):
     modify(factory, organization_id="org-B")
     assert read(app, old_token).status_code == 403
     assert read(app, token(org="org-B")).status_code == 200
+
+
+def test_signed_admin_cookie_is_tenant_bound(sandbox):
+    from app import auth
+    app, _ = sandbox
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-A"))
+        assert client.get("/central/journeys").status_code == 200
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-B"))
+        assert client.get("/central/journeys").status_code == 403
