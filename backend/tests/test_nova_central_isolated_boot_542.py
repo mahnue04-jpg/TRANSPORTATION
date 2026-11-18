@@ -60,6 +60,7 @@ def test_staging_requires_explicit_new_postgres(config, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/nova_central_542_dispos")
     monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "central-only.internal")
     monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "nova_central_542_dispos")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_USER", "user")
     module._config()
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/amicor")
     with pytest.raises(RuntimeError):
@@ -98,5 +99,38 @@ def test_disposable_test_mode_denied_in_staging(config, monkeypatch):
 
 def test_disposable_test_mode_denied_with_render_service_id(config, monkeypatch):
     monkeypatch.setenv("RENDER_SERVICE_ID", "srv-disallowed-runtime")
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+@pytest.mark.parametrize("url", [
+    "postgresql://other:pass@central-only.internal/nova_central_542_dispos",
+    "postgresql://user:pass@other.internal/nova_central_542_dispos",
+    "postgresql://user:pass@central-only.internal/amicor",
+    "postgresql://user:pass@central-only.internal:5433/nova_central_542_dispos",
+    "postgresql://user:pass@central-only.internal/nova_central_542_dispos?options=-csearch_path%3Dpublic",
+    "postgresql://user:pass@central-only.internal/nova_central_542_dispos#fragment",
+    "postgresql://user@central-only.internal/nova_central_542_dispos",
+])
+def test_staging_rejects_wrong_database_identity_or_ambiguous_url(config, monkeypatch, url):
+    monkeypatch.setenv("NOVA_CENTRAL_ISOLATED_TEST", "0")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "central-only.internal")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "nova_central_542_dispos")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_USER", "user")
+    monkeypatch.setenv("DATABASE_URL", url)
+    with pytest.raises(RuntimeError):
+        module._config()
+
+
+def test_staging_requires_separate_approved_database_user(config, monkeypatch):
+    monkeypatch.setenv("NOVA_CENTRAL_ISOLATED_TEST", "0")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@central-only.internal/nova_central_542_dispos")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_HOST", "central-only.internal")
+    monkeypatch.setenv("NOVA_CENTRAL_EXPECTED_DB_NAME", "nova_central_542_dispos")
+    monkeypatch.delenv("NOVA_CENTRAL_EXPECTED_DB_USER", raising=False)
     with pytest.raises(RuntimeError):
         module._config()
