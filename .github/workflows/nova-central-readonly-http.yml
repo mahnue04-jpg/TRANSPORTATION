@@ -5,6 +5,7 @@ on:
     branches:
       - ci/fix-render-backend-python-runner-20261117
       - feature/nova-workspace-readonly-readiness-542
+      - feature/nova-central-tenant-journey-store-542
     paths:
       - "backend/app/core/nova/workspace/central_journey_readonly.py"
       - "backend/app/core/nova/workspace/router.py"
