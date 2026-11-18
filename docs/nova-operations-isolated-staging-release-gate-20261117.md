@@ -97,3 +97,26 @@ The owner separately approved a **maximum $13/month base compute** for a dedicat
 7. Capture one PASS/FAIL record: exact web/DB IDs, test SHA, live logs, schema identity, backup/restore proof, access controls, costs and unverified blockers. Do not move production or merge these draft PRs on the strength of a diagnostic LIVE deploy.
 
 **Current verdict:** infrastructure diagnostic stage PASS (Render LIVE / DB AVAILABLE); independent HTTP endpoint response unverified; actual Operations staging application, connected DB migration, S3, hosted worker and customer readiness NOT TESTED.
+
+
+## Staging application activation preflight — November 18, 2026 (read-only)
+
+**Live inventory:** Render dedicated web `srv-dbujmrmk1f9s73afmp6g` remains configured for diagnostic-only Python HTTP 503 responses, autoDeploy OFF, build pinned to `3ea5f4ac738d2d36ec8408a8082fc8ff70861fcc`. Dedicated PostgreSQL `dpg-dbujmp6k1f9s73afmed0-a` remains AVAILABLE, DB name `nova_operations_staging_db_541`. These are the only two resources approved under the $13/month base-compute ceiling.
+
+**GitHub:** Draft PR #541 head `2433f7db0b1ee5e44b3c8eb8f61228db9a4ed047` after documentation updates. At inspection its PR-triggered CI run #44247026385 had three specialist jobs SUCCESS; the broad backend diagnostic was still IN PROGRESS. Reconfirm the final exact code SHA and all four tests immediately before any deployment. A documentation commit changing the head is not automatically an accepted application SHA.
+
+**Critical configuration hazard:** repository `render.yaml` targets a separate production-oriented AMICOR deployment, includes `releaseCommand: alembic upgrade heads && ...ensure_customer_payment_tables()`, and enables `HEALTH_ISF_AUTO_DISPATCH_ENABLED=true`. **Do not apply this root Blueprint or reuse its environment/secrets** for Operations staging. Keep autoDeploy OFF and explicit staging-only service settings.
+
+### Proposed controlled application sequence — NOT YET APPROVED
+
+A. Read-only inventory and backup review: prove the dedicated PostgreSQL identity, backup/restore approach, retention, and any charges. Do not claim recovery capability without a successful restore rehearsal.
+B. Prepare a **staging-only build and startup configuration** using tested Python 3.12, `backend/requirements.txt`, `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, and **no releaseCommand**. All auto-dispatch, scheduled workers, Operations queued/legacy processing flags, Stripe/payment, external communications, and private S3 remain OFF; no production secrets.
+C. Explicitly review all application startup side effects before enabling any connection; the general `app.main` entrypoint runs multiple AMICOR modules, not an Operations-only minimal router. Do not assume that flags alone prevent startup writes.
+D. With explicit owner approval, pin the exact reviewed code SHA to the already approved staging web service, and do one isolated diagnostic app deployment **without connecting a database or running any schema migration**. Validate startup/readiness; if the global app requires a DB to start, stop and return to the owner with evidence, not a production DB workaround.
+E. Only after a separate backup/identity approval: bind the **dedicated** database using secret-scoped settings and independently execute the separately approved `backend/staging_migrations/operations_lease_schema.py` on that database only. No routine Blueprint/release-command migration.
+F. Only after independent private S3 cost and security approval: connect isolated non-public storage and run complete synthetic owner-authenticated CSV intake, review, download, cancellation, worker restart and orphan inventory tests. No actual customers or autonomous worker.
+G. Record exact service/DB/commit IDs, pass/fail logs, backup/restore proof, no-cost-overrun check, permissions, and rollback plan. Keep all unsafe flags OFF unless individually authorized.
+
+### Current boundary
+
+The $13/month compute approval **does not approve** changing the running diagnostic startup, connecting the database, staging schema DDL, private S3, hosted workers, actual client processing, or third-party charges. Resource provisioning is complete; application acceptance is pending an explicit separate approval. The correct next decision is a single controlled staging-only application smoke-test request after reviewed startup side effects and final CI verification.
