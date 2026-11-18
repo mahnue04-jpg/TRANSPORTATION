@@ -61,6 +61,7 @@ def good_report():
         can_create_schema=False,
         can_create_public_table=False,
         can_create_temp_table=False,
+        role_memberships=[],
         other_tables={},
         tables={
             "platform_users": {
@@ -169,3 +170,20 @@ def test_unrelated_table_inventory_must_be_present():
     report = good_report()
     del report["other_tables"]
     assert "unknown_unrelated_table_privileges" in audit.assess_privileges(report)
+
+
+def test_missing_role_membership_inventory_fails_closed():
+    report = good_report()
+    del report["role_memberships"]
+    assert "unknown_role_memberships" in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("memberships", [
+    ["legacy_admin"],
+    ["public_reader"],
+    ["reader_group", "admin_group"],
+])
+def test_direct_or_transitive_role_membership_fails_closed(memberships):
+    report = good_report()
+    report["role_memberships"] = memberships
+    assert "unexpected_role_memberships" in audit.assess_privileges(report)
