@@ -1298,3 +1298,35 @@ def test_owner_http_restore_unbound_input_after_interrupted_upload(
                     csvjobs.jobs)).scalar_one() == 1
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_initial_queued_csv_private_readback_failure_never_enqueues_claimable_work(
+    postgres, monkeypatch,
+):
+    """A storage receipt without a readable, intact object cannot start a job."""
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.core.nova.work_revenue.operations_private_input import PrivateInputBlocked
+    from app.core.nova.work_revenue.operations_queued_csv_pipeline import submit_queued_csv
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    leases.lease_metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    try:
+        def broken_readback(*args, **kwargs):
+            raise IOError("synthetic object read outage")
+        monkeypatch.setattr(store, "retrieve", broken_readback)
+        with pytest.raises(PrivateInputBlocked, match="cannot be retrieved"):
+            submit_queued_csv(
+                factory, organization_id="synthetic-org",
+                owner_user_id="synthetic-owner", engagement_id="synthetic-eng",
+                task_id="synthetic-csv-task", request_key="input-readback-failure",
+                raw=b"Name\nAda\n", store=store, authorize=lambda *_: True)
+        with factory() as db:
+            row = db.execute(sa.select(leases.lease_jobs)).mappings().one()
+            assert row["state"] == "QUEUED"
+            assert row["input_ref"] is None
+            assert row["attempts"] == 0
+            assert leases.claim(db, require_bound_input=True) is None
+            assert db.execute(sa.select(csvjobs.jobs.c.status)).scalar_one() == "PROCESSING"
+    finally:
+        leases.lease_metadata.drop_all(engine)
