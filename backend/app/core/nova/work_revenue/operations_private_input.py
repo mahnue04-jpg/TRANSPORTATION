@@ -33,6 +33,13 @@ def _valid_identity(value: str, maximum: int = 36) -> bool:
             and value.isascii() and all(c.isalnum() or c in "-_" for c in value))
 
 
+def _expected_prefix(organization_id: str, owner_user_id: str, job_id: str) -> str:
+    if not all(_valid_identity(value) for value in (
+            organization_id, owner_user_id, job_id)):
+        raise PrivateInputBlocked("Invalid private input job scope")
+    return f"{organization_id}/{job_id}/nova-csv-input-{owner_user_id}/"
+
+
 def persist_private_csv_input(
     *, organization_id: str, owner_user_id: str, job_id: str, raw: bytes,
     store,
@@ -47,6 +54,7 @@ def persist_private_csv_input(
         raise PrivateInputBlocked("Invalid private input job scope")
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_INPUT_BYTES:
         raise PrivateInputBlocked("Invalid CSV input size")
+    prefix = _expected_prefix(organization_id, owner_user_id, job_id)
     digest = hashlib.sha256(raw).hexdigest()
     # An owner-separated job path prevents accidental reuse across owners.
     # The storage adapter must independently enforce private bucket access.
@@ -59,7 +67,9 @@ def persist_private_csv_input(
         stream=BytesIO(raw),
     )
     if (not isinstance(saved, (tuple, list)) or len(saved) < 3
-            or not isinstance(saved[1], str) or not saved[1]
+            or not isinstance(saved[1], str)
+            or not saved[1].startswith(prefix)
+            or len(saved[1]) > 512
             or saved[2] != len(raw)):
         raise PrivateInputBlocked("Private input write not confirmed")
     return PrivateInputReceipt(storage_ref=saved[1], sha256=digest, size=len(raw))
@@ -80,6 +90,10 @@ def load_private_csv_input(
         raise PrivateInputBlocked("Invalid private input job scope")
     if not isinstance(storage_ref, str) or not storage_ref:
         raise PrivateInputBlocked("Durable private input reference required")
+    if (not storage_ref.startswith(_expected_prefix(
+            organization_id, owner_user_id, job_id))
+            or len(storage_ref) > 512):
+        raise PrivateInputBlocked("Private input reference scope mismatch")
     if not isinstance(expected_sha256, str):
         raise PrivateInputBlocked("Input fingerprint required")
     if len(expected_sha256) != 64 or any(c not in "0123456789abcdef"
