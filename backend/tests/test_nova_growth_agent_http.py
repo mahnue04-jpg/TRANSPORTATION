@@ -23,7 +23,7 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _headers(client: TestClient, email: str = "dispatcher@amicor.local") -> dict[str, str]:
+def _headers(client: TestClient, email: str = "admin@amicor.local") -> dict[str, str]:
     res = client.post("/api/auth/login", json={"email": email, "password": SEED_PASSWORD})
     assert res.status_code == 200, res.text
     token = res.json().get("access_token") or res.json().get("token")
@@ -48,6 +48,18 @@ def test_flags_and_plans_authenticated(client: TestClient) -> None:
     plans = client.get("/api/nova/growth-agent/plans", headers=headers)
     assert plans.status_code == 200
     assert plans.json()["subscriptions_enabled"] is False
+
+
+def test_dispatcher_cannot_access_growth_management(client: TestClient) -> None:
+    # Use a real seeded non-owner login, not a bypassed dependency.
+    headers = _headers(client, email="dispatcher@amicor.local")
+    for method, path in (
+        ("get", "/api/nova/growth-agent/flags"),
+        ("get", "/api/nova/growth-agent/plans"),
+        ("get", "/api/nova/growth-agent/health"),
+    ):
+        response = getattr(client, method)(path, headers=headers)
+        assert response.status_code == 403, (path, response.text)
 
 
 def test_unauthenticated_api_rejected(client: TestClient) -> None:

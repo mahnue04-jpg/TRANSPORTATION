@@ -5,13 +5,14 @@ name: Nova Growth Agent
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, cursor/nova-growth-agent-mvp-1565]
     paths:
       - "backend/app/core/nova/growth_agent/**"
       - "backend/static/nova-growth/**"
       - "backend/migrations/versions/20261112_nova_growth_agent.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
       - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
+      - "backend/migrations/versions/20261118_nova_ga_campaign_review.py"
       - "backend/tests/test_nova_growth_agent_*.py"
       - "docs/nova/growth-agent/**"
       - ".github/workflows/nova-growth-agent.yml"
@@ -68,7 +69,19 @@ jobs:
             tests/test_nova_growth_agent_integration.py \
             tests/test_nova_growth_agent_security.py \
             tests/test_nova_growth_agent_http.py \
-            tests/test_nova_growth_agent_worker_retention.py
+            tests/test_nova_growth_agent_worker_retention.py \
+            tests/test_nova_growth_agent_campaign_preview.py \
+            tests/test_nova_growth_agent_campaign_registry.py \
+            tests/test_nova_growth_owner_gate.py
+
+  growth-demo-report:
+    name: growth-demo-report-node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify synthetic owner demo reporting contracts
+        run: node --test backend/static/nova-growth/demo-report.test.cjs
 
   growth-agent-postgres:
     name: growth-agent-postgres-dispos
