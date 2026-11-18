@@ -1,6 +1,21 @@
 # PR #556 — private Growth staging database acceptance gate
 
-**Status: FRESH EXPORT AVAILABLE; RESTORE NOT VERIFIED. NO-GO for deployment.**
+**CURRENT STATUS (November 18, 2026): CODE CI GREEN; PHYSICAL PITR REPLAY VERIFIED; PRIVATE DATA CONTENT NOT VERIFIED. STAGING DEPLOY NO-GO.**
+
+## Latest authoritative release checkpoint (supersedes historical pre-restore status notes below)
+
+- Current reviewed draft candidate: `7064d03f2a070b72883c88e323d6e8f17e541288`, on `integration/growth-555-staging-preserve-20261118`.
+- Exact candidate GitHub Actions **SUCCESS**: [Growth workflow 44300656030](https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/44300656030) and [full backend diagnostic 44300656038](https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/44300656038). These certify code/fixture tests only.
+- Growth migration now fails closed on an already-existing incomplete campaign-review table: checks columns, types, nullability, primary key, unique constraint, and owner index. Added in-memory regression tests in `test_nova_growth_campaign_migration_schema.py` and wired them into CI.
+- Original `nova-ga-490-dispos` (`dpg-dbqv7mmtlv9c73d7tnb0-a`) and isolated, separately billed PITR copy `nova-ga-490-dispos-copy` (`dpg-dbuku8dckfvc73ch22e0-a`) both show **available** with external IP allowlists empty. Render restore logs show pgBackRest success and PostgreSQL startup; **actual copy Alembic revision, table definitions and row counts have not been compared through SQL**.
+- The Nov 18 12:42 AM logical `.dir.tar.gz` export is still a separate, **unrestored/unverified** artifact; successful managed PITR does not prove its integrity.
+- Current staging web service `srv-dbqv8ip5efls73dtpmo0` is still auto-deploy OFF and pinned to `0ad5c5e178f260067e2a95447a01745ed2e09a8b`. PR remains draft/unmerged. No staging database migration, Studio/production change, paid/live traffic, or new services authorized by this checkpoint.
+- **Remaining release gate:** authorized in-environment/private read-only comparison of isolated PITR copy (and original baseline if feasible); record Alembic head, schema/constraint inventory, non-PII aggregate counts, and the recovered timestamp. The hosted Render SQL connector cannot access the copy due to secure networking; do not open its external IP allowlist. If no private runner is available, report the verification gap and seek a separately approved exception or supported path.
+- **Billing/cleanup:** temporary recovery copy may continue to incur roughly $6.30/month prorated until deleted; do not delete it without explicitly verifying and authorizing its exact ID. Never delete the original database. No connected deletion action is available here.
+- After data acceptance, any migration, merge, deployment, flags, or billing-related change requires **new exact-scope approval** with commit/service/database identity and rollback plan.
+
+The sections below preserve historical planning/evidence, including actions later carried out. Apply this latest checkpoint for current status.
+
 
 This document separates evidence already obtained through public GitHub CI from
 unverified evidence for the **existing** Render Growth staging PostgreSQL.
