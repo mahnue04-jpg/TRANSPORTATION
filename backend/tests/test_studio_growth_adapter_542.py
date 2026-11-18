@@ -107,6 +107,24 @@ def test_duplicate_input_is_deterministic():
     assert convert() == convert()
 
 
+def test_event_identity_includes_tenant_and_campaign():
+    first = convert()
+    other_campaign = metadata()
+    other_campaign["campaign_id"] = "campaign-2"
+    second = convert(other_campaign)
+    other_tenant = metadata()
+    other_tenant["organization_id"] = "org-B"
+    third = adapter.staging_asset_event(
+        other_tenant, organization_id="org-B",
+        source_identity="studio-service-A",
+        occurred_at=NOW, enabled=True,
+    )
+    assert first.event_id == first.idempotency_key == "studio-asset:org-A:campaign-1:asset-1"
+    assert second.idempotency_key == "studio-asset:org-A:campaign-2:asset-1"
+    assert third.idempotency_key == "studio-asset:org-B:campaign-1:asset-1"
+    assert len({first.event_id, second.event_id, third.event_id}) == 3
+
+
 def test_missing_required_field_is_rejected():
     row = metadata()
     del row["project_id"]
@@ -120,7 +138,8 @@ def studio_rows():
     asset = SimpleNamespace(id="asset-1", project_id="project-1",
                             owner_id="owner-1", kind="video", status="GENERATED")
     approval = dict(organization_id="org-A", project_id="project-1",
-                    asset_id="asset-1", owner_id="owner-1", approved=True,
+                    asset_id="asset-1", campaign_id="campaign-1",
+                    owner_id="owner-1", approved=True,
                     action="share_campaign_asset_with_growth")
     return project, asset, approval
 
@@ -163,6 +182,7 @@ def test_forged_studio_asset_rows_are_denied(field, value):
     ("organization_id", "org-B"),
     ("project_id", "other-project"),
     ("asset_id", "other-asset"),
+    ("campaign_id", "other-campaign"),
     ("owner_id", "wrong-owner"),
     ("approved", False),
     ("action", "post_to_social_media"),
@@ -215,7 +235,8 @@ def test_owner_scoped_store_and_persisted_approval_reader_required():
     ]
     assert calls == [dict(
         organization_id="org-A", owner_id="owner-1", project_id="project-1",
-        asset_id="asset-1", action="share_campaign_asset_with_growth",
+        asset_id="asset-1", campaign_id="campaign-1",
+        action="share_campaign_asset_with_growth",
     )]
 
 
@@ -256,6 +277,31 @@ def test_server_side_source_of_truth_boundary_fails_closed(failure):
             authenticated_owner_id="owner-1",
             authenticated_studio_principal="studio-service-A",
             occurred_at=NOW, enabled=failure != "disabled",
+        )
+
+
+def test_asset_grant_does_not_authorize_a_different_campaign():
+    project, asset, approval = studio_rows()
+
+    class Store:
+        def get_project(self, project_id, owner_id):
+            return project
+
+        def list_assets(self, project_id, owner_id):
+            return [asset]
+
+    def reader(**kwargs):
+        assert kwargs["campaign_id"] == "campaign-2"
+        return approval
+
+    with pytest.raises(PermissionError):
+        adapter.read_studio_asset_for_growth(
+            studio_store=Store(), approval_reader=reader,
+            project_id="project-1", asset_id="asset-1",
+            campaign_id="campaign-2", organization_id="org-A",
+            authenticated_owner_id="owner-1",
+            authenticated_studio_principal="studio-service-A",
+            occurred_at=NOW, enabled=True,
         )
 
 

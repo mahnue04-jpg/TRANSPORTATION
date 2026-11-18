@@ -168,6 +168,7 @@ class OwnerGrantLedger:
             "owner_id": owner_id,
             "project_id": project_id,
             "asset_id": asset_id,
+            "campaign_id": campaign_id,
             "approved": True,
             "action": ACTION,
         }

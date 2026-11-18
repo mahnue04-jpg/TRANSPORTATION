@@ -37,6 +37,11 @@ bridge = load("studio_growth_owner_bridge")
 NOW = datetime(2026, 11, 17, 21, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _owner_grants_enabled(monkeypatch):
+    monkeypatch.setenv("NOVA_STUDIO_GROWTH_OWNER_GRANTS_ENABLED", "true")
+
+
 def grant():
     return grants.OwnerGrant(
         grant_id="grant-1", organization_id="org-A", owner_user_id="owner-1",
@@ -163,5 +168,23 @@ def test_default_off_and_no_registered_http_route(monkeypatch, tmp_path):
             bridge.preview_approved_studio_campaign(**args)
         assert not hasattr(bridge, "router")
         assert "app.main" not in sys.modules
+    finally:
+        db.close()
+
+
+def test_owner_grant_switch_is_independent_of_staging(monkeypatch, tmp_path):
+    args, db = setup(tmp_path)
+    monkeypatch.setenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED", "true")
+    monkeypatch.setenv("NOVA_STUDIO_GROWTH_OWNER_GRANTS_ENABLED", "true")
+    args["enabled"] = None
+    try:
+        result = bridge.preview_approved_studio_campaign(**args)
+        assert result["mode"] == "synthetic_read_only_preview"
+        monkeypatch.delenv("NOVA_STUDIO_GROWTH_OWNER_GRANTS_ENABLED", raising=False)
+        with pytest.raises(PermissionError, match="owner grant"):
+            bridge.preview_approved_studio_campaign(**args)
+        args["enabled"] = True
+        with pytest.raises(PermissionError, match="owner grant"):
+            bridge.preview_approved_studio_campaign(**args)
     finally:
         db.close()

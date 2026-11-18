@@ -43,30 +43,35 @@ def preview_approved_studio_campaign(
       - grant_ledger points at an isolated, provisioned grant table;
       - growth_profile comes from trusted GrowthAgentService.get_profile(org).
     This function DOES NOT independently prove these prerequisites. No endpoint
-    is registered, and the default-off flag cannot authorize real publishing.
+    is registered. The staging-adapter and owner-grant switches default off
+    independently and cannot authorize real publishing.
     """
     if enabled is None:
         enabled = os.getenv("NOVA_STUDIO_GROWTH_STAGING_ADAPTER_ENABLED") == "true"
     if enabled is not True or os.getenv("NOVA_STUDIO_GROWTH_LIVE_ENABLED") == "true":
         raise PermissionError("Studio-Growth bridge disabled")
 
+    # Do not forward the staging-adapter flag. Owner grants have their own
+    # default-off switch and must stay independently disableable.
     owner = authorize_owner_grant_context(
         authenticated_user=authenticated_user,
         requested_organization_id=requested_organization_id,
         membership_reader=membership_reader,
-        enabled=enabled,
     )
 
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("timezone-aware preview time required")
     if not callable(getattr(grant_ledger, "read_approved", None)):
         raise PermissionError("trusted approved grant reader required")
+    requested_campaign_id = campaign_id
 
     def approval_reader(*, organization_id: str, owner_id: str,
-                        project_id: str, asset_id: str, action: str):
+                        project_id: str, asset_id: str, campaign_id: str,
+                        action: str):
         if (
             organization_id != owner.organization_id
             or owner_id != owner.user_id
+            or campaign_id != requested_campaign_id
             or action != "share_campaign_asset_with_growth"
         ):
             raise PermissionError("grant request scope denied")

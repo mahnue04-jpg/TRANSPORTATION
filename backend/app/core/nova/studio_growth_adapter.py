@@ -59,19 +59,23 @@ def staging_asset_event(
     if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
         raise ValueError("timezone-aware creation time required")
     asset_id = str(raw["asset_id"])
+    campaign_id = str(raw["campaign_id"])
+    # Grants are unique per tenant and campaign, so the envelope identity must
+    # be too. Asset id alone collides across organizations and campaigns.
+    handoff_key = "studio-asset:" + organization_id + ":" + campaign_id + ":" + asset_id
     return AgentEvent(
         schema_version=SCHEMA_VERSION,
-        event_id="studio-asset:" + asset_id,
-        correlation_id=str(raw["campaign_id"]),
+        event_id=handoff_key,
+        correlation_id=campaign_id,
         organization_id=organization_id,
         source_agent=Agent.CREATIVE_STUDIO,
         target_agent=Agent.GROWTH,
         event_type=EventType.ASSET_READY,
         subject_kind="campaign",
-        subject_id=str(raw["campaign_id"]),
+        subject_id=campaign_id,
         synthetic=True,
         occurred_at=occurred_at,
-        idempotency_key="studio-asset:" + asset_id,
+        idempotency_key=handoff_key,
         payload_reference="synthetic:" + asset_id,
     )
 
@@ -110,13 +114,14 @@ def staged_studio_record_event(
         raise PermissionError("Studio asset must be generated")
     if getattr(asset, "kind", None) not in ("video", "image"):
         raise PermissionError("non-campaign Studio asset type")
-    required_approval = {"organization_id", "project_id", "asset_id", "owner_id",
-                         "approved", "action"}
+    required_approval = {"organization_id", "project_id", "asset_id", "campaign_id",
+                         "owner_id", "approved", "action"}
     if not isinstance(owner_approval, Mapping) or set(owner_approval) != required_approval:
         raise PermissionError("trusted persisted approval evidence required")
     if (owner_approval["organization_id"] != organization_id
             or owner_approval["project_id"] != getattr(project, "id", None)
             or owner_approval["asset_id"] != getattr(asset, "id", None)
+            or owner_approval["campaign_id"] != campaign_id
             or owner_approval["owner_id"] != authenticated_owner_id
             or owner_approval["approved"] is not True
             or owner_approval["action"] != "share_campaign_asset_with_growth"):
@@ -156,7 +161,7 @@ def read_studio_asset_for_growth(
     studio_store is expected to be the trusted server-side CreativeStudioStore
     with get_project(project_id, owner_id) and list_assets(project_id, owner_id).
     approval_reader must be a *trusted server-side* callable returning a
-    persisted approval for this exact tenant/owner/project/asset/action.
+    persisted approval for this exact tenant/owner/project/asset/campaign/action.
     No such persistent approval mechanism is wired in this PR. Missing
     approvals fail closed; this is not a route or service integration.
     """
@@ -188,6 +193,7 @@ def read_studio_asset_for_growth(
         owner_id=authenticated_owner_id,
         project_id=project_id,
         asset_id=asset_id,
+        campaign_id=campaign_id,
         action="share_campaign_asset_with_growth",
     )
     return staged_studio_record_event(

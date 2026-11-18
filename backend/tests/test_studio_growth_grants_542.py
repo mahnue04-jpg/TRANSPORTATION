@@ -50,7 +50,7 @@ def test_owner_grant_roundtrip_and_restart(tmp_path):
     assert book.record(grant(), authenticated_owner_id="owner-A") == "duplicate"
     assert read(book) == dict(
         organization_id="org-A", owner_id="owner-A", project_id="project-1",
-        asset_id="asset-1", approved=True,
+        asset_id="asset-1", campaign_id="campaign-1", approved=True,
         action="share_campaign_asset_with_growth",
     )
     con.close()
