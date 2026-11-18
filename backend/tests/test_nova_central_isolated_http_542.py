@@ -514,3 +514,81 @@ def test_isolated_owner_denies_missing_or_invalid_expiration(sandbox, monkeypatc
         payload["exp"] = time.time() + 10 * 86400
     assert _get(app, auth._jwt_sign(payload)).status_code == 401
     assert writes == []
+
+
+def test_owner_token_survives_restart_but_not_signing_key_change(tmp_path):
+    """Disposable three-process test of stable issuer, audience, and signing key.
+
+    No Render or customer accounts; the fictional owner is pre-provisioned once,
+    then read by a fresh process without running any schema/seed startup.
+    """
+    import os
+    import subprocess
+    import sys
+
+    path = tmp_path / "central-restart.sqlite"
+    env = dict(os.environ)
+    env.update({
+        "AMICOR_ENVIRONMENT": "test",
+        "APP_ENV": "test",
+        "NOVA_CENTRAL_ISOLATED_TEST": "1",
+        "DATABASE_URL": "sqlite:///" + str(path),
+        "NOVA_CENTRAL_APPROVED_COMMIT": "a" * 40,
+        "RENDER_GIT_COMMIT": "a" * 40,
+        "JWT_SECRET": "fictional-isolated-staging-key-" + "a" * 48,
+        "SECRET_KEY": "fictional-isolated-staging-key-" + "a" * 48,
+        "JWT_ISSUER": "nova-central-isolated-staging",
+        "JWT_AUDIENCE": "nova-central-owner-readiness",
+        "NOVA_CENTRAL_JOURNEY_READONLY_ENABLED": "false",
+        "NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED": "false",
+    })
+    setup = """
+import json
+from app import auth
+from app.db.models import User
+from app.db.session import engine, SessionLocal
+User.__table__.create(engine)
+with SessionLocal() as db:
+    db.add(User(id="owner-A", email="owner@example.invalid", hashed_password="fictional",
+                role="admin", authorized_roles=json.dumps(["admin"]),
+                session_role="admin", organization_id="org-A", auth_version=0,
+                is_active=True, is_verified=True))
+    db.commit()
+print(auth.create_access_token({
+    "sub": "owner-A", "role": "admin", "organization_id": "org-A",
+    "auth_version": 0, "email": "owner@example.invalid",
+}))
+"""
+    request = """
+import sys
+from fastapi.testclient import TestClient
+from nova_central_isolated import create_app
+app = create_app()
+assert not app.dependency_overrides
+with TestClient(app) as client:
+    r = client.get("/api/nova/workspace/central/journeys",
+                   headers={"Authorization": "Bearer " + sys.argv[1]})
+    print(r.status_code)
+    if r.status_code == 200:
+        assert r.json()["integration_status"] == "not_connected"
+"""
+    def run(script, chosen_env, *args):
+        result = subprocess.run(
+            [sys.executable, "-c", script, *args], cwd=str(FILE.parent),
+            env=chosen_env, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr[-2600:]
+        return result.stdout.strip()
+
+    token = run(setup, env).splitlines()[-1]
+    enabled = dict(env, NOVA_CENTRAL_JOURNEY_READONLY_ENABLED="true")
+    # A new process with the same key must accept the original owner token.
+    assert run(request, enabled, token).splitlines()[-1] == "200"
+    # The unchanged token must be rejected on a separate process with
+    # a different valid signing secret (no fallback to a shared key).
+    changed = dict(enabled)
+    changed["JWT_SECRET"] = changed["SECRET_KEY"] = (
+        "fictional-isolated-staging-key-" + "b" * 48
+    )
+    assert run(request, changed, token).splitlines()[-1] == "401"
+    assert path.exists()
