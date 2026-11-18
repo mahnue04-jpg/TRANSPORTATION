@@ -495,3 +495,22 @@ assert any(item[0] == "forbidden_mutation" for item in observed), observed
         stderr=subprocess.PIPE, text=True, timeout=25,
     )
     assert proc.returncode == 0, proc.stderr[-2600:]
+
+
+@pytest.mark.parametrize("exp_kind", ["missing", "string", "boolean", "long_lived"])
+def test_isolated_owner_denies_missing_or_invalid_expiration(sandbox, monkeypatch, exp_kind):
+    import time
+    app, _, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    payload = {
+        "sub": "owner-A", "email": "owner@example.invalid",
+        "role": "admin", "organization_id": "org-A", "auth_version": 0,
+    }
+    if exp_kind == "string":
+        payload["exp"] = "not-a-time"
+    elif exp_kind == "boolean":
+        payload["exp"] = True
+    elif exp_kind == "long_lived":
+        payload["exp"] = time.time() + 10 * 86400
+    assert _get(app, auth._jwt_sign(payload)).status_code == 401
+    assert writes == []
