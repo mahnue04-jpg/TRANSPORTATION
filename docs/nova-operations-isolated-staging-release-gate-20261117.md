@@ -49,3 +49,16 @@ The Operations package is **not** a self-contained pull request against `main`. 
 The dedicated CI for PR #541 at SHA `230723e0daa6bec9804eb5c3dc9139bff0370755`, run #44244423782, passed Operations PostgreSQL integration, CSV regression, and Work & Revenue qualification; the broad backend diagnostic was still running when last inspected. Do not declare the full latest-head CI green until that job completes successfully.
 
 **Staging plan prerequisite:** produce a read-only combined diff manifest from all ancestor PRs and confirm no unrelated module, database, secret, paid-provider, Render resource, or production auto-deploy is altered. Then make a single owner approval request naming precise staging-only resources, expected charges, migration target, recovery method and SHA.
+
+
+## Alembic integrity review — before staging
+
+A migration safety audit found that the initial proposed Operations lease revision could return successfully outside authorized staging without creating its table, or return successfully on downgrade without removing the schema. Such operations could advance or rewind Alembic's version ledger without equivalent database changes. This has been corrected **in draft source**, not executed.
+
+- `upgrade()` now fails rather than silently no-ops when environment/approval conditions are missing or incompatible.
+- An explicit `NOVA_OPERATIONS_EXPECTED_STAGING_DATABASE` must match PostgreSQL `SELECT current_database()` before any table DDL. An approval flag alone is insufficient to select the destination.
+- `downgrade()` fails unless a separately approved, retention-safe rollback is designed.
+- Disposable table metadata and the draft migration now share the private-input binding check constraint. Tests cover prohibited environments, missing/wrong DB target, schema parity and refused rollback.
+- The older successful full run #44244423782 verified SHA `230723e0daa6bec9804eb5c3dc9139bff0370755` **before these migration hardening changes**. The newer migration changes have their own CI gate; do not treat the previous success as evidence that the new migration has passed.
+
+This is not permission to apply the migration to any connected database. A dedicated Operations staging service/database, review of Alembic ancestry, approved backup, and separate owner approval are still mandatory.
