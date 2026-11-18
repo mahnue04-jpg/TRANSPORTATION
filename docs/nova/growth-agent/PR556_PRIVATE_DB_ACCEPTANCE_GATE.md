@@ -1,6 +1,6 @@
 # PR #556 — private Growth staging database acceptance gate
 
-**Status: PREPARED ONLY; NOT EXECUTED. NO-GO for deployment.**
+**Status: FRESH EXPORT AVAILABLE; RESTORE NOT VERIFIED. NO-GO for deployment.**
 
 This document separates evidence already obtained through public GitHub CI from
 unverified evidence for the **existing** Render Growth staging PostgreSQL.
@@ -70,7 +70,7 @@ been created or started by this document.
 ## Owner-provided Recovery page evidence (November 18, 2026)
 
 From the existing **nova-ga-490-dispos** Render Recovery screen, the owner
-observed these settings (no recovery action performed):
+observed these settings before the subsequently approved fresh export:
 
 - **Point-in-Time Recovery:** available for timestamps within the previous
   **3 days**. Render offers a 7-day window with a Pro workspace upgrade;
@@ -87,14 +87,26 @@ observed these settings (no recovery action performed):
   window does **not** reach back to either November 14 or November 12,
   although these exports are listed separately.
 
-**Revised gate:** Mark recovery controls **OBSERVED**, not
-backup/restore **VERIFIED**. Before any migration/deployment obtain exact
-owner approval to either (a) create a fresh logical export, with its status,
-retention and any cost confirmed, followed by a separately approved isolated
-restore rehearsal, or (b) use a separately approved point-in-time restore to
-a new **isolated** target. Do not click **Restore database**, **Create export**,
-or **Upgrade** until approved, and never restore over the existing staging
-database. Preserve the existing two export entries without deleting them.
+**Updated gate:** Recovery controls observed and fresh export available; restore success still UNVERIFIED. Do not create additional exports, initiate restores, or upgrade without separate approval. Preserve existing exports.
+
+## Fresh export available (owner-verified November 18, 2026)
+
+Following explicit owner approval for one logical export only, the owner
+confirmed the Render Recovery UI now lists a downloadable logical export
+dated **November 18, 2026 at 12:42 AM**, in .dir.tar.gz format.
+The November 14 and November 12 exports remain visible. Three exports
+are now listed; do not store signed/tokenized download URLs.
+
+This is **EXPORT AVAILABLE**. It is NOT evidence of archive integrity,
+schema contents, an actual restore, or a validated migration head.
+No Render service, database instance, restore or deployment was created.
+The owner approved only the one fresh export, NOT an isolated restore,
+migration, additional paid resources or a deployment. Never put backup
+archives or their signed URLs into GitHub, CI, public storage or chat.
+
+**Remaining gate:** authorize and verify a fresh export restore to a
+separate, isolated destination with a known cost and cleanup plan.
+Do not restore over the existing staging database.
 
 ## Required safe evidence before an exact-version staging update
 
