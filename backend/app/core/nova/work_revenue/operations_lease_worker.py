@@ -19,6 +19,7 @@ def run_one(
     *,
     lease_seconds: int = 60,
     retry_delay_seconds: int = 30,
+    require_bound_input: bool = False,
 ) -> dict:
     """Claim once, perform injected work, and fence completion on a fresh session.
 
@@ -28,7 +29,9 @@ def run_one(
     does not itself prove that such an artifact exists.
     """
     with session_factory() as db:
-        claimed = leases.claim(db, lease_seconds=lease_seconds)
+        claimed = leases.claim(
+            db, lease_seconds=lease_seconds, require_bound_input=require_bound_input
+        )
     if claimed is None:
         return {"state": "idle", "job_id": None}
     try:
