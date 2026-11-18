@@ -21,6 +21,8 @@
 - `operations_private_input.py`: bounded synthetic/private input adapter and SHA-256 verification.
 - `operations_postgres_leases.py`: atomic enqueue, scoped immutable input reference, claim/renew/fencing, retry limits, cancel, reconciliation hold.
 - `operations_lease_worker.py`: explicit one-job executor, strict bound-input option, uncertainty holds.
+- `operations_owner_task_authorizer.py`: authenticated-owner adapter to the existing live saved-task eligibility check; not a background worker service principal.
+- `operations_queued_csv_pipeline.py`: verifies private output by readback and SHA-256 before review publication; separately verifies private output integrity before explicit owner approval.
 - `operations_queued_csv_pipeline.py`: explicit development-only queue intake -> processing -> private review -> owner decision coordinator. Requires an injected independent saved-task authorizer.
 - `operations_lease_reconciliation.py` and `operations_csv_reconciliation_bridge.py`: read-only owner-scoped reconciliation helpers.
 - `20261117_nova_operations_leases.py`: proposed explicit staging-only gated PostgreSQL schema migration; not applied.
@@ -47,7 +49,7 @@ Acceptance matrix: basic successful flow; duplicate request reuses job; changed 
 
 ## Still REQUIRED before any staging execution
 
-1. **Real authorization integration:** Replace injected test-only authorizer with existing authenticated account/organization/engagement/task permissions; recheck revocation at every transition. No HTTP routing is wired to the new coordinator.
+1. **Real authorization integration:** An authenticated-owner adapter now reuses existing saved-task eligibility checks, but the coordinator is not wired to an HTTP route or revocable hosted worker service principal. Require actual owner-authenticated request integration and recheck revocation at every state transition.
 2. **S3 private-object security:** Owner-authorized provider credentials; real private bucket settings; key provenance/scope; immutable or versioned object behavior; non-public ACL; encryption; retention; orphan cleanup; and real storage outage testing. Current tests use fake storage.
 3. **Atomicity and crash windows:** Queue and private writes cross two systems. Reservation-before-write may strand jobs; write-before-bind may orphan artifacts; successful output before DB commit may leave an orphan. Add an audited outbox/reconciler and recovery rules. Current code fails closed but cannot automatically repair every window.
 4. **Lease/output reconciliation:** Held jobs whose customer CSV row remains `PROCESSING` need a private-output provenance record and deliberate owner-approved recovery, without automatic retry. SHA alone is not authorization.
