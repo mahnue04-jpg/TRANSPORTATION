@@ -206,3 +206,28 @@ def test_concurrent_duplicate_enqueue_is_idempotent(database):
         assert len(rows) == 1
         assert rows[0]["state"] == "QUEUED"
         assert rows[0]["attempts"] == 0
+
+
+def test_reconciliation_hold_blocks_expired_reclaim_and_cancel_remains_possible(database):
+    seed(database, "synthetic-hold")
+    now = datetime.now(timezone.utc)
+    with Session(database) as db:
+        active = leases.claim(db, now=now, lease_seconds=5)
+        assert active is not None
+        assert leases.hold_for_reconciliation(
+            db, claimed=active, now=now + timedelta(seconds=6))
+        assert not leases.hold_for_reconciliation(
+            db, claimed=active, now=now + timedelta(seconds=7))
+        assert leases.claim(db, now=now + timedelta(days=2)) is None
+        assert leases.exhaust_expired(db, now=now + timedelta(days=2)) == 0
+        with pytest.raises(leases.LeaseBlocked):
+            leases.complete(db, claimed=active, output_sha256="b" * 64,
+                            now=now + timedelta(seconds=7))
+        assert not leases.cancel(db, job_id="synthetic-hold",
+                                 organization_id="other-org",
+                                 owner_user_id="owner-a")
+        # A scoped owner cancellation is permitted even for a held job only
+        # after separate authorization; until implemented, hold is immutable.
+        row = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "synthetic-hold")).mappings().one()
+        assert row["state"] == "NEEDS_RECONCILIATION"
