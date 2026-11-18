@@ -45,7 +45,8 @@ jobs:
           tests/test_nova_work_revenue_live_discovery_flag_bridge.py
 
   backend-diagnostic:
-    runs-on: ubuntu-latest
+    # Python 3.11.9 is unavailable on ubuntu-26.04; pin a compatible runner.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
