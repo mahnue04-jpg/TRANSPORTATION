@@ -28,6 +28,49 @@ Never infer that a successful CI check means the new code has reached the deploy
   succeeded**; backend diagnostic run `44245199913` **both jobs succeeded**.
   This proves tested source, NOT a running deployed revision.
 
+## Critical ancestry check — STOP direct deployment
+
+Read-only GitHub comparison on November 18:
+
+- Deployed staging SHA: `0ad5c5e178f260067e2a95447a01745ed2e09a8b`.
+- Candidate documentation head: `9f33e6e9d30ef6cdb9672ca5cb30ec28595dc59b`
+  (tested app ancestor: `4350e638873176321fa039d4e228be29ef88bcd5`).
+- GitHub result: **DIVERGED**, common ancestor
+  `e4d0aec2e37af6b23e107c71c03eadf01d586287`.
+- Candidate is **28 commits ahead** of the common ancestor; deployed staging
+  has **72 additional commits** not contained in the candidate branch.
+- Comparing toward staging identifies important files absent from the candidate:
+  `website_inquiries.py`, `website_kv_source.py`,
+  `staging_preflight.py`, `staging_start.py`, owner inbox/Workspace
+  JavaScript and tests, lifespan guards, plus changes to `app/main.py`,
+  `router.py`, auth tests and CI. The comparison does **not** prove that all
+  these features still operate; it proves a direct candidate deploy risks loss.
+- Comparing toward #555 identifies new campaign registry, preview, migration,
+  synthetic reporting and tests. Neither branch is a simple successor to the
+  other. **Do not deploy #555 directly or just repin the current service.**
+
+### Required integration release branch before owner deployment approval
+
+1. Start from the exact **currently deployed staging** SHA to preserve its
+   website inbox, staging preflight/start, and operational workflow. Use an
+   isolated **new Git branch only**; do not change Render.
+2. Integrate the #555 feature commits with an explicit three-way review against
+   the shared ancestor, paying particular attention to `router.py`,
+   `tenant.py`, `test_nova_growth_agent_http.py`, and both CI workflows.
+   Keep the stricter admin role gate, tenant isolation and optional review
+   queue disabled by default. Do not overwrite the deployed website inbox.
+3. Reconcile Alembic: inspect current deployed revision and schema in a
+   disposable **restore**; compare the proposed campaign table migration.
+   Never silently run an unapplied revision on the existing DB.
+4. Run combined Growth, website-inbox, Workspace owner, migrations, Postgres,
+   cross-page, Studio and Work & Revenue regressions on the combined branch.
+   Verify public and owner routing, cancel/reschedule/dedup, synthetic only.
+5. Produce one full-length candidate SHA and a reviewed exact diff against the
+   deployed staging SHA; separately verify backups, recovery procedure, costs,
+   service branch/pin changes and required feature flags.
+6. Only then request new explicit approval for **one** isolated staging update.
+   This document grants no such approval.
+
 ## Explicit blockers before any in-place release
 
 1. **Version gap**: inspect the exact diff and ancestry between the deployed
