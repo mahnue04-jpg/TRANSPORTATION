@@ -84,6 +84,11 @@ def assess_privileges(observed: dict[str, Any]) -> list[str]:
         for function, allowed in function_grants.items():
             if allowed is not False:
                 problems.append("unapproved_function_execute_" + str(function))
+    default_grants = observed.get("default_grants")
+    if not isinstance(default_grants, list):
+        problems.append("unknown_default_acl_inventory")
+    elif default_grants:
+        problems.append("unexpected_default_acl_grants")
     memberships = observed.get("role_memberships")
     if not isinstance(memberships, list):
         problems.append("unknown_role_memberships")
@@ -176,6 +181,20 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                     text("SELECT has_function_privilege(current_user, :routine_oid, 'EXECUTE')"),
                     {"routine_oid": routine["oid"]},
                 ).scalar_one())
+            # Explicit default ACL grants may widen access to future tables
+            # and routines. Reject any grant to PUBLIC or the exact reader role.
+            # This is a conservative preflight; implicit PostgreSQL defaults
+            # and future ownership still require separate privilege tests.
+            default_grants = connection.execute(text(
+                "SELECT d.defaclobjtype AS object_type, "
+                "COALESCE(n.nspname, '*') AS schema_name, "
+                "priv.privilege_type AS privilege "
+                "FROM pg_default_acl AS d "
+                "LEFT JOIN pg_namespace AS n ON n.oid = d.defaclnamespace "
+                "CROSS JOIN LATERAL aclexplode(d.defaclacl) AS priv "
+                "WHERE priv.grantee = 0 OR priv.grantee = "
+                "(SELECT oid FROM pg_roles WHERE rolname = current_user)"
+            )).mappings().all()
             # Catch direct and transitive role memberships; inherited grants,
             # including grants available through SET ROLE, require explicit review.
             # This conservative initial boundary rejects *any* membership.
@@ -256,6 +275,13 @@ def read_privilege_report(url_value: str) -> dict[str, Any]:
                 "public_schema_usage": bool(public_schema_usage),
                 "other_schemas": other_schemas,
                 "non_system_functions": non_system_functions,
+                "default_grants": [
+                    {
+                        "type": str(grant["object_type"]),
+                        "schema": str(grant["schema_name"]),
+                        "privilege": str(grant["privilege"]),
+                    } for grant in default_grants
+                ],
                 "role_memberships": sorted(str(name) for name in memberships),
                 "other_tables": other_tables,
                 "tables": tables,
