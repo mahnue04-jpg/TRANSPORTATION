@@ -73,9 +73,13 @@ def create_app():
     generic Nova router. It cannot report active coordination or real journeys.
     """
     _config()
+    from types import SimpleNamespace
+
     from fastapi import Depends, FastAPI, HTTPException
+    from sqlalchemy import select
     from app import auth
-    from app.auth import ROLE_ADMIN, get_current_user_context, require_any_role
+    from app.db.models import User
+    from app.db.session import get_db
 
     app = FastAPI(title="Nova Central isolated readiness", docs_url=None, redoc_url=None,
                   openapi_url=None)
@@ -84,14 +88,11 @@ def create_app():
     def live():
         return {"status": "alive", "mode": "isolated_readiness"}
 
-    @app.get("/api/nova/workspace/central/journeys",
-             dependencies=[Depends(require_any_role(ROLE_ADMIN))])
-    def readiness(request: Request, response: Response,
-                  user=Depends(get_current_user_context)):
-        if os.getenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "").lower() != "true":
-            raise HTTPException(status_code=404, detail="Nova Central journey view unavailable")
-        if not user.user_id or not user.organization_id or user.organization_id == "global" or user.role != ROLE_ADMIN:
-            raise HTTPException(status_code=403, detail="Organization owner required")
+    def authenticated_owner(request: Request, db=Depends(get_db)):
+        # Use the real signed JWT and persisted account/revocation model, but
+        # SELECT only the eight columns needed for this read-only boundary.
+        # This allows PostgreSQL column-level SELECT privileges and excludes
+        # hashed_password, email, display_name and other private account data.
         authorization = request.headers.get("authorization", "")
         if authorization:
             if not authorization.lower().startswith("bearer ") or not authorization[7:].strip():
@@ -100,9 +101,36 @@ def create_app():
         else:
             token = request.cookies.get(auth.ADMIN_SESSION_COOKIE)
         if not token:
-            raise HTTPException(status_code=401, detail="Authenticated session required")
-        if auth._jwt_verify(token).get("organization_id") != user.organization_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        payload = auth._jwt_verify(token)
+        uid = payload.get("sub")
+        if not uid:
+            raise HTTPException(status_code=401, detail="Token missing subject")
+        fields = (
+            User.id, User.role, User.authorized_roles, User.session_role,
+            User.organization_id, User.auth_version, User.is_active,
+        )
+        row = db.execute(select(*fields).where(User.id == uid)).first()
+        if row is None or not row.is_active:
+            raise HTTPException(status_code=401, detail="Invalid or inactive user")
+        if int(payload.get("auth_version", 0) or 0) != int(row.auth_version or 0):
+            raise HTTPException(status_code=401, detail="Session invalidated")
+        principal = SimpleNamespace(**row._mapping)
+        authorized = auth.get_user_authorized_roles(principal)
+        token_role = auth.normalize_role(payload.get("role"))
+        role = auth.resolve_session_role(principal, payload)
+        if token_role not in authorized or role not in authorized or role != auth.ROLE_ADMIN:
+            raise HTTPException(status_code=403, detail="Organization owner required")
+        if not row.organization_id or row.organization_id == "global":
+            raise HTTPException(status_code=403, detail="Organization owner required")
+        if payload.get("organization_id") != row.organization_id:
             raise HTTPException(status_code=403, detail="Session organization mismatch")
+        return principal
+
+    @app.get("/api/nova/workspace/central/journeys")
+    def readiness(response: Response, user=Depends(authenticated_owner)):
+        if os.getenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "").lower() != "true":
+            raise HTTPException(status_code=404, detail="Nova Central journey view unavailable")
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Vary"] = "Authorization, Cookie"
         return {"mode": "read_only", "integration_status": "not_connected",
