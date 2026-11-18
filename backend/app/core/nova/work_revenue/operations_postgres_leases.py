@@ -21,6 +21,8 @@ lease_jobs = sa.Table(
     sa.Column("organization_id", sa.String(36), nullable=False),
     sa.Column("owner_user_id", sa.String(36), nullable=False),
     sa.Column("input_sha256", sa.String(64), nullable=False),
+    sa.Column("input_ref", sa.String(512)),
+    sa.Column("input_size", sa.Integer),
     sa.Column("state", sa.String(20), nullable=False),
     sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
     sa.Column("max_attempts", sa.Integer, nullable=False, server_default="3"),
@@ -299,3 +301,82 @@ def hold_for_reconciliation(
     except Exception:
         db.rollback()
         raise
+
+
+def bind_private_input(
+    db: Session, *, job_id: str, organization_id: str, owner_user_id: str,
+    input_sha256: str, storage_ref: str, input_size: int,
+) -> bool:
+    """Bind an already-persisted private object to a queued job exactly once.
+
+    This is a development schema contract, not a production migration or a
+    transactional object-store write. Caller must verify the private write and
+    separately reconcile any orphan created before DB binding. Identical
+    replay is allowed; a different reference is never substituted.
+    """
+    _guard(db)
+    if not _sha(input_sha256):
+        raise LeaseBlocked("Invalid input fingerprint")
+    if (not isinstance(storage_ref, str) or not 0 < len(storage_ref) <= 512
+            or any(ord(c) < 33 or ord(c) > 126 for c in storage_ref)
+            or "://" in storage_ref):
+        raise LeaseBlocked("Invalid private input reference")
+    if type(input_size) is not int or not 0 < input_size <= 1_000_000:
+        raise LeaseBlocked("Invalid private input size")
+    try:
+        row = db.execute(sa.select(lease_jobs).where(
+            lease_jobs.c.job_id == job_id,
+            lease_jobs.c.organization_id == organization_id,
+            lease_jobs.c.owner_user_id == owner_user_id,
+        ).with_for_update()).mappings().first()
+        if row is None:
+            raise LeaseBlocked("Job not found in authorized scope")
+        if row["input_sha256"] != input_sha256:
+            raise LeaseBlocked("Input fingerprint does not match reserved job")
+        if row["input_ref"] is not None:
+            if (row["input_ref"], row["input_size"]) != (storage_ref, input_size):
+                raise LeaseBlocked("Private input already bound to another reference")
+            db.rollback()
+            return False
+        if row["state"] != "QUEUED" or row["attempts"] != 0:
+            raise LeaseBlocked("Private input may only bind before processing")
+        changed = db.execute(sa.update(lease_jobs).where(
+            lease_jobs.c.job_id == job_id,
+            lease_jobs.c.organization_id == organization_id,
+            lease_jobs.c.owner_user_id == owner_user_id,
+            lease_jobs.c.state == "QUEUED",
+            lease_jobs.c.attempts == 0,
+            lease_jobs.c.input_ref.is_(None),
+        ).values(input_ref=storage_ref, input_size=input_size, updated_at=_now()))
+        if changed.rowcount != 1:
+            raise LeaseBlocked("Private input binding changed concurrently")
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+
+
+def read_bound_input_metadata(
+    db: Session, *, claimed: LeaseClaim,
+) -> tuple[str, int]:
+    """Read a durable reference for a valid current claim (no object reads).
+
+    This does not check engagement authorization or load the private bytes.
+    Callers must separately enforce those checks and input checksum integrity.
+    """
+    _guard(db)
+    row = db.execute(sa.select(
+        lease_jobs.c.input_ref, lease_jobs.c.input_size,
+    ).where(
+        lease_jobs.c.job_id == claimed.job_id,
+        lease_jobs.c.organization_id == claimed.organization_id,
+        lease_jobs.c.owner_user_id == claimed.owner_user_id,
+        lease_jobs.c.input_sha256 == claimed.input_sha256,
+        lease_jobs.c.state == "RUNNING",
+        lease_jobs.c.lease_token == claimed.token,
+        lease_jobs.c.lease_until > _now(),
+    )).first()
+    if row is None or not row[0] or not row[1]:
+        raise LeaseBlocked("Authorized durable private input not bound")
+    return row[0], row[1]
