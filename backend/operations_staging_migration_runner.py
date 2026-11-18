@@ -106,11 +106,21 @@ def main() -> None:
                 raise RuntimeError("Lease table appeared since preflight")
             migration.op = Operations(MigrationContext.configure(conn))
             migration.upgrade()
-        with engine.connect() as conn:
-            columns = {col["name"] for col in sa.inspect(conn).get_columns(TABLE)}
-            if not {"job_id", "organization_id", "owner_user_id",
-                    "lease_token", "state", "input_sha256"}.issubset(columns):
-                raise RuntimeError("Schema postcheck failed; halt before enabling anything")
+            # Keep verification inside the transaction so an invalid schema
+            # rolls back atomically rather than persisting a partial rollout.
+            schema = sa.inspect(conn)
+            columns = {col["name"] for col in schema.get_columns(TABLE)}
+            required = {"job_id", "organization_id", "owner_user_id",
+                        "lease_token", "state", "input_sha256", "input_ref",
+                        "input_size", "updated_at", "available_at"}
+            checks = {c["name"] for c in schema.get_check_constraints(TABLE)}
+            indexes = {i["name"] for i in schema.get_indexes(TABLE)}
+            if not required.issubset(columns) or not {
+                "ck_nova_operations_lease_state",
+                "ck_nova_operations_lease_input_binding",
+                "ck_nova_operations_lease_attempts",
+            }.issubset(checks) or "ix_nova_operations_lease_ready" not in indexes:
+                raise RuntimeError("Schema postcheck failed; transaction rolled back")
         print("MIGRATION APPLIED: dedicated staging lease schema only; workers/customer processing OFF")
     finally:
         engine.dispose()
