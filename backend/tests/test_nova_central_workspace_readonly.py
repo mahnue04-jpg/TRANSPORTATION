@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth import ROLE_ADMIN, ROLE_STAFF, UserContext
+from app.auth import ROLE_ADMIN, ROLE_STAFF, UserContext, create_access_token
 from app.core.nova.workspace import central_journey_readonly as module
 
 
@@ -32,8 +32,12 @@ def api():
 
 
 def _request(api):
+    token = create_access_token({
+        "sub": "synthetic-owner", "role": "admin",
+        "organization_id": "org-A", "auth_version": 0,
+    })
     with TestClient(api) as client:
-        return client.get("/central/journeys")
+        return client.get("/central/journeys", headers={"Authorization": "Bearer " + token})
 
 
 def test_default_off_is_not_found(monkeypatch, api):
@@ -102,7 +106,11 @@ def test_mounted_workspace_route_defaults_off(monkeypatch):
     guard = inspect.signature(module.list_central_journeys).parameters["_role_guard"].default.dependency
     app.dependency_overrides[guard] = lambda: object()
     with TestClient(app) as client:
-        response = client.get("/api/nova/workspace/central/journeys")
+        token = create_access_token({
+            "sub": "synthetic-owner", "role": "admin",
+            "organization_id": "org-A", "auth_version": 0,
+        })
+        response = client.get("/api/nova/workspace/central/journeys", headers={"Authorization": "Bearer " + token})
     assert response.status_code == 404
 
 
