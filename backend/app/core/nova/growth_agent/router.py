@@ -13,6 +13,7 @@ from app.core.nova.growth_agent.flags import live_flags, widget_public_enabled
 from app.core.nova.growth_agent.demo import run_synthetic_demo
 from app.core.nova.growth_agent.schemas import (
     AgentStateIn,
+    OrgScoped,
     AvailabilityIn,
     BookIn,
     ConsentIn,
