@@ -64,6 +64,7 @@ def good_report():
         public_schema_usage=True,
         other_schemas={},
         non_system_functions={},
+        default_grants=[],
         role_memberships=[],
         other_tables={},
         tables={
@@ -224,3 +225,23 @@ def test_unknown_routine_inventory_fails_closed():
     report = good_report()
     del report["non_system_functions"]
     assert "unknown_non_system_function_privileges" in audit.assess_privileges(report)
+
+
+def test_default_acl_inventory_missing_fails_closed():
+    report = good_report()
+    del report["default_grants"]
+    assert "unknown_default_acl_inventory" in audit.assess_privileges(report)
+
+
+@pytest.mark.parametrize("object_type,privilege", [
+    ("r", "SELECT"),
+    ("r", "INSERT"),
+    ("f", "EXECUTE"),
+    ("S", "USAGE"),
+])
+def test_future_object_default_acl_grant_blocks_review(object_type, privilege):
+    report = good_report()
+    report["default_grants"] = [
+        {"type": object_type, "schema": "public", "privilege": privilege}
+    ]
+    assert "unexpected_default_acl_grants" in audit.assess_privileges(report)
