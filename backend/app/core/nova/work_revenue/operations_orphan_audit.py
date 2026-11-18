@@ -96,3 +96,24 @@ def inspect_job_private_objects(
         "may_release": False,
         "delivered": False,
     }
+
+
+def inspect_job_s3_objects(
+    db: Session, *, organization_id: str, owner_user_id: str, job_id: str,
+    s3_client, private_bucket: str, max_objects: int = 1000,
+) -> dict:
+    """Use a supplied read-only, isolated S3 client for exact-job audit.
+
+    Authorization MUST have been independently checked by the caller. This
+    function checks exact scope in PostgreSQL before invoking S3. It does not
+    add an HTTP route, instantiate production credentials, or mutate storage.
+    """
+    from .operations_orphan_s3_listing import list_scoped_s3_keys
+
+    return inspect_job_private_objects(
+        db, organization_id=organization_id, owner_user_id=owner_user_id,
+        job_id=job_id, max_objects=max_objects,
+        list_private_keys=lambda prefix: list_scoped_s3_keys(
+            s3_client, bucket=private_bucket, prefix=prefix,
+            max_objects=max_objects),
+    )
