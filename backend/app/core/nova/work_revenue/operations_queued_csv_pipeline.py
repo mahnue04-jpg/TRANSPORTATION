@@ -81,12 +81,22 @@ def submit_queued_csv(
     with session_factory() as db:
         _runtime(db)
         try:
+            reserved_at = csvjobs._utc()
             db.execute(sa.insert(csvjobs.jobs).values(
                 id=job_id, organization_id=organization_id,
                 owner_user_id=owner_user_id, engagement_id=engagement_id,
                 task_id=task_id, request_key=request_key,
                 input_sha256=fingerprint, status="PROCESSING",
-                created_at=csvjobs._utc(), updated_at=csvjobs._utc(),
+                created_at=reserved_at, updated_at=reserved_at,
+            ))
+            # Both metadata records become visible in one PostgreSQL commit.
+            # The lease is queued but NOT claimable by strict workers until
+            # its private input reference is verified and bound.
+            db.execute(sa.insert(leases.lease_jobs).values(
+                job_id=job_id, organization_id=organization_id,
+                owner_user_id=owner_user_id, input_sha256=fingerprint,
+                state="QUEUED", attempts=0, max_attempts=3,
+                available_at=reserved_at, updated_at=reserved_at,
             ))
             db.commit()
         except IntegrityError:
@@ -116,10 +126,6 @@ def submit_queued_csv(
         raise QueuedCSVBlocked("Private storage returned incorrect fingerprint")
     with session_factory() as db:
         _runtime(db)
-        leases.enqueue(
-            db, job_id=job_id, organization_id=organization_id,
-            owner_user_id=owner_user_id, input_sha256=fingerprint,
-        )
         leases.bind_private_input(
             db, job_id=job_id, organization_id=organization_id,
             owner_user_id=owner_user_id, input_sha256=fingerprint,
