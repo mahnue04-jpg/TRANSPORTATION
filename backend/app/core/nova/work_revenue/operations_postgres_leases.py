@@ -270,7 +270,8 @@ def cancel(db: Session, *, job_id: str, organization_id: str,
 
 
 def hold_for_reconciliation(
-    db: Session, *, claimed: LeaseClaim, now: datetime | None = None,
+    db: Session, *, claimed: LeaseClaim, expected_output_sha256: str,
+    now: datetime | None = None,
 ) -> bool:
     """Persist an explicit no-reclaim hold when a completion outcome is uncertain.
 
@@ -279,6 +280,8 @@ def hold_for_reconciliation(
     artifact and authorization evidence before any future release decision.
     """
     _guard(db)
+    if not _sha(expected_output_sha256):
+        raise LeaseBlocked("Invalid reconciliation output fingerprint")
     now = now or _now()
     try:
         changed = db.execute(sa.update(lease_jobs).where(
@@ -289,7 +292,7 @@ def hold_for_reconciliation(
             lease_jobs.c.lease_token == claimed.token,
         ).values(
             state="NEEDS_RECONCILIATION", lease_token=None,
-            lease_until=None, updated_at=now,
+            lease_until=None, output_sha256=expected_output_sha256, updated_at=now,
         ))
         db.commit()
         return changed.rowcount == 1
