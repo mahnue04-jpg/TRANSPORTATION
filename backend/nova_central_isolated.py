@@ -70,7 +70,13 @@ def create_app():
             raise HTTPException(status_code=404, detail="Nova Central journey view unavailable")
         if not user.user_id or not user.organization_id or user.organization_id == "global" or user.role != ROLE_ADMIN:
             raise HTTPException(status_code=403, detail="Organization owner required")
-        token = auth.extract_access_token(None, request)
+        authorization = request.headers.get("authorization", "")
+        if authorization:
+            if not authorization.lower().startswith("bearer ") or not authorization[7:].strip():
+                raise HTTPException(status_code=401, detail="Invalid authorization header")
+            token = authorization[7:].strip()
+        else:
+            token = request.cookies.get(auth.ADMIN_SESSION_COOKIE)
         if not token:
             raise HTTPException(status_code=401, detail="Authenticated session required")
         if auth._jwt_verify(token).get("organization_id") != user.organization_id:
