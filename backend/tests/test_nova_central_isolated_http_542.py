@@ -220,6 +220,12 @@ def test_fresh_process_binds_only_the_configured_disposable_database(tmp_path):
     script = """
 import sys
 from pathlib import Path
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from fastapi.testclient import TestClient
+def reject_any_sql_connection(dbapi_connection, connection_record):
+    raise AssertionError("Fresh-process isolated readiness unexpectedly connected to a database")
+event.listen(Engine, "connect", reject_any_sql_connection)
 from nova_central_isolated import create_app
 app = create_app()
 from app.db.session import engine
@@ -229,6 +235,12 @@ assert not Path(sys.argv[1]).exists(), "App construction unexpectedly opened or 
 assert sorted(route.path for route in app.routes) == [
     "/api/nova/workspace/central/journeys", "/health/live"
 ]
+with TestClient(app) as client:
+    assert client.get("/health/live").status_code == 200
+    assert client.get("/api/nova/workspace/central/journeys").status_code == 401
+    assert client.post("/api/nova/workspace/central/journeys").status_code == 405
+assert not Path(sys.argv[1]).exists(), "Lifespan/request unexpectedly opened or wrote DB"
+
 """
     proc = subprocess.run(
         [sys.executable, "-c", script, str(dbfile)],
