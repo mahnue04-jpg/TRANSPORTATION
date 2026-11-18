@@ -41,6 +41,9 @@ def run_one(
     lease_seconds: int = 60,
     retry_delay_seconds: int = 30,
     require_bound_input: bool = False,
+    job_id: str | None = None,
+    organization_id: str | None = None,
+    owner_user_id: str | None = None,
 ) -> dict:
     """Claim once, perform injected work, and fence completion on a fresh session.
 
@@ -51,7 +54,8 @@ def run_one(
     """
     with session_factory() as db:
         claimed = leases.claim(
-            db, lease_seconds=lease_seconds, require_bound_input=require_bound_input
+            db, lease_seconds=lease_seconds, require_bound_input=require_bound_input,
+            job_id=job_id, organization_id=organization_id, owner_user_id=owner_user_id,
         )
     if claimed is None:
         return {"state": "idle", "job_id": None}
