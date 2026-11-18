@@ -689,3 +689,91 @@ def test_queued_csv_write_readback_corruption_requires_reconciliation(postgres, 
             assert held == "NEEDS_RECONCILIATION"
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch):
+    """One actual FastAPI owner request cycle with disposable PG and fake S3."""
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.core.nova.router import require_nova_access
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_postgres_leases as leases
+    from app.db.session import get_db
+
+    engine, store = postgres
+    leases.lease_metadata.create_all(engine)
+    monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
+    monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    owner = SimpleNamespace(user_id="synthetic-owner",
+                            organization_id="synthetic-org",
+                            email="owner@synthetic.invalid")
+    eng = {
+        "engagement_id": "synthetic-eng",
+        "organization_id": "synthetic-org",
+        "owner_user_id": "synthetic-owner",
+        "status": "ACTIVE", "blockers": None,
+        "tasks": [{
+            "task_id": "synthetic-csv-task", "title": "CSV cleanup",
+            "status": "READY", "classification": "NOVA",
+            "responsible_party": "NOVA", "review_required": True,
+            "blocked_reason": None, "required_owner_input": None,
+            "depends_on_task_id": None,
+        }],
+    }
+    monkeypatch.setattr(api.service, "get_engagement", lambda *args, **kwargs: eng)
+
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api/nova/work")
+    app.dependency_overrides[require_nova_access] = lambda: owner
+    app.dependency_overrides[api.require_work_revenue_owner] = lambda: owner
+    def db_session():
+        with Session(engine) as db:
+            yield db
+    app.dependency_overrides[get_db] = db_session
+    prefix = "/api/nova/work/operations/queued"
+    create_headers = {
+        "Content-Type": "text/csv",
+        "X-Nova-File-Name": "sample.csv",
+        "Idempotency-Key": "supervised-e2e",
+        "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization",
+        "X-Nova-Owner-Action": "queue-csv-for-owner-review",
+    }
+    try:
+        with TestClient(app) as client:
+            url = prefix + "/engagements/synthetic-eng/tasks/synthetic-csv-task/jobs"
+            created = client.post(url, headers=create_headers, content=b"Name\nAda\nAda\n")
+            assert created.status_code == 202, created.text
+            job_id = created.json()["job_id"]
+            assert created.json()["status"] == "QUEUED"
+            duplicate = client.post(url, headers=create_headers, content=b"Name\nAda\nAda\n")
+            assert duplicate.status_code == 202
+            assert duplicate.json()["job_id"] == job_id
+            assert duplicate.json()["replayed"] is True
+            denied = client.post(prefix + "/jobs/" + job_id + "/process")
+            assert denied.status_code == 403
+            work = client.post(
+                prefix + "/jobs/" + job_id + "/process",
+                headers={"X-Nova-Owner-Action": "process-queued-csv-for-owner-review"})
+            assert work.status_code == 200, work.text
+            assert work.json() == {"state": "completed", "job_id": job_id,
+                                   "delivered": False}
+            pending = client.post(prefix + "/jobs/" + job_id + "/review",
+                                  json={"approve": True})
+            assert pending.status_code == 403
+            approved = client.post(
+                prefix + "/jobs/" + job_id + "/review",
+                json={"approve": True},
+                headers={"X-Nova-Owner-Action": "review-completed-queued-csv"})
+            assert approved.status_code == 200, approved.text
+            assert approved.json()["status"] == "APPROVED_FOR_DOWNLOAD"
+            assert approved.json()["delivered"] is False
+            assert store.put_count == 2
+            # Authorization revocation blocks even an already-completed job.
+            eng["status"] = "BLOCKED"
+            blocked = client.post(
+                prefix + "/jobs/" + job_id + "/review", json={"approve": False},
+                headers={"X-Nova-Owner-Action": "review-completed-queued-csv"})
+            assert blocked.status_code == 409
+    finally:
+        leases.lease_metadata.drop_all(engine)
