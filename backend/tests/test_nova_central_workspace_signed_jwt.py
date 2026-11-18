@@ -51,7 +51,7 @@ def account(*, org="org-A", role="admin", grants=("admin",),
     )
 
 
-def test_app(record):
+def make_app(record):
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_db] = lambda: FakeSession(record)
@@ -76,7 +76,7 @@ def get(app, token):
 def test_valid_signed_owner_session_has_no_connected_data(monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account()
-    reply = get(test_app(user), signed(user))
+    reply = get(make_app(user), signed(user))
     assert reply.status_code == 200
     assert reply.json()["integration_status"] == "not_connected"
     assert reply.json()["journeys"] == []
@@ -90,7 +90,7 @@ def test_valid_signed_owner_session_has_no_connected_data(monkeypatch):
 def test_signed_role_not_authorized_as_owner(monkeypatch, role, grants):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(role=role, grants=grants)
-    assert get(test_app(user), signed(user)).status_code == 403
+    assert get(make_app(user), signed(user)).status_code == 403
 
 
 def test_role_revocation_with_existing_signed_admin_token(monkeypatch):
@@ -98,32 +98,32 @@ def test_role_revocation_with_existing_signed_admin_token(monkeypatch):
     user = account(role="admin", grants=("admin",))
     token = signed(user)
     user.authorized_roles = json.dumps(["staff"])
-    assert get(test_app(user), token).status_code == 403
+    assert get(make_app(user), token).status_code == 403
 
 
 def test_inactivated_account_rejected(monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(active=False)
-    assert get(test_app(user), signed(user)).status_code == 401
+    assert get(make_app(user), signed(user)).status_code == 401
 
 
 def test_session_auth_version_revocation_rejected(monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(version=2)
-    assert get(test_app(user), signed(user, version=1)).status_code == 401
+    assert get(make_app(user), signed(user, version=1)).status_code == 401
 
 
 @pytest.mark.parametrize("org", ["global", "", None])
 def test_owner_without_normal_tenant_rejected(monkeypatch, org):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(org=org)
-    assert get(test_app(user), signed(user)).status_code == 403
+    assert get(make_app(user), signed(user)).status_code == 403
 
 
 def test_token_org_cannot_override_persisted_user_org(monkeypatch):
     monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
     user = account(org="org-A")
-    reply = get(test_app(user), signed(user, org="org-B"))
+    reply = get(make_app(user), signed(user, org="org-B"))
     assert reply.status_code == 200
     assert reply.json()["journeys"] == []
     # Authorization is scoped to persisted user.organization_id, not JWT org.
@@ -133,7 +133,7 @@ def test_token_org_cannot_override_persisted_user_org(monkeypatch):
 def test_signed_owner_still_sees_default_off_404(monkeypatch):
     monkeypatch.delenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", raising=False)
     user = account()
-    assert get(test_app(user), signed(user)).status_code == 404
+    assert get(make_app(user), signed(user)).status_code == 404
 
 
 def test_expired_signed_token_rejected(monkeypatch):
@@ -145,4 +145,4 @@ def test_expired_signed_token_rejected(monkeypatch):
         **({"iss": auth.JWT_ISSUER} if auth.JWT_ISSUER else {}),
         **({"aud": auth.JWT_AUDIENCE} if auth.JWT_AUDIENCE else {}),
     })
-    assert get(test_app(user), token).status_code == 401
+    assert get(make_app(user), token).status_code == 401
