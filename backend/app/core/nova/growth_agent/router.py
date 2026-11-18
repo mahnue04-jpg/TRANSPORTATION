@@ -13,6 +13,7 @@ from app.core.nova.growth_agent.flags import live_flags, widget_public_enabled
 from app.core.nova.growth_agent.demo import run_synthetic_demo
 from app.core.nova.growth_agent.schemas import (
     AgentStateIn,
+    OrgScoped,
     AvailabilityIn,
     BookIn,
     ConsentIn,
@@ -623,4 +624,101 @@ def campaign_asset_preview(
             profile=profile,
         )
     except CampaignPreviewDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+# Review queue APIs are disabled independently from the campaign preview.
+# Explicit schema provisioning is separate and never performed by GET/POST.
+from app.core.nova.growth_agent.campaign_registry import (
+    CampaignReviewRegistry, CampaignRegistryDenied,
+)
+import os as _campaign_os
+
+
+def _campaign_review_enabled() -> bool:
+    return (
+        _campaign_os.getenv("NOVA_GA_CAMPAIGN_REVIEW_ENABLED") == "true"
+        and _campaign_os.getenv("NOVA_GROWTH_CAMPAIGN_LIVE_ENABLED") != "true"
+    )
+
+
+def _campaign_review_owner(user: UserContext, organization_id: str) -> str:
+    if not _campaign_review_enabled():
+        raise HTTPException(status_code=404, detail="Campaign review queue disabled")
+    if (user.role != "admin" or not user.organization_id
+            or organization_id != user.organization_id):
+        raise HTTPException(status_code=403, detail="Exact owner tenant required")
+    return _org(user, organization_id)
+
+
+class CampaignReviewRegisterIn(_CampaignBaseModel):
+    model_config = _CampaignConfigDict(extra="forbid")
+    organization_id: str
+    campaign_id: str
+    studio_project_id: str
+    asset_id: str
+
+
+@router.post("/campaign-assets/reviews")
+def register_campaign_review(
+    body: CampaignReviewRegisterIn,
+    response: _CampaignResponse,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Queue an *unverified* Studio reference; no publishing, contact, or lead."""
+    response.headers["Cache-Control"] = "private, no-store"
+    org = _campaign_review_owner(user, body.organization_id)
+    # Never allow a real/activated Growth profile into the fictional review lane.
+    profile = GrowthAgentService(db).get_profile(org)
+    build_campaign_preview(
+        organization_id=org, owner_user_id=user.user_id,
+        owner_role=user.role, session_organization_id=user.organization_id,
+        campaign_id=body.campaign_id, asset_id=body.asset_id,
+        studio_project_id=body.studio_project_id,
+        profile=profile, enabled=True,
+    )
+    try:
+        result, outcome = CampaignReviewRegistry(db).register(
+            org=org, owner_id=user.user_id, campaign_id=body.campaign_id,
+            project_id=body.studio_project_id, asset_id=body.asset_id,
+        )
+        return {"outcome": outcome, "review": result}
+    except CampaignRegistryDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/campaign-assets/reviews")
+def list_campaign_reviews(
+    organization_id: str,
+    response: _CampaignResponse,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "private, no-store"
+    org = _campaign_review_owner(user, organization_id)
+    try:
+        return {"reviews": CampaignReviewRegistry(db).list_for_owner(
+            org=org, owner_id=user.user_id,
+        )}
+    except CampaignRegistryDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/campaign-assets/reviews/{campaign_id}/withdraw")
+def withdraw_campaign_review(
+    campaign_id: str,
+    body: OrgScoped,
+    response: _CampaignResponse,
+    user: UserContext = Depends(require_growth_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "private, no-store"
+    org = _campaign_review_owner(user, body.organization_id or "")
+    try:
+        result, outcome = CampaignReviewRegistry(db).withdraw(
+            org=org, owner_id=user.user_id, campaign_id=campaign_id,
+        )
+        return {"outcome": outcome, "review": result}
+    except CampaignRegistryDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
