@@ -671,13 +671,16 @@ def register_campaign_review(
     org = _campaign_review_owner(user, body.organization_id)
     # Never allow a real/activated Growth profile into the fictional review lane.
     profile = GrowthAgentService(db).get_profile(org)
-    build_campaign_preview(
-        organization_id=org, owner_user_id=user.user_id,
-        owner_role=user.role, session_organization_id=user.organization_id,
-        campaign_id=body.campaign_id, asset_id=body.asset_id,
-        studio_project_id=body.studio_project_id,
-        profile=profile, enabled=True,
-    )
+    try:
+        build_campaign_preview(
+            organization_id=org, owner_user_id=user.user_id,
+            owner_role=user.role, session_organization_id=user.organization_id,
+            campaign_id=body.campaign_id, asset_id=body.asset_id,
+            studio_project_id=body.studio_project_id,
+            profile=profile, enabled=True,
+        )
+    except CampaignPreviewDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
         result, outcome = CampaignReviewRegistry(db).register(
             org=org, owner_id=user.user_id, campaign_id=body.campaign_id,
