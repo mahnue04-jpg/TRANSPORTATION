@@ -184,3 +184,25 @@ def test_expired_worker_cannot_retry_before_new_claim(database):
         recovered = leases.claim(db, now=now + timedelta(seconds=7),
                                  lease_seconds=60)
         assert recovered is not None and recovered.token != active.token
+
+
+def test_concurrent_duplicate_enqueue_is_idempotent(database):
+    gate = Barrier(2)
+
+    def submit():
+        with Session(database) as db:
+            gate.wait(timeout=10)
+            leases.enqueue(db, job_id="same-job", organization_id="org-a",
+                           owner_user_id="owner-a", input_sha256="a" * 64)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(submit)
+        second = pool.submit(submit)
+        first.result(timeout=20)
+        second.result(timeout=20)
+    with Session(database) as db:
+        rows = db.execute(sa.select(leases.lease_jobs).where(
+            leases.lease_jobs.c.job_id == "same-job")).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["state"] == "QUEUED"
+        assert rows[0]["attempts"] == 0
