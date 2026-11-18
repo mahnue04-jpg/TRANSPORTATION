@@ -14,6 +14,8 @@ on:
       - "backend/tests/test_synthetic_nova_first_customer_542.py"
       - "backend/app/core/nova/studio_growth_adapter.py"
       - "backend/tests/test_studio_growth_adapter_542.py"
+      - "backend/app/core/nova/studio_growth_grants.py"
+      - "backend/tests/test_studio_growth_grants_542.py"
       - ".github/workflows/nova-synthetic-handoff-542.yml"
       - "backend/app/core/nova/agent_events.py"
   workflow_dispatch:
@@ -41,5 +43,5 @@ jobs:
           PYTHONPATH: "tests"
         run: |
           set -euo pipefail
-          python -m py_compile app/core/nova/agent_events.py tests/synthetic_nova_handoff_542.py tests/test_synthetic_nova_handoff_542.py tests/synthetic_nova_replay_542.py tests/test_synthetic_nova_replay_542.py tests/synthetic_nova_workspace_542.py tests/test_synthetic_nova_workspace_542.py tests/synthetic_nova_first_customer_542.py tests/test_synthetic_nova_first_customer_542.py app/core/nova/studio_growth_adapter.py tests/test_studio_growth_adapter_542.py
-          python -m pytest tests/test_synthetic_nova_handoff_542.py tests/test_synthetic_nova_replay_542.py tests/test_synthetic_nova_workspace_542.py tests/test_synthetic_nova_first_customer_542.py tests/test_studio_growth_adapter_542.py -q --tb=short --noconftest
+          python -m py_compile app/core/nova/agent_events.py tests/synthetic_nova_handoff_542.py tests/test_synthetic_nova_handoff_542.py tests/synthetic_nova_replay_542.py tests/test_synthetic_nova_replay_542.py tests/synthetic_nova_workspace_542.py tests/test_synthetic_nova_workspace_542.py tests/synthetic_nova_first_customer_542.py tests/test_synthetic_nova_first_customer_542.py app/core/nova/studio_growth_adapter.py tests/test_studio_growth_adapter_542.py app/core/nova/studio_growth_grants.py tests/test_studio_growth_grants_542.py
+          python -m pytest tests/test_synthetic_nova_handoff_542.py tests/test_synthetic_nova_replay_542.py tests/test_synthetic_nova_workspace_542.py tests/test_synthetic_nova_first_customer_542.py tests/test_studio_growth_adapter_542.py tests/test_studio_growth_grants_542.py -q --tb=short --noconftest
