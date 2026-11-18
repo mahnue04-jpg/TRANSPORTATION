@@ -135,3 +135,66 @@ def test_route_inventory_has_no_job_or_write_paths(sandbox):
         ("/health/live", ("GET",)),
         ("/api/nova/workspace/central/journeys", ("GET",)),
     }
+
+
+def test_inactive_account_denied_without_application_writes(sandbox, monkeypatch):
+    app, factory, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    with factory() as db:
+        owner = db.query(User).filter(User.id == "owner-A").one()
+        owner.is_active = False
+        db.commit()
+    writes.clear()
+    assert _get(app, _token()).status_code == 401
+    assert writes == []
+
+
+def test_removed_owner_grant_denied_without_application_writes(sandbox, monkeypatch):
+    app, factory, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    with factory() as db:
+        owner = db.query(User).filter(User.id == "owner-A").one()
+        owner.authorized_roles = json.dumps(["staff"])
+        owner.session_role = "staff"
+        db.commit()
+    writes.clear()
+    assert _get(app, _token()).status_code == 403
+    assert writes == []
+
+
+def test_cookie_session_auth_and_bearer_precedence(sandbox, monkeypatch):
+    app, _, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, _token())
+        good = client.get("/api/nova/workspace/central/journeys")
+        assert good.status_code == 200
+        # A foreign signed bearer must not fall back to a valid owner cookie.
+        wrong = client.get("/api/nova/workspace/central/journeys", headers={
+            "Authorization": "Bearer " + _token(org="org-B"),
+        })
+        assert wrong.status_code == 403
+        # An invalid bearer must not fall back to a valid owner cookie.
+        invalid = client.get("/api/nova/workspace/central/journeys", headers={
+            "Authorization": "Bearer deliberately-invalid",
+        })
+        assert invalid.status_code == 401
+    assert writes == []
+
+
+def test_foreign_or_unknown_identity_denied(sandbox, monkeypatch):
+    app, _, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    assert _get(app, _token(user="unprovisioned-user")).status_code == 401
+    assert writes == []
+
+
+def test_data_read_flag_cannot_enable_unmounted_preview(sandbox, monkeypatch):
+    app, _, _, writes = sandbox
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_READONLY_ENABLED", "true")
+    monkeypatch.setenv("NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED", "true")
+    result = _get(app, _token())
+    assert result.status_code == 200
+    assert result.json()["integration_status"] == "not_connected"
+    assert result.json()["journeys"] == []
+    assert writes == []
