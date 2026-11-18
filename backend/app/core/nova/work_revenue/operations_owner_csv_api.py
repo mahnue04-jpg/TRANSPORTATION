@@ -538,3 +538,75 @@ async def review_supervised_queued_csv_job(
             store=durable_csv._store())
     except Exception as exc:
         _queued_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}")
+def supervised_queued_csv_status(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-scoped status without exposing private object references."""
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        lease = db.execute(__import__("sqlalchemy").select(
+            _ops_leases.lease_jobs.c.state,
+            _ops_leases.lease_jobs.c.attempts,
+        ).where(
+            _ops_leases.lease_jobs.c.job_id == job_id,
+            _ops_leases.lease_jobs.c.organization_id == org,
+            _ops_leases.lease_jobs.c.owner_user_id == owner_id,
+        )).first()
+        return {
+            "job_id": job_id,
+            "status": row["status"],
+            "lease_status": lease.state if lease else "INPUT_NOT_BOUND",
+            "attempts": lease.attempts if lease else 0,
+            "delivered": False,
+        }
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/queued/jobs/{job_id}/download")
+def supervised_queued_csv_download(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """No download until explicit approval and confirmed lease completion."""
+    _queued_csv_gate(db)
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"])
+        if row["status"] != "APPROVED_FOR_DOWNLOAD":
+            raise HTTPException(409, "Explicit owner approval required")
+        lease = db.execute(__import__("sqlalchemy").select(
+            _ops_leases.lease_jobs.c.state,
+            _ops_leases.lease_jobs.c.output_sha256,
+        ).where(
+            _ops_leases.lease_jobs.c.job_id == job_id,
+            _ops_leases.lease_jobs.c.organization_id == org,
+            _ops_leases.lease_jobs.c.owner_user_id == owner_id,
+        )).first()
+        if (lease is None or lease.state != "COMPLETED"
+                or lease.output_sha256 != row["output_sha256"]):
+            raise HTTPException(409, "Verified completed job required")
+        content = durable_csv.download_review(
+            db, org=org, owner=owner_id, job_id=job_id)
+        return Response(content=content, media_type="text/csv", headers={
+            "Content-Disposition": 'attachment; filename="nova-cleaned-review.csv"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Nova-Delivery-Status": "not-delivered",
+        })
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
