@@ -108,19 +108,27 @@ def enqueue(db: Session, *, job_id: str, organization_id: str,
 
 
 def claim(db: Session, *, now: datetime | None = None,
-          lease_seconds: int = 60) -> LeaseClaim | None:
+          lease_seconds: int = 60, require_bound_input: bool = False) -> LeaseClaim | None:
     """Claim at most one ready job with PostgreSQL row locking and fencing."""
     _guard(db)
     if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
         raise LeaseBlocked("Invalid lease duration")
+    if type(require_bound_input) is not bool:
+        raise LeaseBlocked("Invalid input binding requirement")
     now = now or _now()
     ready = sa.or_(
         sa.and_(lease_jobs.c.state == "QUEUED", lease_jobs.c.available_at <= now),
         sa.and_(lease_jobs.c.state == "RUNNING", lease_jobs.c.lease_until <= now),
     )
     try:
+        conditions = [ready, lease_jobs.c.attempts < lease_jobs.c.max_attempts]
+        if require_bound_input:
+            conditions.extend((
+                lease_jobs.c.input_ref.is_not(None),
+                lease_jobs.c.input_size.between(1, 1_000_000),
+            ))
         row = db.execute(sa.select(lease_jobs).where(
-            ready, lease_jobs.c.attempts < lease_jobs.c.max_attempts
+            *conditions
         ).order_by(lease_jobs.c.available_at, lease_jobs.c.job_id)
          .with_for_update(skip_locked=True).limit(1)).mappings().first()
         if row is None:
@@ -128,8 +136,7 @@ def claim(db: Session, *, now: datetime | None = None,
             return None
         token = secrets.token_hex(24)
         changed = db.execute(sa.update(lease_jobs).where(
-            lease_jobs.c.job_id == row["job_id"], ready,
-            lease_jobs.c.attempts < lease_jobs.c.max_attempts
+            lease_jobs.c.job_id == row["job_id"], *conditions
         ).values(state="RUNNING", attempts=row["attempts"] + 1,
                  lease_token=token, lease_until=now + timedelta(seconds=lease_seconds),
                  updated_at=now))
