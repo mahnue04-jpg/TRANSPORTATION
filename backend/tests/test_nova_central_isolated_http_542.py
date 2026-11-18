@@ -288,3 +288,92 @@ else:
     )
     assert proc.returncode == 0, proc.stderr[-1800:]
     assert not badfile.exists()
+
+
+def test_fresh_process_real_database_dependency_reads_without_writes(tmp_path):
+    """Exercise the unmodified global get_db dependency, not a test override.
+
+    A subprocess provisions its own throwaway owner record before instrumentation.
+    During the ASGI lifespan/authenticated GET all SQL connections must bind to
+    that same file, and no application DDL/DML is allowed.
+    """
+    import os
+    import subprocess
+    import sys
+
+    dbfile = tmp_path / "fresh-process-owner.sqlite"
+    env = dict(os.environ)
+    env.update({
+        "AMICOR_ENVIRONMENT": "test",
+        "APP_ENV": "test",
+        "NOVA_CENTRAL_ISOLATED_TEST": "1",
+        "DATABASE_URL": "sqlite:///" + str(dbfile),
+        "NOVA_CENTRAL_APPROVED_COMMIT": "a" * 40,
+        "RENDER_GIT_COMMIT": "a" * 40,
+        "NOVA_CENTRAL_JOURNEY_READONLY_ENABLED": "false",
+        "NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED": "false",
+    })
+    script = """
+import json, sys
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from fastapi.testclient import TestClient
+from app import auth
+from app.db.models import User
+from app.db.session import engine, SessionLocal
+from nova_central_isolated import create_app
+
+target = sys.argv[1]
+assert engine.url.database == target
+User.__table__.create(engine)
+with SessionLocal() as db:
+    db.add(User(id="owner-A", email="owner@example.invalid",
+                hashed_password="fixture", role="admin",
+                authorized_roles=json.dumps(["admin"]),
+                session_role="admin", organization_id="org-A",
+                auth_version=0, is_active=True, is_verified=True))
+    db.commit()
+
+connections, unexpected_sql = [], []
+def inspect_connection(conn, branch):
+    connections.append(str(conn.engine.url.database))
+    assert conn.engine.url.database == target, "Unexpected DB connection target"
+def inspect_sql(conn, cursor, statement, params, context, many):
+    operation = statement.lstrip().split(None, 1)[0].upper()
+    if operation not in {"SELECT", "PRAGMA"}:
+        unexpected_sql.append(operation)
+event.listen(Engine, "engine_connect", inspect_connection)
+event.listen(Engine, "before_cursor_execute", inspect_sql)
+
+app = create_app()
+assert not app.dependency_overrides, "Real auth/database dependencies must be used"
+assert "app.main" not in sys.modules
+token = auth.create_access_token({
+    "sub": "owner-A", "email": "owner@example.invalid",
+    "role": "admin", "organization_id": "org-A", "auth_version": 0,
+})
+with TestClient(app) as client:
+    assert client.get("/health/live").status_code == 200
+    assert client.get("/api/nova/workspace/central/journeys",
+                      headers={"Authorization": "Bearer " + token}).status_code == 404
+    # This controlled test may enable only empty readiness *after* app creation.
+    import os
+    os.environ["NOVA_CENTRAL_JOURNEY_READONLY_ENABLED"] = "true"
+    read = client.get("/api/nova/workspace/central/journeys",
+                      headers={"Authorization": "Bearer " + token})
+    assert read.status_code == 200, read.text
+    assert read.json()["journeys"] == []
+    assert read.json()["integration_status"] == "not_connected"
+    assert read.headers["cache-control"] == "private, no-store"
+assert connections and set(connections) == {target}
+assert not unexpected_sql, unexpected_sql
+with SessionLocal() as db:
+    assert db.query(User).count() == 1
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(dbfile)],
+        cwd=str(FILE.parent), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=25,
+    )
+    assert proc.returncode == 0, proc.stderr[-2600:]
+    assert dbfile.exists()
