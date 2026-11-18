@@ -282,6 +282,33 @@ async def create_durable_csv_job(
         raise HTTPException(400, "CSV content invalid") from exc
 
 
+
+def _reject_queued_job_in_legacy_path(
+    db: Session, *, job_id: str, owner: UserContext,
+) -> None:
+    """Prevent legacy review/download/recover from bypassing queued lease gates.
+
+    The original synchronous path remains available if the lease table has not
+    been migrated. Database inspection errors fail closed instead of treating
+    queued jobs as unguarded legacy work.
+    """
+    import sqlalchemy as sa
+    from . import operations_postgres_leases as queued_leases
+
+    try:
+        if not sa.inspect(db.get_bind()).has_table(queued_leases.lease_jobs.name):
+            return
+        scoped = db.execute(sa.select(queued_leases.lease_jobs.c.job_id).where(
+            queued_leases.lease_jobs.c.job_id == job_id,
+            queued_leases.lease_jobs.c.organization_id == str(owner.organization_id),
+            queued_leases.lease_jobs.c.owner_user_id == str(owner.user_id),
+        )).first()
+    except Exception as exc:
+        raise HTTPException(503, "CSV job mode cannot be verified") from exc
+    if scoped is not None:
+        raise HTTPException(409, "Queued job requires supervised owner workflow")
+
+
 @router.get("/durable/jobs/{job_id}")
 def durable_csv_job_status(
     job_id: str,
@@ -295,6 +322,7 @@ def durable_csv_job_status(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         return data
     except durable_csv.CustomerCSVBlocked as exc:
         _durable_error(exc)
@@ -314,6 +342,7 @@ async def durable_csv_review(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         payload = await request.json()
         if not isinstance(payload, dict) or type(payload.get("approve")) is not bool:
             raise HTTPException(400, "Boolean approve required")
@@ -338,6 +367,7 @@ def recover_durable_csv_job(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         return durable_csv.recover_stale_job(
             db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
         )
@@ -358,6 +388,7 @@ def durable_csv_download(
         _check_saved_csv_assignment(
             db, owner=owner, engagement_id=data["engagement_id"], task_id=data["task_id"],
         )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         content = durable_csv.download_review(
             db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
         )
