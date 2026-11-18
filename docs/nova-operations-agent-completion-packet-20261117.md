@@ -30,7 +30,7 @@
 - `operations_recovery_diagnostics.py`: read-only owner-scoped job-state assessment for missing input binding, active/expired lease, uncertain output, metadata mismatch, failed/cancelled, and completed-for-review records. No raw refs, hashes, contents, automatic retry, approval or release are returned.
 - `operations_owner_csv_api.py`: development-only `/operations/queued/jobs/{id}/recovery` and explicit `/cancel` routes (same owner auth, saved-task recheck and default-off gate). Only queued/running leases can be cancelled; held/completed jobs require separate reconciliation.
 - Owner UI: separate recovery inspection and confirmed cancellation controls; no hidden automated processing.
-- `20261117_nova_operations_leases.py`: proposed explicit staging-only gated PostgreSQL schema migration; not applied.
+- `operations_lease_schema.py`: proposed explicit staging-only gated PostgreSQL schema migration; not applied.
 
 ## Consolidated acceptance tests
 
@@ -100,3 +100,8 @@ Acceptance matrix: authenticated owner HTTP intake -> exact-job process -> statu
 - `inspect_job_s3_objects` connects these components, checking exact owner scope against the job and lease records **before** invoking the supplied S3 client. Synthetic tests verify cross-owner denial before any S3 call and no deletion behavior.
 - **Not a verified hosted storage audit:** The tests use a fake client, not AMICOR's actual private bucket. A trusted authenticated caller, least-privilege private bucket credentials, audit logging, retention policy and independently approved cleanup plan are still required.
 - **No automatic deletion or retry:** Candidate discovery is not evidence that an object is safe to delete, and the system does not clean or release uncertain customer work.
+
+
+## Staging schema packaging — automatic migrations isolated
+
+The Operations-only proposed schema has been relocated to `backend/staging_migrations/operations_lease_schema.py`, **outside** `backend/migrations/versions`. This prevents routine Alembic upgrades for unrelated products from either creating Operations tables or failing because Operations staging approval is absent. The module still checks the explicit staging environment, approval flag and exact PostgreSQL database name before executing any DDL; it refuses silent downgrade. No automatic staging runner or deployment is configured. It must not be marked applied in the shared Alembic history. A future approved isolated Operations-only migration procedure and backup/rollback plan are still required.
