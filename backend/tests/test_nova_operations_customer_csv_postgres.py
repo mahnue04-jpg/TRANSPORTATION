@@ -746,6 +746,12 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert created.status_code == 202, created.text
             job_id = created.json()["job_id"]
             assert created.json()["status"] == "QUEUED"
+            # The old durable routes must never bypass new queued review rules.
+            legacy = "/api/nova/work/operations/durable/jobs/" + job_id
+            assert client.get(legacy).status_code == 409
+            assert client.get(legacy + "/download").status_code == 409
+            assert client.post(legacy + "/review", json={"approve": True}).status_code == 409
+            assert client.post(legacy + "/recover").status_code == 409
             status = client.get(prefix + "/jobs/" + job_id)
             assert status.status_code == 200
             assert status.json()["lease_status"] == "QUEUED"
@@ -774,6 +780,7 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
             assert approved.status_code == 200, approved.text
             assert approved.json()["status"] == "APPROVED_FOR_DOWNLOAD"
             assert approved.json()["delivered"] is False
+            assert client.get(legacy + "/download").status_code == 409
             downloaded = client.get(prefix + "/jobs/" + job_id + "/download")
             assert downloaded.status_code == 200
             assert downloaded.content == b"Name\nAda\n"
