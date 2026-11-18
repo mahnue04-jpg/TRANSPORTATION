@@ -575,3 +575,52 @@ def synthetic_demo(
     except GrowthAgentError as exc:
         _handle(exc)
         raise
+
+
+# Owner-only, default-OFF campaign metadata preview. Does not ingest creative
+# assets or interact with the public widget, lead storage or live transports.
+from pydantic import BaseModel as _CampaignBaseModel, ConfigDict as _CampaignConfigDict
+from fastapi import Response as _CampaignResponse
+from app.core.nova.growth_agent.campaign_preview import (
+    CampaignPreviewDenied, build_campaign_preview, campaign_preview_enabled,
+)
+
+
+class CampaignAssetPreviewIn(_CampaignBaseModel):
+    model_config = _CampaignConfigDict(extra="forbid")
+    organization_id: str
+    campaign_id: str
+    studio_project_id: str
+    asset_id: str
+
+
+@router.post("/campaign-assets/preview")
+def campaign_asset_preview(
+    body: CampaignAssetPreviewIn,
+    response: _CampaignResponse,
+    user: UserContext = Depends(require_growth_owner),
+    svc: GrowthAgentService = Depends(_svc),
+) -> dict[str, Any]:
+    """Read-only draft view; identifiers are not trusted approval evidence."""
+    response.headers["Cache-Control"] = "private, no-store"
+    if not campaign_preview_enabled():
+        raise HTTPException(status_code=404, detail="Campaign preview disabled")
+    # Resolve no global scope or support-role cross-tenant bypass.
+    if (user.role != "admin" or not user.organization_id
+            or body.organization_id != user.organization_id):
+        raise HTTPException(status_code=403, detail="Owner tenant required")
+    try:
+        org = _org(user, body.organization_id)
+        profile = svc.get_profile(org)
+        return build_campaign_preview(
+            organization_id=org,
+            owner_user_id=user.user_id,
+            owner_role=user.role,
+            session_organization_id=user.organization_id,
+            campaign_id=body.campaign_id,
+            studio_project_id=body.studio_project_id,
+            asset_id=body.asset_id,
+            profile=profile,
+        )
+    except CampaignPreviewDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
