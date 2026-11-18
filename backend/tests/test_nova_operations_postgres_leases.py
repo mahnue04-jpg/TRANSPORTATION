@@ -262,7 +262,8 @@ def test_private_input_binding_is_immutable_and_owner_scoped(database):
         ref, size = leases.read_bound_input_metadata(db, claimed=claimed)
         assert ref == "org-a/synthetic-bound/nova-csv-input-owner-a/source.csv"
         assert size == 11
-        with pytest.raises(leases.LeaseBlocked, match="before processing"):
+        # A different reference is also forbidden after processing started.
+        with pytest.raises(leases.LeaseBlocked, match="another reference"):
             leases.bind_private_input(
                 db, job_id="synthetic-bound", organization_id="org-a",
                 owner_user_id="owner-a", input_sha256="a" * 64,
