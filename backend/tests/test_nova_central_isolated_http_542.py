@@ -198,3 +198,81 @@ def test_data_read_flag_cannot_enable_unmounted_preview(sandbox, monkeypatch):
     assert result.json()["integration_status"] == "not_connected"
     assert result.json()["journeys"] == []
     assert writes == []
+
+
+def test_fresh_process_binds_only_the_configured_disposable_database(tmp_path):
+    """A new interpreter must validate config before constructing session.engine."""
+    import os
+    import subprocess
+    import sys
+    dbfile = tmp_path / "never-created.sqlite"
+    env = dict(os.environ)
+    env.update({
+        "AMICOR_ENVIRONMENT": "test",
+        "APP_ENV": "test",
+        "NOVA_CENTRAL_ISOLATED_TEST": "1",
+        "DATABASE_URL": "sqlite:///" + str(dbfile),
+        "NOVA_CENTRAL_APPROVED_COMMIT": "a" * 40,
+        "RENDER_GIT_COMMIT": "a" * 40,
+        "NOVA_CENTRAL_JOURNEY_READONLY_ENABLED": "false",
+        "NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED": "false",
+    })
+    script = """
+import sys
+from pathlib import Path
+from nova_central_isolated import create_app
+app = create_app()
+from app.db.session import engine
+assert engine.url.database == sys.argv[1], "Global SQL engine target mismatch"
+assert "app.main" not in sys.modules, "Shared app lifespan accidentally imported"
+assert not Path(sys.argv[1]).exists(), "App construction unexpectedly opened or wrote DB"
+assert sorted(route.path for route in app.routes) == [
+    "/api/nova/workspace/central/journeys", "/health/live"
+]
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(dbfile)],
+        cwd=str(FILE.parent), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr[-1800:]
+    assert not dbfile.exists()
+
+
+def test_fresh_process_rejects_foreign_db_before_importing_auth(tmp_path):
+    """The denied target must never be connected, even in a fresh interpreter."""
+    import os
+    import subprocess
+    import sys
+    badfile = tmp_path / "should-not-exist.sqlite"
+    env = dict(os.environ)
+    env.update({
+        "AMICOR_ENVIRONMENT": "staging",
+        "APP_ENV": "staging",
+        "NOVA_CENTRAL_ISOLATED_TEST": "0",
+        "DATABASE_URL": "sqlite:///" + str(badfile),
+        "NOVA_CENTRAL_APPROVED_COMMIT": "a" * 40,
+        "RENDER_GIT_COMMIT": "a" * 40,
+        "NOVA_CENTRAL_EXPECTED_DB_HOST": "central-only.internal",
+        "NOVA_CENTRAL_EXPECTED_DB_NAME": "nova_central_542_dispos",
+        "NOVA_CENTRAL_JOURNEY_READONLY_ENABLED": "false",
+        "NOVA_CENTRAL_JOURNEY_DATA_READ_ENABLED": "false",
+    })
+    script = """
+import sys
+from nova_central_isolated import create_app
+try:
+    create_app()
+except RuntimeError:
+    assert "app.auth" not in sys.modules
+    assert "app.db.session" not in sys.modules
+else:
+    raise AssertionError("Foreign DB unexpectedly accepted")
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(FILE.parent), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr[-1800:]
+    assert not badfile.exists()
