@@ -202,6 +202,24 @@ def test_signed_admin_cookie_is_tenant_bound(sandbox):
         assert client.get("/central/journeys").status_code == 403
 
 
+def test_empty_bearer_falls_back_to_admin_session_cookie(sandbox):
+    """Empty Bearer credentials must not hide a valid admin session cookie."""
+    from app import auth
+    app, _ = sandbox
+    with TestClient(app) as client:
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-A"))
+        accepted = client.get("/central/journeys", headers={"Authorization": "Bearer "})
+        assert accepted.status_code == 200
+        client.cookies.set(auth.ADMIN_SESSION_COOKIE, token(org="org-B"))
+        mismatched = client.get("/central/journeys", headers={"Authorization": "Bearer "})
+        assert mismatched.status_code == 403
+        explicit = client.get(
+            "/central/journeys",
+            headers={"Authorization": "Bearer not-a-jwt"},
+        )
+        assert explicit.status_code == 401
+
+
 def test_owner_readiness_response_is_not_cacheable(sandbox):
     app, _ = sandbox
     response = read(app, token(org="org-A"))

@@ -47,10 +47,14 @@ def list_central_journeys(
     # not silently gain access to a different organization's journey view.
     # Global auth already validated the signature, revocation and active role;
     # re-check signed tenant scope here before future journey reads are wired.
+    # Match extract_access_token: an empty Bearer credential is not a session.
+    # Fall back to the admin cookie so a leftover "Authorization: Bearer " header
+    # does not reject a request platform auth already accepted.
     authorization = request.headers.get("authorization", "")
+    token = ""
     if authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
-    else:
+    if not token:
         token = request.cookies.get(auth.ADMIN_SESSION_COOKIE, "")
     if not token:
         raise HTTPException(status_code=401, detail="Authenticated session required")
