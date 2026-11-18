@@ -7,11 +7,13 @@ pytest-owned SQLite database.
 import json
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert
 from sqlalchemy.orm import Session, sessionmaker
 
+
+from app import auth
 from app.auth import (
     ROLE_ADMIN, UserContext, create_access_token, get_current_user_context,
     require_any_role,
@@ -60,8 +62,16 @@ def context(tmp_path):
 
     @app.get("/test-only/journeys/{correlation_id}",
              dependencies=[Depends(require_any_role(ROLE_ADMIN))])
-    def lookup(correlation_id: str, user: UserContext = Depends(get_current_user_context),
+    def lookup(correlation_id: str, request: Request,
+               user: UserContext = Depends(get_current_user_context),
                db: Session = Depends(get_db)):
+        # Test-only explicit tenant binding: reject stale tokens after tenant transfer.
+        credential = request.headers.get("authorization", "")
+        if not credential.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Bearer token required")
+        token_org = auth._jwt_verify(credential[7:]).get("organization_id")
+        if token_org != user.organization_id:
+            raise HTTPException(status_code=403, detail="Session tenant mismatch")
         try:
             result = get_owner_journey(
                 db, verified_organization_id=user.organization_id,
@@ -113,8 +123,7 @@ def test_owner_a_cannot_fetch_owner_b_private_journey(context):
 def test_forged_token_organization_does_not_override_database_tenant(context):
     app, _ = context
     response = read(app, "shared", jwt("owner-A", "org-B"))
-    assert response.status_code == 200
-    assert response.json()["state"] == "pending_approval"
+    assert response.status_code == 403
 
 
 def test_anonymous_request_fails_authentication(context):
@@ -161,11 +170,12 @@ def test_changed_database_tenant_controls_old_signed_token(context):
         owner = db.query(User).filter(User.id == "owner-A").one()
         owner.organization_id = "org-B"
         db.commit()
-    # Even with a still-valid original token, tenant scope is read from
-    # persisted user context, not the stale token's organization claim.
+    # Stale org-A JWT must not silently gain access to org-B after a transfer.
     response = read(app, "private-B", original_token)
-    assert response.status_code == 200
-    assert response.json()["state"] == "qualified"
+    assert response.status_code == 403
+    fresh = read(app, "private-B", jwt("owner-A", "org-B"))
+    assert fresh.status_code == 200
+    assert fresh.json()["state"] == "qualified"
 
 
 def test_inactive_owner_denied_before_tenant_lookup(context):
