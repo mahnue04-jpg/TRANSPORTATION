@@ -34,6 +34,14 @@ logger = logging.getLogger("amicor.marketing.routes")
 
 router = APIRouter(prefix="/api/marketing", tags=["marketing"])
 
+def _operations_checkout_sales_open() -> bool:
+    """A live Stripe key alone must never advertise customer purchase readiness."""
+    return (
+        agent_checkout_mode() not in {"live", "live_gated"}
+        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() == "true"
+    )
+
+
 _RATE_LOCK = Lock()
 _RATE_HITS: dict[str, deque[float]] = defaultdict(deque)
 _RATE_LIMIT = 8
@@ -170,6 +178,8 @@ def create_marketing_lead(
                     "checkout_available": bool(
                         duplicate.lead_type == "anonymous_operations"
                         and duplicate.service_plan in {"starter_49", "launch_99", "business_299"}
+                        and _operations_checkout_sales_open()
+                        and duplicate.payment_status != "paid"
                     ),
                     "email_notification": {"attempted": False, "sent": False, "reason": "duplicate"},
                 },
@@ -233,6 +243,8 @@ def create_marketing_lead(
             "checkout_available": bool(
                 lead.lead_type == "anonymous_operations"
                 and lead.service_plan in {"starter_49", "launch_99", "business_299"}
+                and _operations_checkout_sales_open()
+                and lead.payment_status != "paid"
             ),
             "duplicate": False,
             "email_notification": {
@@ -252,10 +264,7 @@ def nova_agent_checkout_status():
     return {
         "product": "Nova Anonymous Operations Agent",
         "mode": agent_checkout_mode(),
-        "customer_sales_enabled": (
-            agent_checkout_mode() not in {"live", "live_gated"}
-            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() == "true"
-        ),
+        "customer_sales_enabled": _operations_checkout_sales_open(),
         "plans": {
             key: {
                 "label": spec["label"],
@@ -294,13 +303,14 @@ def create_nova_agent_checkout(
 
     # Stripe live readiness does not establish that customer work can be
     # fulfilled. Keep purchases closed until service delivery is authorized.
-    if agent_checkout_mode() in {"live", "live_gated"} and (
-        os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() != "true"
-    ):
+    if not _operations_checkout_sales_open():
         raise HTTPException(
             status_code=503,
             detail="Operations checkout is not open for customer purchases yet",
         )
+
+    if lead.payment_status == "paid":
+        raise HTTPException(status_code=409, detail="This Operations request is already paid")
 
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
         return {
