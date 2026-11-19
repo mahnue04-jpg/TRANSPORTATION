@@ -12,11 +12,14 @@ class FakeSession:
         self.lead = lead
         self.inserted = []
         self.commits = 0
+        self.existing = None
 
     def get(self, model, key):
         return self.lead if self.lead and key == self.lead.id else None
 
     def execute(self, stmt):
+        if stmt.is_select:
+            return SimpleNamespace(first=lambda: self.existing)
         self.inserted.append(stmt)
         return SimpleNamespace(all=lambda: [])
 
@@ -84,4 +87,29 @@ def test_binding_disabled_by_default_denies_processing(paid, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         invoke(db)
     assert exc.value.status_code == 503
+    assert db.inserted == []
+
+
+def test_exact_binding_retry_does_not_write_again(paid):
+    db = FakeSession(paid)
+    db.existing = SimpleNamespace(
+        organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-a",
+        stripe_checkout_session_id="cs_123",
+    )
+    invoke(db)
+    assert db.inserted == []
+    assert db.commits == 0
+
+
+def test_payment_cannot_be_reused_for_different_task(paid):
+    db = FakeSession(paid)
+    db.existing = SimpleNamespace(
+        organization_id="org-a", owner_user_id="owner-a",
+        engagement_id="eng-a", task_id="task-other",
+        stripe_checkout_session_id="cs_123",
+    )
+    with pytest.raises(HTTPException) as exc:
+        invoke(db)
+    assert exc.value.status_code == 409
     assert db.inserted == []
