@@ -372,10 +372,31 @@ async def nova_agent_stripe_webhook(
     if lead is None or lead.lead_type != "anonymous_operations":
         return {"ok": True, "handled": False, "result": "lead_not_found"}
 
+    # Stripe's signed event is authentic, but it must ALSO identify the exact
+    # saved checkout for this lead. Metadata alone is not order authorization.
+    if event_type.startswith("checkout.session."):
+        if (
+            not lead.stripe_checkout_session_id
+            or str(obj.get("id") or "") != str(lead.stripe_checkout_session_id)
+            or str(metadata.get("nova_agent_plan") or "") != str(lead.service_plan or "")
+            or str(obj.get("customer") or "") != str(lead.stripe_customer_id or "")
+        ):
+            return {"ok": True, "handled": False, "result": "checkout_identity_mismatch"}
+
     result = "ignored"
     if event_type == "checkout.session.completed":
         payment_status = str(obj.get("payment_status") or "")
-        if payment_status in {"paid", "no_payment_required"}:
+        plan_spec = AGENT_PLANS.get(str(lead.service_plan or ""), {})
+        # The $49 starter is an actual 4,900-cent one-time charge. Do not
+        # interpret a no-payment-required session or a zero-dollar checkout
+        # as proof that the customer purchased this task.
+        if lead.service_plan == "starter_49" and (
+            obj.get("mode") != "payment"
+            or obj.get("currency") != "usd"
+            or obj.get("amount_total") != 4900
+        ):
+            return {"ok": True, "handled": False, "result": "starter_payment_amount_mismatch"}
+        if payment_status == "paid" and plan_spec.get("mode") in {"payment", "subscription"}:
             lead.payment_status = "paid"
             lead.status = "qualified"
             subscription = obj.get("subscription")
