@@ -244,6 +244,13 @@ async def scoped_owner_csv_cleanup(
         raise HTTPException(status_code=404, detail="Task not found on authorized engagement")
     if not _eligible_task(task, _completed_task_ids(engagement)):
         raise HTTPException(status_code=409, detail="Task is not ready for supervised Nova processing")
+    # A scoped customer job must have an exact paid $49 checkout-to-task
+    # binding. If the payment binding feature or schema is unavailable, fail closed.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+    )
     result = await owner_csv_cleanup(
         request, owner_action=owner_action, filename=filename, owner=owner,
     )
