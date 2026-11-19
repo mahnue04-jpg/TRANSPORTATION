@@ -199,3 +199,63 @@ def test_owner_grant_rejects_missing_verified_customer(isolated_postgres, monkey
             )
         assert denied.value.status_code == 409
         assert db.execute(sa.select(delivery.grants)).mappings().all() == []
+
+
+def test_owner_can_reissue_only_to_same_customer_after_revoke(isolated_postgres):
+    engine, _ = isolated_postgres
+    with Session(engine) as db:
+        job_id = seed_paid_job(db)
+        kwargs = dict(
+            job_id=job_id, owner_org="synthetic-owner-org",
+            owner_id="synthetic-owner", recipient_user_id="synthetic-recipient",
+        )
+        first = delivery.issue_grant(db, **kwargs)
+        assert first["grant_status"] == "issued"
+        with pytest.raises(delivery.HTTPException) as still_active:
+            delivery.issue_grant(db, **kwargs)
+        assert still_active.value.status_code == 409
+        delivery.revoke_grant(
+            db, job_id=job_id, owner_org="synthetic-owner-org",
+            owner_id="synthetic-owner",
+        )
+        second = delivery.issue_grant(db, **kwargs)
+        assert second["grant_status"] == "issued"
+        row = db.execute(sa.select(delivery.grants).where(
+            delivery.grants.c.job_id == job_id,
+        )).mappings().one()
+        assert row["recipient_user_id"] == "synthetic-recipient"
+        assert row["revoked_at"] is None
+
+
+def test_reissue_does_not_redirect_existing_grant_to_other_account(
+    isolated_postgres,
+):
+    engine, _ = isolated_postgres
+    with Session(engine) as db:
+        job_id = seed_paid_job(db)
+        delivery.issue_grant(
+            db, job_id=job_id, owner_org="synthetic-owner-org",
+            owner_id="synthetic-owner", recipient_user_id="synthetic-recipient",
+        )
+        delivery.revoke_grant(
+            db, job_id=job_id, owner_org="synthetic-owner-org",
+            owner_id="synthetic-owner",
+        )
+        db.execute(sa.insert(PlatformUser.__table__).values(
+            id="unrelated-user", email="buyer@example.invalid",
+            hashed_password="synthetic", role="staff",
+            organization_id="different-customer-org",
+            is_active=True, is_verified=True,
+        ))
+        db.commit()
+        with pytest.raises(delivery.HTTPException) as denied:
+            delivery.issue_grant(
+                db, job_id=job_id, owner_org="synthetic-owner-org",
+                owner_id="synthetic-owner", recipient_user_id="unrelated-user",
+            )
+        assert denied.value.status_code == 409
+        row = db.execute(sa.select(delivery.grants).where(
+            delivery.grants.c.job_id == job_id,
+        )).mappings().one()
+        assert row["recipient_user_id"] == "synthetic-recipient"
+        assert row["revoked_at"] is not None
