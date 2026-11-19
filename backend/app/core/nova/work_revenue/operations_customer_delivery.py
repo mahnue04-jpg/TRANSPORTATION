@@ -43,7 +43,10 @@ grants = sa.Table(
 def _guard(db: Session) -> None:
     if os.getenv("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED", "").lower() != "true":
         raise HTTPException(503, "Customer delivery disabled")
-    csv_jobs.require_runtime(db)
+    try:
+        csv_jobs.require_runtime(db)
+    except csv_jobs.CustomerCSVBlocked as exc:
+        raise HTTPException(503, "Private customer delivery runtime unavailable") from exc
     if db.get_bind().dialect.name != "postgresql":
         raise HTTPException(503, "Isolated PostgreSQL required")
     try:
