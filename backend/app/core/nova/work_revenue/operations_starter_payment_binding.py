@@ -66,6 +66,28 @@ def bind_paid_starter(
     expected_client = (lead.organization_name or lead.contact_name or "").strip().casefold()
     if not expected_client or expected_client != client_name.strip().casefold():
         raise HTTPException(409, "Paid lead does not match the saved engagement client")
+    # A retry for the exact same saved payment and task is safe, while
+    # reusing that payment for any other tenant, owner or job must fail.
+    try:
+        existing = db.execute(select(
+            starter_bindings.c.organization_id,
+            starter_bindings.c.owner_user_id,
+            starter_bindings.c.engagement_id,
+            starter_bindings.c.task_id,
+            starter_bindings.c.stripe_checkout_session_id,
+        ).where(starter_bindings.c.lead_id == lead.id)).first()
+    except SQLAlchemyError as exc:
+        raise HTTPException(503, "Starter payment records unavailable") from exc
+    if existing is not None:
+        if (
+            existing.organization_id == organization_id
+            and existing.owner_user_id == owner_user_id
+            and existing.engagement_id == engagement_id
+            and existing.task_id == task_id
+            and existing.stripe_checkout_session_id == lead.stripe_checkout_session_id
+        ):
+            return
+        raise HTTPException(409, "Starter payment is already assigned to another task")
     try:
         db.execute(starter_bindings.insert().values(
             lead_id=lead.id,
