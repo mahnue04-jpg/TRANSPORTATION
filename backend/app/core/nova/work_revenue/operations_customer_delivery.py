@@ -202,7 +202,7 @@ owner_delivery_router = APIRouter(
 )
 
 
-@owner_delivery_router.post("/jobs/{job_id}/delivery-grants/{recipient_user_id}")
+@owner_delivery_router.post("/jobs/{job_id}/delivery-grants/recipients/{recipient_user_id}")
 def owner_issue_customer_delivery(
     job_id: str,
     recipient_user_id: str,
