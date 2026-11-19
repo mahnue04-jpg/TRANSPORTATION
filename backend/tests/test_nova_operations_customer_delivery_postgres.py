@@ -241,8 +241,12 @@ def test_reissue_does_not_redirect_existing_grant_to_other_account(
             db, job_id=job_id, owner_org="synthetic-owner-org",
             owner_id="synthetic-owner",
         )
+        # Simulate a changed billing email without granting access to the old
+        # artifact's recipient; the earlier grant must not be redirected.
+        lead = db.get(MarketingWebsiteLead, "synthetic-lead")
+        lead.work_email = "other-buyer@example.invalid"
         db.execute(sa.insert(PlatformUser.__table__).values(
-            id="unrelated-user", email="buyer@example.invalid",
+            id="unrelated-user", email="other-buyer@example.invalid",
             hashed_password="synthetic", role="staff",
             organization_id="different-customer-org",
             is_active=True, is_verified=True,
