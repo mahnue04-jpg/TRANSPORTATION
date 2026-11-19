@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>My Deliverables | AMICOR Nova</title>
+  <link rel="icon" href="/static/branding/favicon.ico">
+  <link rel="stylesheet" href="/static/branding/brand.css">
+  <style>
+    :root {color-scheme:light}body{margin:0;font:16px/1.55 system-ui,Arial,sans-serif;background:#f5f7fa;color:#162639}
+    header{background:#122d4a;color:white;padding:18px max(18px,calc((100% - 880px)/2))}
+    header a{color:#dbeafe}main{max-width:840px;margin:32px auto;padding:0 18px}
+    .card{background:white;border:1px solid #dce4ec;border-radius:14px;padding:24px;margin:16px 0}
+    h1{font-size:1.65rem;margin:0}h2{font-size:1.15rem}p{margin:10px 0}
+    button,.button{font:inherit;font-weight:650;background:#163b65;color:white;border:0;border-radius:8px;padding:11px 16px;cursor:pointer}
+    button:disabled{opacity:.6;cursor:wait}.hint{color:#526477}.item{border-top:1px solid #e2e8f0;padding:16px 0}
+    .item:first-child{border-top:0}.item button{margin-top:8px}
+    #status{white-space:pre-wrap}footer{padding:20px;text-align:center;color:#526477;font-size:.85rem}
+  </style>
+</head>
+<body>
+<header><a href="/nova">AMICOR Nova</a> · <a href="/nova/work">Work &amp; Revenue</a></header>
+<main>
+  <h1>My Deliverables</h1>
+  <p class="hint">Your approved Nova Operations Starter Task files appear here when AMICOR has authorized delivery to your verified account.</p>
+  <section class="card" aria-label="Account and deliverables">
+    <h2>Customer downloads</h2>
+    <p>Sign in with the verified customer account used for your order. Completed work is not sent to anyone automatically.</p>
+    <button id="reload" type="button">Check my deliverables</button>
+    <p id="status" role="status" aria-live="polite">Sign in to see available files.</p>
+    <div id="deliverables" aria-live="polite"></div>
+  </section>
+  <section class="card">
+    <h2>Need help?</h2>
+    <p>If you don't see an expected file, please contact AMICOR using the same email address as your approved order. Availability requires owner approval and a time-limited delivery grant.</p>
+    <p><a href="mailto:sales@getamicor.com?subject=Nova%20Operations%20deliverable%20question">Contact AMICOR Operations</a></p>
+  </section>
+</main>
+<footer>Customer data is accessed only through authenticated, approved downloads. This service is not yet open for live delivery.</footer>
+<script src="/static/ux/sessionManager.js"></script>
+<script src="/static/nova-work/my-deliverables.js"></script>
+</body>
+</html>
