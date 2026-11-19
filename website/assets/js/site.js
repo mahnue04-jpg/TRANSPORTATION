@@ -29,6 +29,21 @@
   if (printButton) printButton.addEventListener("click", function () { window.print(); });
 
   var params = new URLSearchParams(window.location.search);
+  // Persist only bounded campaign labels across navigation to the inquiry form.
+  var allowedSources = ["facebook", "instagram", "tiktok", "youtube", "pinterest", "twitter", "x"];
+  var campaignSource = (params.get("utm_source") || "").trim().toLowerCase();
+  if (campaignSource === "x") campaignSource = "twitter";
+  try {
+    if (allowedSources.indexOf(campaignSource) !== -1) {
+      sessionStorage.setItem("amicor-campaign-source", campaignSource);
+    }
+  } catch (err) { /* Storage can be unavailable. */ }
+  function leadCampaignSource() {
+    try {
+      var saved = sessionStorage.getItem("amicor-campaign-source") || "";
+      return allowedSources.indexOf(saved) !== -1 ? saved : "";
+    } catch (err) { return allowedSources.indexOf(campaignSource) !== -1 ? campaignSource : ""; }
+  }
   var productAliases = {
     "Autonomous Operations Agent": "Nova Operations Agent",
     "AMICOR Nova Create": "Nova Creative Studio",
@@ -138,7 +153,8 @@
       product: data.product,
       message: data.message.trim(),
       consent: true,
-      source: "amicor-public-website-w8"
+      source: "amicor-public-website-w8",
+      marketingSource: leadCampaignSource()
     };
 
     function saveLocal() {

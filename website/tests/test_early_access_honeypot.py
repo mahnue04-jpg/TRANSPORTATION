@@ -133,6 +133,8 @@ def test_site_js_uses_new_honeypot_and_preserves_submit_path() -> None:
         assert f"{field}:" in JS or f"data.{field}" in JS
     assert "consent: true" in JS
     assert 'source: "amicor-public-website-w8"' in JS
+    assert "marketingSource: leadCampaignSource()" in JS
+    assert "amicor-campaign-source" in JS
 
 
 def test_empty_honeypot_reaches_lead_submit_path() -> None:
@@ -258,10 +260,61 @@ def test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory() 
     assert "stored_in_memory=2" in completed.stdout
 
 
+def test_social_source_attribution_allowlist() -> None:
+    """Exercise the server handler using synthetic leads and an in-memory KV."""
+    import subprocess
+
+    script = r"""
+globalThis.caches = { default: { async match() { return null; }, async put() {} } };
+const { onRequest } = await import("./functions/api/leads.js");
+const saved = [];
+const store = { async put(_key, value) { saved.push(JSON.parse(value)); } };
+const base = {
+  name: "Sample Owner", company: "Sample Co", email: "owner@example.com",
+  phone: "", industry: "Services", companySize: "1-10",
+  product: "Nova Operations Agent", message: "Please contact me",
+  consent: true, middle_name_confirm: "",
+};
+for (const [source, expected] of [
+  ["tiktok", "tiktok"],
+  ["facebook", "facebook"],
+  ["pinterest", "pinterest"],
+  ["not-a-network", ""],
+  ["<script>alert(1)</script>", ""],
+  ["", ""],
+]) {
+  const response = await onRequest({
+    request: new Request("https://staging.invalid/api/leads", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...base, marketingSource: source}),
+    }),
+    env: {AMICOR_LEADS: store},
+  });
+  if (response.status !== 202) throw new Error("Unexpected HTTP " + response.status);
+  const result = saved.at(-1);
+  if (result.marketingSource !== expected) {
+    throw new Error("Bad attribution for " + source + ": " + result.marketingSource);
+  }
+  if (result.source !== "amicor-public-website-w8") {
+    throw new Error("Existing source field changed");
+  }
+}
+console.log("SOCIAL_ATTRIBUTION_PASSED=6");
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert "SOCIAL_ATTRIBUTION_PASSED=6" in completed.stdout
+
+
 def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
     assert 'source: "amicor-public-website-w8"' in LEADS
+    assert "marketingSource:" in LEADS
     assert "store.put(`lead:${payload.receivedAt}:${id}`" in LEADS
     assert 'return json(202, { ok: true, stored, notified });' in LEADS
 
@@ -276,6 +329,7 @@ def main() -> None:
         test_every_inquiry_option_is_on_the_lead_allowlist,
         test_quote_message_keeps_line_breaks_and_casting_value,
         test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory,
+        test_social_source_attribution_allowlist,
         test_leads_function_and_kv_path_unchanged,
     ]
     for test in tests:

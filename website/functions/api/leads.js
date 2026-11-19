@@ -105,6 +105,11 @@ export async function onRequest(context) {
     message: plain(raw.message, LIMITS.message, true),
     consent: raw.consent === true || raw.consent === "yes",
     source: "amicor-public-website-w8",
+    // Untrusted client attribution is restricted to an allowlist.
+    marketingSource: (() => {
+      const value = plain(raw.marketingSource, 32).toLowerCase();
+      return new Set(["facebook", "instagram", "tiktok", "youtube", "pinterest", "twitter"]).has(value) ? value : "";
+    })(),
   };
 
   if (!payload.name || !payload.company || !payload.industry || !payload.companySize || !payload.message) {
