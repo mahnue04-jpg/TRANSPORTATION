@@ -469,6 +469,106 @@
     } catch (err) { scopedStatus.textContent = err.message; }
     finally { downloadButton.disabled = false; }
   });
+  const deliveryGrantButton = document.getElementById("operations-delivery-grant");
+  const deliveryRevokeButton = document.getElementById("operations-delivery-revoke");
+  const deliveryRecipientInput = document.getElementById("operations-delivery-recipient");
+  const deliveryResult = document.getElementById("operations-delivery-result");
+
+  function updateDeliveryButtons() {
+    const ready = !!currentJobId && currentJobMode === "durable" &&
+      currentJobStatus === "APPROVED_FOR_DOWNLOAD" && !scopedBusy;
+    if (deliveryGrantButton) deliveryGrantButton.disabled = !ready;
+    if (deliveryRevokeButton) deliveryRevokeButton.disabled = !ready;
+  }
+
+  if (deliveryGrantButton && deliveryResult) {
+    deliveryGrantButton.addEventListener("click", async function () {
+      if (scopedBusy || currentJobMode !== "durable" ||
+          currentJobStatus !== "APPROVED_FOR_DOWNLOAD" || !currentJobId) {
+        deliveryResult.textContent = "Approve a durable task before granting customer access.";
+        return;
+      }
+      const headers = scopedAuthHeaders();
+      if (!(headers.Authorization || headers.authorization)) {
+        deliveryResult.textContent = "Sign in as the authorized AMICOR owner.";
+        return;
+      }
+      const recipientId = (deliveryRecipientInput && deliveryRecipientInput.value || "").trim();
+      if (!/^[a-zA-Z0-9_-]{1,36}$/.test(recipientId)) {
+        deliveryResult.textContent = "Enter the verified customer's saved account ID.";
+        return;
+      }
+      if (!window.confirm("Grant this verified customer access to the approved $49 CSV for 24 hours?")) return;
+      scopedBusy = true;
+      updateDeliveryButtons();
+      deliveryResult.textContent = "Verifying paid task, customer identity, and approved private artifact...";
+      try {
+        const url = "/api/nova/work/operations/owner/jobs/" +
+          encodeURIComponent(currentJobId) + "/delivery-grants/recipients/" +
+          encodeURIComponent(recipientId);
+        const response = await fetch(url, {
+          method: "POST", credentials: "same-origin",
+          headers: Object.assign({}, headers, {
+            "X-Nova-Owner-Action": "issue-approved-csv-delivery"
+          })
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        const data = await response.json();
+        deliveryResult.textContent = data.grant_status === "issued"
+          ? "Customer download granted for 24 hours. No notification sent; delivery receipt not confirmed."
+          : "Grant result needs owner review.";
+      } catch (error) {
+        deliveryResult.textContent = error.message || "Customer delivery is unavailable.";
+      } finally {
+        scopedBusy = false;
+        updateDeliveryButtons();
+      }
+    });
+  }
+
+  if (deliveryRevokeButton && deliveryResult) {
+    deliveryRevokeButton.addEventListener("click", async function () {
+      if (scopedBusy || !currentJobId || currentJobMode !== "durable") return;
+      if (!window.confirm("Revoke this customer's current download access?")) return;
+      const headers = scopedAuthHeaders();
+      if (!(headers.Authorization || headers.authorization)) {
+        deliveryResult.textContent = "Sign in as the authorized AMICOR owner.";
+        return;
+      }
+      scopedBusy = true;
+      updateDeliveryButtons();
+      try {
+        const url = "/api/nova/work/operations/owner/jobs/" +
+          encodeURIComponent(currentJobId) + "/delivery-grants/revoke";
+        const response = await fetch(url, {
+          method: "POST", credentials: "same-origin",
+          headers: Object.assign({}, headers, {
+            "X-Nova-Owner-Action": "revoke-csv-delivery"
+          })
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        deliveryResult.textContent = "Customer download permission revoked.";
+      } catch (error) {
+        deliveryResult.textContent = error.message || "Revocation is unavailable.";
+      } finally {
+        scopedBusy = false;
+        updateDeliveryButtons();
+      }
+    });
+  }
+  if (deliveryGrantButton || deliveryRevokeButton) {
+    if (statusButton) statusButton.addEventListener("click", function () {
+      window.setTimeout(updateDeliveryButtons, 0);
+    });
+    if (approveButton) approveButton.addEventListener("click", function () {
+      window.setTimeout(updateDeliveryButtons, 0);
+    });
+    if (rejectButton) rejectButton.addEventListener("click", function () {
+      window.setTimeout(updateDeliveryButtons, 0);
+    });
+    updateDeliveryButtons();
+  }
+
   async function decideJob(approve) {
     if (!currentJobId) return;
     const response = await fetch(jobPath("/review"), {
