@@ -269,6 +269,53 @@ owner_delivery_router = APIRouter(
 )
 
 
+@owner_delivery_router.post("/jobs/{job_id}/delivery-grants/by-paid-order")
+def owner_issue_customer_delivery_by_paid_order(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Resolve the verified customer directly from the bound paid order.
+
+    The owner does not need to know an internal customer UUID. The paid order
+    email must map to exactly one active verified non-owner account.
+    No email is accepted from caller input, and no invitation is sent.
+    """
+    if owner_action != "issue-approved-csv-delivery":
+        raise HTTPException(403, "Explicit owner delivery approval required")
+    from .operations_owner_csv_api import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
+
+    org, owner_id = str(owner.organization_id or ""), str(owner.user_id)
+    _guard(db)
+    job = csv_jobs._owned(db, job_id, org, owner_id)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=job["engagement_id"], task_id=job["task_id"],
+    )
+    _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
+    if job["status"] != "APPROVED_FOR_DOWNLOAD":
+        raise HTTPException(409, "Owner-approved CSV output required")
+    lead = _exact_paid_lead(
+        db, org=org, owner=owner_id, eng=job["engagement_id"], task=job["task_id"],
+    )
+    candidates = db.execute(sa.select(PlatformUser).where(
+        sa.func.lower(PlatformUser.email) == lead.work_email.strip().lower(),
+        PlatformUser.is_active.is_(True),
+        PlatformUser.is_verified.is_(True),
+        PlatformUser.organization_id.is_not(None),
+        PlatformUser.organization_id != org,
+    ).limit(2)).scalars().all()
+    if len(candidates) != 1:
+        raise HTTPException(409, "Exactly one verified customer account matching the paid order is required")
+    try:
+        return issue_grant(
+            db, job_id=job_id, owner_org=org, owner_id=owner_id,
+            recipient_user_id=candidates[0].id,
+        )
+    except csv_jobs.CustomerCSVBlocked as exc:
+        raise HTTPException(getattr(exc, "code", 503), "Customer delivery unavailable") from exc
+
+
 @owner_delivery_router.post("/jobs/{job_id}/delivery-grants/recipients/{recipient_user_id}")
 def owner_issue_customer_delivery(
     job_id: str,
