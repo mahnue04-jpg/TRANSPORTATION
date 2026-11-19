@@ -1509,6 +1509,10 @@
     return row.kind || "Asset";
   }
 
+  function isWalkingPresenterFile(url) {
+    return /(?:^|\/)nova-walk-presenter-[^/?#]+(?:[?#]|$)/.test(String(url || ""));
+  }
+
   async function pollStudioJob(projectId, jobId) {
     var last = null;
     for (var attempt = 0; attempt < 45; attempt += 1) {
@@ -1585,15 +1589,17 @@
         var filePath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
           : "";
+        var isWalkingPreview = (row.metadata || {}).pipeline === "presenter_5s_proof" || isWalkingPresenterFile(row.url);
+        var isPrivateVideo = (row.metadata || {}).source === "owner_video_import" || isWalkingPreview;
         var fallbackVideoName = offlineMontage ? "nova-offline-montage.mp4" : "nova-video.mp4";
         var downloadControl = filePath
           ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
             escapeHtml(filePath) + "\" data-download-name=\"" + fallbackVideoName + "\">" + videoLabel + "</button>")
-          : (String(row.url).indexOf("/api/") === 0 ? "" : ("<a class=\"button secondary\" href=\"" +
+          : (isPrivateVideo || String(row.url).indexOf("/api/") === 0 ? "" : ("<a class=\"button secondary\" href=\"" +
             escapeHtml(row.url) + "\" download>" + videoLabel + "</a>"));
         var presenterCaptionText = isPresenterVideo && !(row.metadata && row.metadata.captions_burned_in) ? String(row.content || "").trim() : "";
         var subtitleUrl = row.metadata && row.metadata.subtitle_url ? String(row.metadata.subtitle_url) : "";
-        var subtitleTrack = subtitleUrl && String(subtitleUrl).indexOf("/api/") !== 0
+        var subtitleTrack = !isWalkingPreview && subtitleUrl && String(subtitleUrl).indexOf("/api/") !== 0
           ? ("<track kind=\"subtitles\" srclang=\"en\" label=\"English\" src=\"" + escapeHtml(subtitleUrl) + "\" default>")
           : "";
         var captionControl = filePath && (subtitleUrl || offlineMontage)
@@ -1611,26 +1617,28 @@
           licenseNote = "<p class=\"hint\">PREVIEW_ONLY. Presenter NOT USED. Lip-sync presenter: no. Commercial-use clearance: " +
             escapeHtml(license) + ". " + escapeHtml(String(clearance)) + "</p>";
         }
-        var isPrivateImportedVideo = (row.metadata || {}).source === "owner_video_import";
-        var videoSourceAttr = isPrivateImportedVideo
-          ? ("data-private-video-url=\"" + escapeHtml(filePath) + "\"")
+        var videoSourceAttr = isPrivateVideo
+          ? (filePath ? "data-private-video-url=\"" + escapeHtml(filePath) + "\"" : "")
           : ("src=\"" + escapeHtml(row.url) + "\"");
         media = "<figure class=\"generated-media" + (isPresenterVideo ? " presenter-media" : "") + "\"><video controls playsinline preload=\"metadata\" " + videoSourceAttr +
           (isPresenterVideo ? " class=\"presenter-caption-video\" data-caption-text=\"" + escapeHtml(presenterCaptionText) + "\"" : "") +
           ">" + subtitleTrack + "</video>" +
           (isPresenterVideo ? "<div class=\"presenter-live-caption\" aria-live=\"polite\"></div>" : "") +
-          "</figure>" + (isPrivateImportedVideo ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button> <button type=\"button\" class=\"secondary private-video-inspect\">Inspect saved MP4 format (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p><p class=\"hint private-video-inspection\" role=\"status\" aria-live=\"polite\"></p></div>" : "") + licenseNote + downloadControl + captionControl;
+          "</figure>" + (isPrivateVideo && filePath ? "<div class=\"private-video-actions\"><button type=\"button\" class=\"secondary private-video-retry\">Load and play saved video (free)</button> <button type=\"button\" class=\"secondary private-video-inspect\">Inspect saved MP4 format (free)</button><p class=\"hint private-video-status\" role=\"status\" aria-live=\"polite\">Loading protected video preview…</p><p class=\"hint private-video-inspection\" role=\"status\" aria-live=\"polite\"></p></div>" : "") + licenseNote + downloadControl + captionControl;
       } else if (row.kind === "audio" && row.url && mediaAvailable) {
         var audioPath = row.id
           ? ("/api/nova/creative/projects/" + encodeURIComponent(activeProjectId) + "/assets/" + encodeURIComponent(row.id) + "/file")
           : "";
         var audioName = /\.mp3(?:$|\?)/i.test(row.url) ? "nova-voice.mp3" : "nova-voice.wav";
+        var privateAudio = (row.metadata || {}).source === "owner_audio_upload";
+        var walkingNarration = isWalkingPresenterFile(row.url);
         var audioControl = audioPath
           ? ("<button type=\"button\" class=\"secondary asset-auth-download\" data-download-url=\"" +
             escapeHtml(audioPath) + "\" data-download-name=\"" + audioName + "\">Download voice</button>")
-          : ("<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
-        var privateAudio = (row.metadata || {}).source === "owner_audio_upload";
-        media = privateAudio
+          : (privateAudio || walkingNarration ? "" : "<a class=\"button secondary\" href=\"" + escapeHtml(row.url) + "\" download>Download voice</a>");
+        media = walkingNarration
+          ? "<p class=\"hint\">Private preview narration. Download voice to listen separately.</p>" + audioControl
+          : privateAudio
           ? "<p class=\"hint\">Private recording. Download voice to listen, then use the narration approval section.</p>" + audioControl
           : "<div class=\"generated-media\"><audio controls preload=\"metadata\" src=\"" +
             escapeHtml(row.url) + "\"></audio></div>" + audioControl;
