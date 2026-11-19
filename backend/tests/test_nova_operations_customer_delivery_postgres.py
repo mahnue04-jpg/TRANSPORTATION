@@ -94,7 +94,7 @@ def seed_paid_job(db):
     result = csv.submit_review_job(
         db, org="synthetic-owner-org", owner="synthetic-owner",
         engagement_id="synthetic-eng", task_id="synthetic-task",
-        request_key="synthetic-acceptance-1", raw=b"Name\\nAda\\nAda\\n",
+        request_key="synthetic-acceptance-1", raw=b"Name\nAda\nAda\n",
     )
     csv.review_job(
         db, org="synthetic-owner-org", owner="synthetic-owner",
@@ -116,7 +116,7 @@ def test_postgres_payment_bound_approved_csv_customer_download(isolated_postgres
         recipient = db.get(PlatformUser, "synthetic-recipient")
         assert delivery.recipient_download(
             db, job_id=job_id, user=recipient,
-        ) == b"Name\\nAda\\n"
+        ) == b"Name\nAda\n"
         wrong_recipient = PlatformUser(
             id="different-user", email="buyer@example.invalid",
             hashed_password="synthetic", organization_id="synthetic-customer-org",
