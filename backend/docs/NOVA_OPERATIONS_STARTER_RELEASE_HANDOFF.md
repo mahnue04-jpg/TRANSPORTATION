@@ -10,6 +10,23 @@ Status: **not live**. No production deployment or customer data use approved by 
 - Automatic deploys and PR previews are OFF. Thus PR #559 commits are **not** running on this service, and CI passing in TRANSPORTATION does **not** establish staging acceptance.
 - Do not silently repoint or redeploy this service; coordinate an explicitly approved release artifact or separate compatible staging service.
 
+## Deployment mechanism verified — why redeploying old staging is not enough
+Read-only inspection of `mahnue04-jpg/nova-central-intelligence-staging` / `feature/nova-hosted-operations-endpoint`:
+- `build.sh` creates a scratch Git repository and fetches **fixed** upstream `ce3c39385e540f4b99a3340f20c01a1c55987a1f` from TRANSPORTATION. It applies `staging.patch`, `operations-handoff.patch` and `hosted-operations.patch`, then installs dependencies and moves the result into `.nova-source`.
+- `start-operations.sh` launches `nova_operations_synthetic_staging:create_app` from that imported source. This is **not** the customer-capable FastAPI `app.main` entrypoint.
+- Render additionally hard-pins its own staging repository commit `a24d806bf485a5ec7073783ed20b1ea609b283e0` in the build command. Therefore **neither PR #559 nor its CI automatically updates this service**.
+- Do not remove pins/apply old patches against a new upstream head without checking source compatibility. Do not switch the public diagnostic staging service to `app.main` because that can activate unrelated application initialization with incompatible database and secrets.
+
+### Proposed isolated staging route — requires explicit owner approval
+1. Preserve the existing synthetic staging service unchanged and keep production untouched.
+2. Create **separate** noncustomer validation web service from a reviewed immutable SHA of PR #559, with root `backend`, explicit Python dependency install and `uvicorn app.main:app --host 0.0.0.0 --port $PORT` **only after verifying application startup has no unexpected data mutation on its isolated environment**.
+3. Use a separate disposable PostgreSQL database with a defined backup and rollback; run only reviewed migrations there. Set all live customer sales, customer processing, worker, queued processing, paid provider, and live Stripe flags OFF by default.
+4. Initially check public readiness, owner login, route registration, and safe synthetic authorization denials; run a test-mode *lead-specific* payment-to-task flow only after the binding schema has been reviewed and applied in this disposable database.
+5. Add private storage ONLY after provider credentials, bucket isolation, tenant scoping, retention, and cost have been approved. Never upload real customer files during rehearsal.
+6. Before deploying to production, demonstrate secure customer-specific owner-approved delivery, explicit refund/cancellation/terms handling, failure recovery, monitoring and rollback.
+
+**Not yet approved or performed**: creating a Render service/database, modifying environment variables, applying DDL, sending test Stripe requests, redirecting DNS, enabling paid checkout, or deploying production.
+
 ## $49 first-customer acceptance chain
 1. Save lead and explicitly agreed one-time CSV scope. Confirm legal customer identity and authorization to process their data. No implied unlimited work.
 2. Create a **saved lead-specific** Stripe Checkout; verify the signed checkout event, exact saved checkout/session/customer, USD 4900, payment status paid. Do not assume the public generic Stripe Payment Link maps to a lead/task.
