@@ -12,6 +12,8 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import Response
 from app.auth import UserContext, get_current_user_context
+from app.core.nova.router import require_nova_access
+from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.db.session import get_db
 from sqlalchemy.orm import Session
 
@@ -192,3 +194,51 @@ def authenticated_customer_csv_download(
         "X-Content-Type-Options": "nosniff",
         "X-Nova-Delivery-Status": "download-offered-not-receipt-confirmed",
     })
+
+
+owner_delivery_router = APIRouter(
+    prefix="/api/nova/work/operations/owner", tags=["nova-operations-owner-delivery"],
+    dependencies=[Depends(require_nova_access), Depends(require_work_revenue_owner)],
+)
+
+
+@owner_delivery_router.post("/jobs/{job_id}/delivery-grants/{recipient_user_id}")
+def owner_issue_customer_delivery(
+    job_id: str,
+    recipient_user_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    if owner_action != "issue-approved-csv-delivery":
+        raise HTTPException(403, "Explicit owner delivery approval required")
+    from .operations_owner_csv_api import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
+    org, owner_id = str(owner.organization_id or ""), str(owner.user_id)
+    _guard(db)
+    job = csv_jobs._owned(db, job_id, org, owner_id)
+    _check_saved_csv_assignment(
+        db, owner=owner, engagement_id=job["engagement_id"], task_id=job["task_id"],
+    )
+    _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
+    try:
+        return issue_grant(
+            db, job_id=job_id, owner_org=org, owner_id=owner_id,
+            recipient_user_id=recipient_user_id,
+        )
+    except csv_jobs.CustomerCSVBlocked as exc:
+        raise HTTPException(getattr(exc, "code", 503), "Customer delivery unavailable") from exc
+
+
+@owner_delivery_router.post("/jobs/{job_id}/delivery-grants/revoke")
+def owner_revoke_customer_delivery(
+    job_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    if owner_action != "revoke-csv-delivery":
+        raise HTTPException(403, "Explicit owner revocation action required")
+    return revoke_grant(
+        db, job_id=job_id,
+        owner_org=str(owner.organization_id or ""), owner_id=str(owner.user_id),
+    )
