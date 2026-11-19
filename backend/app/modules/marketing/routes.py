@@ -180,6 +180,7 @@ def create_marketing_lead(
                         and duplicate.service_plan in {"starter_49", "launch_99", "business_299"}
                         and _operations_checkout_sales_open()
                         and duplicate.payment_status != "paid"
+                        and (agent_checkout_mode() != "live" or duplicate.status == "qualified")
                     ),
                     "email_notification": {"attempted": False, "sent": False, "reason": "duplicate"},
                 },
@@ -245,6 +246,7 @@ def create_marketing_lead(
                 and lead.service_plan in {"starter_49", "launch_99", "business_299"}
                 and _operations_checkout_sales_open()
                 and lead.payment_status != "paid"
+                and (agent_checkout_mode() != "live" or lead.status == "qualified")
             ),
             "duplicate": False,
             "email_notification": {
