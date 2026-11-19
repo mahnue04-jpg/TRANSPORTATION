@@ -39,8 +39,10 @@ def harness(monkeypatch):
     app.dependency_overrides[require_work_revenue_owner] = lambda: owner
 
     def session():
-        with Session(engine) as db:
-            yield db
+        class DenyUnconfiguredDatabase:
+            def get(self, model, identifier):
+                return None
+        yield DenyUnconfiguredDatabase()
 
     app.dependency_overrides[get_db] = session
     with TestClient(app) as client:
