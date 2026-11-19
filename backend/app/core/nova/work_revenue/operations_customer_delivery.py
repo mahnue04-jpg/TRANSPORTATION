@@ -9,7 +9,10 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
-from fastapi import HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import Response
+from app.auth import UserContext, get_current_user_context
+from app.db.session import get_db
 from sqlalchemy.orm import Session
 
 from app.db.models import User as PlatformUser
@@ -142,3 +145,50 @@ def recipient_download(db: Session, *, job_id: str, user: PlatformUser) -> bytes
     return csv_jobs.download_review(
         db, org=row["organization_id"], owner=row["owner_user_id"], job_id=job_id,
     )
+
+
+def revoke_grant(db: Session, *, job_id: str, owner_org: str, owner_id: str) -> dict:
+    _guard(db)
+    now = datetime.now(timezone.utc)
+    try:
+        changed = db.execute(sa.update(grants).where(
+            grants.c.job_id == job_id,
+            grants.c.organization_id == owner_org,
+            grants.c.owner_user_id == owner_id,
+            grants.c.revoked_at.is_(None),
+        ).values(revoked_at=now))
+        if changed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(404, "Active delivery grant not found")
+        db.commit()
+    except sa.exc.SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(503, "Delivery revocation unavailable") from exc
+    return {"job_id": job_id, "grant_status": "revoked", "delivered": False}
+
+
+customer_delivery_router = APIRouter(
+    prefix="/api/nova/work/operations/customer", tags=["nova-operations-customer-delivery"],
+)
+
+
+@customer_delivery_router.get("/deliveries/{job_id}")
+def authenticated_customer_csv_download(
+    job_id: str,
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Account-bound download; access does not imply customer receipt."""
+    db_user = db.get(PlatformUser, user.user_id)
+    if db_user is None or db_user.organization_id != user.organization_id:
+        raise HTTPException(403, "Customer session invalid")
+    try:
+        content = recipient_download(db, job_id=job_id, user=db_user)
+    except csv_jobs.CustomerCSVBlocked as exc:
+        raise HTTPException(getattr(exc, "code", 503), "Customer delivery unavailable") from exc
+    return Response(content=content, media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="nova-completed-task.csv"',
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-Nova-Delivery-Status": "download-offered-not-receipt-confirmed",
+    })
