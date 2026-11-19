@@ -75,6 +75,18 @@
           </select>
         </label>
         <p class="hint">Choose a task from the authenticated list above. Manual engagement and task IDs are not accepted. Tasks are rechecked by the server when you process the file.</p>
+        <div class="command-card" aria-label="Paid Starter Task owner review">
+          <h3>$49 Starter Task — paid customer review</h3>
+          <p class="hint">Owner-only workflow. First choose the saved, authorized customer task above. Bind its exact verified $49 checkout using the saved Operations lead ID; a name or payment claim alone is not enough. Requires separately enabled payment binding and completed customer authorization. Not live yet.</p>
+          <label for="operations-starter-lead">Paid Operations lead ID
+            <input id="operations-starter-lead" type="text" maxlength="36" autocomplete="off" placeholder="Saved lead ID" />
+          </label>
+          <div class="command-actions">
+            <button type="button" class="secondary" id="operations-starter-bind">Bind verified payment to selected task</button>
+            <button type="button" id="operations-starter-process">Process selected paid task for owner review</button>
+          </div>
+          <p id="operations-starter-result" class="hint" aria-live="polite">No payment bound and no customer file processed. Customer delivery remains disabled.</p>
+        </div>
         <form id="operations-scoped-csv-form">
           <label for="operations-scoped-csv-file">Authorized CSV
             <input id="operations-scoped-csv-file" type="file" accept=".csv,text/csv" required />
