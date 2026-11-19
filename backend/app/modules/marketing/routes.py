@@ -312,6 +312,15 @@ def create_nova_agent_checkout(
     if lead.payment_status == "paid":
         raise HTTPException(status_code=409, detail="This Operations request is already paid")
 
+    # For real-money Operations sales, a lead submission is not an agreed
+    # contract. Internal review must qualify the scope before checkout.
+    # Test-mode synthetic checkout remains available for rehearsal.
+    if agent_checkout_mode() == "live" and lead.status != "qualified":
+        raise HTTPException(
+            status_code=409,
+            detail="AMICOR must review and approve the work scope before payment",
+        )
+
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
         return {
             "checkout_url": lead.checkout_url,
