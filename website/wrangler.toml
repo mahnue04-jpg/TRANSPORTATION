@@ -4,6 +4,12 @@ name = "amicor-public"
 compatibility_date = "2026-09-11"
 pages_build_output_dir = "."
 
+# Production lead storage — preserve existing customers and records.
 [[kv_namespaces]]
 binding = "AMICOR_LEADS"
 id = "aef188e1167a41c98ee81deabbbce50d"
+
+# All Pages preview deployments use isolated synthetic-test storage.
+[[env.preview.kv_namespaces]]
+binding = "AMICOR_LEADS"
+id = "e02be1f5a9c748528cd64f04e3f2b4a0"
