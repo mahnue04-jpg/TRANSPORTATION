@@ -1,59 +1,5 @@
 (function () {
   "use strict";
-  const form = document.getElementById("operations-csv-form");
-  const message = document.getElementById("operations-csv-result");
-  if (!form || !message) return;
-  form.addEventListener("submit", async function (event) {
-    event.preventDefault();
-    const file = document.getElementById("operations-csv-file").files[0];
-    const button = form.querySelector('button[type="submit"]');
-    if (!file) { message.textContent = "Choose a CSV file."; return; }
-    if (file.size > 1000000) { message.textContent = "File must be no larger than 1 MB."; return; }
-    const session = window.AmiCorSession;
-    const headers = session && typeof session.getAuthHeaders === "function"
-      ? session.getAuthHeaders() : {};
-    if (!headers || !(headers.Authorization || headers.authorization)) {
-      message.textContent = "Sign in as the AMICOR Work & Revenue owner first.";
-      return;
-    }
-    button.disabled = true;
-    message.textContent = "Processing CSV for owner review...";
-    try {
-      const response = await fetch("/api/nova/work/operations/csv-clean", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: Object.assign({}, headers, {
-          "X-Nova-Owner-Action": "process-csv-for-owner-review",
-          "X-Nova-File-Name": file.name,
-          "Content-Type": "text/csv"
-        }),
-        body: file
-      });
-      if (!response.ok) {
-        let detail = "Request failed (" + response.status + ").";
-        try { const payload = await response.json(); detail = payload.detail || detail; } catch (_) {}
-        message.textContent = detail;
-        return;
-      }
-      const cleaned = await response.blob();
-      const downloadUrl = URL.createObjectURL(cleaned);
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = "nova-cleaned-review.csv";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.setTimeout(function () { URL.revokeObjectURL(downloadUrl); }, 10000);
-      message.textContent = "Review required: " +
-        (response.headers.get("X-Nova-Input-Rows") || "?") + " input rows, " +
-        (response.headers.get("X-Nova-Output-Rows") || "?") +
-        " cleaned rows. Downloaded for your inspection. No file was saved by the application.";
-    } catch (_) {
-      message.textContent = "Could not connect. Please check your sign-in and network.";
-    } finally {
-      button.disabled = false;
-    }
-  });
   const loadEligible = document.getElementById("operations-load-eligible");
   const eligibleSelect = document.getElementById("operations-eligible-select");
   let eligibleTasks = [];
@@ -141,6 +87,124 @@
     const headers = session && typeof session.getAuthHeaders === "function"
       ? session.getAuthHeaders() : {};
     return headers || {};
+  }
+
+  const starterBindButton = document.getElementById("operations-starter-bind");
+  const starterProcessButton = document.getElementById("operations-starter-process");
+  const starterStatus = document.getElementById("operations-starter-result");
+  let starterBoundTask = "";
+
+  function starterSelectedKey() {
+    return selectedTask ? selectedTask.engagement_id + "|" + selectedTask.task_id : "";
+  }
+
+  function starterAuthorization() {
+    const headers = scopedAuthHeaders();
+    if (!(headers.Authorization || headers.authorization)) {
+      throw new Error("Sign in as the AMICOR owner before processing.");
+    }
+    if (!selectedTask || !eligibleTasks.includes(selectedTask)) {
+      throw new Error("Choose an eligible saved customer task first.");
+    }
+    if (!document.getElementById("operations-scope-confirmed").checked) {
+      throw new Error("Confirm the client's permission to process this specific task.");
+    }
+    return headers;
+  }
+
+  if (starterBindButton && starterStatus) {
+    starterBindButton.addEventListener("click", async function () {
+      if (scopedBusy) return;
+      starterBoundTask = "";
+      let auth;
+      try { auth = starterAuthorization(); }
+      catch (error) { starterStatus.textContent = error.message; return; }
+      const leadInput = document.getElementById("operations-starter-lead");
+      const leadId = (leadInput && leadInput.value || "").trim();
+      if (!/^[a-zA-Z0-9_-]{1,36}$/.test(leadId)) {
+        starterStatus.textContent = "Enter the saved paid Operations lead ID (not a Stripe card or bank number).";
+        return;
+      }
+      const taskKey = starterSelectedKey();
+      scopedBusy = true;
+      starterBindButton.disabled = true;
+      starterStatus.textContent = "Checking the saved verified $49 checkout and matching customer task...";
+      try {
+        const url = "/api/nova/work/operations/engagements/" +
+          encodeURIComponent(selectedTask.engagement_id) + "/tasks/" +
+          encodeURIComponent(selectedTask.task_id) + "/starter-payment-bindings/" +
+          encodeURIComponent(leadId);
+        const response = await fetch(url, {
+          method: "POST", credentials: "same-origin",
+          headers: Object.assign({}, auth, {
+            "X-Nova-Owner-Action": "bind-paid-starter-to-task"
+          })
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        starterBoundTask = taskKey;
+        starterStatus.textContent = "Saved $49 payment bound to this task for owner review. No customer file has been processed or delivered.";
+      } catch (error) {
+        starterStatus.textContent = error.message ||
+          "Unable to verify the payment-to-task binding. Do not process customer data.";
+      } finally {
+        scopedBusy = false;
+        starterBindButton.disabled = false;
+      }
+    });
+  }
+
+  if (starterProcessButton && starterStatus) {
+    starterProcessButton.addEventListener("click", async function () {
+      if (scopedBusy) return;
+      let auth;
+      try { auth = starterAuthorization(); }
+      catch (error) { starterStatus.textContent = error.message; return; }
+      if (!starterBoundTask || starterBoundTask !== starterSelectedKey()) {
+        starterStatus.textContent = "Bind the verified $49 payment to this exact task first.";
+        return;
+      }
+      const fileInput = document.getElementById("operations-scoped-csv-file");
+      const file = fileInput && fileInput.files[0];
+      if (!file || !file.name.toLowerCase().endsWith(".csv") ||
+          file.size < 1 || file.size > 1000000) {
+        starterStatus.textContent = "Choose an authorized UTF-8 CSV file up to 1 MB.";
+        return;
+      }
+      scopedBusy = true;
+      starterProcessButton.disabled = true;
+      starterStatus.textContent = "Processing the paid, authorized task for owner review only...";
+      try {
+        const url = "/api/nova/work/operations/engagements/" +
+          encodeURIComponent(selectedTask.engagement_id) + "/tasks/" +
+          encodeURIComponent(selectedTask.task_id) + "/csv-clean";
+        const response = await fetch(url, {
+          method: "POST", credentials: "same-origin", body: file,
+          headers: Object.assign({}, auth, {
+            "Content-Type": "text/csv",
+            "X-Nova-File-Name": file.name,
+            "X-Nova-Owner-Action": "process-csv-for-owner-review",
+            "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization"
+          })
+        });
+        if (!response.ok) throw new Error(await safeError(response));
+        const blob = await response.blob();
+        const temporaryUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = temporaryUrl;
+        link.download = "nova-starter-owner-review.csv";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function () { URL.revokeObjectURL(temporaryUrl); }, 10000);
+        starterStatus.textContent = "Review-only CSV downloaded locally. Customer delivery and task completion are NOT automatic.";
+      } catch (error) {
+        starterStatus.textContent = error.message ||
+          "Owner-reviewed processing unavailable. Do not send an unapproved file.";
+      } finally {
+        scopedBusy = false;
+        starterProcessButton.disabled = false;
+      }
+    });
   }
 
   function updateJobButtons(status) {
