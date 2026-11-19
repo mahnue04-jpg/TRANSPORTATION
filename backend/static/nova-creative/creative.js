@@ -2433,13 +2433,19 @@
 
   var latestStudioOrderId = null;
 
-  async function runWalkingRender(endpoint, button, startMessage, successMessage) {
+  async function runWalkingRender(endpoint, button, startMessage, successMessage, { useSelectedProject = false } = {}) {
     button.disabled = true;
+    var projectId = activeProjectId;
+    var revision = activeProjectRevision;
     try {
-      // Never rely on a bare localStorage id — always resolve against the live project list.
-      var projectId = await ensureSecondCommercialSelected();
+      if (!useSelectedProject) projectId = await ensureSecondCommercialSelected();
       if (!projectId) {
-        showBanner("AMICOR Second Commercial was not found. No video generated. Choose the original project explicitly before rendering.", false);
+        showBanner(
+          useSelectedProject
+            ? "Select a saved project before building the 5s walking preview."
+            : "AMICOR Second Commercial was not found. No video generated. Choose the original project explicitly before rendering.",
+          false
+        );
         return;
       }
       showBanner(startMessage + " Active: " + projectId, true);
@@ -2451,8 +2457,10 @@
       if (rendered.job && rendered.job.id) {
         polled = await pollStudioJob(projectId, rendered.job.id);
       }
+      if (useSelectedProject && (activeProjectId !== projectId || activeProjectRevision !== revision)) return;
       renderOutput(polled || rendered);
       await refreshAssets();
+      if (useSelectedProject && (activeProjectId !== projectId || activeProjectRevision !== revision)) return;
       var status = polled && polled.job && polled.job.status;
       if (status === "ERROR") {
         showBanner("Render failed: " + (polled.job.message || "Unknown error."), false);
@@ -2466,7 +2474,9 @@
         );
       }
     } catch (err) {
-      showBanner(err.message || "Walking render failed.", false);
+      if (!useSelectedProject || (activeProjectId === projectId && activeProjectRevision === revision)) {
+        showBanner(err.message || "Walking render failed.", false);
+      }
     } finally {
       button.disabled = false;
     }
@@ -2475,11 +2485,12 @@
   var walkingPresenterButton = $("build-walking-presenter");
   if (walkingPresenterButton) {
     walkingPresenterButton.addEventListener("click", function () {
-      runWalkingRender(
+      return runWalkingRender(
         "/assemble/walking-presenter-proof",
         walkingPresenterButton,
         "Rendering the 5–6s walking presenter proof. No paid provider is charged.",
-        "Walking presenter proof ready. Download the MP4 from assets."
+        "Walking presenter proof ready. Download the MP4 from this project's assets.",
+        { useSelectedProject: true }
       );
     });
   }
