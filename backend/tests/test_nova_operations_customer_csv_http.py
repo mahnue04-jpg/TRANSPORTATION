@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue import operations_owner_csv_api as api
 from app.core.nova.work_revenue import operations_customer_csv_jobs as jobs
+from app.core.nova.work_revenue import operations_starter_payment_binding as payment_binding
 from app.core.nova.work_revenue.router import require_work_revenue_owner
 from app.db.session import get_db
 
@@ -44,6 +45,9 @@ def harness(monkeypatch):
     store = MemoryStore()
     monkeypatch.setattr(jobs, "require_runtime", lambda db: None)
     monkeypatch.setattr(jobs, "_store", lambda: store)
+    # This file verifies durable CSV mechanics with a synthetic paid-task grant.
+    # A separate check asserts that an unavailable payment grant fails closed.
+    monkeypatch.setattr(payment_binding, "require_paid_starter", lambda *args, **kwargs: None)
     eng = {
         "engagement_id": "eng-a", "organization_id": "org-a",
         "owner_user_id": "owner-a", "status": "ACTIVE",
@@ -140,3 +144,13 @@ def test_invalid_file_and_idempotency_conflict(harness):
     assert create(client, body=b"X" * 1000001).status_code == 413
     assert create(client).status_code == 202
     assert create(client, body=b"Name\nOther\n").status_code == 409
+
+
+def test_durable_submission_requires_paid_task_binding(harness, monkeypatch):
+    client, _, store, _ = harness
+    def deny_payment(*args, **kwargs):
+        raise api.HTTPException(503, "Starter payment binding not enabled")
+    monkeypatch.setattr(payment_binding, "require_paid_starter", deny_payment)
+    result = create(client)
+    assert result.status_code == 503
+    assert store.objects == {}
