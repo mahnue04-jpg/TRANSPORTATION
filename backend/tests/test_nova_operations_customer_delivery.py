@@ -87,3 +87,132 @@ def test_owner_cannot_revoke_delivery_without_enabled_private_runtime(harness):
         headers={"X-Nova-Owner-Action": "revoke-csv-delivery"},
     )
     assert response.status_code == 503
+
+
+class _DeliveryGrantResult:
+    def __init__(self, grant):
+        self._grant = grant
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._grant
+
+
+class _DeliveryGrantDB:
+    def __init__(self, grant):
+        self.grant = grant
+
+    def execute(self, _statement):
+        return _DeliveryGrantResult(self.grant)
+
+
+def _synthetic_grant():
+    from datetime import datetime, timedelta, timezone
+    return {
+        "job_id": "synthetic-job", "organization_id": "amicor-org",
+        "owner_user_id": "amicor-owner", "engagement_id": "eng-1",
+        "task_id": "task-1", "lead_id": "lead-1",
+        "recipient_user_id": "customer-1",
+        "recipient_organization_id": "customer-org",
+        "output_sha256": "a" * 64,
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=30),
+        "revoked_at": None,
+    }
+
+
+def _synthetic_customer(user_id="customer-1", org="customer-org"):
+    return SimpleNamespace(
+        id=user_id, organization_id=org, email="customer@example.invalid",
+        is_active=True, is_verified=True,
+    )
+
+
+def test_customer_delivery_matches_paid_recipient_and_approved_artifact(monkeypatch):
+    from app.core.nova.work_revenue import operations_customer_delivery as delivery
+    grant = _synthetic_grant()
+    monkeypatch.setattr(delivery, "_guard", lambda db: None)
+    monkeypatch.setattr(
+        delivery, "_exact_paid_lead",
+        lambda *args, **kw: SimpleNamespace(id="lead-1", work_email="customer@example.invalid"),
+    )
+    monkeypatch.setattr(
+        delivery.csv_jobs, "_owned",
+        lambda *args, **kw: {
+            "status": "APPROVED_FOR_DOWNLOAD",
+            "engagement_id": "eng-1", "task_id": "task-1",
+            "output_sha256": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        delivery.csv_jobs, "download_review",
+        lambda *args, **kw: b"name\\nSynthetic\\n",
+    )
+    db = _DeliveryGrantDB(grant)
+    assert delivery.recipient_download(
+        db, job_id="synthetic-job", user=_synthetic_customer()
+    ) == b"name\\nSynthetic\\n"
+
+
+@pytest.mark.parametrize("invalid", [
+    "wrong_recipient", "wrong_tenant", "expired", "revoked",
+    "unverified", "inactive",
+])
+def test_customer_delivery_denies_invalid_grant_before_file_access(monkeypatch, invalid):
+    from datetime import datetime, timedelta, timezone
+    from app.core.nova.work_revenue import operations_customer_delivery as delivery
+    monkeypatch.setattr(delivery, "_guard", lambda db: None)
+    grant = _synthetic_grant()
+    user = _synthetic_customer()
+    if invalid == "wrong_recipient":
+        user.id = "other-user"
+    elif invalid == "wrong_tenant":
+        user.organization_id = "other-org"
+    elif invalid == "expired":
+        grant["expires_at"] = datetime.now(timezone.utc) - timedelta(minutes=1)
+    elif invalid == "revoked":
+        grant["revoked_at"] = datetime.now(timezone.utc)
+    elif invalid == "unverified":
+        user.is_verified = False
+    elif invalid == "inactive":
+        user.is_active = False
+
+    # The stub mimics the database WHERE conditions; no underlying artifact
+    # should be accessed when the grant is ineligible.
+    class ScopedDB(_DeliveryGrantDB):
+        def execute(self, stmt):
+            eligible = (
+                user.id == grant["recipient_user_id"]
+                and user.organization_id == grant["recipient_organization_id"]
+                and grant["revoked_at"] is None
+                and grant["expires_at"] > datetime.now(timezone.utc)
+            )
+            return _DeliveryGrantResult(grant if eligible else None)
+
+    monkeypatch.setattr(
+        delivery.csv_jobs, "download_review",
+        lambda *args, **kw: pytest.fail("Unauthorized delivery reached private storage"),
+    )
+    with pytest.raises(delivery.HTTPException) as exc:
+        delivery.recipient_download(ScopedDB(grant), job_id="synthetic-job", user=user)
+    assert exc.value.status_code in {403, 404}
+
+
+def test_customer_delivery_denies_changed_paid_recipient(monkeypatch):
+    from app.core.nova.work_revenue import operations_customer_delivery as delivery
+    monkeypatch.setattr(delivery, "_guard", lambda db: None)
+    monkeypatch.setattr(
+        delivery, "_exact_paid_lead",
+        lambda *args, **kw: SimpleNamespace(id="lead-1", work_email="other@example.invalid"),
+    )
+    monkeypatch.setattr(
+        delivery.csv_jobs, "download_review",
+        lambda *args, **kw: pytest.fail("Mismatched paid order reached private storage"),
+    )
+    with pytest.raises(delivery.HTTPException) as exc:
+        delivery.recipient_download(
+            _DeliveryGrantDB(_synthetic_grant()),
+            job_id="synthetic-job", user=_synthetic_customer(),
+        )
+    assert exc.value.status_code == 403
