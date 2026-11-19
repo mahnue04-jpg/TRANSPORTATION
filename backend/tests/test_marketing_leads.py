@@ -439,3 +439,51 @@ def test_operations_paid_request_cannot_open_another_checkout(monkeypatch):
         assert fake.sessions == {}
     finally:
         set_agent_stripe_override(None)
+
+
+def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.235"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Owner Scope Sample",
+                "contact_name": "Synthetic Customer",
+                "work_email": "owner-scope-235@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic single CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        lead_id = submitted.json()["data"]["lead_id"]
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.236"},
+        )
+        assert blocked.status_code == 409
+        assert fake.sessions == {}
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead is not None
+            lead.status = "qualified"
+            db.commit()
+        allowed = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.237"},
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert len(fake.sessions) == 1
+    finally:
+        set_agent_stripe_override(None)
