@@ -133,6 +133,8 @@ def test_site_js_uses_new_honeypot_and_preserves_submit_path() -> None:
         assert f"{field}:" in JS or f"data.{field}" in JS
     assert "consent: true" in JS
     assert 'source: "amicor-public-website-w8"' in JS
+    assert "marketingSource: leadCampaignSource()" in JS
+    assert "amicor-campaign-source" in JS
 
 
 def test_empty_honeypot_reaches_lead_submit_path() -> None:
@@ -262,6 +264,7 @@ def test_leads_function_and_kv_path_unchanged() -> None:
     assert "plain(raw.middle_name_confirm, 200)" in LEADS
     assert "env.AMICOR_LEADS" in LEADS
     assert 'source: "amicor-public-website-w8"' in LEADS
+    assert "marketingSource:" in LEADS
     assert "store.put(`lead:${payload.receivedAt}:${id}`" in LEADS
     assert 'return json(202, { ok: true, stored, notified });' in LEADS
 
