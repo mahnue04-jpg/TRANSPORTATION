@@ -71,3 +71,19 @@ def test_customer_download_cannot_reach_unconfigured_database(harness):
     )
     assert response.status_code in {403, 503}
     assert b"synthetic-csv-content" not in response.content
+
+
+def test_owner_cannot_issue_delivery_while_disabled(harness):
+    response = harness.post(
+        "/api/nova/work/operations/owner/jobs/synthetic-job/delivery-grants/recipients/synthetic-user",
+        headers={"X-Nova-Owner-Action": "issue-approved-csv-delivery"},
+    )
+    assert response.status_code == 503
+
+
+def test_owner_cannot_revoke_delivery_without_enabled_private_runtime(harness):
+    response = harness.post(
+        "/api/nova/work/operations/owner/jobs/synthetic-job/delivery-grants/revoke",
+        headers={"X-Nova-Owner-Action": "revoke-csv-delivery"},
+    )
+    assert response.status_code == 503
