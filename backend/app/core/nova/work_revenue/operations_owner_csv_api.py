@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -470,8 +470,8 @@ def durable_csv_delivery_readiness(
         content = durable_csv.download_review(
             db, org=org, owner=owner_id, job_id=job_id,
         )
-        return Response(
-            content=__import__("json").dumps({
+        return JSONResponse(
+            content={
                 "job_id": job_id,
                 "task_id": row["task_id"],
                 "engagement_id": row["engagement_id"],
@@ -483,8 +483,7 @@ def durable_csv_delivery_readiness(
                 "customer_delivery_ready": False,
                 "delivered": False,
                 "remaining_action": "Verified customer-specific secure delivery is not implemented",
-            }),
-            media_type="application/json",
+            },
             headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
         )
     except durable_csv.CustomerCSVBlocked as exc:
