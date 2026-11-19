@@ -7,7 +7,7 @@ Requires explicit approval before any hosted deployment. Synthetic only.
 from __future__ import annotations
 
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.core.nova.work_revenue.operations_owner_csv_api import router as operations_router
@@ -44,10 +44,9 @@ def health() -> JSONResponse:
     )
 
 
-@app.on_event("startup")
-def prevent_unsafe_validation_configuration() -> None:
-    """Fail startup rather than accidentally turning staging into production."""
-    unsafe = (
+def _unsafe_configuration() -> bool:
+    """Never permit a diagnostic instance to become a customer processor."""
+    return (
         os.getenv("APP_ENV", "development").strip().lower() == "production"
         or os.getenv("AMICOR_ENVIRONMENT", "development").strip().lower() == "production"
         or _enabled("NOVA_STRIPE_LIVE_ENABLED")
@@ -58,8 +57,33 @@ def prevent_unsafe_validation_configuration() -> None:
         or _enabled("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED")
         or _enabled("NOVA_OPERATIONS_LEASE_WORKER_ENABLED")
     )
-    if unsafe:
+
+
+
+@app.on_event("startup")
+def prevent_unsafe_validation_configuration() -> None:
+    """Fail fast at startup with unsafe configuration."""
+    if _unsafe_configuration():
         raise RuntimeError("Isolated Operations validation prohibits live or processing flags")
 
-    # No database startup or migrations. The mounted Operations routes retain
-    # their own authenticated owner and default-off guards.
+
+@app.middleware("http")
+async def deny_customer_routes(request: Request, call_next):
+    """No customer processing even if an environment flag changes after boot.
+
+    Owner Operations routers are mounted to validate route registration, but
+    they must never execute in the synthetic diagnostic process.
+    """
+    if request.url.path != "/health":
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Operations isolated validation cannot process customer work"},
+            headers={"Cache-Control": "no-store"},
+        )
+    if _unsafe_configuration():
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Operations isolated validation configuration unsafe"},
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
