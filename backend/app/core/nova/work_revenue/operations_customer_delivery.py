@@ -177,6 +177,71 @@ customer_delivery_router = APIRouter(
 )
 
 
+@customer_delivery_router.get("/deliveries")
+def list_my_approved_deliveries(
+    user: UserContext = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    """Discover only current account's eligible files, never public URLs."""
+    _guard(db)
+    db_user = db.get(PlatformUser, user.user_id)
+    if (
+        db_user is None or not db_user.is_active or not db_user.is_verified
+        or not db_user.organization_id
+        or db_user.organization_id != user.organization_id
+    ):
+        raise HTTPException(403, "Verified customer account required")
+    now = datetime.now(timezone.utc)
+    rows = db.execute(sa.select(
+        grants.c.job_id, grants.c.organization_id, grants.c.owner_user_id,
+        grants.c.engagement_id, grants.c.task_id, grants.c.lead_id,
+        grants.c.output_sha256, grants.c.expires_at,
+    ).where(
+        grants.c.recipient_user_id == db_user.id,
+        grants.c.recipient_organization_id == db_user.organization_id,
+        grants.c.revoked_at.is_(None),
+        grants.c.expires_at > now,
+    ).limit(50)).mappings().all()
+    available = []
+    for row in rows:
+        # A valid delivery grant may become invalid if payment was revoked
+        # or the owner rejects/replaces the previously approved artifact.
+        try:
+            paid = _exact_paid_lead(
+                db, org=row["organization_id"], owner=row["owner_user_id"],
+                eng=row["engagement_id"], task=row["task_id"],
+            )
+            if (
+                paid.id != row["lead_id"]
+                or paid.work_email.strip().casefold() != db_user.email.strip().casefold()
+            ):
+                continue
+            job = csv_jobs._owned(
+                db, row["job_id"], row["organization_id"], row["owner_user_id"],
+            )
+            if (
+                job["status"] != "APPROVED_FOR_DOWNLOAD"
+                or job["output_sha256"] != row["output_sha256"]
+                or job["engagement_id"] != row["engagement_id"]
+                or job["task_id"] != row["task_id"]
+            ):
+                continue
+        except (HTTPException, csv_jobs.CustomerCSVBlocked):
+            continue
+        available.append({
+            "job_id": row["job_id"],
+            "expires_at": row["expires_at"].isoformat(),
+            "download_path": (
+                "/api/nova/work/operations/customer/deliveries/" + row["job_id"]
+            ),
+        })
+    return Response(
+        content=__import__("json").dumps({"deliveries": available}),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @customer_delivery_router.get("/deliveries/{job_id}")
 def authenticated_customer_csv_download(
     job_id: str,
