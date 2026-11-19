@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 
 from fastapi import HTTPException
-from sqlalchemy import Column, ForeignKey, MetaData, String, Table, UniqueConstraint, select
+from sqlalchemy import Column, MetaData, String, Table, UniqueConstraint, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -44,6 +44,7 @@ def _paid_lead(db: Session, lead_id: str) -> MarketingWebsiteLead:
         or lead.payment_status != "paid"
         or not lead.consent
         or not lead.stripe_checkout_session_id
+        or lead.starter_paid_session_id != lead.stripe_checkout_session_id
         or not lead.stripe_customer_id
     ):
         raise HTTPException(409, "No verified paid Starter Task checkout for this lead")
