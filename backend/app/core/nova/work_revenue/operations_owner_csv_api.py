@@ -609,6 +609,11 @@ def process_supervised_queued_csv_job(
         _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     factory = _queued_factory(db)
     try:
         result = _queued_csv.process_one_queued_csv(
@@ -641,6 +646,11 @@ async def review_supervised_queued_csv_job(
         _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     factory = _queued_factory(db)
     try:
         return _queued_csv.review_processed_csv(
@@ -814,6 +824,11 @@ async def restore_supervised_queued_csv_input(
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"],
         task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > LIMIT_BYTES:
