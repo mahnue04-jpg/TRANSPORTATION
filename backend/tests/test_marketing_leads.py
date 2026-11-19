@@ -358,3 +358,84 @@ def test_operations_agent_links_shared_image_generator() -> None:
     page = (ROOT / "static" / "nova-anonymous-agent" / "index.html").read_text(encoding="utf-8")
     assert 'href="/nova/creative"' in page
     assert "Creative image generation" in page
+
+
+def test_operations_live_sales_gate_prevents_checkout_without_approval(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.delenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", raising=False)
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.231"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Gated Starter Sample",
+                "contact_name": "Synthetic Gate Client",
+                "work_email": "gated-starter-231@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "One agreed sample CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        data = submitted.json()["data"]
+        assert data["checkout_available"] is False
+        lead_id = data["lead_id"]
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        assert status.json()["customer_sales_enabled"] is False
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.232"},
+        )
+        assert blocked.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_operations_paid_request_cannot_open_another_checkout(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "test")
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.233"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Already Paid Sample",
+                "contact_name": "Synthetic Paid Client",
+                "work_email": "already-paid-233@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "One agreed sample CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        lead_id = submitted.json()["data"]["lead_id"]
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead is not None
+            lead.payment_status = "paid"
+            db.commit()
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.234"},
+        )
+        assert blocked.status_code == 409
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
