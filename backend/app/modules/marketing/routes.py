@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from datetime import timedelta
@@ -286,6 +287,16 @@ def create_nova_agent_checkout(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if plan["mode"] not in {"payment", "subscription"}:
         raise HTTPException(status_code=422, detail="This starting option does not require checkout")
+
+    # Stripe live readiness does not establish that customer work can be
+    # fulfilled. Keep purchases closed until service delivery is authorized.
+    if agent_checkout_mode() in {"live", "live_gated"} and (
+        os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() != "true"
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Operations checkout is not open for customer purchases yet",
+        )
 
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
         return {
