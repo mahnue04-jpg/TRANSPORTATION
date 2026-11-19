@@ -113,3 +113,24 @@ async def test_studio_blob_media_exception_is_not_global(path):
 
     response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
     assert "blob:" not in response.headers['Content-Security-Policy']
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/media/nova-creative/nova-walk-presenter-example.mp4",
+        "/static/generated/nova-creative/nova-walk-presenter-example.wav",
+        "/assets/generated/nova-creative/nova-walk-presenter-example.srt",
+    ],
+)
+@pytest.mark.asyncio
+async def test_walking_preview_files_are_never_served_by_public_aliases(path):
+    middleware = SecurityHeadersMiddleware(app=lambda scope, receive, send: None)
+
+    async def call_next(request):
+        pytest.fail("Owner-scoped media must not reach a static file handler")
+
+    response = await middleware.dispatch(SimpleNamespace(url=SimpleNamespace(path=path)), call_next)
+
+    assert response.status_code == 404
+    assert response.headers["Cache-Control"] == "private, no-store"
