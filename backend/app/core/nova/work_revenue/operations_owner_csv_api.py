@@ -322,6 +322,14 @@ async def create_durable_csv_job(
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=engagement_id, task_id=task_id,
     )
+    # Durable customer submissions must not bypass the same paid Starter
+    # checkout-to-task requirement as the in-memory owner-review route.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=str(owner.organization_id),
+        owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+    )
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > LIMIT_BYTES:
