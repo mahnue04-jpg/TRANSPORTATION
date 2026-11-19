@@ -56,13 +56,8 @@
 
     <section class="command-card" aria-label="Operations Agent CSV cleanup for owner review">
       <h2>Operations Agent — CSV cleanup</h2>
-      <p class="hint">Owner-only limited real task: clean a UTF-8 CSV (up to 1 MB, 10,000 rows) and download a review copy. This does not accept a contract, deliver work to a client, or store the file. Check every result before using it.</p>
-      <form id="operations-csv-form">
-        <label for="operations-csv-file">Select your CSV file</label>
-        <input id="operations-csv-file" type="file" accept=".csv,text/csv" required />
-        <button type="submit">Clean CSV for my review</button>
-      </form>
-      <p class="hint" id="operations-csv-result" aria-live="polite">Feature unavailable until separately enabled for an authorized owner.</p>
+      <p class="hint">Owner-only review processing is limited to approved, task-specific CSV work (up to 1 MB, 10,000 rows). No automatic customer delivery or contractual acceptance.</p>
+      <p class="hint">The former unscoped CSV form is retired. For Starter Tasks, select an authenticated saved task below and verify its payment before processing. The feature remains off until separately approved.</p>
       <div class="command-card">
         <h3>Process CSV for a saved assignment</h3>
         <p class="hint">Only for an ACTIVE, unblocked engagement with a saved Nova task requiring owner review. Processing does not complete or deliver the contract.</p>
