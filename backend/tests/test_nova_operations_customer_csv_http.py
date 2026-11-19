@@ -154,3 +154,26 @@ def test_durable_submission_requires_paid_task_binding(harness, monkeypatch):
     result = create(client)
     assert result.status_code == 503
     assert store.objects == {}
+
+
+def test_queued_submission_requires_paid_starter_binding(harness, monkeypatch):
+    # This never creates a queued worker or uses private storage: the HTTP
+    # route must reject before consuming bytes or entering the job pipeline.
+    client, _, store, _ = harness
+    monkeypatch.setattr(api, "_queued_csv_gate", lambda db: None)
+    def deny_payment(*args, **kwargs):
+        raise api.HTTPException(503, "Starter payment binding not enabled")
+    monkeypatch.setattr(payment_binding, "require_paid_starter", deny_payment)
+    result = client.post(
+        "/api/nova/work/operations/queued/engagements/eng-a/tasks/task-a/jobs",
+        headers={
+            "Content-Type": "text/csv",
+            "X-Nova-File-Name": "synthetic.csv",
+            "X-Nova-Scope-Confirmed": "owner-confirmed-client-authorization",
+            "X-Nova-Owner-Action": "queue-csv-for-owner-review",
+            "Idempotency-Key": "synthetic-queued-1",
+        },
+        content=b"name\\nSample\\n",
+    )
+    assert result.status_code == 503
+    assert store.objects == {}
