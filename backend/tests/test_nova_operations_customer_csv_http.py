@@ -177,3 +177,51 @@ def test_queued_submission_requires_paid_starter_binding(harness, monkeypatch):
     )
     assert result.status_code == 503
     assert store.objects == {}
+
+
+def test_paid_approved_artifact_delivery_readiness_is_owner_only_evidence(harness):
+    client, _, _, _ = harness
+    created = create(client)
+    assert created.status_code == 202
+    job_id = created.json()["job_id"]
+    url = f"/api/nova/work/operations/durable/jobs/{job_id}/delivery-readiness"
+    assert client.get(url).status_code == 409
+    approved = client.post(
+        f"/api/nova/work/operations/durable/jobs/{job_id}/review",
+        json={"approve": True},
+    )
+    assert approved.status_code == 200
+    response = client.get(url)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["payment_bound"] is True
+    assert data["integrity_verified"] is True
+    assert data["review_approved"] is True
+    assert data["customer_delivery_ready"] is False
+    assert data["delivered"] is False
+    assert data["output_sha256"]
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_delivery_readiness_rejects_revoked_payment_or_modified_artifact(
+    harness, monkeypatch
+):
+    client, _, store, _ = harness
+    created = create(client)
+    job_id = created.json()["job_id"]
+    assert client.post(
+        f"/api/nova/work/operations/durable/jobs/{job_id}/review",
+        json={"approve": True},
+    ).status_code == 200
+    url = f"/api/nova/work/operations/durable/jobs/{job_id}/delivery-readiness"
+    monkeypatch.setattr(
+        payment_binding, "require_paid_starter",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            api.HTTPException(409, "Payment binding revoked")
+        ),
+    )
+    assert client.get(url).status_code == 409
+    monkeypatch.setattr(payment_binding, "require_paid_starter", lambda *args, **kwargs: None)
+    key = next(iter(store.objects))
+    store.objects[key] = b"tampered"
+    assert client.get(url).status_code == 503
