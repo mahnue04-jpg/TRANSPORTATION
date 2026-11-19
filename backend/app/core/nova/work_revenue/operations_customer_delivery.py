@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from app.auth import UserContext, get_current_user_context
 from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
@@ -235,9 +235,8 @@ def list_my_approved_deliveries(
                 "/api/nova/work/operations/customer/deliveries/" + row["job_id"]
             ),
         })
-    return Response(
-        content=__import__("json").dumps({"deliveries": available}),
-        media_type="application/json",
+    return JSONResponse(
+        content={"deliveries": available},
         headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 
