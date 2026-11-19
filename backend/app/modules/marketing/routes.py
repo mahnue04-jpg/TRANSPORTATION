@@ -383,6 +383,24 @@ async def nova_agent_stripe_webhook(
         ):
             return {"ok": True, "handled": False, "result": "checkout_identity_mismatch"}
 
+    # Invoice webhooks are subscription events, never proof of a $49
+    # one-time Starter Task. Match the stored customer and subscription
+    # before allowing them to change any recurring payment state.
+    if event_type.startswith("invoice."):
+        subscription = obj.get("subscription")
+        if isinstance(subscription, dict):
+            subscription = subscription.get("id")
+        customer = obj.get("customer")
+        if isinstance(customer, dict):
+            customer = customer.get("id")
+        if (
+            str(lead.service_plan or "") not in {"launch_99", "business_299"}
+            or not lead.stripe_subscription_id
+            or str(subscription or "") != str(lead.stripe_subscription_id)
+            or str(customer or "") != str(lead.stripe_customer_id or "")
+        ):
+            return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+
     result = "ignored"
     if event_type == "checkout.session.completed":
         payment_status = str(obj.get("payment_status") or "")
