@@ -101,6 +101,49 @@ def acquisition_review(
         raise
 
 
+
+
+def website_inquiry_source_factory():
+    """Explicit opt-in staging KV reader; otherwise unavailable. Tests inject fixtures."""
+    from app.core.nova.growth_agent.website_inquiry_cloudflare_readonly import staging_cloudflare_source_for_org
+    return staging_cloudflare_source_for_org
+
+
+@router.get("/website-inquiries/read-only")
+def website_inquiries_read_only(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+    source_factory: Any = Depends(website_inquiry_source_factory),
+) -> dict[str, Any]:
+    """Owner-only, exact-tenant source boundary. Default 503; no live KV reads."""
+    from app.core.nova.growth_agent.website_inquiry_owner_boundary import (
+        WebsiteInquiryAccessDenied,
+        read_owner_website_inquiries,
+    )
+    from app.core.nova.growth_agent.website_inquiry_readonly import WebsiteInquirySourceError
+
+    try:
+        # Authorization is checked before the source factory is invoked.
+        return read_owner_website_inquiries(
+            user, organization_id,
+            source_factory if callable(source_factory) else lambda _org: None,
+        )
+    except WebsiteInquiryAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="website_inquiry_access_denied") from exc
+    except WebsiteInquirySourceError as exc:
+        raise HTTPException(status_code=503, detail="website_inquiry_source_unavailable") from exc
+
+@router.get("/website-inquiries/preview")
+def website_inquiries_synthetic_preview(
+    organization_id: str | None = None,
+    user: UserContext = Depends(require_growth_owner),
+) -> dict[str, Any]:
+    """Signed owner-only, tenant-scoped synthetic display; no production KV access."""
+    _org(user, organization_id)
+    from app.core.nova.growth_agent.website_inquiry_preview import synthetic_website_inquiry_preview
+    return synthetic_website_inquiry_preview()
+
+
 @router.get("/retention")
 def retention(user: UserContext = Depends(require_growth_owner)) -> dict[str, Any]:
     return GrowthAgentService.retention_policy()

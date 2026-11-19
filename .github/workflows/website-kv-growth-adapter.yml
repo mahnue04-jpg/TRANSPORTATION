@@ -1,0 +1,29 @@
+name: Website inquiry adapter tests
+
+on:
+  pull_request:
+    paths:
+      - "backend/static/nova-growth/website-lead-adapter.cjs"
+      - "backend/static/nova-growth/website-lead-adapter.test.cjs"
+      - "backend/static/nova-growth/website-inquiry-owner-service.cjs"
+      - "backend/static/nova-growth/website-inquiry-owner-service.test.cjs"
+      - "backend/static/nova-growth/website-inquiry-paged-fixture.cjs"
+      - "backend/static/nova-growth/website-inquiry-paged-fixture.test.cjs"
+      - ".github/workflows/website-kv-growth-adapter.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-inquiry-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run offline synthetic adapter tests
+        run: |
+          node --test \
+            backend/static/nova-growth/website-lead-adapter.test.cjs \
+            backend/static/nova-growth/website-inquiry-owner-service.test.cjs \
+            backend/static/nova-growth/website-inquiry-paged-fixture.test.cjs

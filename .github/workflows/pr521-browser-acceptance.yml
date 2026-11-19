@@ -1,0 +1,87 @@
+name: PR521 isolated Chromium browser acceptance
+
+on:
+  pull_request:
+    branches: [feat/amicor-first-customer-campaign-20261114]
+    paths:
+      - "backend/tests/pr521_browser_acceptance.cjs"
+      - "backend/static/nova-growth/**"
+      - "backend/app/core/nova/growth_agent/**"
+      - ".github/workflows/pr521-browser-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium-synthetic-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      TESTING: "true"
+      APP_ENV: test
+      AMICOR_ENVIRONMENT: test
+      DATABASE_URL: "sqlite:////tmp/amicor_pr521_browser.sqlite3"
+      DB_FILENAME: "/tmp/amicor_pr521_browser.sqlite3"
+      NOVA_GROWTH_AGENT_ENABLED: "true"
+      NOVA_GROWTH_AGENT_DEMO_MODE: "true"
+      NOVA_GROWTH_AGENT_WIDGET_ENABLED: "false"
+      NOVA_GROWTH_AGENT_BACKGROUND_WORKER: "false"
+      NOVA_GROWTH_AGENT_RETENTION_DELETE_ENABLED: "false"
+      NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_GROWTH_AGENT_LIVE_EMAIL_ENABLED: "false"
+      NOVA_GROWTH_AGENT_LIVE_SMS_ENABLED: "false"
+      NOVA_GROWTH_AGENT_LIVE_CALENDAR_ENABLED: "false"
+      NOVA_GROWTH_AGENT_LIVE_AI_ENABLED: "false"
+      AMICOR_RESTRICT_SEED_ACCOUNTS: "true"
+      AMICOR_SEED_ACTIVE_EMAILS: "admin@amicor.local,dispatcher@amicor.local"
+      ALLOWED_ORIGINS: "http://127.0.0.1:18765"
+      AMICOR_PUBLIC_URL: "http://127.0.0.1:18765"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install backend and Chromium test dependencies
+        run: |
+          python -m pip install -r backend/requirements.txt
+          mkdir -p /tmp/pr521-browser
+          cd /tmp/pr521-browser
+          npm init -y >/dev/null
+          npm install playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Start temporary loopback API and execute Chromium acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset OPENAI_API_KEY ANTHROPIC_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY TWILIO_AUTH_TOKEN TWILIO_ACCOUNT_SID
+          export AMICOR_SEED_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          export CI_SYNTHETIC_OWNER_PASSWORD="$AMICOR_SEED_PASSWORD"
+          export JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          cd backend
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 18765 --workers 1 > /tmp/pr521-browser-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do
+            if curl --silent --fail http://127.0.0.1:18765/nova/growth -o /dev/null; then ready=1; break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "Temporary backend failed (log hidden for secrets)"; exit 1; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          NODE_PATH=/tmp/pr521-browser/node_modules node tests/pr521_browser_acceptance.cjs
+      - name: Upload synthetic-only browser screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr521-chromium-synthetic-screenshot
+          path: backend/pr521-browser-evidence.png
+          if-no-files-found: ignore
+          retention-days: 3
