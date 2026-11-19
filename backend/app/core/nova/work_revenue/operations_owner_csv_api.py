@@ -440,6 +440,57 @@ def recover_durable_csv_job(
         _durable_error(exc)
 
 
+@router.get("/durable/jobs/{job_id}/delivery-readiness")
+def durable_csv_delivery_readiness(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-only evidence for a potential future customer handoff.
+
+    This does not transmit files, create customer links, or claim delivery.
+    An approved review output is not enough: the paid checkout must still
+    match this exact task and the stored artifact must pass integrity checks.
+    """
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"],
+        )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
+        if row["status"] != "APPROVED_FOR_DOWNLOAD":
+            raise HTTPException(409, "Owner-approved CSV result required")
+        from .operations_starter_payment_binding import require_paid_starter
+        require_paid_starter(
+            db, organization_id=org, owner_user_id=owner_id,
+            engagement_id=row["engagement_id"], task_id=row["task_id"],
+        )
+        content = durable_csv.download_review(
+            db, org=org, owner=owner_id, job_id=job_id,
+        )
+        return Response(
+            content=__import__("json").dumps({
+                "job_id": job_id,
+                "task_id": row["task_id"],
+                "engagement_id": row["engagement_id"],
+                "review_approved": True,
+                "payment_bound": True,
+                "integrity_verified": True,
+                "output_sha256": row["output_sha256"],
+                "output_bytes": len(content),
+                "customer_delivery_ready": False,
+                "delivered": False,
+                "remaining_action": "Verified customer-specific secure delivery is not implemented",
+            }),
+            media_type="application/json",
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
 @router.get("/durable/jobs/{job_id}/download")
 def durable_csv_download(
     job_id: str,
