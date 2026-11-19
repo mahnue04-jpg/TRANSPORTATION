@@ -252,6 +252,10 @@ def nova_agent_checkout_status():
     return {
         "product": "Nova Anonymous Operations Agent",
         "mode": agent_checkout_mode(),
+        "customer_sales_enabled": (
+            agent_checkout_mode() not in {"live", "live_gated"}
+            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() == "true"
+        ),
         "plans": {
             key: {
                 "label": spec["label"],
