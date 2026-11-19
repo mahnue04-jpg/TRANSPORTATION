@@ -104,8 +104,9 @@ def acquisition_review(
 
 
 def website_inquiry_source_factory():
-    """No production source is configured. Tests may inject an offline fixture."""
-    return None
+    """Explicit opt-in staging KV reader; otherwise unavailable. Tests inject fixtures."""
+    from app.core.nova.growth_agent.website_inquiry_cloudflare_readonly import staging_cloudflare_source_for_org
+    return staging_cloudflare_source_for_org
 
 
 @router.get("/website-inquiries/read-only")
