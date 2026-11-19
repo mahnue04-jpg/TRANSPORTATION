@@ -4045,6 +4045,17 @@ def serve_nova_business() -> Response:
     return JSONResponse({"error": "Nova Business page not found"}, status_code=404)
 
 
+@app.get("/nova/work/my-deliverables")
+def serve_nova_customer_deliverables() -> Response:
+    """Customer delivery page. Backend access remains separately disabled."""
+    page = os.path.join(_static_dir, "nova-work", "my-deliverables.html")
+    if os.path.isfile(page):
+        return FileResponse(page, media_type="text/html", headers={
+            "Cache-Control": "private, no-store",
+        })
+    return JSONResponse({"error": "Customer delivery page not found"}, status_code=404)
+
+
 @app.get("/nova/work")
 def serve_nova_work() -> Response:
     page = os.path.join(_static_dir, "nova-work", "index.html")
