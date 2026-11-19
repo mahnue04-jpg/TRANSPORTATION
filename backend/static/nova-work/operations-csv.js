@@ -472,7 +472,6 @@
   });
   const deliveryGrantButton = document.getElementById("operations-delivery-grant");
   const deliveryRevokeButton = document.getElementById("operations-delivery-revoke");
-  const deliveryRecipientInput = document.getElementById("operations-delivery-recipient");
   const deliveryResult = document.getElementById("operations-delivery-result");
 
   function updateDeliveryButtons() {
@@ -494,19 +493,13 @@
         deliveryResult.textContent = "Sign in as the authorized AMICOR owner.";
         return;
       }
-      const recipientId = (deliveryRecipientInput && deliveryRecipientInput.value || "").trim();
-      if (!/^[a-zA-Z0-9_-]{1,36}$/.test(recipientId)) {
-        deliveryResult.textContent = "Enter the verified customer's saved account ID.";
-        return;
-      }
       if (!window.confirm("Grant this verified customer access to the approved $49 CSV for 24 hours?")) return;
       scopedBusy = true;
       updateDeliveryButtons();
       deliveryResult.textContent = "Verifying paid task, customer identity, and approved private artifact...";
       try {
         const url = "/api/nova/work/operations/owner/jobs/" +
-          encodeURIComponent(currentJobId) + "/delivery-grants/recipients/" +
-          encodeURIComponent(recipientId);
+          encodeURIComponent(currentJobId) + "/delivery-grants/by-paid-order";
         const response = await fetch(url, {
           method: "POST", credentials: "same-origin",
           headers: Object.assign({}, headers, {
