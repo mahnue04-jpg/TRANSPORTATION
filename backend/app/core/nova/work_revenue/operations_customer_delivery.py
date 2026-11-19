@@ -98,19 +98,40 @@ def issue_grant(
     csv_jobs.download_review(db, org=owner_org, owner=owner_id, job_id=job_id)
     now = datetime.now(timezone.utc)
     existing = db.execute(
-        sa.select(grants).where(grants.c.job_id == job_id)
+        sa.select(grants).where(grants.c.job_id == job_id).with_for_update()
     ).mappings().first()
+    values = dict(
+        organization_id=owner_org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+        lead_id=lead.id, recipient_user_id=recipient.id,
+        recipient_organization_id=recipient.organization_id,
+        output_sha256=row["output_sha256"],
+        created_at=now, expires_at=now + timedelta(hours=24), revoked_at=None,
+    )
     if existing:
-        raise HTTPException(409, "Delivery grant already exists; explicit revoke/reissue required")
+        # Reissue is permitted ONLY for the original verified recipient and
+        # original paid task after explicit revoke or time expiry. Never
+        # silently redirect an already issued grant to a different account.
+        if any(existing[key] != values[key] for key in (
+            "organization_id", "owner_user_id", "engagement_id",
+            "task_id", "lead_id", "recipient_user_id",
+            "recipient_organization_id", "output_sha256",
+        )):
+            raise HTTPException(409, "Existing grant identity or artifact mismatch")
+        expires = existing["expires_at"]
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if existing["revoked_at"] is None and expires > now:
+            raise HTTPException(409, "An active delivery grant already exists")
     try:
-        db.execute(sa.insert(grants).values(
-            job_id=job_id, organization_id=owner_org, owner_user_id=owner_id,
-            engagement_id=row["engagement_id"], task_id=row["task_id"],
-            lead_id=lead.id, recipient_user_id=recipient.id,
-            recipient_organization_id=recipient.organization_id,
-            output_sha256=row["output_sha256"],
-            created_at=now, expires_at=now + timedelta(hours=24),
-        ))
+        if existing:
+            db.execute(sa.update(grants).where(
+                grants.c.job_id == job_id,
+                grants.c.organization_id == owner_org,
+                grants.c.owner_user_id == owner_id,
+            ).values(**values))
+        else:
+            db.execute(sa.insert(grants).values(job_id=job_id, **values))
         db.commit()
     except sa.exc.SQLAlchemyError as exc:
         db.rollback()
