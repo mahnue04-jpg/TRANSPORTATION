@@ -216,3 +216,68 @@ def test_customer_delivery_denies_changed_paid_recipient(monkeypatch):
             job_id="synthetic-job", user=_synthetic_customer(),
         )
     assert exc.value.status_code == 403
+
+
+def test_my_deliverables_requires_verified_customer(monkeypatch):
+    from app.core.nova.work_revenue import operations_customer_delivery as delivery
+    monkeypatch.setattr(delivery, "_guard", lambda db: None)
+
+    class FakeDB:
+        def get(self, model, user_id):
+            return SimpleNamespace(
+                id=user_id, organization_id="customer-org",
+                email="customer@example.invalid", is_active=True,
+                is_verified=False,
+            )
+
+        def execute(self, statement):
+            pytest.fail("Unverified account accessed delivery grants")
+
+    with pytest.raises(delivery.HTTPException) as exc:
+        delivery.list_my_approved_deliveries(
+            user=SimpleNamespace(user_id="customer-1", organization_id="customer-org"),
+            db=FakeDB(),
+        )
+    assert exc.value.status_code == 403
+
+
+def test_my_deliverables_hides_revoked_or_changed_paid_order(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.core.nova.work_revenue import operations_customer_delivery as delivery
+    monkeypatch.setattr(delivery, "_guard", lambda db: None)
+    grant = _synthetic_grant()
+    grant["expires_at"] = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+    class FakeResult:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [grant]
+
+    class FakeDB:
+        def get(self, model, user_id):
+            return _synthetic_customer()
+
+        def execute(self, statement):
+            return FakeResult()
+
+    monkeypatch.setattr(
+        delivery, "_exact_paid_lead",
+        lambda *args, **kwargs: SimpleNamespace(
+            id="lead-1", work_email="different@example.invalid"
+        ),
+    )
+    monkeypatch.setattr(
+        delivery.csv_jobs, "_owned",
+        lambda *args, **kwargs: pytest.fail(
+            "Mismatched paid customer was allowed to inspect private job"
+        ),
+    )
+    response = delivery.list_my_approved_deliveries(
+        user=SimpleNamespace(user_id="customer-1", organization_id="customer-org"),
+        db=FakeDB(),
+    )
+    assert response.status_code == 200
+    assert b'"deliveries":[]' in response.body
+    assert response.headers["cache-control"] == "private, no-store"
