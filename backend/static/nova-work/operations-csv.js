@@ -226,6 +226,7 @@
     if (cancelQueuedButton) cancelQueuedButton.disabled =
       !currentJobId || currentJobMode !== "queued" ||
       !["QUEUED", "RUNNING"].includes(currentLeaseStatus);
+    updateDeliveryButtons();
   }
 
   function jobPath(suffix) {
@@ -556,18 +557,7 @@
       }
     });
   }
-  if (deliveryGrantButton || deliveryRevokeButton) {
-    if (statusButton) statusButton.addEventListener("click", function () {
-      window.setTimeout(updateDeliveryButtons, 0);
-    });
-    if (approveButton) approveButton.addEventListener("click", function () {
-      window.setTimeout(updateDeliveryButtons, 0);
-    });
-    if (rejectButton) rejectButton.addEventListener("click", function () {
-      window.setTimeout(updateDeliveryButtons, 0);
-    });
-    updateDeliveryButtons();
-  }
+  updateDeliveryButtons();
 
   async function decideJob(approve) {
     if (!currentJobId) return;
