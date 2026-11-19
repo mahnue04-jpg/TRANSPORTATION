@@ -595,6 +595,50 @@ test('Operations Agent narration QC is review-only and keeps publication gated',
   assert.match(html, /does not transcribe audio, correct the MP4, approve publication, or call a paid provider/);
 });
 
+test('the five-second walking preview uses the selected project and requires a selection', async () => {
+  const start = source.indexOf('  async function runWalkingRender(');
+  const end = source.indexOf('  var providerAssemblyButton', start);
+  assert.ok(start >= 0 && end > start);
+
+  const sent = [];
+  const banners = [];
+  const buttons = {};
+  let buildPreview;
+  const button = { disabled: false, addEventListener: (_event, handler) => { buildPreview = handler; } };
+  buttons['build-walking-presenter'] = button;
+  const ctx = vm.createContext({
+    $: id => buttons[id],
+    activeProjectId: 'cproj_five_seconds',
+    activeProjectRevision: 0,
+    ensureSecondCommercialSelected: () => assert.fail('The preview must not switch to the commercial'),
+    api: async (path, options) => {
+      sent.push([path, options.method]);
+      return { job: { id: 'proof', status: 'GENERATED' } };
+    },
+    pollStudioJob: async (projectId, jobId) => {
+      assert.equal(projectId, 'cproj_five_seconds');
+      assert.equal(jobId, 'proof');
+      return { job: { id: jobId, status: 'GENERATED' } };
+    },
+    renderOutput() {},
+    refreshAssets: async () => {},
+    showBanner: (message, success) => { banners.push([message, success]); },
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+
+  await buildPreview();
+  assert.deepEqual(sent, [['/api/nova/creative/projects/cproj_five_seconds/assemble/walking-presenter-proof', 'POST']]);
+  assert.equal(ctx.activeProjectId, 'cproj_five_seconds');
+  assert.match(banners.at(-1)[0], /proof ready/);
+  assert.equal(button.disabled, false);
+
+  ctx.activeProjectId = null;
+  await buildPreview();
+  assert.equal(sent.length, 1);
+  assert.match(banners.at(-1)[0], /Select a saved project/);
+  assert.equal(button.disabled, false);
+});
+
 test('second commercial controls link directly to saved project history', () => {
   const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
   assert.match(html, /href="#studio-project-history"/);
