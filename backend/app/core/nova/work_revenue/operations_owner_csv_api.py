@@ -150,6 +150,55 @@ async def owner_csv_cleanup(
     )
 
 
+@router.post("/engagements/{engagement_id}/tasks/{task_id}/starter-payment-bindings/{lead_id}")
+def authorize_starter_payment_binding(
+    engagement_id: str,
+    task_id: str,
+    lead_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Owner-only explicit binding of a verified paid $49 lead to a saved task.
+
+    Default-off and dependent on a separately approved binding table migration.
+    Never executes the task or delivers any files.
+    """
+    from .operations_starter_payment_binding import bind_paid_starter
+
+    if owner_action != "bind-paid-starter-to-task":
+        raise HTTPException(403, "Explicit owner binding action required")
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(403, "Specific owner organization required")
+    if not lead_id or len(lead_id) > 36:
+        raise HTTPException(400, "Valid paid lead identifier required")
+    if not engagement_id or not task_id or len(engagement_id) > 120 or len(task_id) > 120:
+        raise HTTPException(400, "Valid engagement and task required")
+    try:
+        engagement = service.get_engagement(db, engagement_id, organization_id=org, user=owner)
+    except service.NovaWorkError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    if (
+        str(engagement.get("engagement_id") or "") != engagement_id
+        or not _eligible_engagement(engagement, org, str(owner.user_id))
+    ):
+        raise HTTPException(409, "Engagement not eligible for paid task")
+    task = next(
+        (item for item in (engagement.get("tasks") or [])
+         if isinstance(item, dict) and str(item.get("task_id") or "") == task_id),
+        None,
+    )
+    if task is None or not _eligible_task(task, _completed_task_ids(engagement)):
+        raise HTTPException(409, "Saved task not eligible for Starter Task payment")
+    bind_paid_starter(
+        db, lead_id=lead_id, organization_id=org, owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+        client_name=str(engagement.get("client_name") or ""),
+    )
+    return {"status": "bound_for_owner_review", "engagement_id": engagement_id, "task_id": task_id}
+
+
 @router.post("/engagements/{engagement_id}/tasks/{task_id}/csv-clean")
 async def scoped_owner_csv_cleanup(
     engagement_id: str,
