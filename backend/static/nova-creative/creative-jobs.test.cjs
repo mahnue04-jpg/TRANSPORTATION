@@ -495,7 +495,7 @@ test('offline montage readiness stays preview-only and does not false-green the 
   assert.match(item(html, "Brand profile"), /readiness-item missing/);
 });
 
-test('offline asset markup downloads through a button and never puts the file API in an href', async () => {
+test('offline montage and private walking proof assets use owner downloads', async () => {
   const escape = source.slice(source.indexOf('  function escapeHtml('), source.indexOf('  function loadImage('));
   const memoryNotice = source.slice(source.indexOf('  function memoryHeadroomNotice('), source.indexOf('  function clickVerified('));
   const failure = source.slice(source.indexOf('  function assetFailureHtml('), source.indexOf('  function assertDownloadUrlHasNoToken('));
@@ -527,6 +527,13 @@ test('offline asset markup downloads through a button and never puts the file AP
           subtitle_url: "/media/nova-creative/offline.srt",
           narration: {commercial_use: "GPL review only"},
         },
+      }, {
+        id: "proof-video", title: "Five-second proof", kind: "presenter_video", status: "GENERATED",
+        url: "/media/nova-creative/nova-walk-presenter-example.mp4",
+        metadata: { subtitle_url: "/media/nova-creative/nova-walk-presenter-example.srt" },
+      }, {
+        id: "proof-voice", title: "Walking narration", kind: "audio", status: "GENERATED",
+        url: "/media/nova-creative/nova-walk-presenter-example.wav",
       }],
     }),
   });
@@ -539,6 +546,11 @@ test('offline asset markup downloads through a button and never puts the file AP
   assert.match(html, /part=captions/);
   assert.match(html, /PREVIEW_ONLY/);
   assert.match(html, /Presenter NOT USED/);
+  assert.match(html, /src="\/media\/nova-creative\/offline\.mp4"/);
+  assert.match(html, /data-private-video-url="\/api\/nova\/creative\/projects\/cproj_293e7b8547d4\/assets\/proof-video\/file"/);
+  assert.match(html, /data-download-url="[^"]*\/proof-video\/file\?part=captions"/);
+  assert.match(html, /data-download-url="[^"]*\/proof-voice\/file"/);
+  assert.doesNotMatch(html, /\/media\/nova-creative\/nova-walk-presenter-/);
   assert.doesNotMatch(html, /href="\/api\/nova\/creative\/[^"]+\/file/);
   assert.doesNotMatch(html, /access_token|Bearer /);
 });
