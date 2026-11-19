@@ -565,6 +565,14 @@ async def create_supervised_queued_csv_job(
         raise HTTPException(415, "Only CSV supported")
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=engagement_id, task_id=task_id)
+    # Deny queued customer uploads before reading their bytes unless the
+    # exact saved task has a verified, owner-bound $49 Starter checkout.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=str(owner.organization_id),
+        owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+    )
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > LIMIT_BYTES:
