@@ -149,3 +149,53 @@ def test_postgres_delivery_rejects_changed_payment(isolated_postgres):
         with pytest.raises(delivery.HTTPException) as exc:
             delivery.recipient_download(db, job_id=job_id, user=recipient)
         assert exc.value.status_code == 409
+
+
+def test_owner_grant_resolves_customer_from_paid_order(isolated_postgres, monkeypatch):
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+
+    engine, _ = isolated_postgres
+    monkeypatch.setattr(api, "_check_saved_csv_assignment", lambda *args, **kw: None)
+    monkeypatch.setattr(api, "_reject_queued_job_in_legacy_path", lambda *args, **kw: None)
+    with Session(engine) as db:
+        job_id = seed_paid_job(db)
+        result = delivery.owner_issue_customer_delivery_by_paid_order(
+            job_id=job_id,
+            owner_action="issue-approved-csv-delivery",
+            owner=SimpleNamespace(
+                user_id="synthetic-owner", organization_id="synthetic-owner-org",
+            ),
+            db=db,
+        )
+        assert result["grant_status"] == "issued"
+        stored = db.execute(sa.select(delivery.grants).where(
+            delivery.grants.c.job_id == job_id,
+        )).mappings().one()
+        assert stored["recipient_user_id"] == "synthetic-recipient"
+        assert stored["recipient_organization_id"] == "synthetic-customer-org"
+
+
+def test_owner_grant_rejects_missing_verified_customer(isolated_postgres, monkeypatch):
+    from types import SimpleNamespace
+    from app.core.nova.work_revenue import operations_owner_csv_api as api
+
+    engine, _ = isolated_postgres
+    monkeypatch.setattr(api, "_check_saved_csv_assignment", lambda *args, **kw: None)
+    monkeypatch.setattr(api, "_reject_queued_job_in_legacy_path", lambda *args, **kw: None)
+    with Session(engine) as db:
+        job_id = seed_paid_job(db)
+        user = db.get(PlatformUser, "synthetic-recipient")
+        user.is_verified = False
+        db.commit()
+        with pytest.raises(delivery.HTTPException) as denied:
+            delivery.owner_issue_customer_delivery_by_paid_order(
+                job_id=job_id,
+                owner_action="issue-approved-csv-delivery",
+                owner=SimpleNamespace(
+                    user_id="synthetic-owner", organization_id="synthetic-owner-org",
+                ),
+                db=db,
+            )
+        assert denied.value.status_code == 409
+        assert db.execute(sa.select(delivery.grants)).mappings().all() == []
