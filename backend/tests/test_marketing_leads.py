@@ -467,6 +467,7 @@ def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
             },
         )
         assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["data"]["checkout_available"] is False
         lead_id = submitted.json()["data"]["lead_id"]
         blocked = client.post(
             f"/api/marketing/leads/{lead_id}/checkout",
