@@ -700,6 +700,7 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
     from fastapi.testclient import TestClient
     from app.core.nova.router import require_nova_access
     from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_starter_payment_binding as starter_payment
     from app.core.nova.work_revenue import operations_postgres_leases as leases
     from app.db.session import get_db
 
@@ -707,6 +708,9 @@ def test_supervised_owner_http_queue_process_review_packet(postgres, monkeypatch
     leases.lease_metadata.create_all(engine)
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
     monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    # This synthetic queue regression verifies workflow mechanics with a simulated
+    # paid-task binding; customer processing remains fail-closed without one.
+    monkeypatch.setattr(starter_payment, "require_paid_starter", lambda *a, **kw: None)
     owner = SimpleNamespace(user_id="synthetic-owner",
                             organization_id="synthetic-org",
                             email="owner@synthetic.invalid")
@@ -1036,6 +1040,7 @@ def test_recovery_api_and_owner_cancellation_are_scoped_and_explicit(
     from fastapi.testclient import TestClient
     from app.core.nova.router import require_nova_access
     from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_starter_payment_binding as starter_payment
     from app.core.nova.work_revenue import operations_postgres_leases as leases
     from app.db.session import get_db
 
@@ -1043,6 +1048,9 @@ def test_recovery_api_and_owner_cancellation_are_scoped_and_explicit(
     leases.lease_metadata.create_all(engine)
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
     monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    # This synthetic queue regression verifies workflow mechanics with a simulated
+    # paid-task binding; customer processing remains fail-closed without one.
+    monkeypatch.setattr(starter_payment, "require_paid_starter", lambda *a, **kw: None)
     owner = SimpleNamespace(user_id="synthetic-owner", organization_id="synthetic-org")
     eng = {
         "engagement_id": "synthetic-eng", "organization_id": "synthetic-org",
@@ -1225,6 +1233,7 @@ def test_owner_http_restore_unbound_input_after_interrupted_upload(
     from fastapi.testclient import TestClient
     from app.core.nova.router import require_nova_access
     from app.core.nova.work_revenue import operations_owner_csv_api as api
+    from app.core.nova.work_revenue import operations_starter_payment_binding as starter_payment
     from app.core.nova.work_revenue import operations_postgres_leases as leases
     from app.core.nova.work_revenue.operations_queued_csv_pipeline import (
         submit_queued_csv, QueuedCSVBlocked,
@@ -1235,6 +1244,9 @@ def test_owner_http_restore_unbound_input_after_interrupted_upload(
     leases.lease_metadata.create_all(engine)
     monkeypatch.setenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "true")
     monkeypatch.setenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "true")
+    # This synthetic queue regression verifies workflow mechanics with a simulated
+    # paid-task binding; customer processing remains fail-closed without one.
+    monkeypatch.setattr(starter_payment, "require_paid_starter", lambda *a, **kw: None)
     owner = SimpleNamespace(user_id="synthetic-owner",
                             organization_id="synthetic-org")
     engagement = {
