@@ -28,6 +28,21 @@ Read-only inspection of `mahnue04-jpg/nova-central-intelligence-staging` / `feat
 
 **Not yet approved or performed**: creating a Render service/database, modifying environment variables, applying DDL, sending test Stripe requests, redirecting DNS, enabling paid checkout, or deploying production.
 
+## Minimal validation entrypoint prepared (not deployed)
+The PR now includes `backend/operations_isolated_validation.py`, a separate FastAPI application that mounts only the owner Operations router with **all processing/payment/worker flags required OFF at startup**. It does not import `app.main` or call its startup lifecycle. It exposes `GET /health` with explicit `synthetic_only=true`, `customer_processing=false`, and `customer_delivery=false`. It has no customer-facing purchase route or delivery method. If a prohibited flag is enabled, startup raises an error.
+
+For an **owner-approved** isolated Render web service, an example reviewed source configuration would be:
+- Repo: `mahnue04-jpg/TRANSPORTATION`; immutable reviewed branch commit, never a floating development branch.
+- Root directory: `backend`.
+- Build: `pip install -r requirements.txt`.
+- Start: `uvicorn operations_isolated_validation:app --host 0.0.0.0 --port $PORT`.
+- Health: `/health`.
+- APP_ENV and AMICOR_ENVIRONMENT: `development` or `staging` (never production).
+- Explicitly set `NOVA_STRIPE_LIVE_ENABLED=false`, `NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED=false`, `NOVA_OPERATIONS_OWNER_CSV_ENABLED=false`, `NOVA_OPERATIONS_STARTER_BINDING_ENABLED=false`, `NOVA_OPERATIONS_DURABLE_CSV_ENABLED=false`, `NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED=false`, `NOVA_OPERATIONS_LEASE_WORKER_ENABLED=false`.
+- No production secrets, customer PostgreSQL, private S3, external payment provider API keys or background jobs. Do not turn this diagnostic web service into customer processing by changing its flags.
+
+**Limit:** This service is useful to validate isolated startup and route denial, but by design it cannot complete the paid customer journey. A separate approved data-backed staging plan and secure customer delivery path must be built before live release.
+
 ## $49 first-customer acceptance chain
 1. Save lead and explicitly agreed one-time CSV scope. Confirm legal customer identity and authorization to process their data. No implied unlimited work.
 2. Create a **saved lead-specific** Stripe Checkout; verify the signed checkout event, exact saved checkout/session/customer, USD 4900, payment status paid. Do not assume the public generic Stripe Payment Link maps to a lead/task.
