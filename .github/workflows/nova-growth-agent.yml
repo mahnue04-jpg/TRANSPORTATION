@@ -21,6 +21,7 @@ on:
       - "backend/tests/test_nova_growth_website_inquiry_owner_boundary.py"
       - "backend/tests/test_nova_growth_website_inquiry_http_boundary.py"
       - "backend/tests/test_nova_growth_website_inquiry_source_binding.py"
+      - "backend/tests/test_nova_growth_website_cloudflare_transport.py"
       - "backend/tests/test_nova_growth_owner_gate.py"
       - "backend/tests/test_nova_growth_staging_preflight.py"
       - "backend/tests/test_nova_growth_staging_start.py"
@@ -87,6 +88,7 @@ jobs:
             tests/test_nova_growth_website_inquiry_owner_boundary.py \
             tests/test_nova_growth_website_inquiry_http_boundary.py \
             tests/test_nova_growth_website_inquiry_source_binding.py \
+            tests/test_nova_growth_website_cloudflare_transport.py \
             tests/test_nova_growth_agent_acquisition.py \
             tests/test_nova_growth_agent_worker_retention.py \
             tests/test_nova_growth_owner_gate.py \
