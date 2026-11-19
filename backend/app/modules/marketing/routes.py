@@ -398,6 +398,8 @@ async def nova_agent_stripe_webhook(
             return {"ok": True, "handled": False, "result": "starter_payment_amount_mismatch"}
         if payment_status == "paid" and plan_spec.get("mode") in {"payment", "subscription"}:
             lead.payment_status = "paid"
+            if lead.service_plan == "starter_49":
+                lead.starter_paid_session_id = str(obj.get("id") or "")
             lead.status = "qualified"
             subscription = obj.get("subscription")
             if isinstance(subscription, dict):
