@@ -106,6 +106,18 @@
           <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
           <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>
         </div>
+        <div class="command-card" aria-label="Approved Starter Task customer delivery">
+          <h3>Grant customer access to approved $49 work</h3>
+          <p class="hint">Only after an approved durable job and verified payment. The recipient must already have a verified customer account matching the order. A grant expires after 24 hours; Nova does not email the customer automatically. This feature stays disabled until the separate secure delivery release.</p>
+          <label for="operations-delivery-recipient">Verified customer account ID
+            <input id="operations-delivery-recipient" type="text" maxlength="36" autocomplete="off" placeholder="Saved verified customer account ID" />
+          </label>
+          <div class="command-actions">
+            <button type="button" class="secondary" id="operations-delivery-grant" disabled>Grant approved customer download</button>
+            <button type="button" class="secondary" id="operations-delivery-revoke" disabled>Revoke customer access</button>
+          </div>
+          <p class="hint" id="operations-delivery-result" aria-live="polite">No customer delivery access has been granted.</p>
+        </div>
         <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>
     </section>
