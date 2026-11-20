@@ -3,6 +3,7 @@ const PRODUCTS = new Set([
   "Nova Casting & Auditions", "Nova Snap", "Work & Revenue", "Nova Today",
   "AMICOR Health", "AMICOR Delivery",
   "Lifesaver AI Care Cloud", "Home Hub", "AMICOR Farm App", "Partnership", "Other",
+  "VoiceLedger Pro", "CFSS Budget Co-Pilot",
   "Autonomous Operations Agent", "AMICOR Nova Work & Revenue", "AMICOR Nova Today",
   "AMICOR Nova Create", "AMICOR Deliver",
 ]);
