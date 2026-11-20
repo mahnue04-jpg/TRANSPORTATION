@@ -99,7 +99,17 @@ function report(v,r){
 }
 form.addEventListener("submit",function(event){
  event.preventDefault();
- try{var v=collect(),r=calculate(v);report(v,r);}
+ try{
+  var v=collect(),r=calculate(v);report(v,r);
+  // Bring the result into view on narrow screens and provide focus for
+  // keyboard/screen-reader users after the explicit Calculate action.
+  var target=el("resultTitle");
+  if(target&&typeof target.focus==="function")target.focus({preventScroll:true});
+  if(target&&typeof target.scrollIntoView==="function"){
+   var reduced=typeof window.matchMedia==="function"&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+   target.scrollIntoView({behavior:reduced?"auto":"smooth",block:"start"});
+  }
+ }
  catch(error){el("error").textContent=error.message;el("results").hidden=true;current=null;}
 });
 form.addEventListener("input",function(){
