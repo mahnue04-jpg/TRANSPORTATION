@@ -34,7 +34,7 @@ def test_browser_local_without_upload() -> None:
 def test_program_boundaries() -> None:
     assert "Not an official DHS or FMS system" in HTML
     assert "does not establish eligibility" in HTML
-    assert "not confirmation that funds or purchases are available or approved" in HTML
+    assert "not confirmation that funds or purchases are available or approved" in JS
     assert "financial management services (FMS)" in HTML
     assert "Do not enter names" in HTML
     assert "No payments accepted" in HTML
