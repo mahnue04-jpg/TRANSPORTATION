@@ -73,6 +73,12 @@ def test_sandbox_rejects_production_database():
     assert "DATABASE_URL mismatch" in completed.stderr
 
 
+def test_sandbox_rejects_durable_receipt_mode():
+    completed = _import_sandbox(NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED="true")
+    assert completed.returncode != 0
+    assert "sandbox requires isolated SQLite" in completed.stderr
+
+
 def test_sandbox_rejects_customer_processing_switch():
     completed = _import_sandbox(NOVA_OPERATIONS_DURABLE_CSV_ENABLED="true")
     assert completed.returncode != 0
