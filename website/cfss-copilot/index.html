@@ -18,7 +18,7 @@
 <h1>CFSS Budget Co-Pilot</h1>
 <p>Explore how planned support-worker costs, approved goods and other expenses could fit inside your <strong>existing authorized CFSS service budget</strong>. Use figures from your approved service delivery plan and your FMS spending reports.</p>
 </section>
-<div class="notice"><strong>Not an official DHS or FMS system.</strong>This tool does not establish eligibility, calculate a DHS authorization, approve purchases, process payroll or replace your consultation services provider, lead agency, case manager or financial management services (FMS) provider. All costs are user-entered assumptions. Do not enter names, case numbers, SSNs, medical information, or other sensitive information.</div>
+<div class="notice"><strong>Not an official DHS or FMS system.</strong> This tool does not establish eligibility, calculate a DHS authorization, approve purchases, process payroll or replace your consultation services provider, lead agency, case manager or financial management services (FMS) provider. All costs are user-entered assumptions. Do not enter names, case numbers, SSNs, medical information, or other sensitive information.</div>
 <div class="layout">
 <section class="panel" aria-labelledby="formtitle">
 <h2 id="formtitle">Plan your budget</h2>
@@ -35,7 +35,7 @@
 </fieldset>
 <fieldset class="section">
 <legend>2. Monthly FMS spending reconciliation (optional)</legend>
-<p class="help">Enter <strong>amounts only</strong> from FMS monthly reports for the elapsed plan months (month 1, month 2, etc.). Leave unknown months blank. This compares those amounts with “Actual spent to date,” but never changes the forecast input or replaces the official FMS report.</p>
+<p class="help">Enter each month’s <strong>individual spending amount</strong> from the FMS report for your current plan period. If a report shows a cumulative year-to-date total, do <strong>not</strong> enter that cumulative balance as the month’s spending; first confirm the individual-month amount with your FMS provider. Leave unknown months blank, not zero. These figures only check against “Actual spent to date” and never replace the official FMS report.</p>
 <details><summary class="cfss-summary">Enter monthly FMS figures (up to 12 months)</summary>
 <div class="fieldgrid fms-fields">
 <label>Month 1 FMS reported amount ($)<input id="fms1" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
@@ -127,6 +127,11 @@
 <div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations and FMS report comparisons run in your browser without third-party analytics or uploading the figures you enter. Normal website hosting access logs may still record page visits. Refreshing discards entries unless you choose to download a private JSON plan.</p></div>
 <div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and the latest FMS monthly spending report as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review. A projected affordable schedule is never an approved service authorization.</p></div>
 <div><strong><span aria-hidden="true">🧮</span> Estimates, not authorization</strong><p>Monthly worker cost uses 52 weeks divided by 12 months. It assumes a constant schedule and user-supplied employer burden, not DHS rate formulas.</p></div>
+</section>
+<section class="evaluation-note" aria-labelledby="evaluation-heading">
+<h2 id="evaluation-heading">Help evaluate CFSS Budget Co-Pilot</h2>
+<p>The planning prototype is available for evaluation with fictional numbers only. If you notice a usability issue or want to discuss a supervised evaluation, send AMICOR a general business inquiry. <strong>Do not include participant names, medical information, actual budget figures, FMS statements, payroll records, or saved JSON plans.</strong> The inquiry form is separate from this calculator and does not receive your entries.</p>
+<p><a class="evaluation-link" href="https://getamicor.com/early-access/?product=CFSS%20Budget%20Co-Pilot">Send evaluation feedback or request details</a></p>
 </section>
 </main>
 <footer>
