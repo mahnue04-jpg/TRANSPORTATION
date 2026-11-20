@@ -1098,7 +1098,7 @@ add(
           <p class="kicker">AMICOR Nova</p>
           <h1>Work &amp; Revenue</h1>
           <p class="lede">Find work. Manage work. Track revenue. Stay in control.</p>
-          <p class="notice">Status: Early Access / In Development. This public page does not enable live external submissions, client contact, or financial execution.</p>
+          <p class="notice">Status: Early Access / In Development. This public page does not enable live external submissions, client contact, or financial execution.</p><p class="notice">Owner-reviewed opportunity intake and saved task/CSV processing are in staged development. This public site cannot autonomously submit job applications or confirm earned revenue. <a href="/launch-status/">See the current status of all Nova agents</a>.</p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="/early-access/?product=AMICOR%20Nova%20Work%20%26%20Revenue">Request Early Access</a>
             <a class="btn btn-ghost" href="/early-access/?intent=demo&amp;product=AMICOR%20Nova%20Work%20%26%20Revenue">Watch Demo</a>
