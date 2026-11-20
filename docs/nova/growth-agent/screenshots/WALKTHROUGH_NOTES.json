@@ -1,0 +1,34 @@
+[
+  {
+    "after_login_banner": "Signed in. Growth Agent APIs require NOVA_GROWTH_AGENT_ENABLED=true."
+  },
+  {
+    "setup_preview": "{\n  \"configured\": true,\n  \"id\": \"bc1e1ba8f2cb40468f58601961ecb78d\",\n  \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n  \"business_name\": \"Cedar Ridge Synthetic Demo\",\n  \"website\": \"https://demo.example\",\n  \"timezone\": \"America/Chicago\",\n  \"operating_hours\": {\n    \"mon_fri\": \"09:00-17:00\"\n  },\n  \"services\": [\n    {\n      \"code\": \"consult\",\n      \"name\": \"Consultation\",\n      \"duration_minutes\": 30\n    }\n  ],\n  \"faqs\": [\n    {\n      \"id\": \"faq_hours\",\n      \"question\": \"What are your ho"
+  },
+  {
+    "demo_ok": true,
+    "demo_snip": "{\n  \"label\": \"SYNTHETIC DEMO \u2014 not live customers\",\n  \"profile\": {\n    \"configured\": true,\n    \"id\": \"bc1e1ba8f2cb40468f58601961ecb78d\",\n    \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n    \"business_name\": \"Cedar Ridge Home Services (SYNTHETIC DEMO)\",\n    \"website\": \"https://demo.cedar-ridge.example\",\n    \"timezone\": \"America/Chicago\",\n    \"operating_hours\": {\n      \"mon_fri\": \"09:0"
+  },
+  {
+    "leads": "Name\tState\tNotes\tDemo\t\nAlex Demo\t\nnew\ncontacted\nqualified\nbooked\nclosed\n\t\t\tSave"
+  },
+  {
+    "booking": "{\n  \"service_code\": \"consult\",\n  \"day\": \"2026-11-14\",\n  \"timezone\": \"America/Chicago\",\n  \"slots\": []\n}"
+  },
+  {
+    "flags": "live_delivery=false \u00b7 mock_worker=on \u00b7 retention_schedule=on \u00b7 retention_mode=dry_run \u00b7 retention_delete=off",
+    "diag_snip": "{\n  \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n  \"mock_processing_only\": true,\n  \"live_delivery\": false,\n  \"worker\": {\n    \"mock_worker_flag\": true,\n    \"live_worker\": false,\n    \"runtime_worker_id\": \"ga-worker-f0e00c0476cf\",\n    \"runtime_stats\": {\n      \"claimed\": 0,\n      \"completed\": 0,\n      \"failed\": 0,\n      \"suppressed\": 0,\n      \"deferred_quiet_hours\": 0,\n      \"ticks\": 1024\n    },\n    \"heartbeats\": [\n      {\n        \"worker_id\": \"ga-worker-f0e00c0476cf\",\n        \"status\": \"running\",\n        \"jobs_claimed\": 0,\n        \"jobs_completed\": 0,\n        \"jobs_failed\": 0,\n     "
+  },
+  {
+    "retention_preview": "{\n  \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n  \"dry_run\": true,\n  \"delete_enabled\": false,\n  \"retain_always\": [\n    \"consent_records\",\n    \"business_profiles\",\n    \"contacts\",\n    \"contact_identities\",\n    \"appointments\"\n  ],\n  \"categories\": {\n    \"conversation_messages\": {\n      \"retention_days\": 365,\n      \"eligible_count\": 0,\n      \"batch_limit\": 100,\n      \"would_delete\": 0\n "
+  },
+  {
+    "worker_tick": "{\n  \"worker_id\": \"tick-f29217fa\",\n  \"claimed\": 0,\n  \"processed\": 0,\n  \"results\": [],\n  \"stats\": {\n    \"claimed\": 0,\n    \"completed\": 0,\n    \"failed\": 0,\n    \"suppressed\": 0,\n    \"deferred_quiet_hours\": 0,\n    \"ticks\": 1\n  },\n  \"live_send\": false,\n  \"mock_only\": true,\n  \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n  \"distinction\": \"mock_only\"\n}"
+  },
+  {
+    "schedule_tick": "{\n  \"scheduler_id\": \"tick-ret-f29217fa\",\n  \"window_key\": \"2026-11-12\",\n  \"schedule_enabled\": true,\n  \"delete_enabled\": false,\n  \"mode\": \"dry_run\",\n  \"claimed\": 0,\n  \"processed\": 0,\n  \"results\": [],\n  \"stats\": {\n    \"ensured\": 0,\n    \"claimed\": 0,\n    \"completed\": 0,\n    \"failed\": 0,\n    \"skipped\": 0,\n    \"dry_runs\": 0,\n    \"deletes\": 0,\n    \"ticks\": 1\n  },\n  \"organization_id\": \"b3aaab92-5dae-4892-a416-4913efdfd7aa\",\n  \"dry_run_default\": true,\n  \"distinction\": \"scheduled_retention\",\n  \"owner_trig"
+  },
+  {
+    "banner_after_disable": "Agent state updated paused=null disabled=true"
+  }
+]
