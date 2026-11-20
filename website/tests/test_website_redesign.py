@@ -50,7 +50,7 @@ def test_homepage_renders_product_illustrations() -> None:
     from catalog import PRODUCTS
 
     home = _html(PAGES["/"])
-    assert home.count("product-visual-card") == 12
+    assert home.count("product-visual-card") == len(PRODUCTS)
     assert 'id="home-product-catalog"' in home
     assert "These are business services, not catalog products." in home
     assert 'data-listing="service"' in home
@@ -124,21 +124,22 @@ def test_product_catalog_uses_distinct_images() -> None:
                 if self._depth <= 0:
                     self._card = False
 
+    from catalog import PRODUCTS
     html = _html(PAGES["/products/"])
     parser = Cards()
     parser.feed(html)
-    assert len(parser.pairs) == 12
+    assert len(parser.pairs) == len(PRODUCTS)
     srcs = [src for src, _alt in parser.pairs]
     alts = [alt for _src, alt in parser.pairs]
-    assert len(set(srcs)) == 12
-    assert len(set(alts)) == 12
+    assert len(set(srcs)) == len(PRODUCTS)
+    assert len(set(alts)) == len(PRODUCTS)
     hashes = []
     for src, alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         assert path.is_file(), src
         assert len(alt) > 24, alt
         hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
-    assert len(set(hashes)) == 12
+    assert len(set(hashes)) == len(PRODUCTS)
     for src, _alt in parser.pairs:
         path = (ROOT / "products" / src).resolve()
         if src.endswith(".jpg"):
