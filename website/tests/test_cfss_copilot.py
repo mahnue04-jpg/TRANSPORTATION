@@ -38,7 +38,7 @@ def test_essential_values_and_scenario() -> None:
     assert 'values.months-values.elapsed' in HTML
     assert 'values.spent>v.budget' not in HTML
     assert "v.spent>v.budget" not in HTML
-    assert "Reported spending already exceeds the entered authorization" in HTML
+    assert "FMS-reported spending already exceeds the entered authorization" in HTML
     assert "maxHours" in HTML
     assert "form.requestSubmit()" in HTML
     assert 'exampleActive=true' in HTML
