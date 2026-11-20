@@ -113,7 +113,7 @@
       return;
     }
 
-    ["name", "company", "email", "industry", "companySize", "product", "message"].forEach(function (name) {
+    ["name", "email", "product", "message"].forEach(function (name) {
       var input = form.elements[name];
       if (!input) return;
       var value = String(data[name] || "").trim();
@@ -145,11 +145,11 @@
     var payload = {
       receivedAt: new Date().toISOString(),
       name: data.name.trim(),
-      company: data.company.trim(),
+      company: (data.company || "").trim(),
       email: data.email.trim(),
       phone: (data.phone || "").trim(),
-      industry: data.industry.trim(),
-      companySize: data.companySize,
+      industry: (data.industry || "").trim(),
+      companySize: data.companySize || "",
       product: data.product,
       message: data.message.trim(),
       consent: true,
