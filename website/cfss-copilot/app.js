@@ -109,6 +109,9 @@ form.addEventListener("input",function(){
 });
 el("example").addEventListener("click",function(){
  var sample={budget:48000,months:12,elapsed:3,spent:9500,wage:20,hours:30,burden:17,other:200,onetime:450,altWage:22,altHours:28,fms1:3200,fms2:3100,fms3:3200};
+ // Clear any previous monthly report inputs so the fictional illustration
+ // cannot accidentally reuse real/previous values from the form.
+ for(var n=1;n<=12;n++)el("fms"+n).value="";
  Object.keys(sample).forEach(function(k){el(k).value=sample[k];});
  exampleActive=true;
  form.requestSubmit();
@@ -147,6 +150,8 @@ el("restoreFile").addEventListener("change",async function(){
    parsed[id]=String(val);
   });
   if(Number(parsed.elapsed)>Number(parsed.months))throw Error("Elapsed months exceed the plan period.");
+  // All values were validated above; restore them together only after the
+  // entire file has passed validation, leaving previous inputs unchanged on errors.
   idlist.forEach(function(id){el(id).value=parsed[id];});
   exampleActive=data.fictionalExample===true;
   form.requestSubmit();
