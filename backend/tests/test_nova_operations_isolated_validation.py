@@ -13,6 +13,10 @@ def test_isolated_health_and_disabled_customer_csv(monkeypatch):
         "NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED",
         "NOVA_OPERATIONS_LEASE_WORKER_ENABLED",
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+    "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+    "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
         "NOVA_STRIPE_LIVE_ENABLED",
     ):
         monkeypatch.delenv(flag, raising=False)
@@ -47,6 +51,8 @@ def test_isolated_startup_fails_when_any_live_or_processing_flag_enabled(
         "NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED",
         "NOVA_OPERATIONS_LEASE_WORKER_ENABLED",
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
         "NOVA_STRIPE_LIVE_ENABLED",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -66,6 +72,8 @@ def test_diagnostic_denies_processing_after_runtime_config_drift(monkeypatch):
         "NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED",
         "NOVA_OPERATIONS_LEASE_WORKER_ENABLED",
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
         "NOVA_STRIPE_LIVE_ENABLED",
     ):
         monkeypatch.delenv(flag, raising=False)
