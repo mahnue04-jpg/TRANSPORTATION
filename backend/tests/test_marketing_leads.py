@@ -647,3 +647,94 @@ def test_starter_rejects_invalid_stripe_test_price_id(monkeypatch):
             lead_id="synthetic-lead", email="sample@example.invalid",
             plan_key="starter_49", customer_id="cus_test_synthetic",
         )
+
+
+def test_operations_webhook_rejects_unlinked_sandbox_checkout(monkeypatch):
+    """A manually created Stripe sandbox checkout is not a paid customer order."""
+    from app.modules.marketing import routes
+
+    synthetic_event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_unlinked_synthetic",
+            "client_reference_id": "AMICOR-SYNTHETIC-STARTER-CHECKOUT-20261120",
+            "customer": None,
+            "mode": "payment",
+            "currency": "usd",
+            "amount_total": 4900,
+            "payment_status": "paid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_plan": "starter_49",
+                "synthetic_only": "true",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: synthetic_event)
+    result = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-event-not-a-valid-stripe-signature",
+        headers={"Stripe-Signature": "test-only-mocked-signature"},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json() == {"ok": True, "handled": False, "result": "lead_not_found"}
+
+
+def test_operations_webhook_rejects_mismatched_saved_checkout(monkeypatch):
+    """Even paid-looking event data cannot change a different saved lead."""
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.249"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Webhook Recipient",
+            "work_email": "webhook-recipient@example.invalid",
+            "consent": True,
+            "service_plan": "starter_49",
+            "message": "Synthetic webhook identity control, no real purchase.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead is not None
+        lead.stripe_checkout_session_id = "cs_test_saved_session"
+        lead.stripe_customer_id = "cus_test_saved_customer"
+        lead.payment_status = "pending"
+        db.commit()
+
+    synthetic_event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_other_session",
+            "client_reference_id": lead_id,
+            "customer": "cus_test_saved_customer",
+            "mode": "payment",
+            "currency": "usd",
+            "amount_total": 4900,
+            "payment_status": "paid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_lead_id": lead_id,
+                "nova_agent_plan": "starter_49",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: synthetic_event)
+    response = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-test-event",
+        headers={"Stripe-Signature": "test-only-mocked-signature"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "checkout_identity_mismatch"
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead.payment_status == "pending"
+        assert not lead.starter_paid_session_id
