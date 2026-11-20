@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
-const html = fs.readFileSync("website/cfss-copilot/index.html","utf8");
+const html = fs.readFileSync("website/cfss-copilot/app.js","utf8");
 const start = html.indexOf("function calculate(values){");
 const end = html.indexOf("function collect(){",start);
 assert(start>0 && end>start,"Pure calculate() function exists");
