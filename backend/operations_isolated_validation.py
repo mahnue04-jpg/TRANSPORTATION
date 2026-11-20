@@ -56,6 +56,8 @@ def _unsafe_configuration() -> bool:
         or _enabled("NOVA_OPERATIONS_DURABLE_CSV_ENABLED")
         or _enabled("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED")
         or _enabled("NOVA_OPERATIONS_LEASE_WORKER_ENABLED")
+        or _enabled("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED")
+        or _enabled("NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED")
     )
 
 
