@@ -242,11 +242,15 @@ def test_anonymous_operations_accepts_all_public_launch_plans():
         assert response.status_code == 200, (plan, response.text)
 
 
-def test_anonymous_operations_paid_checkout_uses_selected_price():
+def test_anonymous_operations_paid_checkout_uses_selected_price(monkeypatch):
     from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
     from app.modules.marketing.routes import _RATE_HITS
 
     _RATE_HITS.clear()
+    # Rehearse checkout with an in-process Stripe fake; CI has no Stripe key.
+    # Do not relax the production checkout gate.
+    from app.modules.marketing import routes as marketing_routes
+    monkeypatch.setattr(marketing_routes, "agent_checkout_mode", lambda: "test")
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
@@ -288,11 +292,15 @@ def test_anonymous_operations_paid_checkout_uses_selected_price():
         set_agent_stripe_override(None)
 
 
-def test_anonymous_operations_subscription_checkout_is_monthly():
+def test_anonymous_operations_subscription_checkout_is_monthly(monkeypatch):
     from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
     from app.modules.marketing.routes import _RATE_HITS
 
     _RATE_HITS.clear()
+    # Rehearse checkout with an in-process Stripe fake; CI has no Stripe key.
+    # Do not relax the production checkout gate.
+    from app.modules.marketing import routes as marketing_routes
+    monkeypatch.setattr(marketing_routes, "agent_checkout_mode", lambda: "test")
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
