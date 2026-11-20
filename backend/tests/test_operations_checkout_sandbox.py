@@ -77,3 +77,13 @@ def test_sandbox_rejects_customer_processing_switch():
     completed = _import_sandbox(NOVA_OPERATIONS_DURABLE_CSV_ENABLED="true")
     assert completed.returncode != 0
     assert "sandbox requires isolated SQLite" in completed.stderr
+
+
+def test_owner_test_page_contains_no_embedded_credentials():
+    page = (BACKEND_DIR / "operations_checkout_sandbox_ui.html").read_text(encoding="utf-8")
+    assert "Create synthetic $49 checkout" in page
+    assert "x-amicor-sandbox-token" in page
+    assert "sk_test_" not in page
+    assert "rk_test_" not in page
+    assert "whsec_" not in page
+    assert "https://checkout.stripe.com/" in page
