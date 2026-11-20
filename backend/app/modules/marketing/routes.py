@@ -481,7 +481,7 @@ async def nova_agent_stripe_webhook(
             return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
 
     result = "ignored"
-    if event_type == "checkout.session.completed":
+    if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
         payment_status = str(obj.get("payment_status") or "")
         plan_spec = AGENT_PLANS.get(str(lead.service_plan or ""), {})
         # The $49 starter is an actual 4,900-cent one-time charge. Do not

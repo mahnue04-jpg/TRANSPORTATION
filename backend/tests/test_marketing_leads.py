@@ -6,6 +6,7 @@ from pathlib import Path
 
 os.environ.setdefault("AMICOR_SKIP_WMI_PLATFORM_QUERY", "1")
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -645,7 +646,6 @@ def test_live_checkout_never_uses_stripe_sandbox_price(monkeypatch):
 
 
 def test_starter_rejects_invalid_stripe_test_price_id(monkeypatch):
-    import pytest
     from app.modules.marketing import operations_billing as billing
 
     monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
@@ -864,7 +864,8 @@ def test_operations_paid_order_ignores_stale_unpaid_completion(monkeypatch):
         assert lead.starter_paid_session_id == "cs_test_paid_for_completion"
 
 
-def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monkeypatch):
+@pytest.mark.parametrize("event_type", ["checkout.session.completed", "checkout.session.async_payment_succeeded"])
+def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monkeypatch, event_type):
     """Exercise real signature verification and saved-order binding without Stripe network calls."""
     import hashlib
     import hmac
@@ -890,7 +891,7 @@ def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monke
             json={
                 "lead_type": "anonymous_operations",
                 "contact_name": "Synthetic Signed Order",
-                "work_email": "signed-order@example.invalid",
+                "work_email": f"signed-order-{event_type.rsplit('.', 1)[-1]}@example.invalid",
                 "consent": True,
                 "service_plan": "starter_49",
                 "message": "Synthetic signed webhook test; no real customer work.",
@@ -910,7 +911,7 @@ def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monke
             "id": "evt_test_synthetic_starter",
             "object": "event",
             "api_version": "2024-06-20",
-            "type": "checkout.session.completed",
+            "type": event_type,
             "data": {"object": {
                 "id": session_id,
                 "object": "checkout.session",
