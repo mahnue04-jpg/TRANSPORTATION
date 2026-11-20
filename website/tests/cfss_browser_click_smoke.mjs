@@ -33,6 +33,9 @@ function node(id){
  listeners:{},addEventListener(type,fn){this.listeners[type]=fn;},closest(){return{textContent:id}}});
  return nodes.get(id);
 }
+const resultHeading=node("resultTitle");
+resultHeading.focus=function(){this.focused=true;};
+resultHeading.scrollIntoView=function(){this.scrolled=true;};
 const form=node("budgetForm");
 form.requestSubmit=function(){this.listeners.submit({preventDefault(){}});};
 form.reset=function(){for(const f of nodes.values()){if(typeof f.value==="string")f.value="";}};
@@ -58,6 +61,8 @@ assert.equal(node("other").value,"200");
 assert.equal(node("onetime").value,"450");
 assert.equal(node("results").hidden,false,"Budget outlook becomes visible; error="+node("error").textContent);
 assert.equal(node("error").textContent,"","Example must calculate without an error");
+assert.equal(node("resultTitle").focused,true,"Budget outlook receives keyboard focus");
+assert.equal(node("resultTitle").scrolled,true,"Budget outlook scrolls into view");
 assert.equal(node("rBudget").textContent,"$48,000.00");
 assert.equal(node("rMonths").textContent,"9");
 assert.equal(node("rMonthly").textContent,"$3,242.00");
