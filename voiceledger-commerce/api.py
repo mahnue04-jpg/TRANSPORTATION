@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, HTMLResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from flow import CheckoutError, Commerce, Settings
 
 app = FastAPI(
