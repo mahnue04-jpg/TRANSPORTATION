@@ -36,6 +36,69 @@ receipt_table = Table(
 )
 
 
+# A durable order binding is required before a signed payment can be accepted.
+# Never reconstruct a payable order from Stripe metadata alone.
+order_table = Table(
+    "starter_test_orders", _metadata,
+    Column("lead_id", String(36), primary_key=True),
+    Column("session_id", String(128), nullable=False),
+    Column("customer_id", String(128), nullable=False),
+    Column("plan", String(32), nullable=False),
+    Column("amount_cents", Integer, nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False),
+    UniqueConstraint("session_id", name="uq_ops_sandbox_order_session"),
+    CheckConstraint("plan = 'starter_49'", name="ck_ops_sandbox_order_plan"),
+    CheckConstraint("amount_cents = 4900", name="ck_ops_sandbox_order_amount"),
+    CheckConstraint("currency = 'usd'", name="ck_ops_sandbox_order_currency"),
+    schema=SCHEMA,
+)
+
+
+def validated_checkout_event(event, order):
+    """Validate a previously signature-verified Stripe event against a saved order.
+
+    The caller MUST call verify_agent_webhook(raw_body, stripe_signature)
+    first. Never use a browser redirect query or unsigned event object.
+    """
+    if not isinstance(event, dict) or not isinstance(order, dict):
+        raise ValueError("Valid Stripe event and saved order required")
+    obj = event.get("data", {}).get("object", {}) if isinstance(event.get("data"), dict) else {}
+    metadata = obj.get("metadata") if isinstance(obj, dict) else None
+    if not isinstance(obj, dict) or not isinstance(metadata, dict):
+        raise ValueError("Malformed checkout event")
+    if (
+        event.get("type") not in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}
+        or event.get("livemode") is not False
+        or obj.get("livemode") is not False
+        or obj.get("payment_status") != "paid"
+        or obj.get("mode") != "payment"
+        or obj.get("amount_total") != 4900
+        or obj.get("currency") != "usd"
+        or metadata.get("nova_product") != "nova_anonymous_operations_agent"
+        or metadata.get("nova_agent_plan") != "starter_49"
+        or metadata.get("nova_agent_lead_id") != order.get("lead_id")
+        or obj.get("client_reference_id") != order.get("lead_id")
+        or obj.get("id") != order.get("session_id")
+        or obj.get("customer") != order.get("customer_id")
+        or order.get("plan") != "starter_49"
+        or order.get("amount_cents") != 4900
+        or order.get("currency") != "usd"
+    ):
+        raise ValueError("Checkout event does not match the durable synthetic order")
+    event_id = str(event.get("id") or "")
+    if not event_id.startswith("evt_") or len(event_id) > 128:
+        raise ValueError("Missing Stripe event identity")
+    return dict(
+        lead_id=order["lead_id"],
+        session_id=order["session_id"],
+        customer_id=order["customer_id"],
+        event_id=event_id,
+        amount_cents=4900,
+        currency="usd",
+    )
+
+
 def require_staging_config() -> None:
     """Fail closed before *any* connection to a persistent database."""
     if os.environ.get("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED") != "true":
@@ -70,8 +133,9 @@ def verify_store_ready(engine) -> None:
     if not required_db or database != required_db:
         raise RuntimeError("Dedicated staging database name mismatch")
     inspector = inspect(engine)
-    if not inspector.has_table(TABLE_NAME, schema=SCHEMA):
-        raise RuntimeError("Receipt table missing: reviewed migration required")
+    for expected in (TABLE_NAME, order_table.name):
+        if not inspector.has_table(expected, schema=SCHEMA):
+            raise RuntimeError("Durable checkout table missing: reviewed migration required")
 
 
 def _confirmed_values(*, lead_id, session_id, customer_id, event_id, amount_cents, currency):
@@ -88,6 +152,57 @@ def _confirmed_values(*, lead_id, session_id, customer_id, event_id, amount_cent
     return values
 
 
+
+def record_checkout_order(engine, *, lead_id, session_id, customer_id):
+    """Register one synthetic order BEFORE issuing its checkout link.
+
+    Does not contact Stripe or create a payment. Duplicate identical order
+    is idempotent; conflicting identities are rejected without updates.
+    """
+    verify_store_ready(engine)
+    values = dict(
+        lead_id=str(lead_id), session_id=str(session_id),
+        customer_id=str(customer_id), plan="starter_49",
+        amount_cents=4900, currency="usd",
+    )
+    if (not values["lead_id"] or len(values["lead_id"]) > 36
+        or not values["session_id"].startswith("cs_test_")
+        or not values["customer_id"].startswith("cus_")):
+        raise ValueError("Invalid synthetic order binding")
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    with engine.begin() as conn:
+        conn.execute(pg_insert(order_table).values(**values).on_conflict_do_nothing())
+        saved = conn.execute(select(order_table).where(
+            order_table.c.lead_id == values["lead_id"]
+        )).mappings().first()
+        compared = ("lead_id", "session_id", "customer_id", "plan", "amount_cents", "currency")
+        if saved is None or any(saved[k] != values[k] for k in compared):
+            raise ValueError("Order binding conflict")
+    return {"result": "registered", "lead_id": values["lead_id"]}
+
+
+def process_verified_checkout_event(engine, event):
+    """Record an authentic paid event only when a durable order already exists.
+
+    Caller verifies the Stripe signature before passing the event here.
+    """
+    verify_store_ready(engine)
+    data = event.get("data") if isinstance(event, dict) else None
+    obj = data.get("object") if isinstance(data, dict) else None
+    metadata = obj.get("metadata") if isinstance(obj, dict) else None
+    lead_id = str(metadata.get("nova_agent_lead_id") or "") if isinstance(metadata, dict) else ""
+    if not lead_id:
+        raise ValueError("Event has no durable order reference")
+    with engine.connect() as conn:
+        order = conn.execute(select(order_table).where(
+            order_table.c.lead_id == lead_id
+        )).mappings().first()
+    if order is None:
+        raise ValueError("Signed event has no registered order")
+    values = validated_checkout_event(event, dict(order))
+    return record_confirmed_event(engine, **values)
+
+
 def record_confirmed_event(engine, *, lead_id, session_id, customer_id,
                            event_id, amount_cents, currency):
     """Record ONLY an event already verified via Stripe's signed webhook.
@@ -101,8 +216,20 @@ def record_confirmed_event(engine, *, lead_id, session_id, customer_id,
         lead_id=lead_id, session_id=session_id, customer_id=customer_id,
         event_id=event_id, amount_cents=amount_cents, currency=currency,
     )
-    # This operates only on the pre-existing restricted staging schema.
+    # Defense in depth: the order binding must exist and match, even if the
+    # caller invokes this helper directly rather than the webhook adapter.
     with engine.begin() as conn:
+        order = conn.execute(select(order_table).where(
+            order_table.c.lead_id == values["lead_id"]
+        )).mappings().first()
+        if order is None or any((
+            order["session_id"] != values["session_id"],
+            order["customer_id"] != values["customer_id"],
+            order["plan"] != "starter_49",
+            order["amount_cents"] != 4900,
+            order["currency"] != "usd",
+        )):
+            raise ValueError("No matching durable order binding")
         existing = conn.execute(
             select(receipt_table).where(receipt_table.c.lead_id == values["lead_id"])
         ).mappings().first()
