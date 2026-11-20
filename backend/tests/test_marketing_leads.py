@@ -458,7 +458,12 @@ def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
         "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
     ):
         monkeypatch.setenv(flag, "true")
-    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", lambda db: True)
+    verified_sessions = []
+    def verified_preflight(db):
+        assert db is not None
+        verified_sessions.append(db)
+        return True
+    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", verified_preflight)
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
@@ -495,6 +500,7 @@ def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
         )
         assert allowed.status_code == 200, allowed.text
         assert len(fake.sessions) == 1
+        assert verified_sessions, "Live checkout must pass a database session to preflight"
     finally:
         set_agent_stripe_override(None)
 
