@@ -44,6 +44,25 @@ assert.equal(overspent.maxHours,0,"No hours can be funded from a negative remain
 const noWage=calculate({...test,wage:0,burden:0});
 assert.equal(noWage.maxHours,null,"Do not divide by zero or imply free authorized service units");
 
+const monthsComplete=calculate({...test,fmsMonths:[3200,3100,3200,null,null,null,null,null,null,null,null,null]});
+assert.equal(monthsComplete.fmsReconciliation.complete,true,"Three elapsed months fully entered");
+assert.equal(monthsComplete.fmsReconciliation.count,3);
+close(monthsComplete.fmsReconciliation.total,9500);
+close(monthsComplete.fmsReconciliation.difference,0);
+const monthsDisagree=calculate({...test,fmsMonths:[3200,3100,3300]});
+assert.equal(monthsDisagree.fmsReconciliation.complete,true);
+close(monthsDisagree.fmsReconciliation.difference,100);
+const monthsIncomplete=calculate({...test,fmsMonths:[3200,null,3200]});
+assert.equal(monthsIncomplete.fmsReconciliation.complete,false,"Missing report must not be treated as zero");
+assert.equal(monthsIncomplete.fmsReconciliation.difference,null);
+const monthsFuture=calculate({...test,fmsMonths:[3200,3100,3200,100]});
+assert.equal(monthsFuture.fmsReconciliation.complete,false,"Reports beyond elapsed months require review");
+assert.equal(monthsFuture.fmsReconciliation.unexpected,1);
+close(monthsFuture.projected,result.projected);
+const noReports=calculate(test);
+assert.equal(noReports.fmsReconciliation.count,0);
+assert.equal(noReports.fmsReconciliation.complete,false);
+
 const over=calculate({...test,wage:30,hours:60,burden:30});
 assert(over.variance<0,"High cost schedule shows deficit");
-console.log("CFSS_CALCULATION_CHECKS_PASSED=22");
+console.log("CFSS_CALCULATION_CHECKS_PASSED=33");
