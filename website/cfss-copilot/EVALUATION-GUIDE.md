@@ -18,6 +18,9 @@ Evaluate whether a Minnesota CFSS budget-model participant, representative, cons
 - Assumes wages and hours remain constant through the forecast period.
 - Uses 52 weeks / 12 months to approximate monthly staffing costs. This is **not** a DHS billing-unit or service-hours authorization calculation.
 - Uses an employer-cost percentage entered by the user; it is not a verified FMS expense factor.
+- Worker hourly wages are illustrative; CFSS tiered wage rules, collective bargaining requirements and applicable wage laws are **not validated by this app**. The 2026 DHS CFSS notice describes quarterly budget adjustments for qualifying experienced direct-support workers. Participants must obtain the current authorized amount rather than assume an increase.
+- **FMS provider fees are billed on a separate authorization line in the CFSS budget model**, according to DHS. Do not subtract fees that are separately authorized from the service budget a second time. Use a fee in the planning model only if a consultation/FMS professional confirms it belongs in the exact budget total entered.
+- FMS monthly reports can use cumulative totals; do not add cumulative month-end balances together. Enter discrete monthly spending amounts or ask the FMS provider to clarify.
 - Uses *whole months elapsed* and a future-spending forecast; it does not model partial months, payroll timing, holidays, overtime or FMS administrative fees unless represented in the user's explicit inputs.
 - Calculates projected budget differences using total budget minus actual spent-to-date minus forecast future costs.
 - Does not determine eligible goods/services, authorize employment, validate wage limits, or certify FMS payment.
@@ -40,5 +43,8 @@ Evaluate whether a Minnesota CFSS budget-model participant, representative, cons
 ## Official references
 - Minnesota DHS, CFSS program guidance: https://mn.gov/dhs/disability-aging/home-and-community-services/programs-and-services/cfss-faq/
 - Minnesota Statutes 256B.85: https://www.revisor.mn.gov/statutes/cite/256B.85
+- DHS goods and services through CFSS (separate FMS fee line in budget model): https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&dID=148505
+- DHS FMS responsibilities and rates: https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&dID=148519
+- DHS CFSS 2026 tiered-wage budget adjustments: https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&RevisionSelectionMethod=LatestReleased&dDocName=MNDHS-076194
 
 **No production merge, live payments, DHS integration, customer solicitation, or real client-data processing is authorized by this document.**
