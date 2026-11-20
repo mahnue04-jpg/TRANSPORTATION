@@ -98,7 +98,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <label>Authorized budget ($) *<input id="budget" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Enter official amount" required><span>From approved CFSS plan; not an estimate</span></label>
 <label>Months in service plan *<input id="months" type="number" min="1" max="12" step="1" inputmode="numeric" value="12" required><span>Use the actual authorization period</span></label>
 <label>Months already elapsed *<input id="elapsed" type="number" min="0" max="12" step="1" inputmode="numeric" value="0" required><span>Whole months for this simplified forecast</span></label>
-<label>Actual spent to date ($) *<input id="spent" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" value="0" required><span>Verify using your FMS spending report</span></label>
+<label>Actual spent to date ($) *<input id="spent" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" value="0" required><span>From the most recent FMS monthly spending report (same plan period)</span></label>
 </div>
 </fieldset>
 <fieldset class="section">
@@ -137,6 +137,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <div class="metric"><div class="name">Unspent amount reported</div><strong id="rRemaining">$0</strong><small>Budget less actual reported spending</small></div>
 <div class="metric"><div class="name">Projected period-end spending</div><strong id="rProjected">$0</strong><small>Actual so far plus planned future cost</small></div>
 <div id="varianceTile" class="metric"><div class="name">Projected budget difference</div><strong id="rVariance">$0</strong><small id="rVarianceLabel">After planned future spending</small></div>
+<div class="metric"><div class="name">Illustrative weekly hours budget may cover</div><strong id="rMaxHours">—</strong><small>For entered wage, employer costs, remaining months and other planned expenses; not authorized hours</small></div>
 </div>
 <table class="result-table">
 <caption>Scenario A — planned costs</caption>
@@ -169,7 +170,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </div>
 <section class="privacy" aria-label="Planning safeguards">
 <div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations run in this browser and are not uploaded by this tool. The page uses AMICOR visitor analytics, but this tool does not send your entered financial figures. Refreshing or closing this page discards your entries.</p></div>
-<div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and FMS reports as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review.</p></div>
+<div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and the latest FMS monthly spending report as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review. A projected affordable schedule is never an approved service authorization.</p></div>
 <div><strong><span aria-hidden="true">🧮</span> Estimates, not authorization</strong><p>Monthly worker cost uses 52 weeks divided by 12 months. It assumes a constant schedule and user-supplied employer burden, not DHS rate formulas.</p></div>
 </section>
 </main>
@@ -197,6 +198,14 @@ function calculate(values){
  var future=monthly*monthsLeft+values.onetime;
  var projected=values.spent+future;
  var variance=values.budget-projected;
+ // This is a budgeting comparison, NOT a CFSS authorization or a promise
+ // that service units and worker hours have been approved.
+ var leftoverForWages=values.budget-values.spent-values.onetime-values.other*monthsLeft;
+ var hourlyCost=values.wage*(1+values.burden/100);
+ var maxHours=null;
+ if(monthsLeft>0&&hourlyCost>0){
+   maxHours=Math.max(0,Math.min(168,Math.floor(Math.max(0,leftoverForWages)/(hourlyCost*(52/12)*monthsLeft)*4)/4));
+ }
  var alternative=null;
  if(values.altWage!==null||values.altHours!==null){
    var altWage=values.altWage===null?values.wage:values.altWage;
@@ -205,12 +214,13 @@ function calculate(values){
    var altProjected=values.spent+altMonthly*monthsLeft+values.onetime;
    alternative={monthly:altMonthly,projected:altProjected,difference:altProjected-projected,variance:values.budget-altProjected};
  }
- return {monthsLeft:monthsLeft,wages:baselineWages,employer:employer,monthly:monthly,future:future,projected:projected,variance:variance,remaining:values.budget-values.spent,average:values.budget/values.months,alternative:alternative};
+ return {monthsLeft:monthsLeft,wages:baselineWages,employer:employer,monthly:monthly,future:future,projected:projected,variance:variance,remaining:values.budget-values.spent,average:values.budget/values.months,maxHours:maxHours,alternative:alternative};
 }
 function collect(){
  var v={budget:read("budget",true),months:read("months",true),elapsed:read("elapsed",true),spent:read("spent",true),wage:read("wage",true),hours:read("hours",true),burden:read("burden",true),other:read("other",true),onetime:read("onetime",true),altWage:read("altWage",false),altHours:read("altHours",false)};
  if(v.elapsed>v.months)throw new Error("Elapsed months cannot exceed plan months.");
- if(v.spent>v.budget)throw new Error("Reported spending exceeds the authorized budget; please verify the figures with your FMS provider.");
+ // Allow actual FMS spending above the entered authorization so the app
+ // displays an overspending warning instead of refusing to calculate.
  return v;
 }
 function report(v,r){
@@ -222,6 +232,7 @@ function report(v,r){
  s("rRemaining",money(r.remaining));
  s("rProjected",money(r.projected));
  s("rVariance",money(r.variance));
+ s("rMaxHours",r.maxHours===null?"Not estimated":r.maxHours.toLocaleString("en-US",{maximumFractionDigits:2})+" hrs/week");
  s("rVarianceLabel",r.variance<0?"Estimated amount over entered budget":"Estimated amount left after forecast");
  el("varianceTile").className="metric "+(r.variance<0?"red":"green");
  s("rMonths",String(r.monthsLeft));
@@ -243,7 +254,8 @@ function report(v,r){
  if(r.monthsLeft===0&&v.onetime>0){summary="No months remain, but one-time future purchases are entered. Confirm timing and authorization with your FMS and consultation services provider.";}
  else if(r.variance<0){summary="This scenario projects spending above the amount you entered by "+money(-r.variance)+". Review the budget and options with your FMS and consultation services provider before committing funds.";}
  else {summary="Based on these assumptions, estimated spending would leave "+money(r.variance)+" unallocated. This is not confirmation that funds or purchases are available or approved.";}
- if(r.remaining<0)summary="Reported spending exceeds the entered authorization. Confirm official numbers before relying on this estimate.";
+ if(r.remaining<0)summary="FMS-reported spending already exceeds the entered authorization by "+money(-r.remaining)+". Review official FMS records and contact the consultation services provider immediately; this estimate cannot authorize additional spending.";
+ else if(r.maxHours!==null&&v.hours>r.maxHours&&r.monthsLeft>0)summary+=" The illustrative weekly-hour upper bound at these entered costs is "+r.maxHours+" hours; this is NOT your authorized service-hours limit. Confirm any schedule change with your FMS and consultation services provider.";
  el("interpretation").textContent=summary;
  el("status").textContent="Calculated from the values entered in this browser. Nothing was submitted to AMICOR or DHS.";
 }
@@ -279,7 +291,7 @@ el("download").addEventListener("click",function(){
  ["Months remaining",r.monthsLeft],["Average monthly authorized budget",money(r.average)],
  ["Monthly worker wages estimate",money(r.wages)],["Monthly employer cost estimate",money(r.employer)],
  ["Monthly total estimate",money(r.monthly)],["Future planned costs",money(r.future)],
- ["Projected total period spending",money(r.projected)],["Budget difference",money(r.variance)]];
+ ["Projected total period spending",money(r.projected)],["Budget difference",money(r.variance)],["Illustrative weekly hours budget may cover",r.maxHours===null?"Not estimated":r.maxHours],["Weekly hours estimate status","Not authorization; verify with consultation and FMS provider"]];
  if(r.alternative)lines.push(["Alternative hourly wage",v.altWage===null?money(v.wage):money(v.altWage)],["Alternative hours per week",v.altHours===null?v.hours:v.altHours],["Alternative monthly estimate",money(r.alternative.monthly)],["Alternative projected period spending",money(r.alternative.projected)],["Alternative budget difference",money(r.alternative.variance)]);
  lines.push(["Notice","Planning estimates only; confirm spending and allowable expenses with your FMS provider."]);
  var csv=lines.map(function(row){return row.map(function(item){return '"'+String(item).replace(/"/g,'""')+'"';}).join(",");}).join("\r\n");
