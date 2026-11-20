@@ -1,0 +1,34 @@
+name: VoiceLedger test-only checkout review
+on:
+  pull_request:
+    paths:
+      - "voiceledger-commerce/**"
+      - ".github/workflows/voiceledger-commerce-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  voiceledger-test-commerce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile checkout files
+        run: python -m compileall -q voiceledger-commerce
+      - name: Run offline tests without Stripe credentials
+        run: python -m unittest discover -s voiceledger-commerce -p "test_*.py" -v
+      - name: Verify no live checkout configuration is bundled
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('voiceledger-commerce/flow.py').read_text()
+          assert 'sk_test_' in text
+          assert 'sk_live_unsafe' not in text
+          assert 'mode != "test"' in text
+          print('VoiceLedger TEST-only checkout guard found')
+          PY
