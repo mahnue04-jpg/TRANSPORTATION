@@ -60,3 +60,8 @@ footer p{font-size:12px}
 @media print{header,.actions,#error,.notice,.privacy,footer{display:none!important}body{background:#fff}main{padding:0}.layout{grid-template-columns:1fr 1fr}.panel{box-shadow:none;border:1px solid #bbcbd5}.intro p{font-size:12px}}
 .cfss-summary{font-weight:750;cursor:pointer;padding:8px 0}
 .fms-fields{margin-top:15px}
+
+.evaluation-note{background:#fff;border:1px solid #d5e5e9;border-radius:16px;padding:24px;margin-top:20px}
+.evaluation-note p{max-width:850px}
+.evaluation-link{display:inline-block;background:#0b6c73;color:#fff;text-decoration:none;font-weight:750;border-radius:10px;padding:12px 16px}
+.evaluation-link:focus-visible{outline:3px solid #f0b34f;outline-offset:3px}
