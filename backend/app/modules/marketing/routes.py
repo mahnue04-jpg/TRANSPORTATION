@@ -367,6 +367,19 @@ def create_nova_agent_checkout(
         )
 
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
+        if os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true":
+            # Reconcile a previously created session before reusing its URL.
+            # A failed durable binding must not leak a payable URL.
+            try:
+                from operations_checkout_durable_receipts import register_staging_checkout_binding
+                register_staging_checkout_binding(
+                    lead_id=lead.id,
+                    session_id=lead.stripe_checkout_session_id,
+                    customer_id=lead.stripe_customer_id,
+                )
+            except Exception as exc:
+                logger.warning("durable_staging_checkout_binding_failed type=%s", type(exc).__name__)
+                raise HTTPException(status_code=503, detail="Secure staging checkout unavailable") from exc
         return {
             "checkout_url": lead.checkout_url,
             "checkout_session_id": lead.stripe_checkout_session_id,
@@ -408,6 +421,16 @@ def create_nova_agent_checkout(
     except Exception as exc:
         logger.warning("nova_agent_checkout_failed lead_id=%s exc_type=%s", lead.id, type(exc).__name__)
         raise HTTPException(status_code=503, detail="Secure checkout is not available yet.") from exc
+
+    if os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true":
+        try:
+            from operations_checkout_durable_receipts import register_staging_checkout_binding
+            register_staging_checkout_binding(
+                lead_id=lead.id, session_id=session_id, customer_id=customer_id,
+            )
+        except Exception as exc:
+            logger.warning("durable_staging_checkout_binding_failed type=%s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Secure staging checkout unavailable") from exc
 
     lead.stripe_customer_id = customer_id
     lead.stripe_checkout_session_id = session_id
@@ -526,6 +549,21 @@ async def nova_agent_stripe_webhook(
     elif event_type == "invoice.paid":
         lead.payment_status = "paid"
         result = "renewal_paid"
+
+    if (
+        os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true"
+        and lead.service_plan == "starter_49"
+        and result == "paid"
+    ):
+        # The event was already signature-verified and matched to this lead.
+        # Persist the durable receipt before acknowledging payment to Stripe.
+        try:
+            from operations_checkout_durable_receipts import record_staging_signed_webhook
+            record_staging_signed_webhook(raw_body=raw, stripe_signature=stripe_signature)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("durable_staging_receipt_failed type=%s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Durable test receipt unavailable") from exc
 
     db.commit()
     return {"ok": True, "handled": True, "result": result, "lead_id": lead.id}
