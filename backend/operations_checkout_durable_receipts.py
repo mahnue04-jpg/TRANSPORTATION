@@ -265,6 +265,55 @@ def process_signed_test_webhook(engine, raw_body: bytes, stripe_signature: str |
     return process_verified_checkout_event(engine, event)
 
 
+def _dedicated_staging_engine():
+    """Construct only an explicitly named staging receipt database connection.
+
+    Never use the app's general DATABASE_URL (which may be an existing
+    shared or production database). No DDL or migrations happen here.
+    """
+    require_staging_config()
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import make_url
+
+    raw = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DATABASE_URL", "").strip()
+    expected_name = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_NAME", "").strip()
+    expected_user = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "").strip()
+    if not raw or not expected_name or not expected_user:
+        raise RuntimeError("Dedicated staging receipt database settings required")
+    url = make_url(raw)
+    if (
+        url.get_backend_name() != "postgresql"
+        or url.database != expected_name
+        or url.username != expected_user
+        or not url.password
+        or not url.host
+        or expected_user.lower() in {"postgres", "amicor", "render", "root"}
+    ):
+        raise RuntimeError("Dedicated staging receipt connection identity mismatch")
+    return create_engine(url, pool_pre_ping=True)
+
+
+def register_staging_checkout_binding(*, lead_id, session_id, customer_id):
+    """Optional route hook: register synthetic checkout BEFORE URL is returned."""
+    engine = _dedicated_staging_engine()
+    try:
+        return record_checkout_order(
+            engine, lead_id=lead_id, session_id=session_id,
+            customer_id=customer_id,
+        )
+    finally:
+        engine.dispose()
+
+
+def record_staging_signed_webhook(*, raw_body, stripe_signature):
+    """Optional webhook route hook: verify Stripe signature then store receipt."""
+    engine = _dedicated_staging_engine()
+    try:
+        return process_signed_test_webhook(engine, raw_body, stripe_signature)
+    finally:
+        engine.dispose()
+
+
 def find_receipt(engine, *, lead_id):
     verify_store_ready(engine)
     with engine.connect() as conn:
