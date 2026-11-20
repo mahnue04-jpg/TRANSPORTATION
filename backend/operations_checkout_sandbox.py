@@ -27,6 +27,7 @@ def _safe_configuration() -> bool:
         and os.getenv("APP_ENV", "staging").strip().lower() != "production"
         and os.getenv("AMICOR_ENVIRONMENT", "staging").strip().lower() != "production"
         and os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").strip().lower() != "true"
+        and os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_OWNER_CSV_ENABLED", "").strip().lower() != "true"
