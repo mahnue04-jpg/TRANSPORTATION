@@ -55,10 +55,10 @@
 <fieldset class="section">
 <legend>3. Planned support-worker schedule</legend>
 <div class="fieldgrid">
-<label>Hourly worker wage ($) *<input id="wage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="e.g., 20.00" required></label>
+<label>Hourly worker wage ($) *<input id="wage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="e.g., 20.00" required><span>Planning input only: verify CFSS tiered wage floor, bargaining agreement, and any applicable state/local wage laws with your FMS provider</span></label>
 <label>Scheduled hours per week *<input id="hours" type="number" min="0" max="168" step="0.25" inputmode="decimal" placeholder="e.g., 30" required></label>
 <label>Employer-related costs (%) *<input id="burden" type="number" min="0" max="200" step="0.1" inputmode="decimal" placeholder="Enter FMS estimate" required><span>Taxes, insurance and applicable benefits; ask FMS</span></label>
-<label>Other recurring expenses ($/mo) *<input id="other" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0" required><span>Only goods/services in approved plan</span></label>
+<label>Other recurring expenses ($/mo) *<input id="other" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0" required><span>Only approved costs within this SAME budget. If including an FMS fee, first verify whether it has a separate authorization line. Do not double-count.</span></label>
 <label>Additional one-time purchases ($) *<input id="onetime" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0" required><span>Future approved purchases only</span></label>
 </div>
 </fieldset>
@@ -106,6 +106,7 @@
 </tbody>
 </table>
 <div class="summary" id="fmsReconcile" aria-live="polite">Enter amounts from monthly FMS reports if you want a reconciliation check.</div>
+<div class="summary"><strong>Before using this forecast:</strong> The wage shown is not checked against Minnesota CFSS tiered wage floors, collective bargaining terms, or applicable wage laws. Confirm payroll burden and any separately authorized FMS fees with the FMS provider. Even if the calculator shows money remaining, no wages, schedules, goods, or services are approved by this result.</div>
 <div id="comparison" hidden>
 <table class="result-table"><caption>Scenario B — alternative schedule</caption><tbody>
 <tr><th scope="row">Alternative monthly total</th><td id="rAltMonthly">—</td></tr>
@@ -135,7 +136,7 @@
 </section>
 </main>
 <footer>
-<p><strong>Source references:</strong> <a href="https://mn.gov/dhs/disability-aging/home-and-community-services/programs-and-services/cfss-faq/" rel="noopener noreferrer">Minnesota DHS CFSS FAQ</a> · <a href="https://www.revisor.mn.gov/statutes/2026/cite/256B.85" rel="noopener noreferrer">Minn. Stat. §256B.85</a>. Review current DHS/FMS guidance before making financial commitments.</p>
+<p><strong>Source references:</strong> <a href="https://mn.gov/dhs/disability-aging/home-and-community-services/programs-and-services/cfss-faq/" rel="noopener noreferrer">Minnesota DHS CFSS FAQ</a> · <a href="https://www.revisor.mn.gov/statutes/2026/cite/256B.85" rel="noopener noreferrer">Minn. Stat. §256B.85</a> · <a href="https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&amp;dID=146009" rel="noopener noreferrer">DHS CFSS model and wage responsibilities</a>. Review current DHS/FMS guidance before making financial commitments.</p>
 <p>AMICOR HEALTH ISF LLC · Local planning prototype · Not affiliated with or approved by the Minnesota Department of Human Services · No payments accepted</p>
 </footer>
 <script src="./app.js" defer></script>
