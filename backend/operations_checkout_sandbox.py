@@ -32,6 +32,8 @@ def _safe_configuration() -> bool:
         and os.getenv("NOVA_OPERATIONS_OWNER_CSV_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_DURABLE_CSV_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_LEASE_WORKER_ENABLED", "").strip().lower() != "true"
+        and os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED", "").strip().lower() != "true"
+        and os.getenv("NOVA_OPERATIONS_QUEUED_CSV_HTTP_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED", "").strip().lower() != "true"
     )
 
