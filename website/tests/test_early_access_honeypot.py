@@ -256,7 +256,7 @@ def test_staging_lead_probe_rejects_nonconsent_and_stores_nova_snap_in_memory() 
         check=False,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
-    assert "STAGING_PROBES_PASSED=5" in completed.stdout
+    assert "STAGING_PROBES_PASSED=7" in completed.stdout
     assert "stored_in_memory=2" in completed.stdout
 
 
