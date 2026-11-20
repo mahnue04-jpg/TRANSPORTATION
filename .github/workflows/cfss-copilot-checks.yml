@@ -4,6 +4,7 @@ on:
     paths:
       - "website/cfss-copilot/**"
       - "website/tests/cfss_calculation.mjs"
+      - "website/tests/cfss_browser_click_smoke.mjs"
       - "website/tests/test_cfss_copilot.py"
       - ".github/workflows/cfss-copilot-checks.yml"
   workflow_dispatch:
@@ -27,3 +28,5 @@ jobs:
         run: python website/tests/test_cfss_copilot.py
       - name: Verify CFSS budget scenario math without network
         run: node website/tests/cfss_calculation.mjs
+      - name: Verify fictional example click and visible budget results
+        run: node website/tests/cfss_browser_click_smoke.mjs
