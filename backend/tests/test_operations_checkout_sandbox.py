@@ -87,3 +87,11 @@ def test_owner_test_page_contains_no_embedded_credentials():
     assert "rk_test_" not in page
     assert "whsec_" not in page
     assert "https://checkout.stripe.com/" in page
+
+
+def test_sandbox_return_page_never_uses_query_as_payment_proof():
+    source = (BACKEND_DIR / "operations_checkout_sandbox.py").read_text(encoding="utf-8")
+    assert 'path == "/nova/anonymous-agent"' in source
+    assert 'outcome in {"success", "cancelled"}' in source
+    assert "only the signed webhook updates DB" in source
+    assert "Payment confirmation is handled separately" in source
