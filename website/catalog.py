@@ -222,9 +222,13 @@ def by_id(product_id: str) -> dict:
     raise KeyError(product_id)
 
 
+INQUIRY_ONLY_LEAD_NAMES = ("VoiceLedger Pro", "CFSS Budget Co-Pilot")
+
+
 def lead_names() -> list[str]:
     names = ["Business Services"]
     names.extend(product["lead"] for product in PRODUCTS)
+    names.extend(INQUIRY_ONLY_LEAD_NAMES)
     names.extend(OTHER_INQUIRIES)
     return names
 
@@ -351,6 +355,7 @@ def status_table() -> str:
 def inquiry_options() -> str:
     service = '<optgroup label="Business services"><option>Business Services</option></optgroup>'
     products = "".join("<option>" + _esc(product["lead"]) + "</option>" for product in PRODUCTS)
+    products += "".join("<option>" + _esc(name) + "</option>" for name in INQUIRY_ONLY_LEAD_NAMES)
     other = "".join("<option>" + _esc(name) + "</option>" for name in OTHER_INQUIRIES)
     return (
         service
