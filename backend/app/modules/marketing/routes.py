@@ -505,6 +505,10 @@ async def nova_agent_stripe_webhook(
                 lead.stripe_subscription_id = str(subscription)
             result = "paid"
         else:
+            # A delayed completion event may have preceded an asynchronous
+            # success. Never demote a confirmed paid Starter order to pending.
+            if lead.payment_status == "paid":
+                return {"ok": True, "handled": False, "result": "already_paid"}
             lead.payment_status = "pending"
             result = "checkout_completed_pending"
     elif event_type in {"checkout.session.async_payment_failed", "invoice.payment_failed"}:
