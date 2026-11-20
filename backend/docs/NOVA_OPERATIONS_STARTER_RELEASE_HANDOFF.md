@@ -99,3 +99,18 @@ Official Minnesota DOR references:
 - Generic public live $49 Payment Link remains unconnected to lead-specific paid-task binding; it is not proof of authorized work.
 - Isolated approved test backend, synthetic lead/task, signed webhook, and durable fulfillment are still required. The full-app Render PR preview is not a safe fulfillment test environment.
 - Minnesota tax treatment awaits written guidance. No live Stripe Tax or customer sales activation is authorized by this change.
+
+## Isolated Stripe Checkout sandbox gateway (code-only; not deployed)
+
+- New entrypoint: backend/operations_checkout_sandbox.py, **not** app.main or operations_isolated_validation.py.
+- Intended for a newly reviewed, isolated staging runtime; no existing Render services have been reconfigured by this code.
+- Entrypoint: uvicorn operations_checkout_sandbox:app --host 0.0.0.0 --port $PORT (from backend directory).
+- Sandbox must explicitly set NOVA_OPERATIONS_SANDBOX_ENABLED=true and NOVA_OPERATIONS_SANDBOX_DB_URL=sqlite:////tmp/amicor-operations-sandbox-<unique>.sqlite; DATABASE_URL must be empty or exactly equal to that sandbox URL.
+- Required: STRIPE_SECRET_KEY supplied as a Stripe **test** secret from Render's private environment; STRIPE_NOVA_AGENT_WEBHOOK_SECRET from a dedicated sandbox Stripe webhook endpoint; NOVA_OPERATIONS_STARTER_TEST_PRICE_ID=price_1UdwuEBCDlIbm4gm4Ggt7nuI.
+- Required: NOVA_OPERATIONS_SANDBOX_ACCESS_TOKEN with at least 24 high-entropy characters, distributed privately only to the synthetic test caller. Do not commit any keys, signing secrets, or access tokens.
+- Set APP_ENV=staging and AMICOR_ENVIRONMENT=staging. Keep NOVA_STRIPE_LIVE_ENABLED, customer sales, fulfillment, owners' CSV workers, private storage and all other processing flags OFF.
+- The gateway exposes only synthetic .invalid-domain Starter lead creation, lead-specific Checkout Session creation, signed Operations webhook, and public status/health. Synthetic lead and checkout routes require x-amicor-sandbox-token; the signed webhook is intentionally open to Stripe but checks the existing signature verifier.
+- Its SQLite database and synthetic data may not be reused for real customer work. This is **not** a production migration path.
+- Run backend/tests/test_operations_checkout_sandbox.py and the marketing payment regression tests; CI coverage added to render-backend-diagnostic.yml.
+- **Not verified:** actual test-key deployment, Stripe webhook endpoint configured, completion of real Stripe test-card payment, customer data isolation after hosting, automatic CSV processing or private delivery.
+- **No user approval** to purchase new hosting, activate customer sales, or attach test secrets to an existing full application preview. Keep PR in draft until operational verification and release authorization.
