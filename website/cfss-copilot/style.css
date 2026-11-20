@@ -1,5 +1,7 @@
 :root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#19354a;background:#f4f7fa;font-synthesis:none}
 *{box-sizing:border-box}
+/* Ensure browser-native hidden controls stay hidden even with input{display:block}. */
+[hidden]{display:none!important}
 body{margin:0}
 a{color:#146d7b}
 button,input{font:inherit}
