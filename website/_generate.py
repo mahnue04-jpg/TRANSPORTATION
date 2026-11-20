@@ -754,7 +754,7 @@ add(
       <div class="wrap">
         <p class="kicker">Partners / Early Access</p>
         <h1>Tell us what you want to explore.</h1>
-        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. A success message appears only after AMICOR’s lead store accepts the request. Do not submit medical records or other sensitive health information.</p>
+        <p class="lede">Individuals and businesses can request access or feedback. Name, email, product and message are required; company, industry, company size and phone are optional. Only a confirmed lead-store submission counts as delivered. Do not send FMS statements, medical records, banking details or passwords.</p>
         <p class="form-error" data-form-error role="alert"></p>
         <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Thank you. Your request was sent to AMICOR.</p>
         <form class="panel" data-early-access-form novalidate>
