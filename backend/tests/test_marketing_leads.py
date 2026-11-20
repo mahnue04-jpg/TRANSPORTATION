@@ -738,3 +738,59 @@ def test_operations_webhook_rejects_mismatched_saved_checkout(monkeypatch):
         lead = db.get(MarketingWebsiteLead, lead_id)
         assert lead.payment_status == "pending"
         assert not lead.starter_paid_session_id
+
+
+def test_operations_paid_order_ignores_late_expiration(monkeypatch):
+    """An out-of-order Stripe expiration must not revoke an already paid task."""
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.250"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Paid Order",
+            "work_email": "late-expiry@example.invalid",
+            "consent": True,
+            "service_plan": "starter_49",
+            "message": "Synthetic event ordering regression.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead is not None
+        lead.stripe_checkout_session_id = "cs_test_completed_synthetic"
+        lead.stripe_customer_id = "cus_test_completed_synthetic"
+        lead.starter_paid_session_id = "cs_test_completed_synthetic"
+        lead.payment_status = "paid"
+        db.commit()
+
+    event = {
+        "type": "checkout.session.expired",
+        "data": {"object": {
+            "id": "cs_test_completed_synthetic",
+            "customer": "cus_test_completed_synthetic",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_lead_id": lead_id,
+                "nova_agent_plan": "starter_49",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: event)
+    response = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-older-event",
+        headers={"Stripe-Signature": "mocked-signature"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "already_paid"
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead.payment_status == "paid"
+        assert lead.starter_paid_session_id == "cs_test_completed_synthetic"
