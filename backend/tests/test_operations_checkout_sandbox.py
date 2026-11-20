@@ -49,6 +49,18 @@ def test_sandbox_imports_without_full_application():
     assert "SANDBOX_IMPORTED" in completed.stdout
 
 
+def test_sandbox_accepts_restricted_test_stripe_key():
+    completed = _import_sandbox(STRIPE_SECRET_KEY="rk_test_synthetic_ci_only")
+    assert completed.returncode == 0, completed.stderr[-1800:]
+    assert "SANDBOX_IMPORTED" in completed.stdout
+
+
+def test_sandbox_rejects_restricted_live_stripe_key():
+    completed = _import_sandbox(STRIPE_SECRET_KEY="rk_live_synthetic_ci_only")
+    assert completed.returncode != 0
+    assert "sandbox requires isolated SQLite" in completed.stderr
+
+
 def test_sandbox_rejects_live_stripe_key():
     completed = _import_sandbox(STRIPE_SECRET_KEY="sk_live_synthetic_ci_only")
     assert completed.returncode != 0
