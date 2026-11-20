@@ -234,8 +234,8 @@ class Commerce:
         if email_normalized(actual_email) != row["email"]:
             raise CheckoutError("Customer email mismatch.")
         items = (session.get("line_items") or {}).get("data") or []
-        if len(items) != 1 or items[0].get("quantity") != 1:
-            raise CheckoutError("Expected one VoiceLedger license.")
+        if len(items) != 1 or (session.get("line_items") or {}).get("has_more") or items[0].get("quantity") != 1:
+            raise CheckoutError("Expected exactly one VoiceLedger license.")
         price = items[0].get("price") or {}
         if price.get("id") != self.settings.price_id or price.get("currency") != "usd":
             raise CheckoutError("Wrong TEST price or currency.")
