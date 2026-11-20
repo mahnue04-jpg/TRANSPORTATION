@@ -605,3 +605,45 @@ def test_live_starter_checkout_denied_until_fulfillment_ready(monkeypatch):
         assert fake.sessions == {}
     finally:
         set_agent_stripe_override(None)
+
+
+def test_starter_uses_existing_stripe_test_price_without_new_inline_product(monkeypatch):
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "price_test_owner_created")
+    payload = billing.checkout_payload(
+        lead_id="synthetic-lead", email="sample@example.invalid",
+        plan_key="starter_49", customer_id="cus_test_synthetic",
+    )
+    assert payload["mode"] == "payment"
+    assert payload["line_items"] == [{"price": "price_test_owner_created", "quantity": 1}]
+    assert payload["metadata"]["nova_agent_lead_id"] == "synthetic-lead"
+    assert payload["payment_intent_data"]["metadata"]["nova_agent_plan"] == "starter_49"
+
+
+def test_live_checkout_never_uses_stripe_sandbox_price(monkeypatch):
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "price_test_owner_created")
+    payload = billing.checkout_payload(
+        lead_id="synthetic-lead", email="sample@example.invalid",
+        plan_key="starter_49", customer_id="cus_test_synthetic",
+    )
+    assert "price_data" in payload["line_items"][0]
+    assert "price" not in payload["line_items"][0]
+    assert payload["line_items"][0]["price_data"]["unit_amount"] == 4900
+
+
+def test_starter_rejects_invalid_stripe_test_price_id(monkeypatch):
+    import pytest
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "not_a_stripe_price")
+    with pytest.raises(ValueError, match="Invalid Operations Starter sandbox price ID"):
+        billing.checkout_payload(
+            lead_id="synthetic-lead", email="sample@example.invalid",
+            plan_key="starter_49", customer_id="cus_test_synthetic",
+        )
