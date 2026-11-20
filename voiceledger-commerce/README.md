@@ -30,6 +30,14 @@ This requires appropriate staging resources before deployment. **No resources, s
 5. An outbox record is queued. **No email is sent automatically.** An authorized staging operator must inspect secure outbox and securely deliver the expiring token; do not expose the outbox on a public route.
 6. Customer redemption is capped, token-checked, and private. Lost token / refunds / disputes / resend flows remain incomplete.
 
+## Test checkout return experience
+
+- Isolated API routes `GET /complete?session_id={CHECKOUT_SESSION_ID}` and `GET /cancel` provide clear mobile-friendly test-only status pages.
+- The /complete page reads the existing test order status but never creates an entitlement. It does not grant access on URL alone, and never displays a private download token.
+- When enabling an isolated test checkout service, use `https://<isolated-staging-domain>/complete?session_id={CHECKOUT_SESSION_ID}` as the success URL and `https://<isolated-staging-domain>/cancel` as the cancellation URL. Do not put these on the public AMICOR website before launch.
+- Confirmation currently reports `paid` only after signed Stripe webhook processing and queueing. The fulfillment outbox is still a private manual staging workflow.
+- This is **not a connected real test purchase** until the isolated Stripe test account/key, webhook signing secret, test price, durable database, and private licensed package are configured and independently verified.
+
 ## Known limitations before production
 
 - The public VoiceLedger trial remains free and fully usable. A paid purchase currently **cannot** restrict use; a coherent product license / private delivery and customer access design is required before charging money.
