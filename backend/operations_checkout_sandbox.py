@@ -21,7 +21,7 @@ def _safe_configuration() -> bool:
         and _SANDBOX_DB.startswith(_DB_PREFIX)
         and _SANDBOX_DB.endswith(".sqlite")
         and ".." not in _SANDBOX_DB
-        and stripe_key.startswith("sk_test_")
+        and stripe_key.startswith(("sk_test_", "rk_test_"))
         and os.getenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", "").startswith("whsec_")
         and os.getenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "").startswith("price_")
         and os.getenv("APP_ENV", "staging").strip().lower() != "production"
