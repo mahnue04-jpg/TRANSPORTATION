@@ -102,6 +102,7 @@ jobs:
             tests/test_nova_operations_csv_alembic_gate.py
           python -m pytest -q -rs tests/test_marketing_leads.py -k "operations or starter"
           python -m pytest -q -rs tests/test_operations_checkout_sandbox.py
+          python -m pytest -q -rs tests/test_operations_checkout_durable_receipts.py
           echo "CSV regressions use synthetic fixtures; not proof of production storage, real authorization, or customer-job readiness." >> "$GITHUB_STEP_SUMMARY"
 
   operations-csv-postgres:
