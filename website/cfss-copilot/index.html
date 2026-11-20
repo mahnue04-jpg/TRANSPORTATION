@@ -102,7 +102,26 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </div>
 </fieldset>
 <fieldset class="section">
-<legend>2. Planned support-worker schedule</legend>
+<legend>2. Monthly FMS spending reconciliation (optional)</legend>
+<p class="help">Enter <strong>amounts only</strong> from FMS monthly reports for the elapsed plan months (month 1, month 2, etc.). Leave unknown months blank. This compares those amounts with “Actual spent to date,” but never changes the forecast input or replaces the official FMS report.</p>
+<details><summary style="font-weight:750;cursor:pointer;padding:8px 0">Enter monthly FMS figures (up to 12 months)</summary>
+<div class="fieldgrid" style="margin-top:15px">
+<label>Month 1 FMS reported amount ($)<input id="fms1" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 2 FMS reported amount ($)<input id="fms2" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 3 FMS reported amount ($)<input id="fms3" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 4 FMS reported amount ($)<input id="fms4" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 5 FMS reported amount ($)<input id="fms5" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 6 FMS reported amount ($)<input id="fms6" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 7 FMS reported amount ($)<input id="fms7" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 8 FMS reported amount ($)<input id="fms8" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 9 FMS reported amount ($)<input id="fms9" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 10 FMS reported amount ($)<input id="fms10" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 11 FMS reported amount ($)<input id="fms11" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 12 FMS reported amount ($)<input id="fms12" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+</div></details>
+</fieldset>
+<fieldset class="section">
+<legend>3. Planned support-worker schedule</legend>
 <div class="fieldgrid">
 <label>Hourly worker wage ($) *<input id="wage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="e.g., 20.00" required></label>
 <label>Scheduled hours per week *<input id="hours" type="number" min="0" max="168" step="0.25" inputmode="decimal" placeholder="e.g., 30" required></label>
@@ -112,7 +131,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </div>
 </fieldset>
 <fieldset class="section">
-<legend>3. Compare another staffing scenario</legend>
+<legend>4. Compare another staffing scenario</legend>
 <p class="help">Optional: enter an alternative wage and weekly hours. All other assumptions remain the same.</p>
 <div class="fieldgrid">
 <label>Alternative hourly wage ($)<input id="altWage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="Optional"></label>
@@ -124,6 +143,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <button type="submit">Calculate scenarios</button>
 <button type="button" class="secondary" id="example">Load fictional example</button>
 <button type="button" class="secondary" id="reset">Start fresh</button>
+<button type="button" class="secondary" id="restoreBtn">Open saved plan (JSON)</button>
+<input type="file" id="restoreFile" accept=".json,application/json" hidden aria-label="Choose a saved CFSS planning JSON file">
 </div>
 </form>
 </section>
@@ -152,6 +173,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <tr><th scope="row">Projected future spending</th><td id="rFuture">—</td></tr>
 </tbody>
 </table>
+<div class="summary" id="fmsReconcile" aria-live="polite">Enter amounts from monthly FMS reports if you want a reconciliation check.</div>
 <div id="comparison" hidden>
 <table class="result-table"><caption>Scenario B — alternative schedule</caption><tbody>
 <tr><th scope="row">Alternative monthly total</th><td id="rAltMonthly">—</td></tr>
@@ -163,13 +185,14 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <div class="summary" id="interpretation"></div>
 <div class="actions">
 <button id="download" type="button">Export scenario CSV</button>
+<button id="savePlan" type="button" class="secondary">Save plan (JSON)</button>
 <button id="print" type="button" class="secondary">Print plan</button>
 </div>
 </div>
 </section>
 </div>
 <section class="privacy" aria-label="Planning safeguards">
-<div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations run in this browser and are not uploaded by this tool. The page uses AMICOR visitor analytics, but this tool does not send your entered financial figures. Refreshing or closing this page discards your entries.</p></div>
+<div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations and FMS report comparisons run in this browser; we do not send your entered financial figures. Page analytics may record visits. Refreshing discards your entries unless you choose to download a local JSON plan. Treat downloaded files as private financial information.</p></div>
 <div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and the latest FMS monthly spending report as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review. A projected affordable schedule is never an approved service authorization.</p></div>
 <div><strong><span aria-hidden="true">🧮</span> Estimates, not authorization</strong><p>Monthly worker cost uses 52 weeks divided by 12 months. It assumes a constant schedule and user-supplied employer burden, not DHS rate formulas.</p></div>
 </section>
@@ -206,6 +229,17 @@ function calculate(values){
  if(monthsLeft>0&&hourlyCost>0){
    maxHours=Math.max(0,Math.min(168,Math.floor(Math.max(0,leftoverForWages)/(hourlyCost*(52/12)*monthsLeft)*4)/4));
  }
+ var monthlyEntries=Array.isArray(values.fmsMonths)?values.fmsMonths:[];
+ var recordedCount=0,recordedTotal=0,unexpectedCount=0;
+ for(var m=0;m<monthlyEntries.length;m++){
+  if(monthlyEntries[m]!==null&&monthlyEntries[m]!==undefined){
+   if(m>=values.elapsed)unexpectedCount++;
+   else{recordedCount++;recordedTotal+=monthlyEntries[m];}
+  }
+ }
+ var allExpectedReported=values.elapsed>0&&recordedCount===values.elapsed&&unexpectedCount===0;
+ var fmsDiff=allExpectedReported?Math.round((recordedTotal-values.spent)*100)/100:null;
+ var fmsReconciliation={count:recordedCount,expected:values.elapsed,total:recordedTotal,unexpected:unexpectedCount,complete:allExpectedReported,difference:fmsDiff};
  var alternative=null;
  if(values.altWage!==null||values.altHours!==null){
    var altWage=values.altWage===null?values.wage:values.altWage;
@@ -214,10 +248,11 @@ function calculate(values){
    var altProjected=values.spent+altMonthly*monthsLeft+values.onetime;
    alternative={monthly:altMonthly,projected:altProjected,difference:altProjected-projected,variance:values.budget-altProjected};
  }
- return {monthsLeft:monthsLeft,wages:baselineWages,employer:employer,monthly:monthly,future:future,projected:projected,variance:variance,remaining:values.budget-values.spent,average:values.budget/values.months,maxHours:maxHours,alternative:alternative};
+ return {monthsLeft:monthsLeft,wages:baselineWages,employer:employer,monthly:monthly,future:future,projected:projected,variance:variance,remaining:values.budget-values.spent,average:values.budget/values.months,maxHours:maxHours,alternative:alternative,fmsReconciliation:fmsReconciliation};
 }
 function collect(){
  var v={budget:read("budget",true),months:read("months",true),elapsed:read("elapsed",true),spent:read("spent",true),wage:read("wage",true),hours:read("hours",true),burden:read("burden",true),other:read("other",true),onetime:read("onetime",true),altWage:read("altWage",false),altHours:read("altHours",false)};
+ v.fmsMonths=Array.from({length:12},function(_,idx){return read("fms"+(idx+1),false);});
  if(v.elapsed>v.months)throw new Error("Elapsed months cannot exceed plan months.");
  // Allow actual FMS spending above the entered authorization so the app
  // displays an overspending warning instead of refusing to calculate.
@@ -233,6 +268,13 @@ function report(v,r){
  s("rProjected",money(r.projected));
  s("rVariance",money(r.variance));
  s("rMaxHours",r.maxHours===null?"Not estimated":r.maxHours.toLocaleString("en-US",{maximumFractionDigits:2})+" hrs/week");
+ var rec=r.fmsReconciliation,recText="";
+ if(rec.expected===0)recText="No completed plan months entered. Monthly FMS reconciliation is not needed yet.";
+ else if(rec.unexpected>0)recText="Monthly report figures were entered for months after the elapsed plan period. Check the month positions; no reconciliation is confirmed.";
+ else if(!rec.complete)recText="FMS report comparison incomplete: "+rec.count+" of "+rec.expected+" elapsed months entered. Blank months are treated as unknown, not as $0.";
+ else if(Math.abs(rec.difference)<=0.01)recText="FMS monthly amounts match the entered spent-to-date total ("+money(rec.total)+") to the nearest cent. Confirm against the original FMS statement.";
+ else recText="FMS reconciliation difference: monthly entries total "+money(rec.total)+", versus entered spent-to-date "+money(v.spent)+" (difference "+money(rec.difference)+"). Review the FMS reports before using this forecast.";
+ el("fmsReconcile").textContent=recText;
  s("rVarianceLabel",r.variance<0?"Estimated amount over entered budget":"Estimated amount left after forecast");
  el("varianceTile").className="metric "+(r.variance<0?"red":"green");
  s("rMonths",String(r.monthsLeft));
@@ -270,15 +312,52 @@ form.addEventListener("input",function(){
  exampleActive=false;
 });
 el("example").addEventListener("click",function(){
- var sample={budget:48000,months:12,elapsed:3,spent:9500,wage:20,hours:30,burden:17,other:200,onetime:450,altWage:22,altHours:28};
+ var sample={budget:48000,months:12,elapsed:3,spent:9500,wage:20,hours:30,burden:17,other:200,onetime:450,altWage:22,altHours:28,fms1:3200,fms2:3100,fms3:3200};
  Object.keys(sample).forEach(function(k){el(k).value=sample[k];});
  exampleActive=true;
  form.requestSubmit();
 });
 el("reset").addEventListener("click",function(){
- form.reset();el("budget").value="";el("wage").value="";el("hours").value="";el("burden").value="";el("results").hidden=true;el("error").textContent="";el("status").textContent="Form reset. Enter an authorized budget and planned costs to begin.";current=null;exampleActive=false;
+ form.reset();Array.from({length:12},function(_,idx){el("fms"+(idx+1)).value="";});el("budget").value="";el("wage").value="";el("hours").value="";el("burden").value="";el("results").hidden=true;el("error").textContent="";el("status").textContent="Form reset. Enter an authorized budget and planned costs to begin.";current=null;exampleActive=false;
 });
 el("print").addEventListener("click",function(){if(current)window.print();});
+function fileDownload(filename,contents,contentType){
+ var blob=new Blob([contents],{type:contentType});
+ var url=URL.createObjectURL(blob),link=document.createElement("a");
+ link.href=url;link.download=filename;document.body.appendChild(link);link.click();link.remove();
+ setTimeout(function(){URL.revokeObjectURL(url);},1000);
+}
+var fields=["budget","months","elapsed","spent","wage","hours","burden","other","onetime","altWage","altHours"];
+el("savePlan").addEventListener("click",function(){
+ if(!current)return;
+ var data={kind:"amicor-cfss-plan",version:1,savedAt:new Date().toISOString(),fictionalExample:exampleActive,fields:{}};
+ fields.forEach(function(id){data.fields[id]=current.v[id];});
+ for(var j=1;j<=12;j++)data.fields["fms"+j]=current.v.fmsMonths[j-1];
+ fileDownload("cfss-private-budget-plan.json",JSON.stringify(data,null,2),"application/json;charset=utf-8");
+});
+el("restoreBtn").addEventListener("click",function(){el("restoreFile").click();});
+el("restoreFile").addEventListener("change",async function(){
+ var f=this.files&&this.files[0];if(!f)return;
+ try{
+  if(f.size>50000)throw Error("Saved plan file is too large.");
+  var data=JSON.parse(await f.text());
+  if(!data||data.kind!=="amicor-cfss-plan"||data.version!==1||!data.fields||typeof data.fields!=="object")throw Error("This is not a supported CFSS plan file.");
+  var parsed={},idlist=fields.concat(Array.from({length:12},function(_,i){return "fms"+(i+1);}));
+  idlist.forEach(function(id){
+   var val=data.fields[id],optional=id==="altWage"||id==="altHours"||id.slice(0,3)==="fms";
+   if(val===null&&optional){parsed[id]="";return;}
+   var input=el(id);
+   if(typeof val!=="number"||!Number.isFinite(val)||val<Number(input.min||0)||(input.max&&val>Number(input.max))||(input.step==="1"&&!Number.isInteger(val)))throw Error("Saved file contains an invalid "+id+" amount.");
+   parsed[id]=String(val);
+  });
+  if(Number(parsed.elapsed)>Number(parsed.months))throw Error("Elapsed months exceed the plan period.");
+  idlist.forEach(function(id){el(id).value=parsed[id];});
+  exampleActive=data.fictionalExample===true;
+  form.requestSubmit();
+  if(current)el("status").textContent="Saved planning figures restored locally from your selected file; check them against your current FMS reports.";
+ }catch(err){el("error").textContent="Could not restore plan: "+err.message;}
+ finally{this.value="";}
+});
 el("download").addEventListener("click",function(){
  if(!current)return;
  var v=current.v,r=current.r;
@@ -291,9 +370,10 @@ el("download").addEventListener("click",function(){
  ["Months remaining",r.monthsLeft],["Average monthly authorized budget",money(r.average)],
  ["Monthly worker wages estimate",money(r.wages)],["Monthly employer cost estimate",money(r.employer)],
  ["Monthly total estimate",money(r.monthly)],["Future planned costs",money(r.future)],
- ["Projected total period spending",money(r.projected)],["Budget difference",money(r.variance)],["Illustrative weekly hours budget may cover",r.maxHours===null?"Not estimated":r.maxHours],["Weekly hours estimate status","Not authorization; verify with consultation and FMS provider"]];
+ ["Projected total period spending",money(r.projected)],["Budget difference",money(r.variance)],["Illustrative weekly hours budget may cover",r.maxHours===null?"Not estimated":r.maxHours],["Weekly hours estimate status","Not authorization; verify with consultation and FMS provider"],["Monthly FMS report entries received",r.fmsReconciliation.count],["Monthly FMS report entries expected",r.fmsReconciliation.expected],["FMS monthly sum comparison",r.fmsReconciliation.complete?money(r.fmsReconciliation.difference):"Incomplete"]];
  if(r.alternative)lines.push(["Alternative hourly wage",v.altWage===null?money(v.wage):money(v.altWage)],["Alternative hours per week",v.altHours===null?v.hours:v.altHours],["Alternative monthly estimate",money(r.alternative.monthly)],["Alternative projected period spending",money(r.alternative.projected)],["Alternative budget difference",money(r.alternative.variance)]);
  lines.push(["Notice","Planning estimates only; confirm spending and allowable expenses with your FMS provider."]);
+ v.fmsMonths.forEach(function(amount,idx){if(amount!==null)lines.push(["FMS reported month "+(idx+1),money(amount)]);});
  var csv=lines.map(function(row){return row.map(function(item){return '"'+String(item).replace(/"/g,'""')+'"';}).join(",");}).join("\r\n");
  var blob=new Blob([csv],{type:"text/csv;charset=utf-8"});var url=URL.createObjectURL(blob);var link=document.createElement("a");link.href=url;link.download="cfss-budget-planning-scenario.csv";document.body.appendChild(link);link.click();link.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
 });
