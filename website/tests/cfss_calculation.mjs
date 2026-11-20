@@ -34,6 +34,16 @@ assert.equal(zero.monthsLeft,0);
 close(zero.future,0);
 close(zero.variance,38500);
 assert.equal(zero.alternative,null);
+assert.equal(zero.maxHours,null,"No future months means no weekly hour estimate");
+assert(result.maxHours>=30,"The illustrated schedule fits within the budget");
+assert(result.maxHours<=168,"Illustrative hours cannot exceed a week's hours");
+const overspent=calculate({...test,spent:51000});
+assert(overspent.remaining<0,"Show actual overage instead of rejecting an FMS-reported amount");
+assert(overspent.variance<0,"Reported overage should remain visible as a deficit");
+assert.equal(overspent.maxHours,0,"No hours can be funded from a negative remaining budget");
+const noWage=calculate({...test,wage:0,burden:0});
+assert.equal(noWage.maxHours,null,"Do not divide by zero or imply free authorized service units");
+
 const over=calculate({...test,wage:30,hours:60,burden:30});
 assert(over.variance<0,"High cost schedule shows deficit");
-console.log("CFSS_CALCULATION_CHECKS_PASSED=15");
+console.log("CFSS_CALCULATION_CHECKS_PASSED=22");
