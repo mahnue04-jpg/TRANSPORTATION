@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>AMICOR Operations — Stripe test checkout</title>
+<style>body{font:16px system-ui,sans-serif;max-width:560px;margin:48px auto;padding:0 18px;color:#172334}h1{font-size:1.7rem}label{display:block;margin:20px 0 8px;font-weight:600}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #a7b0b9;border-radius:8px}button{background:#132e58;color:white;border:0;border-radius:8px;padding:12px 18px;margin-top:16px;cursor:pointer}button:disabled{opacity:.5}#result{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;margin-top:18px;background:#f1f4f8;border-radius:8px}small{color:#53606d}a{overflow-wrap:anywhere}</style>
+</head><body><h1>Operations $49 sandbox checkout</h1><p>This page creates a <strong>synthetic</strong> order in Stripe test mode. It does not accept real customer work or real payments.</p>
+<label for="token">Private sandbox access token</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the sandbox access token">
+<small>Token stays in this page's memory while you use it; never send it in chat or screenshots.</small>
+<p><button id="create" type="button">Create synthetic $49 checkout</button></p><div id="result" role="status" aria-live="polite">No order created yet.</div>
+<script>
+(function(){
+'use strict';
+const button=document.getElementById('create'),out=document.getElementById('result');
+const token=document.getElementById('token');
+button.addEventListener('click',async function(){
+ const secret=token.value.trim();
+ if(secret.length<24){out.textContent='Enter the sandbox access token from Render Environment.';return;}
+ button.disabled=true;out.textContent='Creating a synthetic test request...';
+ try{
+  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+  const headers={'Content-Type':'application/json','x-amicor-sandbox-token':secret};
+  const lead=await fetch('/api/marketing/leads',{method:'POST',headers,cache:'no-store',
+   body:JSON.stringify({lead_type:'anonymous_operations',contact_name:'AMICOR Synthetic Test',
+    organization_name:'AMICOR Internal Testing',work_email:'sandbox-'+id+'@example.invalid',
+    message:'INTERNAL SYNTHETIC TEST ONLY. No customer work or real purchase.',
+    consent:true,lead_source:'sandbox_checkout',service_plan:'starter_49'})});
+  const leadJson=await lead.json();
+  if(!lead.ok)throw Error('Request creation failed ('+lead.status+'): '+JSON.stringify(leadJson));
+  const leadId=leadJson.data?.lead_id||leadJson.lead_id;
+  if(!leadId)throw Error('Saved lead identifier missing from response.');
+  out.textContent='Saved synthetic request. Creating Stripe test checkout...';
+  const res=await fetch('/api/marketing/leads/'+encodeURIComponent(leadId)+'/checkout',
+   {method:'POST',headers,cache:'no-store'});
+  const data=await res.json();
+  if(!res.ok)throw Error('Stripe test checkout failed ('+res.status+'): '+JSON.stringify(data));
+  if(!data.checkout_url||!data.checkout_url.startsWith('https://checkout.stripe.com/'))
+   throw Error('A valid Stripe Checkout URL was not returned.');
+  out.textContent='Synthetic order created. Session: '+String(data.checkout_session_id||'')+'\n';
+  const a=document.createElement('a');a.href=data.checkout_url;a.textContent='Open $49 Stripe TEST checkout';
+  a.target='_blank';a.rel='noopener noreferrer';out.appendChild(a);
+  token.value='';
+ }catch(err){out.textContent=String(err?.message||err)+'\nNo real purchase was attempted.';}
+ finally{button.disabled=false;}
+});
+})();
+</script></body></html>
