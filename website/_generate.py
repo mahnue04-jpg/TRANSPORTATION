@@ -1214,6 +1214,7 @@ def main() -> None:
         "/business-services/", "/ask-nova/", "/nova-operations/", "/samples/", "/company-profile/",
         "/",
         "/products/",
+        "/launch-status/",
         "/solutions/",
         "/pricing/",
         "/resources/",
