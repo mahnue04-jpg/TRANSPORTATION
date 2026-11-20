@@ -47,7 +47,7 @@ if os.environ.get("DATABASE_URL") not in (None, "", _SANDBOX_DB):
 os.environ["DATABASE_URL"] = _SANDBOX_DB
 
 from fastapi import FastAPI, Request  # noqa: E402
-from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.responses import JSONResponse, HTMLResponse  # noqa: E402
 from app.db.session import Base, engine  # noqa: E402
 from app.modules.marketing.models import MarketingWebsiteLead  # noqa: E402
 from app.modules.marketing import routes as marketing_routes  # noqa: E402
@@ -80,6 +80,16 @@ async def synthetic_only_guard(request: Request, call_next):
     path = request.url.path
     if not _safe_configuration():
         return JSONResponse(status_code=503, content={"detail": "Sandbox unavailable"})
+    if path == "/sandbox-test" and request.method == "GET":
+        # UI contains no secrets; the token is entered locally by the owner.
+        html = Path(__file__).with_name("operations_checkout_sandbox_ui.html").read_text(encoding="utf-8")
+        return HTMLResponse(html, headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+        })
     if path == "/health":
         return JSONResponse({
             "status": "sandbox_only",
