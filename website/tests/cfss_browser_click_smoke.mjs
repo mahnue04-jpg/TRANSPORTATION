@@ -36,10 +36,13 @@ function node(id){
 const form=node("budgetForm");
 form.requestSubmit=function(){this.listeners.submit({preventDefault(){}});};
 form.reset=function(){for(const f of nodes.values()){if(typeof f.value==="string")f.value="";}};
+let lastBlob=null, downloadClicks=0, pickerClicks=0;
+node("restoreFile").click=function(){pickerClicks++;};
 const context={
- document:{getElementById:node,body:{appendChild(){}},createElement:()=>({click(){},remove(){}})},
- window:{print(){}}, console,Intl,Number,Math,String,Array,Object,Date,Error,JSON,SetTimeout:()=>{},
- setTimeout:()=>{},Blob:class{},URL:{createObjectURL:()=>"",revokeObjectURL(){}}
+ document:{getElementById:node,body:{appendChild(){}},createElement:()=>({click(){downloadClicks++;},remove(){}})},
+ window:{print(){}}, console,Intl,Number,Math,String,Array,Object,Date,Error,JSON,
+ setTimeout:()=>{},Blob:class {constructor(parts,opts){this.parts=parts;this.type=opts?.type;lastBlob=this;}},
+ URL:{createObjectURL:()=> "blob:offline-smoke-test",revokeObjectURL(){}}
 };
 vm.runInNewContext(script,context,{timeout:2000});
 assert.equal(typeof node("example").listeners.click,"function","Example button handler is registered");
@@ -62,4 +65,42 @@ assert.equal(node("rProjected").textContent,"$39,128.00");
 assert.equal(node("rVariance").textContent,"$8,872.00");
 assert.equal(node("demoTag").hidden,false);
 assert.match(node("fmsReconcile").textContent,/match the entered spent-to-date total/);
-console.log("CFSS_CLICK_SMOKE_PASSED=17");
+// Confirm the real Save plan handler creates a local JSON artifact.
+assert.equal(typeof node("savePlan").listeners.click,"function");
+node("savePlan").listeners.click();
+assert(lastBlob,"Saving must create a JSON Blob");
+assert.equal(downloadClicks,1,"Saving must initiate one local download");
+const saved=JSON.parse(lastBlob.parts.join(""));
+assert.equal(saved.kind,"amicor-cfss-plan");
+assert.equal(saved.version,1);
+assert.equal(saved.fictionalExample,true);
+assert.equal(saved.fields.budget,48000);
+assert.equal(saved.fields.fms1,3200);
+assert.equal(saved.fields.fms2,3100);
+assert.equal(saved.fields.fms3,3200);
+assert.equal(saved.fields.fms4,null);
+assert.equal(saved.fields.altHours,28);
+// Confirm the custom chooser button works but the native chooser remains hidden.
+assert.match(css,/\[hidden\]\s*\{display:none!important\}/);
+node("restoreBtn").listeners.click();
+assert.equal(pickerClicks,1,"Custom restore button opens the native chooser");
+// Restore a saved plan after resetting and verify the financial outputs recalculate.
+node("reset").listeners.click();
+assert.equal(node("results").hidden,true,"Reset hides the budget outlook");
+const fileInput=node("restoreFile");
+fileInput.files=[{size:JSON.stringify(saved).length,text:async()=>JSON.stringify(saved)}];
+await fileInput.listeners.change.call(fileInput);
+assert.equal(node("error").textContent,"","Restoring valid JSON should not error");
+assert.equal(node("results").hidden,false,"Restored plan is calculated");
+assert.equal(node("rProjected").textContent,"$39,128.00");
+assert.equal(node("rVariance").textContent,"$8,872.00");
+assert.equal(node("fms1").value,"3200");
+assert.equal(node("fms3").value,"3200");
+assert.equal(node("altHours").value,"28");
+assert.equal(fileInput.value,"","Input resets so the same saved file can be selected again");
+// Reject malformed files without replacing the existing valid inputs.
+fileInput.files=[{size:40,text:async()=> '{"kind":"invalid", "version":1}'}];
+await fileInput.listeners.change.call(fileInput);
+assert.match(node("error").textContent,/Could not restore plan/);
+assert.equal(node("budget").value,"48000","Invalid JSON must not overwrite existing plan");
+console.log("CFSS_CLICK_SMOKE_PASSED=35");
