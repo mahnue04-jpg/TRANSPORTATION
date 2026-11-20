@@ -23,6 +23,10 @@ for(const match of formFields){
  addEventListener(type,fn){this.listeners[type]=fn;},
  closest(){return {textContent:id};},
  reset(){this.value="";}});
+ const field=nodes.get(id);
+ // Real DOM <input>.value coerces assignments to strings.
+ let currentValue=field.value;
+ Object.defineProperty(field,"value",{get(){return currentValue;},set(next){currentValue=String(next);}});
 }
 function node(id){
  if(!nodes.has(id))nodes.set(id,{id,value:"",hidden:false,className:"",textContent:"",
@@ -40,15 +44,15 @@ const context={
 vm.runInNewContext(script,context,{timeout:2000});
 assert.equal(typeof node("example").listeners.click,"function","Example button handler is registered");
 node("example").listeners.click();
-assert.equal(node("budget").value,48000);
-assert.equal(node("months").value,12);
-assert.equal(node("elapsed").value,3);
-assert.equal(node("spent").value,9500);
-assert.equal(node("wage").value,20);
-assert.equal(node("hours").value,30);
-assert.equal(node("burden").value,17);
-assert.equal(node("other").value,200);
-assert.equal(node("onetime").value,450);
+assert.equal(node("budget").value,"48000");
+assert.equal(node("months").value,"12");
+assert.equal(node("elapsed").value,"3");
+assert.equal(node("spent").value,"9500");
+assert.equal(node("wage").value,"20");
+assert.equal(node("hours").value,"30");
+assert.equal(node("burden").value,"17");
+assert.equal(node("other").value,"200");
+assert.equal(node("onetime").value,"450");
 assert.equal(node("results").hidden,false,"Budget outlook becomes visible; error="+node("error").textContent);
 assert.equal(node("error").textContent,"","Example must calculate without an error");
 assert.equal(node("rBudget").textContent,"$48,000.00");
