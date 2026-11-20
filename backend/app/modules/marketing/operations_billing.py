@@ -222,12 +222,22 @@ def checkout_payload(*, lead_id: str, email: str, plan_key: str, customer_id: st
     }
     if plan["mode"] == "subscription":
         price_data["recurring"] = {"interval": str(plan.get("interval") or "month")}
+    # Reuse the owner-created Stripe TEST price for the Starter pilot when
+    # configured. Do not use a sandbox price with a live Stripe key.
+    line_item: dict[str, Any] = {"price_data": price_data, "quantity": 1}
+    if plan_key == "starter_49" and agent_checkout_mode() == "test":
+        test_price = (os.getenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID") or "").strip()
+        if test_price:
+            if not test_price.startswith("price_") or len(test_price) > 128 or not test_price.isascii():
+                raise ValueError("Invalid Operations Starter sandbox price ID")
+            line_item = {"price": test_price, "quantity": 1}
+
     base = public_base_url()
     payload: dict[str, Any] = {
         "mode": plan["mode"],
         "customer": customer_id,
         "client_reference_id": str(lead_id),
-        "line_items": [{"price_data": price_data, "quantity": 1}],
+        "line_items": [line_item],
         "metadata": metadata,
         "success_url": f"{base}/nova/anonymous-agent?checkout=success&lead_id={lead_id}",
         "cancel_url": f"{base}/nova/anonymous-agent?checkout=cancelled&lead_id={lead_id}",
