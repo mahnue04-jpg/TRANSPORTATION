@@ -16,26 +16,26 @@
 <section class="intro">
 <span class="topline">CFSS budget model · Planning prototype</span>
 <h1>CFSS Budget Co-Pilot</h1>
-<p>Explore how planned support-worker costs, approved goods and other expenses could fit inside your <strong>existing authorized CFSS service budget</strong>. Use figures from your approved service delivery plan and your FMS spending reports.</p>
+<p>Explore how planned support-worker costs, approved goods and other expenses could fit inside your <strong>existing authorized CFSS service budget</strong>. For this public evaluation, select <strong>Load fictional example</strong> or enter invented numbers only. Do not use a real service plan or FMS report.</p>
 </section>
 <div class="notice"><strong>Not an official DHS or FMS system.</strong> This tool does not establish eligibility, calculate a DHS authorization, approve purchases, process payroll or replace your consultation services provider, lead agency, case manager or financial management services (FMS) provider. All costs are user-entered assumptions. Do not enter names, case numbers, SSNs, medical information, or other sensitive information.</div>
 <div class="layout">
 <section class="panel" aria-labelledby="formtitle">
 <h2 id="formtitle">Plan your budget</h2>
-<p class="help">Start with actual authorization and spending amounts. Fields marked * are required. Nothing is saved or sent to AMICOR.</p>
+<p class="help">Use fictional amounts only during this evaluation. Fields marked * are required. Entered values remain in this browser unless you explicitly save or export a file; they are not sent to AMICOR.</p>
 <form id="budgetForm" novalidate>
 <fieldset class="section">
 <legend>1. Authorized budget and spending</legend>
 <div class="fieldgrid">
-<label>Authorized budget ($) *<input id="budget" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Enter official amount" required><span>From approved CFSS plan; not an estimate</span></label>
-<label>Months in service plan *<input id="months" type="number" min="1" max="12" step="1" inputmode="numeric" value="12" required><span>Use the actual authorization period</span></label>
+<label>Authorized budget ($) *<input id="budget" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Fictional budget, e.g., 48000" required><span>For evaluation, use invented figures only. Real decisions must use an approved CFSS plan.</span></label>
+<label>Months in service plan *<input id="months" type="number" min="1" max="12" step="1" inputmode="numeric" value="12" required><span>Use a hypothetical plan period; actual authorization must be confirmed later</span></label>
 <label>Months already elapsed *<input id="elapsed" type="number" min="0" max="12" step="1" inputmode="numeric" value="0" required><span>Whole months for this simplified forecast</span></label>
-<label>Actual spent to date ($) *<input id="spent" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" value="0" required><span>From the most recent FMS monthly spending report (same plan period)</span></label>
+<label>Actual spent to date ($) *<input id="spent" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" value="0" required><span>Use an invented spent-to-date value for demonstration; never copy a real FMS report</span></label>
 </div>
 </fieldset>
 <fieldset class="section">
 <legend>2. Monthly FMS spending reconciliation (optional)</legend>
-<p class="help">Enter each month’s <strong>individual spending amount</strong> from the FMS report for your current plan period. If a report shows a cumulative year-to-date total, do <strong>not</strong> enter that cumulative balance as the month’s spending; first confirm the individual-month amount with your FMS provider. Leave unknown months blank, not zero. These figures only check against “Actual spent to date” and never replace the official FMS report.</p>
+<p class="help">Enter each hypothetical month’s <strong>individual spending amount</strong> using fictional figures. If a report shows a cumulative year-to-date total, do <strong>not</strong> enter that cumulative balance as the month’s spending; first confirm the individual-month amount with your FMS provider. Leave unknown months blank, not zero. These figures only check against “Actual spent to date” and never replace the official FMS report.</p>
 <details><summary class="cfss-summary">Enter monthly FMS figures (up to 12 months)</summary>
 <div class="fieldgrid fms-fields">
 <label>Month 1 FMS reported amount ($)<input id="fms1" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
