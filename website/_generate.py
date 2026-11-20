@@ -754,7 +754,7 @@ add(
       <div class="wrap">
         <p class="kicker">Partners / Early Access</p>
         <h1>Tell us what you want to explore.</h1>
-        <p class="lede">This form is for customers, partners, insurers, reviewers, and advisors. A success message appears only after AMICOR’s lead store accepts the request. Do not submit medical records or other sensitive health information.</p>
+        <p class="lede">Individuals and businesses can request access or feedback. Name, email, product and message are required; company, industry, company size and phone are optional. Only a confirmed lead-store submission counts as delivered. Do not send FMS statements, medical records, banking details or passwords.</p>
         <p class="form-error" data-form-error role="alert"></p>
         <p class="form-success" data-form-success tabindex="-1" aria-live="polite">Thank you. Your request was sent to AMICOR.</p>
         <form class="panel" data-early-access-form novalidate>
@@ -762,12 +762,12 @@ add(
             <input name="middle_name_confirm" tabindex="-1" autocomplete="off" aria-hidden="true">
           </div>
           <label>Name <input name="name" autocomplete="name" required></label>
-          <label>Company <input name="company" autocomplete="organization" required></label>
+          <label>Company <span class="optional">(optional; leave blank if you are an individual)</span> <input name="company" autocomplete="organization"></label>
           <label>Email <input name="email" type="email" autocomplete="email" required></label>
           <label>Phone <span class="optional">(optional)</span> <input name="phone" type="tel" autocomplete="tel"></label>
-          <label>Industry <input name="industry" required></label>
-          <label>Company size
-            <select name="companySize" required>
+          <label>Industry <span class="optional">(optional)</span> <input name="industry"></label>
+          <label>Company size <span class="optional">(optional)</span>
+            <select name="companySize">
               <option value="">Select</option>
               <option>1-10</option>
               <option>11-50</option>
@@ -848,7 +848,7 @@ add(
     <section class="section">
       <div class="wrap grid grid-2">
         <article class="card"><h2>Who we are</h2><p>The public brand is AMICOR. The legal operator of this site is AMICOR HEALTH ISF LLC, Minnesota, United States. This page does not publish a street address.</p></article>
-        <article class="card"><h2>What this site collects</h2><p>The Early Access form may collect name, company, email, optional phone, industry, company size, product interest, a message, a consent flag, and a timestamp. That is business-contact information, not clinical data.</p></article>
+        <article class="card"><h2>What this site collects</h2><p>The Early Access form collects name, email, product interest, message, consent flag and timestamp; company, phone, industry and company size are optional. That is business-contact information, not clinical data.</p></article>
         <article class="card"><h2>How it is stored today</h2><p>When the Early Access form succeeds, the inquiry is stored in an AMICOR-owned Cloudflare lead store. An optional inbox webhook may be added later and must not replace that store. Browser storage is used only if live delivery fails.</p></article>
         <article class="card"><h2>What we do not claim</h2><p>This draft does not claim HIPAA compliance, medical-device compliance, sale of personal information, or that a live customer database already exists.</p></article>
       </div>

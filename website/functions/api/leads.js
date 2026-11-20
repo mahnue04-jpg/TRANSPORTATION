@@ -113,7 +113,7 @@ export async function onRequest(context) {
     })(),
   };
 
-  if (!payload.name || !payload.company || !payload.industry || !payload.companySize || !payload.message) {
+  if (!payload.name || !payload.message) {
     return json(400, { ok: false, error: "missing_fields" });
   }
   if (!validEmail(payload.email)) {

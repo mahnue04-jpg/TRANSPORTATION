@@ -75,7 +75,7 @@ def chrome_like_visible_autofill() -> dict[str, str]:
 def would_reach_lead_submit(form_data: dict[str, str]) -> bool:
     if honeypot_blocks(form_data):
         return False
-    for field in ("name", "company", "email", "industry", "companySize", "product", "message"):
+    for field in ("name", "email", "product", "message"):
         if not str(form_data.get(field) or "").strip():
             return False
     if form_data.get("consent") not in {"yes", "true", True}:
@@ -87,11 +87,11 @@ def build_payload(form_data: dict[str, str]) -> dict[str, object]:
     return {
         "receivedAt": "2026-09-15T03:00:00.000Z",
         "name": form_data["name"].strip(),
-        "company": form_data["company"].strip(),
+        "company": str(form_data.get("company") or "").strip(),
         "email": form_data["email"].strip(),
         "phone": str(form_data.get("phone") or "").strip(),
-        "industry": form_data["industry"].strip(),
-        "companySize": form_data["companySize"],
+        "industry": str(form_data.get("industry") or "").strip(),
+        "companySize": str(form_data.get("companySize") or ""),
         "product": form_data["product"],
         "message": form_data["message"].strip(),
         "consent": True,
@@ -156,6 +156,39 @@ def test_visible_autofill_does_not_populate_honeypot() -> None:
     for field in ("name", "company", "email", "phone"):
         completed[field] = autofilled[field]
     assert would_reach_lead_submit(completed) is True
+
+
+def test_individual_can_inquire_without_business_details() -> None:
+    individual = {
+        "name": "Taylor Example", "email": "taylor@example.com",
+        "product": "VoiceLedger Pro", "message": "I'd like a free demo.",
+        "consent": "yes", HONEYPOT: "",
+    }
+    assert would_reach_lead_submit(individual)
+    payload = build_payload(individual)
+    assert payload["company"] == ""
+    assert payload["industry"] == ""
+    assert payload["companySize"] == ""
+    assert "company" in _form_html() and 'name="company" autocomplete="organization"></label>' in _form_html()
+    assert 'name="companySize">' in _form_html()
+    assert 'name="industry"></label>' in _form_html()
+    script = r"""
+globalThis.caches = {default: {async match(){return null}, async put(){}}};
+const {onRequest} = await import("./functions/api/leads.js");
+const writes=[];
+const response=await onRequest({
+  request: new Request("https://staging.invalid/api/leads", {
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name:"Taylor Example",email:"taylor@example.com",product:"VoiceLedger Pro",message:"Fictional individual request",consent:true})
+  }),
+  env:{AMICOR_LEADS:{async put(_k,value){writes.push(JSON.parse(value))}}}
+});
+if (response.status!==202 || writes.length!==1) throw Error("Individual inquiry rejected: "+response.status);
+if(writes[0].company!=="" || writes[0].industry!=="" || writes[0].companySize!=="") throw Error("Optional business fields not empty");
+"""
+    import subprocess
+    completed = subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,text=True,capture_output=True,check=False)
+    assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
 def test_nonempty_honeypot_still_blocks() -> None:
