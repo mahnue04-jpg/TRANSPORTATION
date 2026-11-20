@@ -250,6 +250,21 @@ def record_confirmed_event(engine, *, lead_id, session_id, customer_id,
     return {"result": "paid", "lead_id": values["lead_id"]}
 
 
+def process_signed_test_webhook(engine, raw_body: bytes, stripe_signature: str | None):
+    """Staging-only adapter connecting signature verification to durable receipt.
+
+    Does not create an HTTP route or enable customer work. The caller must
+    provision a restricted store and explicitly wire this after a staging
+    migration, never in the running disposable SQLite sandbox.
+    """
+    require_staging_config()
+    if not raw_body or not stripe_signature:
+        raise ValueError("Signed Stripe webhook body and header required")
+    from app.modules.marketing.operations_billing import verify_agent_webhook
+    event = verify_agent_webhook(raw_body, stripe_signature)
+    return process_verified_checkout_event(engine, event)
+
+
 def find_receipt(engine, *, lead_id):
     verify_store_ready(engine)
     with engine.connect() as conn:
