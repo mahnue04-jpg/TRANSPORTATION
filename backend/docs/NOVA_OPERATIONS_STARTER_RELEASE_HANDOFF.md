@@ -43,6 +43,29 @@ For an **owner-approved** isolated Render web service, an example reviewed sourc
 
 **Limit:** This service is useful to validate isolated startup and route denial, but by design it cannot complete the paid customer journey. A separate approved data-backed staging plan and secure customer delivery path must be built before live release.
 
+## Minnesota sales-tax classification and Stripe launch gate (2026-11-20)
+
+**Tax research is preliminary, not a determination letter or authorization to collect tax.** Minnesota DOR distinguishes between prewritten downloaded software (generally taxable), remotely hosted software without customer possession (subscriptions generally not taxable), and most professional and customer-data-processing services (generally nontaxable). Apply the classification to the actual contractual deliverables, not the Nova branding.
+
+| Product / commercial promise | Preliminary Minnesota classification | Release action |
+| --- | --- | --- |
+| $49 Operations Starter: owner-reviewed processing of a customer CSV into a cleaned file | Generally nontaxable data processing/service, if no software license is delivered | Confirm scoped statement of work, invoice description, no bundled software license; request tax adviser review before sales |
+| $99/$299 Operations monthly managed work | Generally nontaxable services when primarily human-reviewed support | Do not sell subscriptions until service limits, billing, and fulfillment reviewed |
+| VoiceLedger Pro downloadable prewritten app/standalone ZIP license | Generally taxable prewritten software even when electronically delivered | Verify MN registration, tax coding, customer address sourcing, local rates and returns BEFORE paid license checkout |
+| Growth Agent or CFSS Co-Pilot hosted-only access | Generally nontaxable hosted software if the customer receives no software copy | Confirm terms/delivery and compliance; both remain gated from live commerce |
+
+Official Minnesota DOR references:
+- https://www.revenue.state.mn.us/guide/computer-software-and-digital-products
+- https://www.revenue.state.mn.us/guide/nontaxable-sales-8
+- https://www.revenue.state.mn.us/guide/registering-your-business
+- https://www.revenue.state.mn.us/guide/taxes-and-rates
+- https://www.revenue.state.mn.us/guide/accounting-services
+- https://www.revenue.state.mn.us/sites/default/files/2023-12/fs173.pdf
+
+**Read-only live Stripe evidence on 2026-11-20:** Account `Amicor Nova` has charges/payouts enabled, but Stripe Tax settings report `pending`, no default tax code/behavior or head-office address in Tax settings, and `GET /v1/tax/registrations` returned zero registrations. This does NOT establish AMICOR's actual state tax-registration status. Verify it through Minnesota e-Services or with the accountant before treating taxable software as eligible for sale.
+
+**Payment release controls:** Do not activate automatic tax, register jurisdictions in Stripe, add taxable products, or enable live purchases by guessing a tax code or tax registration. In particular, the generic live $49 Payment Link is not a lead/task-specific checkout and must NOT be linked as a ready purchase path until controlled fulfillment is operational. Existing owner-approved live payout banking can remain unchanged. Review out-of-state customer tax obligations separately.
+
 ## $49 first-customer acceptance chain
 1. Save lead and explicitly agreed one-time CSV scope. Confirm legal customer identity and authorization to process their data. No implied unlimited work.
 2. Create a **saved lead-specific** Stripe Checkout; verify the signed checkout event, exact saved checkout/session/customer, USD 4900, payment status paid. Do not assume the public generic Stripe Payment Link maps to a lead/task.
