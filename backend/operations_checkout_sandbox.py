@@ -80,6 +80,33 @@ async def synthetic_only_guard(request: Request, call_next):
     path = request.url.path
     if not _safe_configuration():
         return JSONResponse(status_code=503, content={"detail": "Sandbox unavailable"})
+    if path == "/nova/anonymous-agent" and request.method == "GET":
+        # Stripe Checkout returns here after payment/cancel. Never interpret
+        # query arguments as payment proof: only the signed webhook updates DB.
+        outcome = request.query_params.get("checkout", "")
+        if outcome in {"success", "cancelled"}:
+            title = "Stripe test checkout returned" if outcome == "success" else "Stripe test checkout cancelled"
+            message = (
+                "Stripe redirected back from the test checkout. Payment confirmation is handled separately by the signed Stripe webhook."
+                if outcome == "success" else
+                "The test checkout was cancelled. No payment is confirmed by this page."
+            )
+            html = (
+                "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<meta name='robots' content='noindex,nofollow'>"
+                "<title>AMICOR Operations Test Checkout</title></head>"
+                "<body style='font:16px system-ui;max-width:580px;margin:48px auto;padding:20px'>"
+                "<h1>" + title + "</h1><p>" + message + "</p>"
+                "<p><a href='/sandbox-test'>Back to synthetic checkout test</a></p></body></html>"
+            )
+            return HTMLResponse(html, headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+                "X-Frame-Options": "DENY",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+            })
     if path == "/sandbox-test" and request.method == "GET":
         # UI contains no secrets; the token is entered locally by the owner.
         html = Path(__file__).with_name("operations_checkout_sandbox_ui.html").read_text(encoding="utf-8")
