@@ -78,7 +78,9 @@ def test_signed_paid_event_persists_across_connections(staging_ledger):
     assert process_verified_checkout_event(engine, event)["result"] == "already_paid"
 
     # Re-create a completely separate engine to simulate app process restart.
-    url = str(engine.url)
+    # SQLAlchemy renders passwords as *** by default; retain the original
+    # disposable CI URL instead of serializing an engine URL.
+    url = os.environ[CI_DB]
     engine.dispose()
     restarted = create_engine(url, pool_pre_ping=True)
     try:
