@@ -14,6 +14,10 @@ def test_browser_local_without_upload() -> None:
     assert "fetch(" not in HTML
     assert "XMLHttpRequest" not in HTML
     assert "navigator.sendBeacon" not in HTML
+    assert "googletagmanager.com" not in HTML
+    assert "googletagmanager" not in HTML.lower()
+    assert "connect-src \'none\'" in HTML
+    assert "third-party analytics" in HTML
     assert "<form" in HTML
     assert "type=\"submit\"" in HTML
     assert "No accounts or uploads" in HTML
