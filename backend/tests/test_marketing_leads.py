@@ -862,3 +862,95 @@ def test_operations_paid_order_ignores_stale_unpaid_completion(monkeypatch):
         lead = db.get(MarketingWebsiteLead, lead_id)
         assert lead.payment_status == "paid"
         assert lead.starter_paid_session_id == "cs_test_paid_for_completion"
+
+
+def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monkeypatch):
+    """Exercise real signature verification and saved-order binding without Stripe network calls."""
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.db.session import SessionLocal
+
+    # Explicitly synthetic: this is NOT a real Stripe transaction or a delivery test.
+    secret = "whsec_ci_synthetic_operations_only"
+    monkeypatch.setenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", secret)
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "test")
+    routes._RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.252"},
+            json={
+                "lead_type": "anonymous_operations",
+                "contact_name": "Synthetic Signed Order",
+                "work_email": "signed-order@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic signed webhook test; no real customer work.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        lead_id = submitted.json()["data"]["lead_id"]
+        checkout = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.253"},
+        )
+        assert checkout.status_code == 200, checkout.text
+        session_id = checkout.json()["checkout_session_id"]
+        customer_id = fake.sessions[session_id]["customer"]
+
+        event = {
+            "id": "evt_test_synthetic_starter",
+            "object": "event",
+            "api_version": "2024-06-20",
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "id": session_id,
+                "object": "checkout.session",
+                "mode": "payment",
+                "customer": customer_id,
+                "client_reference_id": lead_id,
+                "currency": "usd",
+                "amount_total": 4900,
+                "payment_status": "paid",
+                "metadata": {
+                    "nova_product": "nova_anonymous_operations_agent",
+                    "nova_agent_lead_id": lead_id,
+                    "nova_agent_plan": "starter_49",
+                },
+            }},
+        }
+        raw = json.dumps(event, separators=(",", ":")).encode("utf-8")
+        timestamp = str(int(time.time()))
+        sig = hmac.new(secret.encode(), timestamp.encode() + b"." + raw, hashlib.sha256).hexdigest()
+        headers = {"Stripe-Signature": f"t={timestamp},v1={sig}", "Content-Type": "application/json"}
+
+        response = client.post(
+            "/api/marketing/nova-agent/stripe/webhook", content=raw, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["result"] == "paid"
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead.payment_status == "paid"
+            assert lead.starter_paid_session_id == session_id
+
+        # Tampering with the signed body must not pass authentication.
+        tampered = raw.replace(b'"amount_total":4900', b'"amount_total":0')
+        rejected = client.post(
+            "/api/marketing/nova-agent/stripe/webhook", content=tampered, headers=headers
+        )
+        assert rejected.status_code == 400, rejected.text
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead.payment_status == "paid"
+            assert lead.starter_paid_session_id == session_id
+    finally:
+        set_agent_stripe_override(None)
