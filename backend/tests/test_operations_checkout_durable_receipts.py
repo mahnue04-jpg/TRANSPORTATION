@@ -74,6 +74,29 @@ def test_ledger_is_isolated_and_never_auto_creates_schema():
     assert "create_all(" not in source
     assert "DROP TABLE" not in sql
 
+def test_staging_checkout_route_requires_durable_order_before_url():
+    routes = (BACKEND / "app/modules/marketing/routes.py").read_text()
+    new = routes.index('register_staging_checkout_binding(', routes.index('def create_nova_agent_checkout('))
+    assert new < routes.index('    lead.stripe_customer_id = customer_id')
+    assert 'NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED' in routes
+    assert 'raise HTTPException(status_code=503, detail="Secure staging checkout unavailable")' in routes
+
+def test_signed_webhook_must_persist_receipt_before_ack():
+    routes = (BACKEND / "app/modules/marketing/routes.py").read_text()
+    section = routes[routes.index('async def nova_agent_stripe_webhook('):]
+    assert section.index('record_staging_signed_webhook(') < section.index('    db.commit()')
+    assert "Durable test receipt unavailable" in section
+
+def test_receipt_engine_never_uses_general_database_url(monkeypatch):
+    from operations_checkout_durable_receipts import _dedicated_staging_engine
+    _safe_env(monkeypatch)
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_NAME", "synthetic")
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "staging_receipt_user")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://prod.example.invalid/prod")
+    with pytest.raises(RuntimeError, match="Dedicated staging receipt database settings required"):
+        _dedicated_staging_engine()
+
+
 
 def _signed_event_fixture():
     """Already authenticated by the webhook caller in the real integration."""
