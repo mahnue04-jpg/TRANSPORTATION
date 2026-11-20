@@ -81,10 +81,22 @@ if (casting.status !== 202 || puts.length !== 2 || puts[1].value.product !== "No
   process.exit(5);
 }
 
+const voiceledger = await post(lead("VoiceLedger Pro", true));
+if (voiceledger.status !== 202 || puts.length !== 3 || puts[2].value.product !== "VoiceLedger Pro") {
+  console.error("voiceledger", voiceledger, puts.length);
+  process.exit(7);
+}
+
+const cfss = await post(lead("CFSS Budget Co-Pilot", true));
+if (cfss.status !== 202 || puts.length !== 4 || puts[3].value.product !== "CFSS Budget Co-Pilot") {
+  console.error("cfss", cfss, puts.length);
+  process.exit(8);
+}
+
 const unknown = await post(lead("Nova Casting and Auditions", true));
-if (unknown.status !== 400 || unknown.body.error !== "invalid_product" || puts.length !== 2) {
+if (unknown.status !== 400 || unknown.body.error !== "invalid_product" || puts.length !== 4) {
   console.error("unknown", unknown, puts.length);
   process.exit(6);
 }
 
-console.log(`STAGING_PROBES_PASSED=5 stored_in_memory=${puts.length}`);
+console.log(`STAGING_PROBES_PASSED=7 stored_in_memory=${puts.length}`);
