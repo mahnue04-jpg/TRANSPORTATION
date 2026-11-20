@@ -15,6 +15,14 @@ def main():
         # Retired-route redirect documents do not load the site template.
         if '<meta http-equiv="refresh"' in html or '<meta http-equiv="refresh"' in html.lower():
             continue
+        # Explicitly exclude the CFSS financial-planning tool from third-party
+        # tracking. This is a narrowly scoped exception; all other pages
+        # still require the existing GTM snippets.
+        if path.relative_to(ROOT).as_posix() == "cfss-copilot/index.html":
+            if ("googletagmanager" in html.lower() or "gtag(" in html.lower()
+                    or "connect-src 'none'" not in html):
+                failures.append("cfss-copilot/index.html: financial planner must not load trackers or send data")
+            continue
         script_start = "<!-- Google Tag Manager -->"
         script_url = "https://www.googletagmanager.com/gtm.js?id="
         noscript_url = f"https://www.googletagmanager.com/ns.html?id={GTM_ID}"
