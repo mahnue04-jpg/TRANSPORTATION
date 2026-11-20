@@ -508,9 +508,15 @@ async def nova_agent_stripe_webhook(
             lead.payment_status = "pending"
             result = "checkout_completed_pending"
     elif event_type in {"checkout.session.async_payment_failed", "invoice.payment_failed"}:
+        # Stripe can retry or deliver older events after a successful payment.
+        # Never revoke a confirmed paid order because of an out-of-order event.
+        if lead.payment_status == "paid":
+            return {"ok": True, "handled": False, "result": "already_paid"}
         lead.payment_status = "failed"
         result = "payment_failed"
     elif event_type == "checkout.session.expired":
+        if lead.payment_status == "paid":
+            return {"ok": True, "handled": False, "result": "already_paid"}
         lead.payment_status = "expired"
         result = "checkout_expired"
     elif event_type == "invoice.paid":
