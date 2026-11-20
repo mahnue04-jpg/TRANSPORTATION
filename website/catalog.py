@@ -57,6 +57,45 @@ SERVICES = [
 
 PRODUCTS = [
     _item(
+        id="voiceledger-pro",
+        name="VoiceLedger Pro",
+        status="Free working preview",
+        table_status="FREE WORKING PREVIEW",
+        summary="Record income, expenses and business mileage in a browser-local ledger. Free hosted preview; paid standalone delivery is not enabled.",
+        claim="Working free browser preview. Entries stay on-device unless the user exports; browser voice support varies. No paid checkout or automatic cloud sync.",
+        href="https://voiceledger-pro-staging-v15.onrender.com/",
+        art="card-voiceledger.svg",
+        alt="Illustration of a ledger, mileage route and microphone controls. Conceptual artwork, not customer financial data.",
+        lead="VoiceLedger Pro",
+        group="software",
+    ),
+    _item(
+        id="cfss-budget-copilot",
+        name="CFSS Budget Co-Pilot",
+        status="Fictional-data preview",
+        table_status="FICTIONAL-DATA EVALUATION",
+        summary="Compare CFSS budget-model scenarios and monthly FMS spending using fictional figures only. Independent program review pending.",
+        claim="Working planning preview, not approved by Minnesota DHS or FMS. No actual participant data, eligibility decisions, payroll or payments.",
+        href="https://deploy-preview-564--grand-beignet-6447ea.netlify.app/cfss-copilot/",
+        art="card-cfss-copilot.svg",
+        alt="Illustration of a budget chart, document checklist and planning figures; not an official DHS or FMS statement.",
+        lead="CFSS Budget Co-Pilot",
+        group="software",
+    ),
+    _item(
+        id="nova-growth-agent",
+        name="Nova Growth Agent",
+        status="Development staging",
+        table_status="DEVELOPMENT STAGING",
+        summary="Owner CRM, consent-aware chat and booking prototypes in staging. No autonomous customer outreach or live messaging.",
+        claim="Working staging components under review; not a customer-live growth service. Paid providers and autonomous outreach are disabled.",
+        href="/launch-status/#nova-growth-agent",
+        art="card-growth-agent.svg",
+        alt="Conceptual growth workflow illustration with contact pipeline and appointment calendar. Not actual customer records.",
+        lead="Nova Growth Agent",
+        group="software",
+    ),
+    _item(
         id="nova-operations-agent",
         name="Nova Operations Agent",
         status="Supervised release",
@@ -222,7 +261,8 @@ def by_id(product_id: str) -> dict:
     raise KeyError(product_id)
 
 
-INQUIRY_ONLY_LEAD_NAMES = ("VoiceLedger Pro", "CFSS Budget Co-Pilot")
+# Both tools now have canonical catalog cards and must not appear twice in lead dropdowns.
+INQUIRY_ONLY_LEAD_NAMES = ()
 
 
 def lead_names() -> list[str]:
@@ -245,6 +285,12 @@ def card_action(product: dict) -> tuple[str, str]:
     """Public card CTA. Available is not used until a product is independently verified as generally usable."""
     status = product["status"].lower()
     table = product["table_status"].lower()
+    if product["id"] == "voiceledger-pro":
+        return ("Try free preview", product["href"])
+    if product["id"] == "cfss-budget-copilot":
+        return ("Try fictional demo", product["href"])
+    if product["id"] == "nova-growth-agent":
+        return ("View development status", product["href"])
     unfinished = any(token in status for token in ("in development", "future hardware", "coming soon")) or "coming soon" in table
     if unfinished:
         return ("Join waitlist", "/early-access/?product=" + quote(product["lead"]))
