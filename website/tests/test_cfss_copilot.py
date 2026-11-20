@@ -42,6 +42,10 @@ def test_program_boundaries() -> None:
     assert "getamicor.com/early-access/?product=CFSS%20Budget%20Co-Pilot" in HTML
     assert "does not receive your entries" in HTML
     assert "No payments accepted" in HTML
+    assert "tiered wage floor" in HTML
+    assert "separate authorization line" in HTML
+    assert "Do not double-count" in HTML
+    assert "no wages, schedules, goods, or services are approved" in HTML
 
 def test_essential_values_and_scenario() -> None:
     for f in (
