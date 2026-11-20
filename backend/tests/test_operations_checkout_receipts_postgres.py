@@ -6,6 +6,10 @@ no real Stripe calls, no customer data, and no app deployment.
 from __future__ import annotations
 
 import os
+import json
+import hmac
+import hashlib
+import time
 from pathlib import Path
 
 import pytest
@@ -13,7 +17,7 @@ from sqlalchemy import create_engine, text
 
 from operations_checkout_durable_receipts import (
     SCHEMA, _metadata, find_receipt, process_verified_checkout_event,
-    record_checkout_order, validated_checkout_event,
+    record_checkout_order, process_signed_test_webhook, validated_checkout_event,
 )
 
 CI_DB = "NOVA_OPS_RECEIPTS_CI_DATABASE_URL"
@@ -114,3 +118,22 @@ def test_receipt_rejects_conflicting_order_binding(staging_ledger):
     assert record_checkout_order(engine, **original)["result"] == "registered"
     with pytest.raises(ValueError, match="conflict"):
         record_checkout_order(engine, **{**original, "customer_id": "cus_other"})
+
+
+def test_signed_webhook_adapter_writes_durable_receipt(staging_ledger, monkeypatch):
+    """Exercise the real Stripe signature verifier, no mocks or network calls."""
+    engine = staging_ledger
+    monkeypatch.setenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", "whsec_disposable_ci_only")
+    record_checkout_order(engine, lead_id="ci-order-1", session_id="cs_test_ci_session_1",
+                          customer_id="cus_ci_customer_1")
+    raw = json.dumps(_paid_event(), separators=(",", ":")).encode("utf-8")
+    timestamp = str(int(time.time()))
+    signed_payload = timestamp.encode() + b"." + raw
+    digest = hmac.new(b"whsec_disposable_ci_only", signed_payload, hashlib.sha256).hexdigest()
+    header = f"t={timestamp},v1={digest}"
+    assert process_signed_test_webhook(engine, raw, header)["result"] == "paid"
+    assert process_signed_test_webhook(engine, raw, header)["result"] == "already_paid"
+    assert find_receipt(engine, lead_id="ci-order-1")["stripe_event_id"] == "evt_ci_paid_1"
+    tampered = raw.replace(b'"amount_total":4900', b'"amount_total":0')
+    with pytest.raises(ValueError, match="Invalid Stripe webhook"):
+        process_signed_test_webhook(engine, tampered, header)
