@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from operations_checkout_durable_receipts import (
-    _confirmed_values, require_staging_config, receipt_table, SCHEMA,
+    _confirmed_values, require_staging_config, receipt_table, order_table, validated_checkout_event, SCHEMA,
 )
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -73,3 +73,65 @@ def test_ledger_is_isolated_and_never_auto_creates_schema():
     source=(BACKEND / "operations_checkout_durable_receipts.py").read_text()
     assert "create_all(" not in source
     assert "DROP TABLE" not in sql
+
+
+def _signed_event_fixture():
+    """Already authenticated by the webhook caller in the real integration."""
+    lead = "synthetic-lead"
+    order = {
+        "lead_id": lead,
+        "session_id": "cs_test_synthetic",
+        "customer_id": "cus_synthetic",
+        "plan": "starter_49", "amount_cents": 4900, "currency": "usd",
+    }
+    event = {
+        "id": "evt_synthetic", "type": "checkout.session.completed",
+        "livemode": False,
+        "data": {"object": {
+            "id": "cs_test_synthetic", "livemode": False,
+            "client_reference_id": lead, "customer": "cus_synthetic",
+            "mode": "payment", "currency": "usd",
+            "amount_total": 4900, "payment_status": "paid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_plan": "starter_49",
+                "nova_agent_lead_id": lead,
+            },
+        }},
+    }
+    return event, order
+
+
+def test_verified_event_requires_exact_saved_order():
+    event, order = _signed_event_fixture()
+    assert validated_checkout_event(event, order)["event_id"] == "evt_synthetic"
+    for key, wrong in (
+        ("session_id", "cs_test_other"), ("customer_id", "cus_other"),
+        ("lead_id", "other"), ("plan", "launch_99"), ("amount_cents", 0),
+    ):
+        altered = dict(order, **{key: wrong})
+        with pytest.raises(ValueError, match="does not match"):
+            validated_checkout_event(event, altered)
+
+
+def test_verified_event_rejects_wrong_stripe_payment():
+    event, order = _signed_event_fixture()
+    for field, wrong in (
+        ("payment_status", "unpaid"), ("amount_total", 0),
+        ("currency", "eur"), ("livemode", True),
+    ):
+        altered = dict(event)
+        altered["data"] = {"object": dict(event["data"]["object"])}
+        altered["data"]["object"][field] = wrong
+        with pytest.raises(ValueError, match="does not match"):
+            validated_checkout_event(altered, order)
+    altered = dict(event, type="checkout.session.expired")
+    with pytest.raises(ValueError, match="does not match"):
+        validated_checkout_event(altered, order)
+
+
+def test_order_and_receipt_are_separate_isolated_tables():
+    assert order_table.schema == receipt_table.schema == SCHEMA
+    assert order_table.name == "starter_test_orders"
+    sql = (BACKEND / "operations_checkout_receipts_staging.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS nova_ops_checkout_sandbox.starter_test_orders" in sql
