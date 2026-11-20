@@ -108,7 +108,7 @@ def apply(add, pages, status_table):
 
     operations = hero('Nova software', 'Nova Operations Agent', 'Supported digital operations with scope checks and human review. Explore the demo or submit a business task.', button(AGENT, 'Open Operations Agent') + button(SIGNUP, 'Start a Seven-Day Trial', False))
     operations += section('Supported work', text_service_cards + '<p>Administrative operations, research, spreadsheets, documentation, customer-support preparation, workflow support, and proposal organization are listed in the app. Supported work stays within the approved engagement.</p>')
-    operations += section('Starting options', plans)
+    operations += section('Starting options', plans + "<p class=\"notice\"><strong>Current readiness (November 2026):</strong> The public demo and supervised task intake are available. Owner-scoped CSV processing and the $49 Starter Task checkout-to-private-delivery workflow remain in development/staging; customer-paid automated delivery and monthly-plan fulfillment are not verified live. <a href=\"/launch-status/\">View verified AMICOR product status</a>.</p>")
     operations += section('Try the lead-workflow demo', '<p>Enter a sample inquiry in the public app and see how Nova organizes work for owner review. The demo is a sandbox and does not send email, update a CRM, or charge money.</p>' + button(AGENT, 'Run the Interactive Demo'))
     replace('/nova-operations/', 'Nova Operations Agent — AMICOR Business Support', 'Explore Nova Operations Agent, its public demo, trial and starting plans.', operations)
     replace('/technologies/autonomous-operations-agent/', 'Nova Operations Agent — canonical page', 'Autonomous Operations Agent is an earlier name for Nova Operations Agent, not a second product.',
