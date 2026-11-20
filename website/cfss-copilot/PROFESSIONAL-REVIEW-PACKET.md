@@ -72,8 +72,8 @@ Corrective action and evidence: _____________________
 ## Official review references
 
 - Minnesota DHS, CFSS and lead agencies FAQ: https://mn.gov/dhs/partners-and-providers/news-initiatives-reports-workgroups/long-term-services-and-supports/cfss/cfss-faq-la.jsp
-- DHS, FMS documentation and monthly reporting: https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&RevisionSelectionMethod=LatestReleased&dDocName=cfss-001002
+- DHS, FMS documentation and monthly reporting: https://mentalhealth.dhs.state.mn.us/main/idcplg/mhc%20Season%2010%20current%20materials.doc?IdcService=GET_DYNAMIC_CONVERSION&RevisionSelectionMethod=LatestReleased&dDocName=CFSS-001002
 - Minnesota Statutes 2026, section 256B.85: https://www.revisor.mn.gov/statutes/2026/cite/256B.85
-- DHS, Community First Services and Supports: https://www.dhs.state.mn.us/main/idcplg/001024.doc?IdcService=GET_DYNAMIC_CONVERSION&RevisionSelectionMethod=LatestReleased&dDocName=MNDHS-067912
+- DHS, CFSS FAQ for people who use services: https://mn.gov/dhs/disability-aging/home-and-community-services/programs-and-services/cfss-faq-people/
 
 **AMICOR HEALTH ISF LLC — independent software evaluation only.**
