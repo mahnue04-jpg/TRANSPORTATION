@@ -351,6 +351,8 @@ def status_table() -> str:
 def inquiry_options() -> str:
     service = '<optgroup label="Business services"><option>Business Services</option></optgroup>'
     products = "".join("<option>" + _esc(product["lead"]) + "</option>" for product in PRODUCTS)
+    # These digital offerings accept inquiries only; they are not catalogue sales or launches.
+    products += "<option>VoiceLedger Pro</option><option>CFSS Budget Co-Pilot</option>"
     other = "".join("<option>" + _esc(name) + "</option>" for name in OTHER_INQUIRIES)
     return (
         service
