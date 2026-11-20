@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr
-from .flow import CheckoutError, Commerce, Settings
+from flow import CheckoutError, Commerce, Settings
 
 app = FastAPI(
     title="VoiceLedger Pro digital delivery (TEST ONLY)",
