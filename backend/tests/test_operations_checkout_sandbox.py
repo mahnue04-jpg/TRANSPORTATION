@@ -15,6 +15,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 def _import_sandbox(**changes):
     env = dict(os.environ)
+    # Do not inherit the CI runner database location.
+    env.pop("DATABASE_URL", None)
     env.update({
         "NOVA_OPERATIONS_SANDBOX_ENABLED": "true",
         "NOVA_OPERATIONS_SANDBOX_DB_URL": "sqlite:////tmp/amicor-operations-sandbox-ci-check.sqlite",
