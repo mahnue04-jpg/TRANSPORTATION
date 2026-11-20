@@ -97,6 +97,20 @@ class CheckoutHttpTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/voiceledger/orders/cs_test_missing").status_code, 404)
         self.assertEqual(self.client.post("/api/voiceledger/checkout", json={"email": "invalid"}).status_code, 400)
 
+    def test_checkout_return_pages_never_deliver_unauthenticated_files(self):
+        complete = self.client.get("/complete?session_id=cs_test_missing")
+        self.assertEqual(complete.status_code, 200)
+        self.assertIn("test-mode", complete.text)
+        self.assertIn("No download has been released", complete.text)
+        self.assertIn("no-store", complete.headers.get("cache-control", ""))
+        self.assertIn("frame-ancestors", complete.headers.get("content-security-policy", ""))
+        self.assertNotIn("sk_test_testing_only", complete.text)
+        cancelled = self.client.get("/cancel")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertIn("cancelled", cancelled.text.lower())
+        with self.service.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM entitlements").fetchone()[0], 0)
+
     def test_default_http_service_does_not_start(self):
         from unittest.mock import patch
         api._service = None
