@@ -488,3 +488,58 @@ def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
         assert len(fake.sessions) == 1
     finally:
         set_agent_stripe_override(None)
+
+
+def test_operations_checkout_unconfigured_is_not_advertised(monkeypatch):
+    from app.modules.marketing import routes
+
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "not_configured")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    response = client.get("/api/marketing/nova-agent/checkout-status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["customer_sales_enabled"] is False
+    assert data["plans"]["starter_49"]["checkout_available"] is False
+    assert data["plans"]["launch_99"]["checkout_available"] is False
+    assert data["plans"]["business_299"]["checkout_available"] is False
+
+
+def test_live_operations_monthly_plans_remain_closed(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    routes._RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        plans = status.json()["plans"]
+        assert plans["starter_49"]["checkout_available"] is True
+        assert plans["launch_99"]["checkout_available"] is False
+        assert plans["business_299"]["checkout_available"] is False
+        for idx, plan in enumerate(("launch_99", "business_299")):
+            submitted = client.post(
+                "/api/marketing/leads",
+                headers={"X-Forwarded-For": f"198.51.100.{240+idx}"},
+                json={
+                    "lead_type": "anonymous_operations",
+                    "contact_name": "Synthetic Monthly Client",
+                    "work_email": f"monthly-blocked-{idx}@example.invalid",
+                    "consent": True,
+                    "service_plan": plan,
+                    "message": "Synthetic monthly inquiry, no live subscription allowed.",
+                },
+            )
+            assert submitted.status_code == 200, submitted.text
+            assert submitted.json()["data"]["checkout_available"] is False
+            response = client.post(
+                f"/api/marketing/leads/{submitted.json()['data']['lead_id']}/checkout",
+                headers={"X-Forwarded-For": f"198.51.100.{242+idx}"},
+            )
+            assert response.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
