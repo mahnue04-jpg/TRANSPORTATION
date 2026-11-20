@@ -87,3 +87,15 @@ Official Minnesota DOR references:
 - No customer data in synthetic rehearsal and no live customer order until the service can securely fulfill it.
 - $99 and $299 monthly plans are later releases; no automatic enrollment after Starter Task.
 - Never represent a synthetic Render health check as verified customer processing.
+
+## Stripe sandbox Starter price — November 20, 2026
+
+- Stripe sandbox account: Amicor Nova (livemode=false).
+- Sandbox product: prod_VfHSXMIYn1fMfu, AMICOR Nova Starter Task — TEST.
+- Sandbox one-time USD price: price_1UdwuEBCDlIbm4gm4Ggt7nuI, unit_amount=4900 cents.
+- The sandbox product and price exist, but no paid Checkout Session, customer order, signed webhook delivery, or private artifact fulfillment has been confirmed.
+- The branch can use the pre-created Price with NOVA_OPERATIONS_STARTER_TEST_PRICE_ID=price_1UdwuEBCDlIbm4gm4Ggt7nuI only with a Stripe test-mode key. Do not commit keys or signing secrets.
+- Never use this test Price in production; live sales remain separately gated.
+- Generic public live $49 Payment Link remains unconnected to lead-specific paid-task binding; it is not proof of authorized work.
+- Isolated approved test backend, synthetic lead/task, signed webhook, and durable fulfillment are still required. The full-app Render PR preview is not a safe fulfillment test environment.
+- Minnesota tax treatment awaits written guidance. No live Stripe Tax or customer sales activation is authorized by this change.
