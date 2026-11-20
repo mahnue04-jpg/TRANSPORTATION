@@ -37,6 +37,10 @@ def test_program_boundaries() -> None:
     assert "not confirmation that funds or purchases are available or approved" in JS
     assert "financial management services (FMS)" in HTML
     assert "Do not enter names" in HTML
+    assert "individual spending amount" in HTML
+    assert "cumulative balance" in HTML
+    assert "getamicor.com/early-access/?product=CFSS%20Budget%20Co-Pilot" in HTML
+    assert "does not receive your entries" in HTML
     assert "No payments accepted" in HTML
 
 def test_essential_values_and_scenario() -> None:
