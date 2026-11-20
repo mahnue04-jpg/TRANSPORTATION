@@ -78,6 +78,8 @@ def initialize_disposable_sandbox() -> None:
 @app.middleware("http")
 async def synthetic_only_guard(request: Request, call_next):
     path = request.url.path
+    if not _safe_configuration():
+        return JSONResponse(status_code=503, content={"detail": "Sandbox unavailable"})
     if path == "/health":
         return JSONResponse({
             "status": "sandbox_only",
@@ -86,8 +88,6 @@ async def synthetic_only_guard(request: Request, call_next):
             "customer_processing": False,
             "private_delivery": False,
         }, headers={"Cache-Control": "no-store"})
-    if not _safe_configuration():
-        return JSONResponse(status_code=503, content={"detail": "Sandbox unavailable"})
     if path == "/api/marketing/nova-agent/stripe/webhook" and request.method == "POST":
         # Signature must still pass the existing route's Stripe verifier.
         return await call_next(request)
