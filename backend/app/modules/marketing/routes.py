@@ -348,7 +348,7 @@ def create_nova_agent_checkout(
 
     # Stripe live readiness does not establish that customer work can be
     # fulfilled. Keep purchases closed until service delivery is authorized.
-    if not _operations_plan_checkout_open(str(lead.service_plan)):
+    if not _operations_plan_checkout_open(str(lead.service_plan), db):
         raise HTTPException(
             status_code=503,
             detail="Operations checkout is not open for customer purchases yet",
