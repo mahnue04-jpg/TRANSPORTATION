@@ -450,6 +450,15 @@ def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
     routes._RATE_HITS.clear()
     monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
     monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    for flag in (
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    ):
+        monkeypatch.setenv(flag, "true")
+    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", lambda db: True)
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
@@ -517,7 +526,7 @@ def test_live_operations_monthly_plans_remain_closed(monkeypatch):
         status = client.get("/api/marketing/nova-agent/checkout-status")
         assert status.status_code == 200
         plans = status.json()["plans"]
-        assert plans["starter_49"]["checkout_available"] is True
+        assert plans["starter_49"]["checkout_available"] is False
         assert plans["launch_99"]["checkout_available"] is False
         assert plans["business_299"]["checkout_available"] is False
         for idx, plan in enumerate(("launch_99", "business_299")):
@@ -540,6 +549,53 @@ def test_live_operations_monthly_plans_remain_closed(monkeypatch):
                 headers={"X-Forwarded-For": f"198.51.100.{242+idx}"},
             )
             assert response.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_live_starter_checkout_denied_until_fulfillment_ready(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    for flag in (
+        "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    ):
+        monkeypatch.setenv(flag, "true")
+    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", lambda db: False)
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.246"},
+            json={
+                "lead_type": "anonymous_operations",
+                "contact_name": "Synthetic Not Ready",
+                "work_email": "no-fulfillment@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic scoped CSV cleanup request.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["data"]["checkout_available"] is False
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        assert status.json()["customer_sales_enabled"] is False
+        lead_id = submitted.json()["data"]["lead_id"]
+        checkout = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.247"},
+        )
+        assert checkout.status_code == 503
         assert fake.sessions == {}
     finally:
         set_agent_stripe_override(None)
