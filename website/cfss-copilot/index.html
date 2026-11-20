@@ -1,16 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-<!-- Google Tag Manager -->
-<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-})(window,document,'script','dataLayer','GTM-KTQ6Q68T');</script>
-<!-- End Google Tag Manager -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="description" content="An offline-first, privacy-conscious demonstration of a Minnesota CFSS budget-model planning assistant. Not an official authorization or FMS record.">
 <title>CFSS Budget Co-Pilot | AMICOR Nova</title>
 <style>
@@ -75,10 +69,6 @@ footer p{font-size:12px}
 </style>
 </head>
 <body>
-<!-- Google Tag Manager (noscript) -->
-<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KTQ6Q68T"
-height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-<!-- End Google Tag Manager (noscript) -->
 <header><a href="https://getamicor.com/">AMICOR NOVA</a><div class="sub">Private-on-device planning preview</div></header>
 <main>
 <section class="intro">
@@ -192,7 +182,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </section>
 </div>
 <section class="privacy" aria-label="Planning safeguards">
-<div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations and FMS report comparisons run in this browser; we do not send your entered financial figures. Page analytics may record visits. Refreshing discards your entries unless you choose to download a local JSON plan. Treat downloaded files as private financial information.</p></div>
+<div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations and FMS report comparisons run in your browser without third-party analytics or uploading the figures you enter. Normal website hosting access logs may still record page visits. Refreshing discards entries unless you choose to download a private JSON plan.</p></div>
 <div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and the latest FMS monthly spending report as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review. A projected affordable schedule is never an approved service authorization.</p></div>
 <div><strong><span aria-hidden="true">🧮</span> Estimates, not authorization</strong><p>Monthly worker cost uses 52 weeks divided by 12 months. It assumes a constant schedule and user-supplied employer burden, not DHS rate formulas.</p></div>
 </section>
