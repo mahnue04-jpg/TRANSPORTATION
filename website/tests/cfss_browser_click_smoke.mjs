@@ -49,7 +49,7 @@ assert.equal(node("hours").value,30);
 assert.equal(node("burden").value,17);
 assert.equal(node("other").value,200);
 assert.equal(node("onetime").value,450);
-assert.equal(node("results").hidden,false,"Budget outlook becomes visible");
+assert.equal(node("results").hidden,false,"Budget outlook becomes visible; error="+node("error").textContent);
 assert.equal(node("error").textContent,"","Example must calculate without an error");
 assert.equal(node("rBudget").textContent,"$48,000.00");
 assert.equal(node("rMonths").textContent,"9");
