@@ -1,0 +1,60 @@
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#19354a;background:#f4f7fa;font-synthesis:none}
+*{box-sizing:border-box}
+body{margin:0}
+a{color:#146d7b}
+button,input{font:inherit}
+header{background:#102e45;color:#fff;padding:22px max(22px,calc((100vw - 1180px)/2))}
+header a{color:#fff;text-decoration:none;font-weight:800}
+header .sub{font-size:12px;color:#bfe5e8;font-weight:600;letter-spacing:.09em;text-transform:uppercase}
+main{max-width:1180px;margin:auto;padding:28px 22px 76px}
+h1{font-size:clamp(30px,4vw,49px);letter-spacing:-.04em;line-height:1.12;margin:10px 0}
+h2{font-size:20px;margin:0 0 8px}
+h3{font-size:16px;margin:0 0 5px}
+p{line-height:1.55;color:#4d6271}
+.intro{max-width:850px}
+.topline{display:inline-flex;align-items:center;border:1px solid #a5d9d2;background:#e8f7f3;color:#195d50;border-radius:100px;font-size:12px;font-weight:800;letter-spacing:.04em;padding:7px 12px}
+.notice{border-left:4px solid #d2942f;background:#fff9e9;padding:13px 16px;border-radius:8px;margin:22px 0 26px;font-size:14px}
+.notice strong{display:block;margin-bottom:4px}
+.layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:22px;align-items:start}
+.panel{background:white;border:1px solid #dbe5eb;border-radius:18px;padding:25px;box-shadow:0 8px 24px #152e4509}
+.panel small,.help{color:#617888;font-size:12px}
+.section{border:0;border-top:1px solid #e1e9ef;margin:22px 0 0;padding:19px 0 0}
+.section legend{font-weight:800;padding:0 6px 0 0;color:#17364c}
+.fieldgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+label{display:block;font-size:13px;font-weight:750;line-height:1.35;color:#243e52}
+label span{display:block;margin-top:5px;font-size:11px;color:#647d8b;font-weight:450}
+input{display:block;width:100%;border:1px solid #b9cbd6;border-radius:8px;background:#fff;color:#17364d;padding:11px 12px;margin-top:6px;min-width:0}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #f0b34f;outline-offset:2px}
+input:invalid{box-shadow:none}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+button{cursor:pointer;border:0;border-radius:10px;background:#086c74;color:white;padding:12px 16px;font-weight:800}
+button.secondary{background:#ecf3f5;color:#235368;border:1px solid #d0e1e7}
+button:disabled{opacity:.5;cursor:not-allowed}
+#error{color:#9e2d2d;font-size:14px;font-weight:700;margin-top:12px}
+.status{background:#f0f6f8;padding:13px 15px;border-radius:10px;color:#315466;font-size:13px;margin:15px 0}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:20px 0}
+.metric{background:#f0f6f8;border-radius:12px;padding:15px;min-width:0}
+.metric .name{font-size:12px;color:#536d7c}
+.metric strong{display:block;font-size:clamp(18px,2.3vw,27px);letter-spacing:-.04em;margin:7px 0;overflow-wrap:anywhere}
+.metric small{display:block}
+.metric.green{background:#e5f5ef}
+.metric.red{background:#fff0e8}
+.result-table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0}
+.result-table th,.result-table td{padding:12px 4px;border-bottom:1px solid #e1e9ef;vertical-align:top}
+.result-table th{text-align:left;font-weight:550;color:#4f6574}
+.result-table td{text-align:right;font-weight:750;font-variant-numeric:tabular-nums}
+.result-table caption{text-align:left;font-weight:800;margin:9px 0;color:#18384c}
+.summary{margin-top:14px;border-radius:11px;background:#f6f9fb;padding:13px;font-size:13px;color:#34566a;line-height:1.55}
+.summary strong{color:#173c54}
+.badge{font-size:12px;font-weight:800;display:inline-block;padding:5px 8px;border-radius:7px;background:#ecf3f5;color:#385e70}
+footer{max-width:1180px;margin:auto;padding:0 22px 40px;color:#526c7b;font-size:12px}
+footer p{font-size:12px}
+.privacy{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px;margin-top:25px}
+.privacy>div{padding:15px;border:1px solid #d7e5e9;border-radius:12px;background:#fff}
+.privacy strong{display:block;font-size:13px}
+.privacy p{font-size:12px;margin-bottom:0}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.panel{padding:20px}.privacy{grid-template-columns:1fr}}
+@media(max-width:420px){.fieldgrid,.metrics{grid-template-columns:1fr}.actions button{width:100%}}
+@media print{header,.actions,#error,.notice,.privacy,footer{display:none!important}body{background:#fff}main{padding:0}.layout{grid-template-columns:1fr 1fr}.panel{box-shadow:none;border:1px solid #bbcbd5}.intro p{font-size:12px}}
+.cfss-summary{font-weight:750;cursor:pointer;padding:8px 0}
+.fms-fields{margin-top:15px}
