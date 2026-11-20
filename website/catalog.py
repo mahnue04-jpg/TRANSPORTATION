@@ -89,7 +89,7 @@ PRODUCTS = [
         table_status="DEVELOPMENT STAGING",
         summary="Owner CRM, consent-aware chat and booking prototypes in staging. No autonomous customer outreach or live messaging.",
         claim="Working staging components under review; not a customer-live growth service. Paid providers and autonomous outreach are disabled.",
-        href="/launch-status/",
+        href="/early-access/?product=Nova%20Growth%20Agent",
         art="card-growth-agent.svg",
         alt="Conceptual growth workflow illustration with contact pipeline and appointment calendar. Not actual customer records.",
         lead="Nova Growth Agent",
@@ -290,7 +290,7 @@ def card_action(product: dict) -> tuple[str, str]:
     if product["id"] == "cfss-budget-copilot":
         return ("Try fictional demo", product["href"])
     if product["id"] == "nova-growth-agent":
-        return ("View development status", product["href"])
+        return ("Request early access", product["href"])
     unfinished = any(token in status for token in ("in development", "future hardware", "coming soon")) or "coming soon" in table
     if unfinished:
         return ("Join waitlist", "/early-access/?product=" + quote(product["lead"]))
