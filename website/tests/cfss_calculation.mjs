@@ -1,8 +1,8 @@
 // Offline calculation checks: no DOM, network, browser or customer information.
 // Evaluates only the pure calculate() function extracted from the source.
-const fs = require("node:fs");
-const vm = require("node:vm");
-const assert = require("node:assert/strict");
+import fs from "node:fs";
+import vm from "node:vm";
+import assert from "node:assert/strict";
 const html = fs.readFileSync("website/cfss-copilot/index.html","utf8");
 const start = html.indexOf("function calculate(values){");
 const end = html.indexOf("function collect(){",start);
