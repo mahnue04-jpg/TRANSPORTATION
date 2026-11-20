@@ -34,21 +34,54 @@ logger = logging.getLogger("amicor.marketing.routes")
 
 router = APIRouter(prefix="/api/marketing", tags=["marketing"])
 
+def _operations_live_fulfillment_ready(db: Session) -> bool:
+    """Read-only proof of required paid-task schema and private storage setup.
+
+    Never create or migrate tables in a checkout request. Return false on
+    unavailable infrastructure so no charge can precede secure fulfillment.
+    """
+    try:
+        import sqlalchemy as sa
+        from app.core.nova.work_revenue import operations_customer_csv_jobs as csv_jobs
+        from app.core.nova.work_revenue import operations_customer_delivery as delivery
+        from app.core.nova.work_revenue import operations_starter_payment_binding as binding
+
+        csv_jobs.require_runtime(db)
+        csv_jobs._store()  # Validate private storage credentials, no upload.
+        inspector = sa.inspect(db.get_bind())
+        return all(inspector.has_table(table.name) for table in (
+            csv_jobs.jobs, delivery.grants, binding.starter_bindings,
+        ))
+    except Exception:
+        logger.warning("operations_live_fulfillment_preflight_failed")
+        return False
+
+
 def _operations_checkout_sales_open() -> bool:
-    """Customer checkout needs a configured Stripe mode and explicit live approval."""
+    """Live checkout requires approval of the whole fulfillment stack."""
     mode = agent_checkout_mode()
     if mode == "test":
         return True
     if mode != "live":
         return False
-    return os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() == "true"
+    required = (
+        "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    )
+    return all(os.getenv(key, "").strip().lower() == "true" for key in required)
 
 
-def _operations_plan_checkout_open(plan_key: str) -> bool:
-    """Monthly plans are not part of the first live Starter Task release."""
+def _operations_plan_checkout_open(plan_key: str, db: Session | None = None) -> bool:
+    """Only sell live Starter Task after the storage and schema preflight."""
     if not _operations_checkout_sales_open():
         return False
-    return agent_checkout_mode() != "live" or plan_key == "starter_49"
+    if agent_checkout_mode() != "live":
+        return True
+    return bool(plan_key == "starter_49" and db is not None and _operations_live_fulfillment_ready(db))
 
 
 _RATE_LOCK = Lock()
@@ -187,7 +220,7 @@ def create_marketing_lead(
                     "checkout_available": bool(
                         duplicate.lead_type == "anonymous_operations"
                         and duplicate.service_plan in {"starter_49", "launch_99", "business_299"}
-                        and _operations_plan_checkout_open(str(duplicate.service_plan))
+                        and _operations_plan_checkout_open(str(duplicate.service_plan), db)
                         and duplicate.payment_status != "paid"
                         and (agent_checkout_mode() != "live" or duplicate.status == "qualified")
                     ),
@@ -253,7 +286,7 @@ def create_marketing_lead(
             "checkout_available": bool(
                 lead.lead_type == "anonymous_operations"
                 and lead.service_plan in {"starter_49", "launch_99", "business_299"}
-                and _operations_plan_checkout_open(str(lead.service_plan))
+                and _operations_plan_checkout_open(str(lead.service_plan), db)
                 and lead.payment_status != "paid"
                 and (agent_checkout_mode() != "live" or lead.status == "qualified")
             ),
@@ -270,18 +303,18 @@ def create_marketing_lead(
 
 
 @router.get("/nova-agent/checkout-status")
-def nova_agent_checkout_status():
+def nova_agent_checkout_status(db: Session = Depends(get_db)):
     """Public non-secret launch status for the Operations Agent payment lane."""
     return {
         "product": "Nova Anonymous Operations Agent",
         "mode": agent_checkout_mode(),
-        "customer_sales_enabled": _operations_checkout_sales_open(),
+        "customer_sales_enabled": _operations_plan_checkout_open("starter_49", db),
         "plans": {
             key: {
                 "label": spec["label"],
                 "amount_cents": int(spec["amount_cents"]),
                 "checkout_required": spec["mode"] in {"payment", "subscription"},
-                "checkout_available": spec["mode"] in {"payment", "subscription"} and _operations_plan_checkout_open(key),
+                "checkout_available": spec["mode"] in {"payment", "subscription"} and _operations_plan_checkout_open(key, db),
                 "billing_mode": spec["mode"],
             }
             for key, spec in AGENT_PLANS.items()
