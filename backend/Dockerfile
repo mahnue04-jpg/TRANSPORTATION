@@ -10,8 +10,11 @@ WORKDIR /app
 # Native speech and voice-data packages are required by the offline 30s montage.
 # Do not remove licensing review: offline output remains AMBER for publication.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends espeak-ng espeak-ng-data \
+    && apt-get install -y --no-install-recommends ffmpeg espeak-ng espeak-ng-data \
     && rm -rf /var/lib/apt/lists/* \
+    && command -v ffmpeg \
+    && command -v ffprobe \
+    && ffprobe -version >/dev/null \
     && command -v espeak-ng \
     && espeak-ng --voices >/dev/null \
     && espeak-ng -w /tmp/studio-voice-smoke.wav 'Nova Studio offline voice verification' \
