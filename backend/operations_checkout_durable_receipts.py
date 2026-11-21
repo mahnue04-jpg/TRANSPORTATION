@@ -299,7 +299,51 @@ def _dedicated_staging_engine():
         or expected_user.lower() in privileged_users
     ):
         raise RuntimeError("Dedicated staging receipt connection identity mismatch")
-    return create_engine(url, pool_pre_ping=True)
+    engine = create_engine(url, pool_pre_ping=True)
+    try:
+        verify_restricted_receipt_role(engine, expected_user)
+    except Exception:
+        engine.dispose()
+        raise
+    return engine
+
+
+def verify_restricted_receipt_role(engine, expected_user):
+    """Refuse owner or overprivileged connections before any receipt writes.
+
+    PostgreSQL checks use the authenticated current_user and effective grants;
+    merely choosing a harmless-looking username is not sufficient. This is
+    read-only validation, never a GRANT, REVOKE, migration or role creation.
+    """
+    with engine.connect() as conn:
+        role = conn.execute(text("""
+            SELECT current_user = :expected AS correct_user,
+                   r.rolsuper, r.rolcreatedb, r.rolcreaterole,
+                   r.rolreplication, r.rolbypassrls,
+                   has_database_privilege(current_user, current_database(), 'CREATE') AS db_create,
+                   has_schema_privilege(current_user, 'public', 'CREATE') AS public_create,
+                   has_schema_privilege(current_user, :schema, 'USAGE') AS receipt_usage,
+                   has_schema_privilege(current_user, :schema, 'CREATE') AS receipt_create,
+                   has_table_privilege(current_user, :orders, 'SELECT, INSERT') AS orders_read_write,
+                   has_table_privilege(current_user, :receipts, 'SELECT, INSERT') AS receipts_read_write,
+                   has_table_privilege(current_user, :orders, 'UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS orders_excess,
+                   has_table_privilege(current_user, :receipts, 'UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS receipts_excess
+            FROM pg_catalog.pg_roles r WHERE r.rolname = current_user
+        """), {
+            "expected": expected_user, "schema": SCHEMA,
+            "orders": f"{SCHEMA}.starter_test_orders",
+            "receipts": f"{SCHEMA}.starter_test_receipts",
+        }).mappings().one_or_none()
+    if role is None or not role["correct_user"]:
+        raise RuntimeError("Restricted receipt role identity mismatch")
+    forbidden = ("rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication",
+                 "rolbypassrls", "db_create", "public_create", "receipt_create",
+                 "orders_excess", "receipts_excess")
+    if any(role[name] for name in forbidden):
+        raise RuntimeError("Restricted receipt role has excessive permissions")
+    required = ("receipt_usage", "orders_read_write", "receipts_read_write")
+    if not all(role[name] for name in required):
+        raise RuntimeError("Restricted receipt role lacks required permissions")
 
 
 def register_staging_checkout_binding(*, lead_id, session_id, customer_id):
