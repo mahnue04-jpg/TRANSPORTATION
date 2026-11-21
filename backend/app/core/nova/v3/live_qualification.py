@@ -16,7 +16,10 @@ from app.core.nova.work_revenue.capability_classification import (
     INSUFFICIENT_INFORMATION,
     classify_opportunity_capability,
 )
-from app.core.nova.work_revenue.capability_first_discovery import score_discovery_candidate
+from app.core.nova.work_revenue.capability_first_discovery import (
+    score_discovery_candidate,
+    upwork_paid_connects_required,
+)
 
 OUTCOME_QUALIFIED = "QUALIFIED"
 OUTCOME_NEEDS_OWNER_REVIEW = "NEEDS_OWNER_REVIEW"
@@ -126,6 +129,11 @@ _FEE_TOKENS = (
     "purchase required",
     "buy access",
     "paid access",
+    "paid connects",
+    "upwork connects",
+    "connects to apply",
+    "pay for connects",
+    "buy connects",
 )
 
 _FEE_UNCLEAR_TOKENS = (
@@ -339,17 +347,118 @@ def _has_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
 
 
+_HARD_EMPLOYMENT_TOKENS = (
+    "w-2",
+    "w2",
+    "employee only",
+    "staff position",
+    "join our team",
+    "permanent employee",
+    "salary employee",
+    "hired as an employee",
+    "full-time employee",
+    "full time employee",
+)
+_EXPLICIT_CONTRACTOR_TOKENS = (
+    "independent contractor",
+    "1099",
+    "freelance",
+    "freelancer",
+    "contractor",
+    "contract role",
+    "contract work",
+    "statement of work",
+)
+
+
+def _affirmative_phrase(text: str, phrase: str) -> bool:
+    """True when phrase appears and is not directly negated."""
+    start = 0
+    while True:
+        index = text.find(phrase, start)
+        if index < 0:
+            return False
+        prefix = text[max(0, index - 16):index]
+        if not re.search(r"\b(?:no|not|without|non)\s*$", prefix, re.I):
+            return True
+        start = index + len(phrase)
+
+
+def _explicit_contractor(text: str, job_type: str) -> bool:
+    jt = job_type.replace("-", "_")
+    if jt in {"contract", "contractor", "freelance", "freelancer", "1099"}:
+        return True
+    if "contract" in jt and "full" not in jt:
+        return True
+    return _has_any(text, _EXPLICIT_CONTRACTOR_TOKENS)
+
+
 def _detect_work_type(text: str, job_type: str | None) -> str:
+    """Classify engagement. Full-time hours do not override an explicit contractor.
+
+    W-2, staff, and "join our team" stay employment even if contractor words
+    also appear. A negated benefits line is not an employment claim.
+    """
     jt = str(job_type or "").lower()
-    if _has_any(text, _EMPLOYEE_TOKENS) or "full_time" in jt or jt in {"full-time", "permanent"}:
+    contractor = _explicit_contractor(text, jt)
+    if _has_any(text, _HARD_EMPLOYMENT_TOKENS):
+        # "Join our team" on an explicit contractor listing is a welcome line,
+        # not a W-2 requirement. W-2, staff, and permanent-employee wording
+        # still classifies the role as employment.
+        team_only = (
+            "join our team" in text
+            and not _has_any(
+                text,
+                tuple(token for token in _HARD_EMPLOYMENT_TOKENS if token != "join our team"),
+            )
+        )
+        if not (team_only and contractor):
+            return WORK_EMPLOYEE
+    if contractor:
+        if "b2b" in text or "vendor" in text or "statement of work" in text:
+            return WORK_B2B
+        if "freelance" in text or "freelance" in jt:
+            return WORK_FREELANCE
+        return WORK_CONTRACTOR
+    benefits = _affirmative_phrase(text, "benefits package") or _affirmative_phrase(text, "401k") or _affirmative_phrase(text, "401(k)")
+    bare_full_time = (
+        "full-time" in text
+        or "full time" in text
+        or "full_time" in jt
+        or jt in {"full-time", "permanent"}
+    )
+    if bare_full_time or benefits:
         return WORK_EMPLOYEE
     if "b2b" in text or "vendor" in text or "statement of work" in text:
         return WORK_B2B
     if "freelance" in text or "freelance" in jt:
         return WORK_FREELANCE
-    if _has_any(text, _CONTRACT_TOKENS) or "contract" in jt:
+    if _has_any(text, _CONTRACT_TOKENS) or ("contract" in jt and "full" not in jt):
         return WORK_CONTRACTOR
     return WORK_UNKNOWN
+
+
+# A benefit such as a gym membership is not a fee to apply. Payment has to sit
+# next to the membership word. Only that benefit span is removed, so a paid
+# club, team, or health membership in the same sentence still counts.
+_BENEFIT_MEMBERSHIP = re.compile(
+    r"\b(?:gym|fitness|health club|insurance)\s+memberships?\b",
+    re.I,
+)
+_MEMBERSHIP_PAYMENT = re.compile(
+    r"\b(?:pay|paid|payment|fee|fees|dues)\b(?:\W+\w+){0,4}\W+memberships?\b"
+    r"|\bmemberships?\b(?:\W+\w+){0,4}\W+\b(?:pay|paid|payment|fee|fees|dues)\b",
+    re.I,
+)
+
+
+def _paid_membership_nearby(text: str) -> bool:
+    """True when a sentence charges for membership access."""
+    for sentence in re.split(r"[.\n;]", text or ""):
+        remaining = _BENEFIT_MEMBERSHIP.sub(" ", sentence)
+        if _MEMBERSHIP_PAYMENT.search(remaining):
+            return True
+    return False
 
 
 def _detect_fee(text: str) -> str:
@@ -395,9 +504,7 @@ def _detect_fee(text: str) -> str:
         return FEE_NO
     if _has_any(text, _FEE_TOKENS) or any(token in text for token in affirmative):
         return FEE_YES
-    if "membership" in text and ("pay" in text or "fee" in text or "dues" in text):
-        if "no fee" in text or "without fee" in text:
-            return FEE_NO
+    if _paid_membership_nearby(text):
         return FEE_YES
     if _has_any(text, _FEE_UNCLEAR_TOKENS):
         return FEE_UNCLEAR
@@ -555,6 +662,9 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
 
     work_type = _detect_work_type(text, job.get("job_type"))
     fee_required = _detect_fee(text)
+    paid_connects = upwork_paid_connects_required(job)
+    if paid_connects:
+        fee_required = FEE_YES
     ai_policy, ai_ambiguous = _detect_ai_policy(text)
     compensation_ok = _compensation_present(job, text)
     source_ok = _source_legitimate(job)
@@ -613,6 +723,9 @@ def qualify_live_job(job: dict[str, Any]) -> dict[str, Any]:
     if fee_required == FEE_YES:
         blockers.append("upfront_fee_or_paid_membership")
         reasons.append("Upfront fee, paid membership, or payment-to-access is required.")
+    if paid_connects:
+        blockers.append("upwork_paid_connects")
+        reasons.append("Upwork paid connects are a pay-to-apply path and stay blocked.")
     if human_evaluator:
         blockers.append("human_evaluator_or_annotation_role")
         reasons.append("Role requires a human evaluator/rater/annotator to personally judge work.")
@@ -963,6 +1076,9 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                 "upfront_fee_required": (
                     "Role requires an upfront fee or payment to apply."
                 ),
+                "upwork_paid_connects": (
+                    "Upwork paid connects are a pay-to-apply path and stay blocked."
+                ),
                 "non_us_location_required": (
                     "Role requires the worker to be outside the United States."
                 ),
@@ -1007,6 +1123,17 @@ def qualify_and_rank_live_jobs(query: str, jobs: list[dict[str, Any]]) -> list[d
                     qual["reasons"].append(specific)
                 if not discovery.get("physical_licensed_onsite_blocked"):
                     qual["owner_review_reason"] = shown
+            if not qual.get("blockers"):
+                shown = (
+                    f"Discovery fit score {discovery.get('discovery_score')} is below the review "
+                    "threshold for this capability family."
+                )
+                qual.setdefault("blockers", []).append("discovery_fit_below_threshold")
+                qual.setdefault("reasons", []).append(shown)
+                qual["owner_review_reason"] = shown
+        row["qualification_status"] = qual["qualification_status"]
+        row["qualification_outcome"] = qual.get("qualification_outcome")
+        row["owner_review_reason"] = qual.get("owner_review_reason")
         base = int(row.get("relevance_score") or 0)
         bonus = qualification_rank_bonus(qual) + int(discovery["discovery_score"] // 4)
         if discovery.get("digital_contractor_rank_boost"):
@@ -1054,7 +1181,11 @@ def partition_by_qualification(jobs: list[dict[str, Any]]) -> dict[str, list[dic
         OUTCOME_NOT_QUALIFIED: [],
     }
     for job in jobs:
-        status = str(job.get("qualification_status") or OUTCOME_NEEDS_OWNER_REVIEW)
+        status = str(
+            (job.get("live_qualification") or {}).get("qualification_status")
+            or job.get("qualification_status")
+            or OUTCOME_NEEDS_OWNER_REVIEW
+        )
         if status not in buckets:
             buckets[OUTCOME_NEEDS_OWNER_REVIEW].append(job)
         else:

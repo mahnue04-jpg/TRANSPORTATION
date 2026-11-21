@@ -889,6 +889,7 @@
     if (selectedOpportunityId) {
       await loadDetail(selectedOpportunityId);
     }
+    document.dispatchEvent(new CustomEvent("nova-work-refreshed"));
   }
   async function novaSubmitApplication(id) {
     setWorkActionStatus(id, "Nova is attempting the approved submission.", true);
@@ -1339,9 +1340,12 @@
   if ($("live-job-form")) {
     $("live-job-form").addEventListener("submit", async function (event) {
       event.preventDefault();
+      var searchButton = event.currentTarget.querySelector('button[type="submit"]');
+      if (searchButton && searchButton.disabled) return;
       var query = $("live-job-query").value.trim();
       if (!query) return;
-      $("live-job-status").textContent = "Nova is resetting the prior live-search list, searching only the requested capability family, and keeping only revenue-ready QUALIFIED matches...";
+      if (searchButton) searchButton.disabled = true;
+      $("live-job-status").textContent = "Nova is searching for qualified paid work and saving valid matches without removing previous leads...";
       $("live-job-results").innerHTML = "";
       try {
         var body = await api("/api/nova/v3/live/jobs/prepare", {
@@ -1357,17 +1361,30 @@
         var prepared = body.prepared || [];
         var ranked = body.ranked_jobs || [];
         var counts = body.qualification_counts || {};
-        $("live-job-status").textContent =
-          "Previous live search archived " + ((body.reset_result && body.reset_result.archived_count) || 0) +
-          " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
-          " · found/ranked " + (body.ranked_count || 0) +
-          " · selected " + (body.selected_count || 0) +
-          " · QUALIFIED " + (counts.QUALIFIED || 0) +
-          " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
-          " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
-          " · auto-prepared " + (body.prepared_count || 0) +
-          " · external action: " + String(body.external_action_taken === true) +
-          " · financial execution: " + String(body.financial_execution === true) + ".";
+        if (body.live_search_claimed === false || body.live_search_status === "unavailable") {
+          var failedSources = (body.providers_failed || []).join(", ") || "every source";
+          $("live-job-status").textContent =
+            "Live search was not completed. " + failedSources +
+            " failed, so this is not a zero-match result. Nothing was submitted.";
+        } else {
+          var partialSourceWarning = body.live_search_status === "partial" || (body.providers_failed || []).length > 0
+            ? "PARTIAL: some live sources failed. These are only the results returned by working sources. "
+            : "";
+          $("live-job-status").textContent = partialSourceWarning +
+            "Previously saved leads retained" +
+            " · search " + (body.live_search_status || "ok") +
+            " · searched " + ((body.search_plan && body.search_plan.length) || 1) + " targeted queries" +
+            " · found/ranked " + (body.ranked_count || 0) +
+            " · selected " + (body.selected_count || 0) +
+            " · saved in database " + (body.durably_saved_count || 0) +
+            " · visible on first-client board " + (body.saved_visible_on_board_count || 0) +
+            " · QUALIFIED " + (counts.QUALIFIED || 0) +
+            " · NEEDS_OWNER_REVIEW " + (counts.NEEDS_OWNER_REVIEW || 0) +
+            " · NOT_QUALIFIED " + (counts.NOT_QUALIFIED || 0) +
+            " · auto-prepared " + (body.prepared_count || 0) +
+            " · external action: " + String(body.external_action_taken === true) +
+            " · financial execution: " + String(body.financial_execution === true) + ".";
+        }
         var preparedIds = {};
         prepared.forEach(function (item) {
           var opp = item.opportunity || {};
@@ -1387,11 +1404,26 @@
           "No live opportunities matched. Try a broader search.",
           liveJobItem
         );
-        showBanner("New search session loaded. Prior unprotected live-search results were archived; only revenue-ready QUALIFIED matches were saved. External submission remains off.", true);
+        if (body.live_search_claimed === false || body.live_search_status === "unavailable") {
+          $("live-job-results").textContent = "Live sources unavailable. No verified search results were returned. Please retry after the source recovers.";
+          showBanner("Live job sources were unavailable. This is not a zero-match search. No applications were submitted.");
+        } else if (body.live_search_status === "partial" || (body.providers_failed || []).length > 0) {
+          showBanner("Partial live-source results. " +
+            (body.durably_saved_count || 0) + " qualified records saved; " +
+            (body.saved_visible_on_board_count || 0) + " visible on the first-client board. Nothing submitted.");
+        } else if ((body.durably_saved_count || 0) > 0) {
+          showBanner((body.durably_saved_count || 0) + " qualified records saved; " +
+            (body.saved_visible_on_board_count || 0) +
+            " visible on the first-client board. Nothing submitted.", true);
+        } else {
+          showBanner("Search completed, but no qualified opportunities were saved. Existing leads remain available.");
+        }
         await refresh();
       } catch (err) {
         $("live-job-status").textContent = err.message;
         showBanner(err.message);
+      } finally {
+        if (searchButton) searchButton.disabled = false;
       }
     });
   }

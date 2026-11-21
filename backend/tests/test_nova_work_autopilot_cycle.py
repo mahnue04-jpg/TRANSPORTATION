@@ -186,3 +186,122 @@ def test_empty_specific_search_retries_with_broader_query(monkeypatch):
     assert calls == ["remote administrative support contractor", "administrative support"]
     assert result["selected_count"] == 1
     assert result["per_query"][0]["used_query"] == "administrative support"
+
+
+def test_later_query_errors_do_not_hide_a_completed_search(monkeypatch):
+    def fake_search(query, limit):
+        if query == "second":
+            return {
+                "jobs": [],
+                "providers_queried": ["remotive", "remoteok"],
+                "provider_errors": [
+                    {"provider_id": "remotive", "error": "timeout"},
+                    {"provider_id": "remoteok", "error": "429"},
+                ],
+                "provider_result_counts": {},
+            }
+        return {
+            "jobs": [{
+                "provider_id": "remotive",
+                "source_url": "https://example.test/job",
+                "title": "Administrative Support",
+                "company_name": "Buyer",
+            }],
+            "providers_queried": ["remotive", "remoteok"],
+            "provider_errors": [],
+            "provider_result_counts": {"remotive": 1, "remoteok": 0},
+        }
+
+    def fake_rank(query, jobs):
+        return [
+            dict(
+                job,
+                relevance_score=80,
+                qualification_status=OUTCOME_QUALIFIED,
+                live_qualification={"qualification_status": OUTCOME_QUALIFIED},
+            )
+            for job in jobs
+        ]
+
+    monkeypatch.setattr(autopilot_cycle, "search_multi_source_jobs", fake_search)
+    monkeypatch.setattr(autopilot_cycle, "qualify_and_rank_live_jobs", fake_rank)
+    monkeypatch.setattr(autopilot_cycle, "persist_ranked_jobs", lambda *args, **kwargs: [])
+
+    result = autopilot_cycle.run_autopilot_cycle(
+        object(),
+        organization_id="org-1",
+        user=object(),
+        queries=["first", "second"],
+        query_limit=2,
+        min_relevance_score=60,
+    )
+
+    assert result["selected_count"] == 1
+    assert result["live_search_claimed"] is True
+    assert result["live_search_status"] == "partial"
+    assert result["providers_succeeded"] == ["remoteok", "remotive"]
+    assert result["providers_failed"] == []
+
+
+def test_fallback_timeout_does_not_hide_a_completed_search(monkeypatch):
+    def fake_search(query, limit):
+        if query == "administrative support":
+            return {
+                "jobs": [],
+                "providers_queried": ["remotive"],
+                "provider_errors": [{"provider_id": "remotive", "error": "timeout"}],
+                "provider_result_counts": {},
+            }
+        return {
+            "jobs": [],
+            "providers_queried": ["remotive"],
+            "provider_errors": [],
+            "provider_result_counts": {"remotive": 0},
+        }
+
+    monkeypatch.setattr(autopilot_cycle, "search_multi_source_jobs", fake_search)
+    monkeypatch.setattr(autopilot_cycle, "qualify_and_rank_live_jobs", lambda query, jobs: [])
+    monkeypatch.setattr(autopilot_cycle, "persist_ranked_jobs", lambda *args, **kwargs: [])
+
+    result = autopilot_cycle.run_autopilot_cycle(
+        object(),
+        organization_id="org-1",
+        user=object(),
+        queries=["remote administrative support contractor"],
+        query_limit=1,
+        min_relevance_score=60,
+    )
+
+    assert result["live_search_claimed"] is True
+    assert result["live_search_status"] == "partial"
+    assert result["providers_succeeded"] == ["remotive"]
+    assert result["empty_reason"] == "no_matches"
+
+
+def test_autopilot_stays_unavailable_when_every_source_fails(monkeypatch):
+    monkeypatch.setattr(
+        autopilot_cycle,
+        "search_multi_source_jobs",
+        lambda query, limit: {
+            "jobs": [],
+            "providers_queried": ["remotive"],
+            "provider_errors": [{"provider_id": "remotive", "error": "timeout"}],
+            "provider_result_counts": {},
+        },
+    )
+    monkeypatch.setattr(autopilot_cycle, "qualify_and_rank_live_jobs", lambda query, jobs: [])
+    monkeypatch.setattr(autopilot_cycle, "persist_ranked_jobs", lambda *args, **kwargs: [])
+
+    result = autopilot_cycle.run_autopilot_cycle(
+        object(),
+        organization_id="org-1",
+        user=object(),
+        queries=["notes"],
+        query_limit=1,
+    )
+
+    assert result["live_search_claimed"] is False
+    assert result["live_search_status"] == "unavailable"
+    assert result["providers_succeeded"] == []
+    assert result["providers_failed"] == ["remotive"]
+    assert result["empty_reason"] == "source_unavailable"

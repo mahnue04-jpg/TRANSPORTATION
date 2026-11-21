@@ -124,7 +124,8 @@ def test_d_connector_temporarily_fails_and_retries() -> None:
     assert job.retry_count == 1
     kernel.connectors[next(iter(kernel.connectors))].state = "CONNECTED"
     ran = kernel.tick_worker(organization_id="org-a", owner_user_id="owner-a")
-    assert ran[0].status == "EXECUTED"
+    assert ran[0].status == "PREPARED"
+    assert ran[0].next_run_at is not None and ran[0].next_run_at > kernel.now
 
 
 def test_e_scheduler_restarts_safely() -> None:

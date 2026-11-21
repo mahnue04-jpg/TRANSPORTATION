@@ -111,9 +111,40 @@ def _listing_text(job: dict[str, Any]) -> str:
     )
 
 
-def _claim_stands(pattern: re.Pattern[str], text: str) -> bool:
+_AUDIENCE_NATIVE_SUFFIX = re.compile(
+    r"^(?:[- ]speaking)?\s+(?:speakers|customers|clients|users|audiences|markets)\b",
+    re.I,
+)
+
+
+def _native_span_is_audience(text: str, start: int, end: int) -> bool:
+    """True when native-language wording names the people being served.
+
+    "Email support for native English speakers" is the audience. "Native
+    English speaker required" and "must be a native English speaker" stay
+    worker requirements.
+    """
+    suffix = text[end:end + 64]
+    if not _AUDIENCE_NATIVE_SUFFIX.match(suffix):
+        return False
+    sentence_prefix = re.split(r"[.;\n]", text[:start])[-1]
+    sentence_suffix = re.split(r"[.;\n]", text[end:])[0]
+    sentence = f"{sentence_prefix}{text[start:end]}{sentence_suffix}"
+    if re.search(r"\b(?:must|required|mandatory|applicants?|candidates?|you)\b", sentence, re.I):
+        return False
+    prefix = text[max(0, start - 48):start]
+    return bool(re.search(
+        r"\b(?:to|for|with|serving|supporting|customers?|clients?|users?)\s+$",
+        prefix,
+        re.I,
+    ))
+
+
+def _claim_stands(pattern: re.Pattern[str], text: str, *, ignore=None) -> bool:
     """True when a requirement is stated and not negated or marked preferred."""
     for match in pattern.finditer(text or ""):
+        if ignore is not None and ignore(text, match):
+            continue
         prefix = re.split(r"[.;\n]", text[:match.start()])[-1]
         suffix = re.split(r"[.;\n]", text[match.end():])[0]
         if re.search(r"\bnot\s+(?:required|mandatory)\b", match.group(), re.I):
@@ -219,6 +250,8 @@ _RESIDENCY_TOPIC = re.compile(
     r"residenc(?:y|e)\b(?!\s+(?:permits?|visas?)\b)|"
     r"must\s+be\s+(?:a\s+|an\s+)?resident\b|"
     r"(?:based|located|residing|living)\s+in\b|"
+    r"\bbased\s+(?:candidates|applicants|contractors|workers|professionals|hires)\b|"
+    r"\b(?:candidates|applicants|contractors|workers)\s+(?:who\s+are\s+|that\s+are\s+)?[a-z][a-z.\s-]{0,40}-based\b|"
     r"(?:mena|middle\s+east)\s+residency"
     r")\b",
     re.I,
@@ -996,7 +1029,11 @@ def international_blockers(job: dict[str, Any], facts: Any | None = None) -> lis
     """
     text = _listing_text(job)
     reasons: list[str] = []
-    if _claim_stands(_NATIVE_FLUENCY, text):
+    if _claim_stands(
+        _NATIVE_FLUENCY,
+        text,
+        ignore=lambda source, match: _native_span_is_audience(source, match.start(), match.end()),
+    ):
         reasons.append("native_fluency_required")
     eligibility = assess_country_eligibility(text, facts)
     if eligibility["residency"]["required"] and not eligibility["residency"]["met"]:
