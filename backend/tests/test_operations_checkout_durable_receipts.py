@@ -191,3 +191,73 @@ def test_receipt_engine_requires_exact_host_and_refuses_default_render_roles(mon
     )
     with pytest.raises(RuntimeError, match="identity mismatch"):
         _dedicated_staging_engine()
+
+
+def test_receipt_role_checks_effective_grants_before_use():
+    """Offline verification of connection identity, granted and forbidden rights."""
+    from operations_checkout_durable_receipts import verify_restricted_receipt_role
+
+    safe = dict(
+        correct_user=True, rolsuper=False, rolcreatedb=False, rolcreaterole=False,
+        rolreplication=False, rolbypassrls=False, db_create=False,
+        public_create=False, receipt_usage=True, receipt_create=False,
+        orders_read_write=True, receipts_read_write=True,
+        orders_excess=False, receipts_excess=False,
+    )
+
+    class Result:
+        def __init__(self, values):
+            self.values = values
+
+        def mappings(self):
+            return self
+
+        def one_or_none(self):
+            return self.values
+
+    class Connection:
+        def __init__(self, values):
+            self.values = values
+
+        def execute(self, query, params):
+            sql = str(query)
+            # Every individual dangerous grant is checked, never an ambiguous
+            # comma-separated privilege list that might mean "any".
+            for table in ("orders", "receipts"):
+                assert f"has_table_privilege(current_user, :{table}, 'SELECT')" in sql
+                assert f"has_table_privilege(current_user, :{table}, 'INSERT')" in sql
+                for action in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                    assert f"has_table_privilege(current_user, :{table}, '{action}')" in sql
+            assert params["expected"] == "ops_receipt_writer"
+            return Result(self.values)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Engine:
+        def __init__(self, values):
+            self.values = values
+
+        def connect(self):
+            return Connection(self.values)
+
+    verify_restricted_receipt_role(Engine(safe), "ops_receipt_writer")
+    for permission, bad in (
+        ("correct_user", False),
+        ("rolsuper", True),
+        ("rolcreatedb", True),
+        ("rolcreaterole", True),
+        ("db_create", True),
+        ("public_create", True),
+        ("receipt_create", True),
+        ("orders_excess", True),
+        ("receipts_excess", True),
+        ("receipt_usage", False),
+        ("orders_read_write", False),
+        ("receipts_read_write", False),
+    ):
+        with pytest.raises(RuntimeError, match="Restricted receipt role"):
+            verify_restricted_receipt_role(Engine({**safe, permission: bad}), "ops_receipt_writer")
