@@ -324,10 +324,20 @@ def verify_restricted_receipt_role(engine, expected_user):
                    has_schema_privilege(current_user, 'public', 'CREATE') AS public_create,
                    has_schema_privilege(current_user, :schema, 'USAGE') AS receipt_usage,
                    has_schema_privilege(current_user, :schema, 'CREATE') AS receipt_create,
-                   has_table_privilege(current_user, :orders, 'SELECT, INSERT') AS orders_read_write,
-                   has_table_privilege(current_user, :receipts, 'SELECT, INSERT') AS receipts_read_write,
-                   has_table_privilege(current_user, :orders, 'UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS orders_excess,
-                   has_table_privilege(current_user, :receipts, 'UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') AS receipts_excess
+                   (has_table_privilege(current_user, :orders, 'SELECT') AND
+                    has_table_privilege(current_user, :orders, 'INSERT')) AS orders_read_write,
+                   (has_table_privilege(current_user, :receipts, 'SELECT') AND
+                    has_table_privilege(current_user, :receipts, 'INSERT')) AS receipts_read_write,
+                   (has_table_privilege(current_user, :orders, 'UPDATE') OR
+                    has_table_privilege(current_user, :orders, 'DELETE') OR
+                    has_table_privilege(current_user, :orders, 'TRUNCATE') OR
+                    has_table_privilege(current_user, :orders, 'REFERENCES') OR
+                    has_table_privilege(current_user, :orders, 'TRIGGER')) AS orders_excess,
+                   (has_table_privilege(current_user, :receipts, 'UPDATE') OR
+                    has_table_privilege(current_user, :receipts, 'DELETE') OR
+                    has_table_privilege(current_user, :receipts, 'TRUNCATE') OR
+                    has_table_privilege(current_user, :receipts, 'REFERENCES') OR
+                    has_table_privilege(current_user, :receipts, 'TRIGGER')) AS receipts_excess
             FROM pg_catalog.pg_roles r WHERE r.rolname = current_user
         """), {
             "expected": expected_user, "schema": SCHEMA,
