@@ -25,6 +25,7 @@
       <a href="/nova/business">Business</a>
       <a href="/nova/creative">Creative Studio</a>
       <a href="/nova/work" aria-current="page">Work</a>
+      <a href="/nova/work/my-deliverables">My Deliverables</a>
       <a href="/workspace">Health</a>
       <a href="/app">Delivery</a>
       <a href="/nova/freight">Freight</a>
@@ -56,13 +57,8 @@
 
     <section class="command-card" aria-label="Operations Agent CSV cleanup for owner review">
       <h2>Operations Agent — CSV cleanup</h2>
-      <p class="hint">Owner-only limited real task: clean a UTF-8 CSV (up to 1 MB, 10,000 rows) and download a review copy. This does not accept a contract, deliver work to a client, or store the file. Check every result before using it.</p>
-      <form id="operations-csv-form">
-        <label for="operations-csv-file">Select your CSV file</label>
-        <input id="operations-csv-file" type="file" accept=".csv,text/csv" required />
-        <button type="submit">Clean CSV for my review</button>
-      </form>
-      <p class="hint" id="operations-csv-result" aria-live="polite">Feature unavailable until separately enabled for an authorized owner.</p>
+      <p class="hint">Owner-only review processing is limited to approved, task-specific CSV work (up to 1 MB, 10,000 rows). No automatic customer delivery or contractual acceptance.</p>
+      <p class="hint">The former unscoped CSV form is retired. For Starter Tasks, select an authenticated saved task below and verify its payment before processing. The feature remains off until separately approved.</p>
       <div class="command-card">
         <h3>Process CSV for a saved assignment</h3>
         <p class="hint">Only for an ACTIVE, unblocked engagement with a saved Nova task requiring owner review. Processing does not complete or deliver the contract.</p>
@@ -75,6 +71,18 @@
           </select>
         </label>
         <p class="hint">Choose a task from the authenticated list above. Manual engagement and task IDs are not accepted. Tasks are rechecked by the server when you process the file.</p>
+        <div class="command-card" aria-label="Paid Starter Task owner review">
+          <h3>$49 Starter Task — paid customer review</h3>
+          <p class="hint">Owner-only workflow. First choose the saved, authorized customer task above. Bind its exact verified $49 checkout using the saved Operations lead ID; a name or payment claim alone is not enough. Requires separately enabled payment binding and completed customer authorization. Not live yet.</p>
+          <label for="operations-starter-lead">Paid Operations lead ID
+            <input id="operations-starter-lead" type="text" maxlength="36" autocomplete="off" placeholder="Saved lead ID" />
+          </label>
+          <div class="command-actions">
+            <button type="button" class="secondary" id="operations-starter-bind">Bind verified payment to selected task</button>
+            <button type="button" id="operations-starter-process">Process selected paid task for owner review</button>
+          </div>
+          <p id="operations-starter-result" class="hint" aria-live="polite">No payment bound and no customer file processed. Customer delivery remains disabled.</p>
+        </div>
         <form id="operations-scoped-csv-form">
           <label for="operations-scoped-csv-file">Authorized CSV
             <input id="operations-scoped-csv-file" type="file" accept=".csv,text/csv" required />
@@ -97,6 +105,16 @@
           <button type="button" class="secondary" id="operations-durable-download" disabled>Download private review copy</button>
           <button type="button" class="secondary" id="operations-durable-approve" disabled>Approve result for download</button>
           <button type="button" class="secondary" id="operations-durable-reject" disabled>Reject result</button>
+        </div>
+        <div class="command-card" aria-label="Approved Starter Task customer delivery">
+          <h3>Grant customer access to approved $49 work</h3>
+          <p class="hint">Only after an approved durable job and verified payment. The recipient must already have a verified customer account matching the order. A grant expires after 24 hours; Nova does not email the customer automatically. This feature stays disabled until the separate secure delivery release.</p>
+          <p class="hint">Nova will look up the verified customer account from the paid order. No manual customer account ID is required.</p>
+          <div class="command-actions">
+            <button type="button" class="secondary" id="operations-delivery-grant" disabled>Grant approved customer download</button>
+            <button type="button" class="secondary" id="operations-delivery-revoke" disabled>Revoke customer access</button>
+          </div>
+          <p class="hint" id="operations-delivery-result" aria-live="polite">No customer delivery access has been granted.</p>
         </div>
         <p class="hint">Owner review is not customer delivery, contract acceptance, billing, or payment. No automatic file transmission.</p>
       </div>

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -88,7 +88,8 @@ def _completed_task_ids(engagement: dict) -> set[str]:
     }
 
 
-@router.post("/csv-clean")
+# Internal helper only: do not expose the unscoped CSV operation over HTTP.
+# Real submissions must use /engagements/{engagement_id}/tasks/{task_id}/csv-clean.
 async def owner_csv_cleanup(
     request: Request,
     owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
@@ -149,6 +150,55 @@ async def owner_csv_cleanup(
     )
 
 
+@router.post("/engagements/{engagement_id}/tasks/{task_id}/starter-payment-bindings/{lead_id}")
+def authorize_starter_payment_binding(
+    engagement_id: str,
+    task_id: str,
+    lead_id: str,
+    owner_action: str | None = Header(default=None, alias="X-Nova-Owner-Action"),
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """Owner-only explicit binding of a verified paid $49 lead to a saved task.
+
+    Default-off and dependent on a separately approved binding table migration.
+    Never executes the task or delivers any files.
+    """
+    from .operations_starter_payment_binding import bind_paid_starter
+
+    if owner_action != "bind-paid-starter-to-task":
+        raise HTTPException(403, "Explicit owner binding action required")
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(403, "Specific owner organization required")
+    if not lead_id or len(lead_id) > 36:
+        raise HTTPException(400, "Valid paid lead identifier required")
+    if not engagement_id or not task_id or len(engagement_id) > 120 or len(task_id) > 120:
+        raise HTTPException(400, "Valid engagement and task required")
+    try:
+        engagement = service.get_engagement(db, engagement_id, organization_id=org, user=owner)
+    except service.NovaWorkError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    if (
+        str(engagement.get("engagement_id") or "") != engagement_id
+        or not _eligible_engagement(engagement, org, str(owner.user_id))
+    ):
+        raise HTTPException(409, "Engagement not eligible for paid task")
+    task = next(
+        (item for item in (engagement.get("tasks") or [])
+         if isinstance(item, dict) and str(item.get("task_id") or "") == task_id),
+        None,
+    )
+    if task is None or not _eligible_task(task, _completed_task_ids(engagement)):
+        raise HTTPException(409, "Saved task not eligible for Starter Task payment")
+    bind_paid_starter(
+        db, lead_id=lead_id, organization_id=org, owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+        client_name=str(engagement.get("client_name") or ""),
+    )
+    return {"status": "bound_for_owner_review", "engagement_id": engagement_id, "task_id": task_id}
+
+
 @router.post("/engagements/{engagement_id}/tasks/{task_id}/csv-clean")
 async def scoped_owner_csv_cleanup(
     engagement_id: str,
@@ -194,6 +244,13 @@ async def scoped_owner_csv_cleanup(
         raise HTTPException(status_code=404, detail="Task not found on authorized engagement")
     if not _eligible_task(task, _completed_task_ids(engagement)):
         raise HTTPException(status_code=409, detail="Task is not ready for supervised Nova processing")
+    # A scoped customer job must have an exact paid $49 checkout-to-task
+    # binding. If the payment binding feature or schema is unavailable, fail closed.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+    )
     result = await owner_csv_cleanup(
         request, owner_action=owner_action, filename=filename, owner=owner,
     )
@@ -264,6 +321,14 @@ async def create_durable_csv_job(
         _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=engagement_id, task_id=task_id,
+    )
+    # Durable customer submissions must not bypass the same paid Starter
+    # checkout-to-task requirement as the in-memory owner-review route.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=str(owner.organization_id),
+        owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
     )
     content = bytearray()
     async for chunk in request.stream():
@@ -370,6 +435,56 @@ def recover_durable_csv_job(
         _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
         return durable_csv.recover_stale_job(
             db, org=str(owner.organization_id), owner=str(owner.user_id), job_id=job_id,
+        )
+    except durable_csv.CustomerCSVBlocked as exc:
+        _durable_error(exc)
+
+
+@router.get("/durable/jobs/{job_id}/delivery-readiness")
+def durable_csv_delivery_readiness(
+    job_id: str,
+    owner: UserContext = Depends(require_work_revenue_owner),
+    db: Session = Depends(get_db),
+):
+    """Owner-only evidence for a potential future customer handoff.
+
+    This does not transmit files, create customer links, or claim delivery.
+    An approved review output is not enough: the paid checkout must still
+    match this exact task and the stored artifact must pass integrity checks.
+    """
+    org, owner_id = str(owner.organization_id), str(owner.user_id)
+    try:
+        row = durable_csv._owned(db, job_id, org, owner_id)
+        _check_saved_csv_assignment(
+            db, owner=owner, engagement_id=row["engagement_id"],
+            task_id=row["task_id"],
+        )
+        _reject_queued_job_in_legacy_path(db, job_id=job_id, owner=owner)
+        if row["status"] != "APPROVED_FOR_DOWNLOAD":
+            raise HTTPException(409, "Owner-approved CSV result required")
+        from .operations_starter_payment_binding import require_paid_starter
+        require_paid_starter(
+            db, organization_id=org, owner_user_id=owner_id,
+            engagement_id=row["engagement_id"], task_id=row["task_id"],
+        )
+        content = durable_csv.download_review(
+            db, org=org, owner=owner_id, job_id=job_id,
+        )
+        return JSONResponse(
+            content={
+                "job_id": job_id,
+                "task_id": row["task_id"],
+                "engagement_id": row["engagement_id"],
+                "review_approved": True,
+                "payment_bound": True,
+                "integrity_verified": True,
+                "output_sha256": row["output_sha256"],
+                "output_bytes": len(content),
+                "customer_delivery_ready": False,
+                "delivered": False,
+                "remaining_action": "Verified customer-specific secure delivery is not implemented",
+            },
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
         )
     except durable_csv.CustomerCSVBlocked as exc:
         _durable_error(exc)
@@ -500,6 +615,14 @@ async def create_supervised_queued_csv_job(
         raise HTTPException(415, "Only CSV supported")
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=engagement_id, task_id=task_id)
+    # Deny queued customer uploads before reading their bytes unless the
+    # exact saved task has a verified, owner-bound $49 Starter checkout.
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=str(owner.organization_id),
+        owner_user_id=str(owner.user_id),
+        engagement_id=engagement_id, task_id=task_id,
+    )
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > LIMIT_BYTES:
@@ -536,6 +659,11 @@ def process_supervised_queued_csv_job(
         _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     factory = _queued_factory(db)
     try:
         result = _queued_csv.process_one_queued_csv(
@@ -568,6 +696,11 @@ async def review_supervised_queued_csv_job(
         _durable_error(exc)
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"], task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     factory = _queued_factory(db)
     try:
         return _queued_csv.review_processed_csv(
@@ -741,6 +874,11 @@ async def restore_supervised_queued_csv_input(
     _check_saved_csv_assignment(
         db, owner=owner, engagement_id=row["engagement_id"],
         task_id=row["task_id"])
+    from .operations_starter_payment_binding import require_paid_starter
+    require_paid_starter(
+        db, organization_id=org, owner_user_id=owner_id,
+        engagement_id=row["engagement_id"], task_id=row["task_id"],
+    )
     content = bytearray()
     async for chunk in request.stream():
         if len(content) + len(chunk) > LIMIT_BYTES:

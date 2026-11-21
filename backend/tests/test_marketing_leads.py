@@ -6,6 +6,7 @@ from pathlib import Path
 
 os.environ.setdefault("AMICOR_SKIP_WMI_PLATFORM_QUERY", "1")
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -242,11 +243,15 @@ def test_anonymous_operations_accepts_all_public_launch_plans():
         assert response.status_code == 200, (plan, response.text)
 
 
-def test_anonymous_operations_paid_checkout_uses_selected_price():
+def test_anonymous_operations_paid_checkout_uses_selected_price(monkeypatch):
     from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
     from app.modules.marketing.routes import _RATE_HITS
 
     _RATE_HITS.clear()
+    # Rehearse checkout with an in-process Stripe fake; CI has no Stripe key.
+    # Do not relax the production checkout gate.
+    from app.modules.marketing import routes as marketing_routes
+    monkeypatch.setattr(marketing_routes, "agent_checkout_mode", lambda: "test")
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
@@ -288,11 +293,15 @@ def test_anonymous_operations_paid_checkout_uses_selected_price():
         set_agent_stripe_override(None)
 
 
-def test_anonymous_operations_subscription_checkout_is_monthly():
+def test_anonymous_operations_subscription_checkout_is_monthly(monkeypatch):
     from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
     from app.modules.marketing.routes import _RATE_HITS
 
     _RATE_HITS.clear()
+    # Rehearse checkout with an in-process Stripe fake; CI has no Stripe key.
+    # Do not relax the production checkout gate.
+    from app.modules.marketing import routes as marketing_routes
+    monkeypatch.setattr(marketing_routes, "agent_checkout_mode", lambda: "test")
     fake = FakeAgentStripeClient()
     set_agent_stripe_override(fake)
     try:
@@ -358,3 +367,591 @@ def test_operations_agent_links_shared_image_generator() -> None:
     page = (ROOT / "static" / "nova-anonymous-agent" / "index.html").read_text(encoding="utf-8")
     assert 'href="/nova/creative"' in page
     assert "Creative image generation" in page
+
+
+def test_operations_live_sales_gate_prevents_checkout_without_approval(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.delenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", raising=False)
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.231"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Gated Starter Sample",
+                "contact_name": "Synthetic Gate Client",
+                "work_email": "gated-starter-231@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "One agreed sample CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        data = submitted.json()["data"]
+        assert data["checkout_available"] is False
+        lead_id = data["lead_id"]
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        assert status.json()["customer_sales_enabled"] is False
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.232"},
+        )
+        assert blocked.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_operations_paid_request_cannot_open_another_checkout(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "test")
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.233"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Already Paid Sample",
+                "contact_name": "Synthetic Paid Client",
+                "work_email": "already-paid-233@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "One agreed sample CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        lead_id = submitted.json()["data"]["lead_id"]
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead is not None
+            lead.payment_status = "paid"
+            db.commit()
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.234"},
+        )
+        assert blocked.status_code == 409
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_live_operations_checkout_requires_qualified_scope(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    for flag in (
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    ):
+        monkeypatch.setenv(flag, "true")
+    verified_sessions = []
+    def verified_preflight(db):
+        assert db is not None
+        verified_sessions.append(db)
+        return True
+    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", verified_preflight)
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.235"},
+            json={
+                "lead_type": "anonymous_operations",
+                "organization_name": "Owner Scope Sample",
+                "contact_name": "Synthetic Customer",
+                "work_email": "owner-scope-235@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic single CSV cleanup.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["data"]["checkout_available"] is False
+        lead_id = submitted.json()["data"]["lead_id"]
+        blocked = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.236"},
+        )
+        assert blocked.status_code == 409
+        assert fake.sessions == {}
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead is not None
+            lead.status = "qualified"
+            db.commit()
+        allowed = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.237"},
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert len(fake.sessions) == 1
+        assert verified_sessions, "Live checkout must pass a database session to preflight"
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_operations_checkout_unconfigured_is_not_advertised(monkeypatch):
+    from app.modules.marketing import routes
+
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "not_configured")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    response = client.get("/api/marketing/nova-agent/checkout-status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["customer_sales_enabled"] is False
+    assert data["plans"]["starter_49"]["checkout_available"] is False
+    assert data["plans"]["launch_99"]["checkout_available"] is False
+    assert data["plans"]["business_299"]["checkout_available"] is False
+
+
+def test_live_operations_monthly_plans_remain_closed(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true")
+    routes._RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        plans = status.json()["plans"]
+        assert plans["starter_49"]["checkout_available"] is False
+        assert plans["launch_99"]["checkout_available"] is False
+        assert plans["business_299"]["checkout_available"] is False
+        for idx, plan in enumerate(("launch_99", "business_299")):
+            submitted = client.post(
+                "/api/marketing/leads",
+                headers={"X-Forwarded-For": f"198.51.100.{240+idx}"},
+                json={
+                    "lead_type": "anonymous_operations",
+                    "contact_name": "Synthetic Monthly Client",
+                    "work_email": f"monthly-blocked-{idx}@example.invalid",
+                    "consent": True,
+                    "service_plan": plan,
+                    "message": "Synthetic monthly inquiry, no live subscription allowed.",
+                },
+            )
+            assert submitted.status_code == 200, submitted.text
+            assert submitted.json()["data"]["checkout_available"] is False
+            response = client.post(
+                f"/api/marketing/leads/{submitted.json()['data']['lead_id']}/checkout",
+                headers={"X-Forwarded-For": f"198.51.100.{242+idx}"},
+            )
+            assert response.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_live_starter_checkout_denied_until_fulfillment_ready(monkeypatch):
+    from app.modules.marketing import routes
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    routes._RATE_HITS.clear()
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "live")
+    for flag in (
+        "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    ):
+        monkeypatch.setenv(flag, "true")
+    monkeypatch.setattr(routes, "_operations_live_fulfillment_ready", lambda db: False)
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.246"},
+            json={
+                "lead_type": "anonymous_operations",
+                "contact_name": "Synthetic Not Ready",
+                "work_email": "no-fulfillment@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic scoped CSV cleanup request.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["data"]["checkout_available"] is False
+        status = client.get("/api/marketing/nova-agent/checkout-status")
+        assert status.status_code == 200
+        assert status.json()["customer_sales_enabled"] is False
+        lead_id = submitted.json()["data"]["lead_id"]
+        checkout = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.247"},
+        )
+        assert checkout.status_code == 503
+        assert fake.sessions == {}
+    finally:
+        set_agent_stripe_override(None)
+
+
+def test_starter_uses_existing_stripe_test_price_without_new_inline_product(monkeypatch):
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "price_test_owner_created")
+    payload = billing.checkout_payload(
+        lead_id="synthetic-lead", email="sample@example.invalid",
+        plan_key="starter_49", customer_id="cus_test_synthetic",
+    )
+    assert payload["mode"] == "payment"
+    assert payload["line_items"] == [{"price": "price_test_owner_created", "quantity": 1}]
+    assert payload["metadata"]["nova_agent_lead_id"] == "synthetic-lead"
+    assert payload["payment_intent_data"]["metadata"]["nova_agent_plan"] == "starter_49"
+
+
+def test_live_checkout_never_uses_stripe_sandbox_price(monkeypatch):
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "live")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "price_test_owner_created")
+    payload = billing.checkout_payload(
+        lead_id="synthetic-lead", email="sample@example.invalid",
+        plan_key="starter_49", customer_id="cus_test_synthetic",
+    )
+    assert "price_data" in payload["line_items"][0]
+    assert "price" not in payload["line_items"][0]
+    assert payload["line_items"][0]["price_data"]["unit_amount"] == 4900
+
+
+def test_starter_rejects_invalid_stripe_test_price_id(monkeypatch):
+    from app.modules.marketing import operations_billing as billing
+
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
+    monkeypatch.setenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "not_a_stripe_price")
+    with pytest.raises(ValueError, match="Invalid Operations Starter sandbox price ID"):
+        billing.checkout_payload(
+            lead_id="synthetic-lead", email="sample@example.invalid",
+            plan_key="starter_49", customer_id="cus_test_synthetic",
+        )
+
+
+def test_operations_webhook_rejects_unlinked_sandbox_checkout(monkeypatch):
+    """A manually created Stripe sandbox checkout is not a paid customer order."""
+    from app.modules.marketing import routes
+
+    synthetic_event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_unlinked_synthetic",
+            "client_reference_id": "AMICOR-SYNTHETIC-STARTER-CHECKOUT-20261120",
+            "customer": None,
+            "mode": "payment",
+            "currency": "usd",
+            "amount_total": 4900,
+            "payment_status": "paid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_plan": "starter_49",
+                "synthetic_only": "true",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: synthetic_event)
+    result = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-event-not-a-valid-stripe-signature",
+        headers={"Stripe-Signature": "test-only-mocked-signature"},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json() == {"ok": True, "handled": False, "result": "lead_not_found"}
+
+
+def test_operations_webhook_rejects_mismatched_saved_checkout(monkeypatch):
+    """Even paid-looking event data cannot change a different saved lead."""
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.249"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Webhook Recipient",
+            "work_email": "webhook-recipient@example.invalid",
+            "consent": True,
+            "service_plan": "starter_49",
+            "message": "Synthetic webhook identity control, no real purchase.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead is not None
+        lead.stripe_checkout_session_id = "cs_test_saved_session"
+        lead.stripe_customer_id = "cus_test_saved_customer"
+        lead.payment_status = "pending"
+        db.commit()
+
+    synthetic_event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_other_session",
+            "client_reference_id": lead_id,
+            "customer": "cus_test_saved_customer",
+            "mode": "payment",
+            "currency": "usd",
+            "amount_total": 4900,
+            "payment_status": "paid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_lead_id": lead_id,
+                "nova_agent_plan": "starter_49",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: synthetic_event)
+    response = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-test-event",
+        headers={"Stripe-Signature": "test-only-mocked-signature"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "checkout_identity_mismatch"
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead.payment_status == "pending"
+        assert not lead.starter_paid_session_id
+
+
+def test_operations_paid_order_ignores_late_expiration(monkeypatch):
+    """An out-of-order Stripe expiration must not revoke an already paid task."""
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.250"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Paid Order",
+            "work_email": "late-expiry@example.invalid",
+            "consent": True,
+            "service_plan": "starter_49",
+            "message": "Synthetic event ordering regression.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead is not None
+        lead.stripe_checkout_session_id = "cs_test_completed_synthetic"
+        lead.stripe_customer_id = "cus_test_completed_synthetic"
+        lead.starter_paid_session_id = "cs_test_completed_synthetic"
+        lead.payment_status = "paid"
+        db.commit()
+
+    event = {
+        "type": "checkout.session.expired",
+        "data": {"object": {
+            "id": "cs_test_completed_synthetic",
+            "customer": "cus_test_completed_synthetic",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_lead_id": lead_id,
+                "nova_agent_plan": "starter_49",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: event)
+    response = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-older-event",
+        headers={"Stripe-Signature": "mocked-signature"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "already_paid"
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead.payment_status == "paid"
+        assert lead.starter_paid_session_id == "cs_test_completed_synthetic"
+
+
+def test_operations_paid_order_ignores_stale_unpaid_completion(monkeypatch):
+    """Out-of-order unpaid completion cannot demote an already paid order."""
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.db.session import SessionLocal
+
+    routes._RATE_HITS.clear()
+    submitted = client.post(
+        "/api/marketing/leads",
+        headers={"X-Forwarded-For": "198.51.100.251"},
+        json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Completion Recipient",
+            "work_email": "late-unpaid@example.invalid",
+            "consent": True,
+            "service_plan": "starter_49",
+            "message": "Synthetic delayed unpaid event.",
+        },
+    )
+    assert submitted.status_code == 200, submitted.text
+    lead_id = submitted.json()["data"]["lead_id"]
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead is not None
+        lead.stripe_checkout_session_id = "cs_test_paid_for_completion"
+        lead.stripe_customer_id = "cus_test_paid_for_completion"
+        lead.starter_paid_session_id = "cs_test_paid_for_completion"
+        lead.payment_status = "paid"
+        db.commit()
+
+    event = {
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_paid_for_completion",
+            "customer": "cus_test_paid_for_completion",
+            "mode": "payment",
+            "currency": "usd",
+            "amount_total": 4900,
+            "payment_status": "unpaid",
+            "metadata": {
+                "nova_product": "nova_anonymous_operations_agent",
+                "nova_agent_lead_id": lead_id,
+                "nova_agent_plan": "starter_49",
+            },
+        }},
+    }
+    monkeypatch.setattr(routes, "verify_agent_webhook", lambda raw, signature: event)
+    response = client.post(
+        "/api/marketing/nova-agent/stripe/webhook",
+        content=b"synthetic-unpaid-event",
+        headers={"Stripe-Signature": "mocked-signature"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"] == "already_paid"
+    with SessionLocal() as db:
+        lead = db.get(MarketingWebsiteLead, lead_id)
+        assert lead.payment_status == "paid"
+        assert lead.starter_paid_session_id == "cs_test_paid_for_completion"
+
+
+@pytest.mark.parametrize("event_type", ["checkout.session.completed", "checkout.session.async_payment_succeeded"])
+def test_operations_signed_synthetic_checkout_confirms_only_matching_order(monkeypatch, event_type):
+    """Exercise real signature verification and saved-order binding without Stripe network calls."""
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+    from app.db.session import SessionLocal
+
+    # Explicitly synthetic: this is NOT a real Stripe transaction or a delivery test.
+    secret = "whsec_ci_synthetic_operations_only"
+    monkeypatch.setenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", secret)
+    monkeypatch.setattr(routes, "agent_checkout_mode", lambda: "test")
+    routes._RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        submitted = client.post(
+            "/api/marketing/leads",
+            headers={"X-Forwarded-For": "198.51.100.252"},
+            json={
+                "lead_type": "anonymous_operations",
+                "contact_name": "Synthetic Signed Order",
+                "work_email": f"signed-order-{event_type.rsplit('.', 1)[-1]}@example.invalid",
+                "consent": True,
+                "service_plan": "starter_49",
+                "message": "Synthetic signed webhook test; no real customer work.",
+            },
+        )
+        assert submitted.status_code == 200, submitted.text
+        lead_id = submitted.json()["data"]["lead_id"]
+        checkout = client.post(
+            f"/api/marketing/leads/{lead_id}/checkout",
+            headers={"X-Forwarded-For": "198.51.100.253"},
+        )
+        assert checkout.status_code == 200, checkout.text
+        session_id = checkout.json()["checkout_session_id"]
+        customer_id = fake.sessions[session_id]["customer"]
+
+        event = {
+            "id": "evt_test_synthetic_starter",
+            "object": "event",
+            "api_version": "2024-06-20",
+            "type": event_type,
+            "data": {"object": {
+                "id": session_id,
+                "object": "checkout.session",
+                "mode": "payment",
+                "customer": customer_id,
+                "client_reference_id": lead_id,
+                "currency": "usd",
+                "amount_total": 4900,
+                "payment_status": "paid",
+                "metadata": {
+                    "nova_product": "nova_anonymous_operations_agent",
+                    "nova_agent_lead_id": lead_id,
+                    "nova_agent_plan": "starter_49",
+                },
+            }},
+        }
+        raw = json.dumps(event, separators=(",", ":")).encode("utf-8")
+        timestamp = str(int(time.time()))
+        sig = hmac.new(secret.encode(), timestamp.encode() + b"." + raw, hashlib.sha256).hexdigest()
+        headers = {"Stripe-Signature": f"t={timestamp},v1={sig}", "Content-Type": "application/json"}
+
+        response = client.post(
+            "/api/marketing/nova-agent/stripe/webhook", content=raw, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["result"] == "paid"
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead.payment_status == "paid"
+            assert lead.starter_paid_session_id == session_id
+
+        # Tampering with the signed body must not pass authentication.
+        tampered = raw.replace(b'"amount_total":4900', b'"amount_total":0')
+        rejected = client.post(
+            "/api/marketing/nova-agent/stripe/webhook", content=tampered, headers=headers
+        )
+        assert rejected.status_code == 400, rejected.text
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead.payment_status == "paid"
+            assert lead.starter_paid_session_id == session_id
+    finally:
+        set_agent_stripe_override(None)

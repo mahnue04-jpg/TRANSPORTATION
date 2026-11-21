@@ -85,9 +85,13 @@ jobs:
           set -euo pipefail
           unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY ANTHROPIC_API_KEY
           python -m pytest -q -rs tests/test_nova_operations_staging_health.py
+          python -m pytest -q -rs tests/test_nova_operations_isolated_validation.py
+          python -m pytest -q -rs tests/test_nova_operations_customer_delivery.py
+          python -m pytest -q -rs tests/test_nova_operations_pilot_server.py
           python -m pytest -q -rs \
             tests/test_nova_operations_csv_eligibility.py \
             tests/test_nova_operations_csv_http.py \
+            tests/test_nova_operations_starter_payment_binding.py \
             tests/test_nova_operations_exact_claim_recovery.py \
             tests/test_nova_operations_atomic_completion.py \
             tests/test_nova_operations_csv_runner.py \
@@ -96,6 +100,9 @@ jobs:
             tests/test_nova_operations_customer_csv_http.py \
             tests/test_nova_operations_durable_csv_ui_contract.py \
             tests/test_nova_operations_csv_alembic_gate.py
+          python -m pytest -q -rs tests/test_marketing_leads.py -k "operations or starter"
+          python -m pytest -q -rs tests/test_operations_checkout_sandbox.py
+          python -m pytest -q -rs tests/test_operations_checkout_durable_receipts.py
           echo "CSV regressions use synthetic fixtures; not proof of production storage, real authorization, or customer-job readiness." >> "$GITHUB_STEP_SUMMARY"
 
   operations-csv-postgres:
@@ -142,6 +149,7 @@ jobs:
       - name: Run ephemeral PostgreSQL CSV concurrency and review tests
         run: |
           python -m pytest -v -rs tests/test_nova_operations_customer_csv_postgres.py
+          python -m pytest -v -rs tests/test_nova_operations_customer_delivery_postgres.py
           python -m pytest -v -rs tests/test_nova_operations_postgres_leases.py
           python -m pytest -v -rs tests/test_nova_operations_lease_worker.py
           python -m pytest -v -rs tests/test_nova_operations_lease_reconciliation.py
@@ -150,6 +158,48 @@ jobs:
           python -m pytest -v -rs tests/test_nova_operations_lease_migration.py
           python -m pytest -v -rs tests/test_nova_operations_worker_subprocess.py
           echo "Ephemeral PostgreSQL and fake in-memory object storage only. Not staging/production readiness." >> "$GITHUB_STEP_SUMMARY"
+
+  operations-checkout-receipts-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ops_receipts_ci
+          POSTGRES_PASSWORD: ops_receipts_ci
+          POSTGRES_DB: nova_ops_receipts_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ops_receipts_ci -d nova_ops_receipts_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NOVA_OPS_RECEIPTS_CI_DATABASE_URL: postgresql+psycopg2://ops_receipts_ci:ops_receipts_ci@127.0.0.1:5432/nova_ops_receipts_ci
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install -r requirements.txt pytest
+      - name: Verify isolated persistent receipts using disposable PostgreSQL
+        run: |
+          python -m pytest -q -rs tests/test_operations_checkout_durable_receipts.py tests/test_operations_checkout_receipts_postgres.py
+          echo "Ephemeral CI PostgreSQL only. Not a Render migration, customer payment, or production readiness." >> "$GITHUB_STEP_SUMMARY"
 
   backend-diagnostic:
     # Python 3.11.9 is unavailable on the current ubuntu-latest (26.04) runner.

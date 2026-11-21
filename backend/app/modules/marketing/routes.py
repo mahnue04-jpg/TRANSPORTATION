@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from datetime import timedelta
@@ -32,6 +33,56 @@ from app.responses import normalize_success
 logger = logging.getLogger("amicor.marketing.routes")
 
 router = APIRouter(prefix="/api/marketing", tags=["marketing"])
+
+def _operations_live_fulfillment_ready(db: Session) -> bool:
+    """Read-only proof of required paid-task schema and private storage setup.
+
+    Never create or migrate tables in a checkout request. Return false on
+    unavailable infrastructure so no charge can precede secure fulfillment.
+    """
+    try:
+        import sqlalchemy as sa
+        from app.core.nova.work_revenue import operations_customer_csv_jobs as csv_jobs
+        from app.core.nova.work_revenue import operations_customer_delivery as delivery
+        from app.core.nova.work_revenue import operations_starter_payment_binding as binding
+
+        csv_jobs.require_runtime(db)
+        csv_jobs._store()  # Validate private storage credentials, no upload.
+        inspector = sa.inspect(db.get_bind())
+        return all(inspector.has_table(table.name) for table in (
+            csv_jobs.jobs, delivery.grants, binding.starter_bindings,
+        ))
+    except Exception:
+        logger.warning("operations_live_fulfillment_preflight_failed")
+        return False
+
+
+def _operations_checkout_sales_open() -> bool:
+    """Live checkout requires approval of the whole fulfillment stack."""
+    mode = agent_checkout_mode()
+    if mode == "test":
+        return True
+    if mode != "live":
+        return False
+    required = (
+        "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+        "NOVA_OPERATIONS_STARTER_BINDING_ENABLED",
+        "NOVA_OPERATIONS_DURABLE_CSV_ENABLED",
+        "NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",
+        "NOVA_WORK_REVENUE_PRIVATE_STORAGE_ENABLED",
+        "NOVA_OPERATIONS_OWNER_CSV_ENABLED",
+    )
+    return all(os.getenv(key, "").strip().lower() == "true" for key in required)
+
+
+def _operations_plan_checkout_open(plan_key: str, db: Session | None = None) -> bool:
+    """Only sell live Starter Task after the storage and schema preflight."""
+    if not _operations_checkout_sales_open():
+        return False
+    if agent_checkout_mode() != "live":
+        return True
+    return bool(plan_key == "starter_49" and db is not None and _operations_live_fulfillment_ready(db))
+
 
 _RATE_LOCK = Lock()
 _RATE_HITS: dict[str, deque[float]] = defaultdict(deque)
@@ -169,6 +220,9 @@ def create_marketing_lead(
                     "checkout_available": bool(
                         duplicate.lead_type == "anonymous_operations"
                         and duplicate.service_plan in {"starter_49", "launch_99", "business_299"}
+                        and _operations_plan_checkout_open(str(duplicate.service_plan), db)
+                        and duplicate.payment_status != "paid"
+                        and (agent_checkout_mode() != "live" or duplicate.status == "qualified")
                     ),
                     "email_notification": {"attempted": False, "sent": False, "reason": "duplicate"},
                 },
@@ -232,6 +286,9 @@ def create_marketing_lead(
             "checkout_available": bool(
                 lead.lead_type == "anonymous_operations"
                 and lead.service_plan in {"starter_49", "launch_99", "business_299"}
+                and _operations_plan_checkout_open(str(lead.service_plan), db)
+                and lead.payment_status != "paid"
+                and (agent_checkout_mode() != "live" or lead.status == "qualified")
             ),
             "duplicate": False,
             "email_notification": {
@@ -246,16 +303,18 @@ def create_marketing_lead(
 
 
 @router.get("/nova-agent/checkout-status")
-def nova_agent_checkout_status():
+def nova_agent_checkout_status(db: Session = Depends(get_db)):
     """Public non-secret launch status for the Operations Agent payment lane."""
     return {
         "product": "Nova Anonymous Operations Agent",
         "mode": agent_checkout_mode(),
+        "customer_sales_enabled": _operations_plan_checkout_open("starter_49", db),
         "plans": {
             key: {
                 "label": spec["label"],
                 "amount_cents": int(spec["amount_cents"]),
                 "checkout_required": spec["mode"] in {"payment", "subscription"},
+                "checkout_available": spec["mode"] in {"payment", "subscription"} and _operations_plan_checkout_open(key, db),
                 "billing_mode": spec["mode"],
             }
             for key, spec in AGENT_PLANS.items()
@@ -287,7 +346,40 @@ def create_nova_agent_checkout(
     if plan["mode"] not in {"payment", "subscription"}:
         raise HTTPException(status_code=422, detail="This starting option does not require checkout")
 
+    # Stripe live readiness does not establish that customer work can be
+    # fulfilled. Keep purchases closed until service delivery is authorized.
+    if not _operations_plan_checkout_open(str(lead.service_plan), db):
+        raise HTTPException(
+            status_code=503,
+            detail="Operations checkout is not open for customer purchases yet",
+        )
+
+    if lead.payment_status == "paid":
+        raise HTTPException(status_code=409, detail="This Operations request is already paid")
+
+    # For real-money Operations sales, a lead submission is not an agreed
+    # contract. Internal review must qualify the scope before checkout.
+    # Test-mode synthetic checkout remains available for rehearsal.
+    if agent_checkout_mode() == "live" and lead.status != "qualified":
+        raise HTTPException(
+            status_code=409,
+            detail="AMICOR must review and approve the work scope before payment",
+        )
+
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
+        if os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true":
+            # Reconcile a previously created session before reusing its URL.
+            # A failed durable binding must not leak a payable URL.
+            try:
+                from operations_checkout_durable_receipts import register_staging_checkout_binding
+                register_staging_checkout_binding(
+                    lead_id=lead.id,
+                    session_id=lead.stripe_checkout_session_id,
+                    customer_id=lead.stripe_customer_id,
+                )
+            except Exception as exc:
+                logger.warning("durable_staging_checkout_binding_failed type=%s", type(exc).__name__)
+                raise HTTPException(status_code=503, detail="Secure staging checkout unavailable") from exc
         return {
             "checkout_url": lead.checkout_url,
             "checkout_session_id": lead.stripe_checkout_session_id,
@@ -329,6 +421,16 @@ def create_nova_agent_checkout(
     except Exception as exc:
         logger.warning("nova_agent_checkout_failed lead_id=%s exc_type=%s", lead.id, type(exc).__name__)
         raise HTTPException(status_code=503, detail="Secure checkout is not available yet.") from exc
+
+    if os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true":
+        try:
+            from operations_checkout_durable_receipts import register_staging_checkout_binding
+            register_staging_checkout_binding(
+                lead_id=lead.id, session_id=session_id, customer_id=customer_id,
+            )
+        except Exception as exc:
+            logger.warning("durable_staging_checkout_binding_failed type=%s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Secure staging checkout unavailable") from exc
 
     lead.stripe_customer_id = customer_id
     lead.stripe_checkout_session_id = session_id
@@ -372,11 +474,52 @@ async def nova_agent_stripe_webhook(
     if lead is None or lead.lead_type != "anonymous_operations":
         return {"ok": True, "handled": False, "result": "lead_not_found"}
 
+    # Stripe's signed event is authentic, but it must ALSO identify the exact
+    # saved checkout for this lead. Metadata alone is not order authorization.
+    if event_type.startswith("checkout.session."):
+        if (
+            not lead.stripe_checkout_session_id
+            or str(obj.get("id") or "") != str(lead.stripe_checkout_session_id)
+            or str(metadata.get("nova_agent_plan") or "") != str(lead.service_plan or "")
+            or str(obj.get("customer") or "") != str(lead.stripe_customer_id or "")
+        ):
+            return {"ok": True, "handled": False, "result": "checkout_identity_mismatch"}
+
+    # Invoice webhooks are subscription events, never proof of a $49
+    # one-time Starter Task. Match the stored customer and subscription
+    # before allowing them to change any recurring payment state.
+    if event_type.startswith("invoice."):
+        subscription = obj.get("subscription")
+        if isinstance(subscription, dict):
+            subscription = subscription.get("id")
+        customer = obj.get("customer")
+        if isinstance(customer, dict):
+            customer = customer.get("id")
+        if (
+            str(lead.service_plan or "") not in {"launch_99", "business_299"}
+            or not lead.stripe_subscription_id
+            or str(subscription or "") != str(lead.stripe_subscription_id)
+            or str(customer or "") != str(lead.stripe_customer_id or "")
+        ):
+            return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+
     result = "ignored"
-    if event_type == "checkout.session.completed":
+    if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
         payment_status = str(obj.get("payment_status") or "")
-        if payment_status in {"paid", "no_payment_required"}:
+        plan_spec = AGENT_PLANS.get(str(lead.service_plan or ""), {})
+        # The $49 starter is an actual 4,900-cent one-time charge. Do not
+        # interpret a no-payment-required session or a zero-dollar checkout
+        # as proof that the customer purchased this task.
+        if lead.service_plan == "starter_49" and (
+            obj.get("mode") != "payment"
+            or obj.get("currency") != "usd"
+            or obj.get("amount_total") != 4900
+        ):
+            return {"ok": True, "handled": False, "result": "starter_payment_amount_mismatch"}
+        if payment_status == "paid" and plan_spec.get("mode") in {"payment", "subscription"}:
             lead.payment_status = "paid"
+            if lead.service_plan == "starter_49":
+                lead.starter_paid_session_id = str(obj.get("id") or "")
             lead.status = "qualified"
             subscription = obj.get("subscription")
             if isinstance(subscription, dict):
@@ -385,17 +528,42 @@ async def nova_agent_stripe_webhook(
                 lead.stripe_subscription_id = str(subscription)
             result = "paid"
         else:
+            # A delayed completion event may have preceded an asynchronous
+            # success. Never demote a confirmed paid Starter order to pending.
+            if lead.payment_status == "paid":
+                return {"ok": True, "handled": False, "result": "already_paid"}
             lead.payment_status = "pending"
             result = "checkout_completed_pending"
     elif event_type in {"checkout.session.async_payment_failed", "invoice.payment_failed"}:
+        # Stripe can retry or deliver older events after a successful payment.
+        # Never revoke a confirmed paid order because of an out-of-order event.
+        if lead.payment_status == "paid":
+            return {"ok": True, "handled": False, "result": "already_paid"}
         lead.payment_status = "failed"
         result = "payment_failed"
     elif event_type == "checkout.session.expired":
+        if lead.payment_status == "paid":
+            return {"ok": True, "handled": False, "result": "already_paid"}
         lead.payment_status = "expired"
         result = "checkout_expired"
     elif event_type == "invoice.paid":
         lead.payment_status = "paid"
         result = "renewal_paid"
+
+    if (
+        os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() == "true"
+        and lead.service_plan == "starter_49"
+        and result == "paid"
+    ):
+        # The event was already signature-verified and matched to this lead.
+        # Persist the durable receipt before acknowledging payment to Stripe.
+        try:
+            from operations_checkout_durable_receipts import record_staging_signed_webhook
+            record_staging_signed_webhook(raw_body=raw, stripe_signature=stripe_signature)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("durable_staging_receipt_failed type=%s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Durable test receipt unavailable") from exc
 
     db.commit()
     return {"ok": True, "handled": True, "result": result, "lead_id": lead.id}

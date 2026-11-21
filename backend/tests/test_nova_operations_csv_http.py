@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.core.nova.router import require_nova_access
 from app.core.nova.work_revenue import operations_owner_csv_api as csv_api
+from app.core.nova.work_revenue import operations_starter_payment_binding as starter_payment
 from app.core.nova.work_revenue.router import require_work_revenue_owner
 from app.db.session import get_db
 
@@ -25,6 +26,9 @@ def harness(monkeypatch):
     app.dependency_overrides[require_work_revenue_owner] = lambda: owner
     app.dependency_overrides[get_db] = lambda: None
     monkeypatch.setenv("NOVA_OPERATIONS_OWNER_CSV_ENABLED", "true")
+    # Existing synthetic CSV behavior tests use a simulated paid task binding.
+    # Separate regression below verifies the real default-off binding guard.
+    monkeypatch.setattr(starter_payment, "require_paid_starter", lambda *args, **kwargs: None)
     base = {
         "engagement_id": "eng-a",
         "organization_id": "org-alpha",
@@ -136,3 +140,13 @@ def test_unrelated_nova_assignment_not_listed_or_executed(harness):
     item["tasks"][0]["title"] = "Write marketing emails"
     assert client.get("/api/nova/work/operations/eligible-csv-tasks").json()["tasks"] == []
     assert _run(client, headers).status_code == 409
+
+
+def test_unconfigured_starter_binding_denies_processing(harness, monkeypatch):
+    client, _, headers = harness
+    def deny_unconfigured(*args, **kwargs):
+        raise csv_api.HTTPException(503, "Starter payment binding not enabled")
+    monkeypatch.setattr(starter_payment, "require_paid_starter", deny_unconfigured)
+    response = _run(client, headers)
+    assert response.status_code == 503
+    assert "binding" in response.json()["detail"].lower()
