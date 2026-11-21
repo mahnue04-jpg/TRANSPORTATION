@@ -278,16 +278,25 @@ def _dedicated_staging_engine():
     raw = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DATABASE_URL", "").strip()
     expected_name = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_NAME", "").strip()
     expected_user = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "").strip()
-    if not raw or not expected_name or not expected_user:
+    expected_host = os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_HOST", "").strip()
+    if not raw or not expected_name or not expected_user or not expected_host:
         raise RuntimeError("Dedicated staging receipt database settings required")
     url = make_url(raw)
+    # The Render default/rotated database owners are not restricted receipt roles.
+    # Do not allow them to be passed off as dedicated, least-privilege identities.
+    privileged_users = {
+        "postgres", "amicor", "render", "root",
+        "nova_operations_staging_db_541_user",
+        "nova_operations_staging_rotated",
+    }
     if (
         url.get_backend_name() != "postgresql"
         or url.database != expected_name
         or url.username != expected_user
+        or url.host != expected_host
         or not url.password
         or not url.host
-        or expected_user.lower() in {"postgres", "amicor", "render", "root"}
+        or expected_user.lower() in privileged_users
     ):
         raise RuntimeError("Dedicated staging receipt connection identity mismatch")
     return create_engine(url, pool_pre_ping=True)
