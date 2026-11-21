@@ -33,3 +33,17 @@ def test_sandbox_page_is_linked_and_the_fictional_preview_stays_offline():
     assert "Resume saved application" in sandbox
     for label in ("Loading", "error", "Withdraw", "Shortlist", "Callback"):
         assert label in sandbox
+
+
+def test_casting_auth_uses_shared_session_and_distinguishes_unauthorized():
+    sandbox = SANDBOX.read_text(encoding="utf-8")
+    assert '<script src="/static/ux/sessionManager.js"></script>' in sandbox
+    assert 'shared.ensureReady()' in sandbox
+    assert 'shared.authFetch(path' in sandbox
+    assert 'shared.start({' in sandbox
+    assert 'shared.applyAuthTokens(body)' in sandbox
+    assert 'shared.setSession(' not in sandbox
+    assert 'if (isLogin) detail = "Nova rejected these sign-in credentials (401).' in sandbox
+    assert 'Casting session is unauthorized (401).' in sandbox
+    assert 'id="create-organization" disabled' in sandbox
+    assert 'setOrganizationReadiness(false,' in sandbox
