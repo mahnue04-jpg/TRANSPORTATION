@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Find coloring, treasure hunts, and a snowy bedtime story from AMICOR Kids.">
+  <link rel="canonical" href="https://getamicor.com/kids/">
+  <title>Kids’ Books | AMICOR Kids</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fffaf0; color: #172741; font: 1rem/1.55 system-ui, sans-serif; }
+    .wrap { width: min(100% - 2rem, 68rem); margin-inline: auto; }
+    header { background: #fffaf0; border-bottom: 1px solid #eadfcd; }
+    header .wrap { min-height: 4.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    header a { color: #172741; text-underline-offset: .2em; }
+    .brand { font-weight: 800; text-decoration: none; }
+    .intro { padding-block: clamp(2.5rem, 7vw, 5.5rem) 2.2rem; }
+    h1, h2 { font-family: Georgia, serif; line-height: 1.12; }
+    h1 { font-size: clamp(2.65rem, 7vw, 5.5rem); letter-spacing: -.035em; margin: 0; max-width: 15ch; }
+    .intro p { font-size: 1.14rem; max-width: 45ch; margin-bottom: 0; }
+    .books { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1.2rem; }
+    article { background: #fff; border: 1px solid #eadfcd; border-radius: 1.2rem; overflow: hidden; display: flex; flex-direction: column; }
+    .cover { height: 19rem; display: grid; place-items: center; padding: 1rem; background: #fcebd8; }
+    .cover img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+    article:nth-child(2) .cover { background: #e9f0ff; }
+    article:nth-child(3) .cover { background: #e1edf2; }
+    .details { display: flex; flex: 1; flex-direction: column; align-items: flex-start; padding: 1.35rem; }
+    h2 { margin: 0; font-size: 1.6rem; }
+    .details p { margin-block: .75rem 1.25rem; }
+    .action { margin-top: auto; border-radius: .55rem; padding: .6rem .9rem; font-weight: 700; }
+    a.action { color: #fff; background: #173969; text-decoration: none; }
+    a.action:hover { background: #24538d; }
+    a:focus-visible { outline: 3px solid #8f3d00; outline-offset: 4px; }
+    .status { background: #f3eadc; }
+    footer { padding-block: 2rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap"><a class="brand" href="/kids/">AMICOR Kids</a><a href="/">AMICOR Home</a></div>
+  </header>
+  <main class="wrap">
+    <section class="intro">
+      <h1>Find your next family adventure</h1>
+      <p>Pick a book for coloring time, a rainy-day treasure hunt, or a cozy bedtime read together.</p>
+    </section>
+    <section class="books" aria-label="Kids’ books">
+      <article>
+        <div class="cover"><img src="abc.webp" alt="My First ABC Animal Coloring Adventure cover"></div>
+        <div class="details">
+          <h2>My First ABC Animal Coloring Adventure</h2>
+          <p>Meet animals from A to Z, color their pictures, and practice letters along the way.</p>
+          <a class="action" href="https://www.amazon.com/dp/B0HQY4PBJK" aria-label="Buy My First ABC Animal Coloring Adventure on Amazon">Buy on Amazon</a>
+        </div>
+      </article>
+      <article>
+        <div class="cover"><img src="rainbow.webp" alt="The Great Rainbow Treasure Hunt cover"></div>
+        <div class="details">
+          <h2>The Great Rainbow Treasure Hunt!</h2>
+          <p>Explore seven colorful worlds through mazes, secret codes, and puzzles for ages 4–8.</p>
+          <a class="action" href="https://www.amazon.com/dp/B0HR1MV3FB" aria-label="Buy The Great Rainbow Treasure Hunt on Amazon">Buy on Amazon</a>
+        </div>
+      </article>
+      <article>
+        <div class="cover"><img src="snowplow.webp" alt="Goodnight, Little Snowplow cover"></div>
+        <div class="details">
+          <h2>Goodnight, Little Snowplow!</h2>
+          <p>On a snowy Minneapolis night, one little snowplow clears a path that helps Nia’s dad get home. A read-aloud for ages 4–8.</p>
+          <span class="action status">Coming soon</span>
+        </div>
+      </article>
+    </section>
+  </main>
+  <footer class="wrap">Paperback orders are placed on Amazon.</footer>
+</body>
+</html>
