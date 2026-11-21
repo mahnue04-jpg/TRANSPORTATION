@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AMICOR Nova Stay360 — Intelligent Hospitality Operations</title>
+  <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
+  <link rel="stylesheet" href="/static/branding/brand.css" />
+  <link rel="stylesheet" href="/static/nova-stay360/stay360.css" />
+</head>
+<body>
+  <header class="stay-header">
+    <div class="amicor-brand-lockup">
+      <img class="amicor-logo-full" src="/static/branding/amicor-logo-full.png" alt="AMICOR" />
+      <div>
+        <p class="brand-kicker" data-i18n="product.name">AMICOR Nova Stay360</p>
+        <h1 data-i18n="product.descriptor">Intelligent Hospitality Operations</h1>
+      </div>
+    </div>
+    <label class="locale-control">
+      <span data-i18n="nav.locale">Language</span>
+      <select id="locale" aria-label="Language">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+      </select>
+    </label>
+  </header>
+
+  <main class="stay-main">
+    <p class="notice" data-i18n="slice.synthetic_notice">Synthetic fixtures only. No live hotel, airline, map, or payment provider is contacted.</p>
+    <p class="notice" data-i18n="privacy.list_notice">Staff lists show a display label and reservation reference. Raw identity, contact, and payment fields stay off the list.</p>
+    <p class="notice" data-i18n="checkin.no_door_access">No door code, mobile key, or physical access is issued.</p>
+    <p class="notice" data-i18n="checkin.no_payment">No payment is captured.</p>
+    <p class="notice" data-i18n="blueprint.citation">Blueprint document: Hospitality &amp; Travel Master Blueprint, version 1.1. This is not the product title.</p>
+    <p class="scope" data-i18n="slice.scope_note">This slice covers privacy-safe guest prearrival, reservation lookup, mock flight and road arrivals, housekeeping, room readiness, and eligible mobile check-in simulation. The product title is AMICOR Nova Stay360. The source document title is Hospitality &amp; Travel Master Blueprint version 1.1 (26 sections) and that document is not in the repo. Those titles are different. Sections not implemented: parking, concierge, guest services, inventory safeguards, family/events, marketing, itinerary.</p>
+
+    <section class="panel" aria-labelledby="session-title">
+      <h2 id="session-title" data-i18n="nav.dashboard">Hotel dashboard</h2>
+      <label>
+        <span data-i18n="session.token">Platform access token</span>
+        <input id="token" type="password" autocomplete="off" />
+      </label>
+      <div class="actions">
+        <button type="button" id="load-dashboard" data-i18n="session.load">Load hotel dashboard</button>
+        <button type="button" id="clear-token" class="secondary" data-i18n="session.signout">Clear token</button>
+      </div>
+      <p id="session-status" class="status" role="status"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="counts-title">
+      <h2 id="counts-title" data-i18n="dashboard.counts">Operational counts</h2>
+      <p><span data-i18n="dashboard.hotel">Hotel</span>: <strong id="hotel-name">—</strong></p>
+      <p><span data-i18n="meta.fixture_date">Fixture date</span>: <strong id="fixture-date">—</strong></p>
+      <dl id="counts" class="counts"></dl>
+    </section>
+
+    <section class="panel" aria-labelledby="arrivals-title">
+      <h2 id="arrivals-title" data-i18n="arrivals.title">Prearrival board</h2>
+      <button type="button" id="refresh-arrivals" data-i18n="arrivals.refresh">Apply mock arrival update</button>
+      <p id="arrivals-empty" class="status" data-i18n="arrivals.empty">No reservations are on this board.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="table.reference">Reference</th>
+              <th data-i18n="table.guest">Guest label</th>
+              <th data-i18n="table.room">Room</th>
+              <th data-i18n="table.arrival">Arrival</th>
+              <th data-i18n="table.readiness">Readiness</th>
+              <th data-i18n="table.eligibility">Check-in</th>
+            </tr>
+          </thead>
+          <tbody id="arrivals"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="lookup-title">
+      <h2 id="lookup-title" data-i18n="lookup.title">Lookup by reservation reference</h2>
+      <form id="lookup-form">
+        <label>
+          <span data-i18n="lookup.reference">Reservation reference</span>
+          <input id="lookup-reference" name="reservation_reference" autocomplete="off" />
+        </label>
+        <button type="submit" data-i18n="lookup.submit">Look up</button>
+      </form>
+      <dl id="lookup-result" class="result"></dl>
+    </section>
+
+    <section class="panel" aria-labelledby="rooms-title">
+      <h2 id="rooms-title" data-i18n="rooms.title">Housekeeping and room readiness</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="table.room">Room</th>
+              <th data-i18n="table.reference">Reference</th>
+              <th data-i18n="table.guest">Guest label</th>
+              <th data-i18n="table.readiness">Readiness</th>
+            </tr>
+          </thead>
+          <tbody id="rooms"></tbody>
+        </table>
+      </div>
+      <form id="housekeeping-form" class="stack">
+        <label>
+          <span data-i18n="table.room">Room</span>
+          <input id="room-number" inputmode="numeric" autocomplete="off" />
+        </label>
+        <label>
+          <span data-i18n="rooms.update">Update housekeeping</span>
+          <select id="housekeeping-status">
+            <option value="dirty" data-i18n="housekeeping.dirty">Dirty</option>
+            <option value="in_progress" data-i18n="housekeeping.in_progress">In progress</option>
+            <option value="inspected" data-i18n="housekeeping.inspected">Inspected</option>
+            <option value="out_of_order" data-i18n="housekeeping.out_of_order">Out of order</option>
+          </select>
+        </label>
+        <button type="submit" data-i18n="rooms.update">Update housekeeping</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="checkin-title">
+      <h2 id="checkin-title" data-i18n="checkin.title">Eligible mobile check-in simulation</h2>
+      <form id="checkin-form" class="stack">
+        <label>
+          <span data-i18n="checkin.reference">Reservation reference</span>
+          <input id="checkin-reference" autocomplete="off" />
+        </label>
+        <button type="submit" data-i18n="checkin.simulate">Simulate check-in</button>
+      </form>
+      <dl id="checkin-result" class="result"></dl>
+    </section>
+  </main>
+  <script src="/static/nova-stay360/stay360.js"></script>
+</body>
+</html>
