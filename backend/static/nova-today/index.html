@@ -7,6 +7,7 @@
   <link rel="icon" href="/static/branding/favicon.ico" sizes="any" />
   <link rel="stylesheet" href="/static/branding/brand.css" />
   <link rel="stylesheet" href="/static/nova-today/today.css" />
+  <link rel="stylesheet" href="/static/nova-language/surface.css" />
 </head>
 <body>
   <header class="today-header">
@@ -35,6 +36,24 @@
 
   <main class="today-main">
     <p class="disclaimer">Nova Today reads existing Nova Core records. It does not merge product databases, send email, file with agencies, charge cards, or create a ledger.</p>
+    <section class="nova-language-bar" aria-label="Screen language" data-nova-language-surface="today">
+      <label for="screen-language">Screen language</label>
+      <select id="screen-language" aria-label="Screen language">
+        <option value="en">English</option>
+        <option value="so">Af-Soomaali</option>
+        <option value="ar">العربية</option>
+        <option value="fr">Français</option>
+        <option value="es">Español</option>
+        <option value="ja" data-rollout="planned">日本語</option>
+        <option value="ko" data-rollout="planned">한국어</option>
+        <option value="el" data-rollout="planned">Ελληνικά</option>
+        <option value="ru" data-rollout="planned">Русский</option>
+        <option value="de" data-rollout="planned">Deutsch</option>
+      </select>
+      <p id="language-fallback" class="hint">If this screen cannot show the selected language, the original text stays in place.</p>
+      <p id="language-rollout-notice" class="hint">Japanese, Korean, Greek, Russian, and German are in the rollout plan. Business delivery in those languages is not verified.</p>
+      <p class="hint">Live voice interpretation is not available. Bidirectional conversation translation is not available yet.</p>
+    </section>
     <ol class="workflow" aria-label="Owner workflow">
       <li>Open Nova Today</li>
       <li>See Attention Now</li>
@@ -192,6 +211,8 @@
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
+  <script src="/static/nova-language/preference.js?v=20261022.3"></script>
+  <script src="/static/nova-language/surface.js?v=20261022.3"></script>
   <script src="/static/ux/humanVoiceEngine.js"></script>
   <script src="/static/nova-today/today.js"></script>
   <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>
