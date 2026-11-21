@@ -158,3 +158,36 @@ def test_order_and_receipt_are_separate_isolated_tables():
     assert order_table.name == "starter_test_orders"
     sql = (BACKEND / "operations_checkout_receipts_staging.sql").read_text()
     assert "CREATE TABLE IF NOT EXISTS nova_ops_checkout_sandbox.starter_test_orders" in sql
+
+
+def test_receipt_engine_requires_exact_host_and_refuses_default_render_roles(monkeypatch):
+    """Never accept a similarly named DB on another host or a Render owner role."""
+    from operations_checkout_durable_receipts import _dedicated_staging_engine
+
+    _safe_env(monkeypatch)
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_NAME", "nova_operations_staging_db_541")
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "ops_receipt_writer")
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_HOST", "approved.staging.internal")
+    monkeypatch.setenv(
+        "NOVA_OPERATIONS_DURABLE_RECEIPT_DATABASE_URL",
+        "postgresql://ops_receipt_writer:synthetic@unapproved.internal/nova_operations_staging_db_541",
+    )
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        _dedicated_staging_engine()
+
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_HOST", "unapproved.internal")
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "nova_operations_staging_rotated")
+    monkeypatch.setenv(
+        "NOVA_OPERATIONS_DURABLE_RECEIPT_DATABASE_URL",
+        "postgresql://nova_operations_staging_rotated:synthetic@unapproved.internal/nova_operations_staging_db_541",
+    )
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        _dedicated_staging_engine()
+
+    monkeypatch.setenv("NOVA_OPERATIONS_DURABLE_RECEIPT_DB_USER", "nova_operations_staging_db_541_user")
+    monkeypatch.setenv(
+        "NOVA_OPERATIONS_DURABLE_RECEIPT_DATABASE_URL",
+        "postgresql://nova_operations_staging_db_541_user:synthetic@unapproved.internal/nova_operations_staging_db_541",
+    )
+    with pytest.raises(RuntimeError, match="identity mismatch"):
+        _dedicated_staging_engine()
