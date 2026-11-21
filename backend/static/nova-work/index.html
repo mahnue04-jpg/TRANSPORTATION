@@ -54,6 +54,17 @@
       </form>
     </section>
 
+    <section class="command-card" aria-label="Operations Agent CSV cleanup for owner review">
+      <h2>Operations Agent — CSV cleanup</h2>
+      <p class="hint">Owner-only limited real task: clean a UTF-8 CSV (up to 1 MB, 10,000 rows) and download a review copy. This does not accept a contract, deliver work to a client, or store the file. Check every result before using it.</p>
+      <form id="operations-csv-form">
+        <label for="operations-csv-file">Select your CSV file</label>
+        <input id="operations-csv-file" type="file" accept=".csv,text/csv" required />
+        <button type="submit">Clean CSV for my review</button>
+      </form>
+      <p class="hint" id="operations-csv-result" aria-live="polite">Feature unavailable until separately enabled for an authorized owner.</p>
+    </section>
+
     <section class="command-card" aria-label="Creative image generation">
       <h2>Nova Creative Image Generator</h2>
       <p class="hint">Work &amp; Revenue uses the same owner-controlled Nova Creative Studio image engine. Generate branded proposal graphics, social creatives, client-support visuals, and other supported work assets without duplicating providers or credentials.</p>
@@ -415,5 +426,6 @@
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-language/preference.js?v=20261022.2"></script>
   <script src="/static/nova-work/work.js"></script>
+  <script src="/static/nova-work/operations-csv.js"></script>
 </body>
 </html>

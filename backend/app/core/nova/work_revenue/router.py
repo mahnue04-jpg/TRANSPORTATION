@@ -1563,3 +1563,6 @@ def list_platform_policies(
 from app.core.nova.work_revenue.v2_router import router as nova_work_v2_router
 
 router.include_router(nova_work_v2_router)
+
+from app.core.nova.work_revenue.operations_owner_csv_api import router as owner_csv_router
+router.include_router(owner_csv_router)
