@@ -54,32 +54,112 @@ def resolve_studio_voice(voice: str | None, *, presenter: bool) -> str:
     return selected
 
 
-def _creative_media_root_and_prefix() -> tuple[Path, str]:
+_MEDIA_PREFIX = "/media/nova-creative"
+_EPHEMERAL_PREFIX = "/static/generated/nova-creative"
+
+
+def _ephemeral_media_root() -> Path:
+    return Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
+
+
+def choose_creative_media_root(
+    *,
+    configured: str,
+    onboarding_docs_exists: bool,
+    data_dir_exists: bool,
+    ephemeral: Path,
+    public_prefix: str,
+) -> tuple[Path, str]:
+    """Pick the directory new Studio media is written to.
+
+    An explicit NOVA_CREATIVE_MEDIA_DIR wins. Production keeps
+    /data/onboarding_docs/nova_creative_media when that disk folder exists.
+    A staging disk mounted at /data, without that folder, uses
+    /data/nova_creative_media so a deploy does not leave the file inside
+    the container image. The container static tree is only the last resort.
+    """
+    selected = str(configured or "").strip()
+    if selected:
+        return Path(selected), public_prefix
+    if onboarding_docs_exists:
+        return Path("/data/onboarding_docs/nova_creative_media"), _MEDIA_PREFIX
+    if data_dir_exists:
+        return Path("/data/nova_creative_media"), _MEDIA_PREFIX
+    return ephemeral, _EPHEMERAL_PREFIX
+
+
+def creative_media_search_roots() -> list[Path]:
+    """Every directory that may already hold a saved Studio file."""
+    roots: list[Path] = []
     configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
     if configured:
-        root = Path(configured)
-        prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or "/media/nova-creative").rstrip("/")
-        return root, prefix
+        roots.append(Path(configured))
+    roots.append(Path("/data/onboarding_docs/nova_creative_media"))
+    roots.append(Path("/data/nova_creative_media"))
+    roots.append(_ephemeral_media_root())
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
 
-    persistent_parent = Path("/data/onboarding_docs")
-    if persistent_parent.exists():
-        return persistent_parent / "nova_creative_media", "/media/nova-creative"
 
-    root = Path(__file__).resolve().parents[4] / "static" / "generated" / "nova-creative"
-    return root, "/static/generated/nova-creative"
+def _creative_media_root_and_prefix() -> tuple[Path, str]:
+    public_prefix = str(os.getenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX") or _MEDIA_PREFIX).rstrip("/")
+    return choose_creative_media_root(
+        configured=str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or ""),
+        onboarding_docs_exists=Path("/data/onboarding_docs").is_dir(),
+        data_dir_exists=Path("/data").is_dir(),
+        ephemeral=_ephemeral_media_root(),
+        public_prefix=public_prefix,
+    )
+
+
+_PRIVATE_IMPORT_PREFIX = "private-studio://"
+
+
+def _private_import_root() -> Path:
+    """Imported owner originals live outside the publicly mounted media tree."""
+    root, _ = _creative_media_root_and_prefix()
+    return root.with_name(root.name + "-private-imports")
+
+
+def _media_filename(raw: str) -> str | None:
+    name = raw.rsplit("/", 1)[-1].strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        return None
+    return name
 
 
 def _resolve_creative_media_url(value: str | None) -> Path | None:
     raw = str(value or "").strip()
     if not raw:
         return None
+    if raw.startswith(_PRIVATE_IMPORT_PREFIX):
+        name = _media_filename(raw)
+        if not name or not name.startswith("imported_video_") or not name.endswith(".mp4"):
+            return None
+        return _private_import_root() / name
     root, prefix = _creative_media_root_and_prefix()
-    if raw.startswith(prefix + "/"):
-        return root / raw.rsplit("/", 1)[-1]
-    if raw.startswith("/static/generated/nova-creative/"):
-        backend_root = Path(__file__).resolve().parents[4]
-        return backend_root / raw.lstrip("/")
-    return None
+    filename = None
+    for known in (prefix, _MEDIA_PREFIX, _EPHEMERAL_PREFIX):
+        if known and raw.startswith(known + "/"):
+            filename = _media_filename(raw)
+            break
+    if filename is None:
+        return None
+    primary = root / filename
+    if primary.is_file():
+        return primary
+    for candidate in creative_media_search_roots():
+        path = candidate / filename
+        if path.is_file():
+            return path
+    return primary
 
 AVAILABLE = "AVAILABLE"
 CONFIG_REQUIRED = "CONFIG_REQUIRED"
@@ -939,10 +1019,82 @@ def talking_presenter_provider() -> TalkingPresenterProvider:
     return DidTalkingPresenterProvider()
 
 
+def _block_reason(status: str, configured: bool) -> str:
+    if status == AVAILABLE and configured:
+        return "ready"
+    if status == DISABLED and configured:
+        return "live_flag_off"
+    if status == CONFIG_REQUIRED or not configured:
+        return "credential_missing"
+    if status == ERROR:
+        return "provider_error"
+    return "unverified"
+
+
+def _video_credential_names() -> list[str]:
+    selected = selected_video_provider()
+    if selected in {"fal", "kling", "fal_kling"}:
+        return ["FAL_KEY"]
+    return ["RUNWAYML_API_SECRET", "NOVA_CREATIVE_VIDEO_API_KEY"]
+
+
+def _video_live_flag_names() -> list[str]:
+    names = ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED"]
+    if selected_video_provider() in {"fal", "kling", "fal_kling"}:
+        names.append("NOVA_CREATIVE_KLING_LIVE_ENABLED")
+    return names
+
+
+def _annotate_provider_status(row: dict[str, Any], credential_names: list[str], live_flag_names: list[str]) -> dict[str, Any]:
+    annotated = dict(row)
+    annotated["block_reason"] = _block_reason(str(row.get("status") or ""), bool(row.get("configured")))
+    annotated["credential_env_names"] = list(credential_names)
+    annotated["live_flag_names"] = list(live_flag_names)
+    annotated["invalid_credential_checked"] = False
+    return annotated
+
+
+def media_selection_label() -> str:
+    """Name the media root class without echoing a custom directory."""
+    if str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip():
+        return "configured"
+    root, _prefix = _creative_media_root_and_prefix()
+    text = str(root)
+    if text == "/data/onboarding_docs/nova_creative_media":
+        return "onboarding_docs"
+    if text == "/data/nova_creative_media":
+        return "data_disk"
+    return "ephemeral"
+
+
 def provider_statuses() -> list[dict[str, Any]]:
-    return [
-        image_provider().status().as_dict(),
-        video_provider().status().as_dict(),
-        voice_provider().status().as_dict(),
-        talking_presenter_provider().status().as_dict(),
+    from app.core.nova.creative_studio.kling import FalKlingAvatarProvider
+
+    rows = [
+        _annotate_provider_status(
+            image_provider().status().as_dict(),
+            ["OPENAI_API_KEY"],
+            ["NOVA_CREATIVE_IMAGE_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            video_provider().status().as_dict(),
+            _video_credential_names(),
+            _video_live_flag_names(),
+        ),
+        _annotate_provider_status(
+            voice_provider().status().as_dict(),
+            ["OPENAI_API_KEY"],
+            ["NOVA_CREATIVE_VOICE_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            talking_presenter_provider().status().as_dict(),
+            ["DID_API_KEY"],
+            ["NOVA_CREATIVE_TALKING_PRESENTER_LIVE_ENABLED"],
+        ),
+        _annotate_provider_status(
+            FalKlingAvatarProvider().status().as_dict(),
+            ["FAL_KEY"],
+            ["NOVA_CREATIVE_VIDEO_LIVE_ENABLED", "NOVA_CREATIVE_KLING_LIVE_ENABLED"],
+        ),
     ]
+    return rows

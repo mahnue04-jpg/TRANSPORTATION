@@ -37,7 +37,7 @@
       <a href="https://amicor-health-isf-py.onrender.com/static/nova-creative/index.html">Open existing AMICOR Studio</a>
     </div>
     <script>
-      if (location.hostname === "nova-studio-validation-350.onrender.com") {
+      if (["nova-studio-validation-350.onrender.com", "amicor-health-isf-pr-454.onrender.com"].includes(location.hostname)) {
         document.getElementById("staging-environment-warning").style.display = "block";
       }
     </script>
@@ -61,12 +61,15 @@
         <form id="staging-register-form" class="grid hidden" autocomplete="off">
           <label>Test email<input id="staging-register-email" type="email" required autocomplete="off" /></label>
           <label>New test password (do not reuse your usual password)<input id="staging-register-password" type="password" required autocomplete="new-password" minlength="12" /></label>
+          <label><input type="checkbox" class="studio-password-visibility" data-target="staging-register-password" /> Show new test password</label>
           <button type="submit">Create separate test account</button>
         </form>
       </div>
       <form id="login-form" class="grid hidden">
         <label>Email<input id="login-email" type="email" autocomplete="username" required /></label>
         <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+        <label><input type="checkbox" class="studio-password-visibility" data-target="login-password" /> Show password</label>
+        <p class="hint">Staging uses separate test accounts. Your production password may not work here. Forgot your test password? Create a new disposable test account with a different test email; never reuse your production password.</p>
         <button type="submit">Sign in</button>
       </form>
     </section>
@@ -76,6 +79,7 @@
       <h2>Walking commercial</h2>
       <p class="hint">Full-body presenter, natural female narration, lip sync, and captions. Does not change the approved 60-second demo. Customer price <strong>$49</strong>.</p>
       <p id="active-project-label" class="hint path-active" role="status">No project selected yet.</p>
+      <p class="hint">To recover an existing commercial, <a href="#studio-project-history">view saved projects in Section 11</a>. Select the exact project there before any render, license change, or checkout.</p>
       <ol class="path-steps">
         <li>Select <strong>AMICOR Second Commercial</strong> (or create a 30s project + storyboard)</li>
         <li>Accept the voice license</li>
@@ -86,13 +90,28 @@
         <button type="button" id="select-second-commercial" class="secondary">Select Second Commercial</button>
         <button type="button" id="accept-voice-license" class="secondary">Accept voice license</button>
         <button type="button" id="build-walking-commercial-30s" class="btn-primary">Build 30s walking commercial</button>
+        <button type="button" id="check-genova-avatar-readiness" class="secondary" aria-controls="genova-avatar-readiness-result">Check Genova professional presenter readiness (free)</button>
       </div>
+      <section aria-label="Genova image approval"><h3>Approve Genova presenter image</h3><p class="hint">Choose one existing image from this project. Approval is saved to this project only; no paid generation.</p><div class="actions wrap"><label>Upload a local presenter image (PNG/JPEG/WebP, up to 8 MB)<input id="genova-image-file" type="file" accept="image/png,image/jpeg,image/webp" /></label><button type="button" id="genova-upload-image" class="secondary">Upload image (free)</button><button type="button" id="genova-load-images" class="secondary">Show existing presenter images</button><button type="button" id="genova-revoke-image" class="secondary">Remove approval</button></div><div id="genova-image-choices" role="status" aria-live="polite"></div></section>
+      <section aria-label="Genova narration approval">
+        <h3>Review and approve Genova narration</h3>
+        <p class="hint">Import a voice recording with its exact script. This saves a new presenter script revision and keeps earlier assets. Review and approval follow separately.</p>
+        <label>Narration recording (WAV or MP3, up to 32 MB)<input id="genova-narration-file" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" /></label>
+        <label>Exact words in the recording<textarea id="genova-narration-script" maxlength="10000" rows="4"></textarea></label>
+        <button type="button" id="genova-upload-narration" class="secondary">Import narration and script (free)</button>
+        <p class="hint">Download and listen to saved narration before approving it. Approval applies to this project's exact audio and saved presenter script. Changing either requires another review. No generation or payment starts here.</p>
+        <div class="actions wrap"><button type="button" id="genova-load-narration" class="secondary">Show saved narration</button><button type="button" id="genova-revoke-narration" class="secondary">Remove narration approval</button></div>
+        <div id="genova-narration-choices" role="status" aria-live="polite"></div>
+      </section>
+      <div id="genova-avatar-readiness-result" class="hint" role="status" aria-live="polite">Professional presenter test is not activated. Run the free readiness check to see missing requirements.</div>
       <details class="studio-details">
         <summary>Optional · 5s preview &amp; montage fallback</summary>
         <p class="hint">PREVIEW_ONLY fallback. Presenter NOT USED. Title cards and local eSpeak narration only. This is not the 30s presenter pipeline and cannot be marked commercially complete. Put a verified first-party link in the TikTok/Instagram profile Website field. Captions are not clickable.</p>
         <div class="actions wrap">
           <button type="button" id="build-walking-presenter" class="secondary">Build 5s walking preview</button>
           <button type="button" id="build-offline-montage" class="secondary">Offline 30s montage (preview only)</button>
+          <button type="button" id="assemble-provider-commercial-offline" class="secondary">Assemble saved provider scenes (free)</button>
+          <div id="provider-commercial-assembly-result" class="hint" role="status" aria-live="polite">Requires six locally saved, lip-synced provider scenes. No provider calls; captions and final QC still pending.</div>
           <button type="button" id="prepare-nova-links" class="secondary">Prepare Nova links</button>
         </div>
       </details>
@@ -313,7 +332,7 @@
       <p class="hint">Saving the plan is free. Motion and voice generation use the configured providers and may consume credits. A failed motion request stays failed. The rendered video is a preview for review before publishing.</p>
     </section>
 
-    <section class="card" aria-label="Project history">
+    <section id="studio-project-history" class="card" aria-label="Project history">
       <h2>11. Project history</h2>
       <div id="project-list" class="list"></div>
     </section>
@@ -333,12 +352,36 @@
         <button type="button" id="reset-project-media" class="secondary">Clear all generated media from this project</button>
         <button type="button" id="clear-failed-video-assets" class="secondary">Clear failed video attempts</button>
       </div>
+      <section aria-label="Import finished video">
+        <h3>Save an existing finished video</h3>
+        <p class="hint">Import your completed MP4 into this project without generating or buying media. Import preserves existing scripts and approvals. Check narration, captions, licensing and publishing approval separately.</p>
+        <label>Finished MP4 (H.264/AAC, up to 128 MB and 120 seconds)<input id="finished-video-file" type="file" accept="video/mp4,.mp4" /></label>
+        <button type="button" id="import-finished-video" class="secondary">Import finished video (free)</button>
+      </section>
+      <details class="studio-details" aria-label="Operations Agent narration quality review">
+        <summary>30s Operations Agent narration QC — owner review required</summary>
+        <p class="hint">This checklist does not transcribe audio, correct the MP4, approve publication, or call a paid provider. Compare the actual downloaded 30-second recording against the approved script; voice-to-text guesses alone are not evidence of an audio defect.</p>
+        <p><strong>Approved narration text:</strong></p>
+        <blockquote>Business paperwork piling up? Meet AMICOR Nova Operations Agent. Get help with business research, spreadsheet cleanup, document organization, and customer-support drafts. Describe your task. We review the scope, and Nova helps prepare the work for your review. Turn scattered information into clear reports and organized records while you stay in control. Visit GetAmiCore.com to explore Nova Operations Agent.</blockquote>
+        <p class="hint">Check spoken AMICOR pronunciation (“Ami-h-core”), “Describe your task,” “customer-support drafts,” and the website getamicor.com. Then verify full 30-second narration, no audio dropouts, caption timing, natural presenter movement, and mouth-to-speech synchronization.</p>
+        <p><strong>Commercial status: NOT APPROVED FOR PUBLISHING</strong> until actual audio, captions, motion, rights, and the finished file are checked. Preserve the existing video; do not clear or regenerate media to perform this review.</p>
+      </details>
       <div id="asset-list" class="list"></div>
     </section>
   </main>
 
   <script src="/static/ux/sessionManager.js"></script>
   <script src="/static/nova-creative/auth-session-guard.js"></script>
-  <script src="/static/nova-creative/creative.js?v=studio-auth-download-20261022"></script>
+  <script>
+    document.querySelectorAll(".studio-password-visibility").forEach(function (control) {
+      control.addEventListener("change", function () {
+        var field = document.getElementById(control.dataset.target);
+        if (field) field.type = control.checked ? "text" : "password";
+      });
+    });
+  </script>
+  <script src="/static/nova-creative/creative.js?v=reviewed-planning-video-import-20261030-brief-scope"></script>
 </body>
 </html>
+
+

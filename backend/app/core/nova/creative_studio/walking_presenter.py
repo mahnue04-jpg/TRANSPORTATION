@@ -824,6 +824,7 @@ def _render_walking_core(
     license_status: str | None = None,
     speech_rate: str = "+0%",
     presenter_image: Path | None = None,
+    approved_narration_path: Path | None = None,
 ) -> dict[str, Any]:
     script = " ".join(str(script or DEFAULT_SCRIPT).split())
     if not script:
@@ -838,8 +839,14 @@ def _render_walking_core(
         with tempfile.TemporaryDirectory(prefix="nova-walk-") as temp_name:
             temp = Path(temp_name)
             audio_mp3 = temp / "narration.mp3"
-            narration = synthesize_female_narration(script, audio_mp3, voice=voice, rate=speech_rate)
-            if license_status in {"GREEN", "AMBER", "RED"}:
+            if approved_narration_path is not None:
+                narration = {"engine": "owner_approved_saved_audio", "wav_path": str(approved_narration_path),
+                             "duration_seconds": probe_duration_seconds(approved_narration_path),
+                             "license_status": "AMBER", "owner_approved_audio": True,
+                             "paid_provider_charges": False}
+            else:
+                narration = synthesize_female_narration(script, audio_mp3, voice=voice, rate=speech_rate)
+            if approved_narration_path is None and license_status in {"GREEN", "AMBER", "RED"}:
                 narration = {**narration, "license_status": license_status}
                 if license_status == "GREEN":
                     narration["commercial_use"] = (
@@ -848,6 +855,19 @@ def _render_walking_core(
                     )
             wav_path = Path(narration["wav_path"])
             audio_duration = float(narration["duration_seconds"] or 0.0)
+            speech_limit = float(target_seconds if milestone == "30s_walking_commercial" else max_seconds)
+            if not math.isfinite(audio_duration) or audio_duration <= 0:
+                raise WalkingPresenterError("INVALID_NARRATION", "Narration duration could not be verified. No video was encoded.")
+            if audio_duration > speech_limit:
+                raise WalkingPresenterError("NARRATION_TOO_LONG",
+                    f"Narration is {audio_duration:.2f}s; this production allows {speech_limit:.0f}s. Shorten the saved script or review a shorter recording. Speech was not cut and no video was encoded.")
+            if approved_narration_path is not None and wav_path.suffix.lower() != ".wav":
+                converted = temp / "approved-narration.wav"
+                _run([ffmpeg, "-y", "-i", str(wav_path), "-ac", "1", "-ar", "24000", str(converted)])
+                wav_path = converted
+                audio_duration = probe_duration_seconds(wav_path)
+                if not math.isfinite(audio_duration) or not 0 < audio_duration <= speech_limit:
+                    raise WalkingPresenterError("NARRATION_TOO_LONG", "Decoded narration does not fit this production. No speech was cut and no video was encoded.")
             duration = max(min_seconds, min(max_seconds, max(audio_duration, float(target_seconds))))
             frame_count = max(int(duration * fps), 24)
             rms = _rms_envelope(wav_path, fps=fps, frame_count=frame_count)
@@ -943,7 +963,7 @@ def _render_walking_core(
         "publish_ready": False,
         "owner_review_required": True,
         "license_status": narration["license_status"],
-        "narration": narration,
+        "narration": {key: value for key, value in narration.items() if key not in {"wav_path", "source_path"}},
         "caption_cues": cues,
         "validation": validation,
         "visible_end_card": "getamicor.com/nova-today",
@@ -1009,6 +1029,7 @@ def render_walking_commercial_30s(
     height: int = HEIGHT,
     license_status: str | None = None,
     presenter_image: Path | None = None,
+    approved_narration_path: Path | None = None,
 ) -> dict[str, Any]:
     """Full ~30s H.264/AAC walking talking commercial for mobile download.
 
@@ -1016,16 +1037,7 @@ def render_walking_commercial_30s(
     Does not call fal/Kling/D-ID/OpenAI and does not purchase credits.
     """
     text = script or (script_from_scenes(scenes or []))
-    # Keep narration covering ~30s without drifting far over the tolerance band.
-    words = text.split()
-    if len(words) < 55:
-        text = (
-            f"{text} "
-            "AMICOR Nova prepares research, follow-ups, and drafts you can review first. "
-            "Visit getamicor.com slash nova-today to explore AMICOR Nova today."
-        )
-    elif len(words) > 95:
-        text = " ".join(words[:95])
+    # Preserve the reviewed wording. Measured audio, not a word count, determines fit.
     render_width, render_height, render_fps = _memory_profile(
         width=width,
         height=height,
@@ -1047,7 +1059,9 @@ def render_walking_commercial_30s(
         license_status=license_status,
         speech_rate="-4%",
         presenter_image=presenter_image,
+        approved_narration_path=approved_narration_path,
     )
     result["final_promo"] = True
     result["scope"] = "30-second AMICOR Creative Studio commercial"
     return result
+

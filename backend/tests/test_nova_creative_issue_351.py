@@ -287,7 +287,8 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     svc.accept_voice_license("owner-351", project["id"], accepted=True, note="Owner accepted for #351")
     rendered = svc.render_walking_commercial_30s("owner-351", project["id"])
     assert rendered["milestone"] == "30s_walking_commercial"
-    assert rendered["lip_sync"] is True
+    assert rendered["lip_sync"] is False
+    assert rendered["asset"]["metadata"]["lip_sync"] is False
     assert rendered["mobile_download_ready"] is True
     assert rendered["paid_provider_charges"] is False
     assert rendered["license_status"] == "GREEN"
