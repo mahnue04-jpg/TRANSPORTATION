@@ -38,9 +38,12 @@ JS = (ROOT / "static" / "nova-creative" / "creative.js").read_text(encoding="utf
 def test_amicor_pronunciation_is_canonical_for_speech_but_branded_in_captions():
     spoken = canonical_spoken_script(DEFAULT_SCRIPT)
     captions = caption_script(DEFAULT_SCRIPT)
-    assert "AH-mih-kor" in spoken
+    assert "Ammy Core" in spoken
+    assert "AMICOR" not in spoken
     assert "AMICOR" in captions
-    assert "AH-mih-kor" not in captions
+    assert "Ammy Core" not in captions
+    assert canonical_spoken_script("Meet AMICOR Nova.") == "Meet Ammy Core Nova."
+    assert caption_script("Meet Ammy Core Nova.") == "Meet AMICOR Nova."
 
 
 def test_word_aligned_cues_cover_every_script_word():
@@ -285,6 +288,13 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     )
     svc.generate_storyboard("owner-351", project["id"])
     svc.accept_voice_license("owner-351", project["id"], accepted=True, note="Owner accepted for #351")
+    # An approved presenter plate must exist: never silently render an unrelated cartoon.
+    from PIL import Image
+
+    Image.new("RGB", (360, 640), (30, 50, 80)).save(
+        tmp_path / "nova-c4edd02f88a04f7081a79a18fd98a935.png"
+    )
+    monkeypatch.setenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", project["id"])
     rendered = svc.render_walking_commercial_30s("owner-351", project["id"])
     assert rendered["milestone"] == "30s_walking_commercial"
     assert rendered["lip_sync"] is True
@@ -304,3 +314,80 @@ def test_thirty_second_walking_commercial_and_green_license(tmp_path, monkeypatc
     assert probe["video_codec"] in {"h264", "avc1"}
     assert probe["audio_codec"] in {"aac", "mp4a"}
     assert video.with_suffix(".srt").is_file()
+
+
+def test_thirty_second_commercial_rejects_missing_presenter(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio.service import CreativeStudioError
+
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_DIR", str(tmp_path))
+    monkeypatch.setenv("NOVA_CREATIVE_MEDIA_PUBLIC_PREFIX", "/media/nova-creative")
+    svc = CreativeStudioService(CreativeStudioStore())
+    project = svc.create_project(
+        "owner-351",
+        {"title": "No approved presenter", "project_type": "short_video", "platform": "TikTok", "duration_target": 30},
+    )
+    svc.generate_storyboard("owner-351", project["id"])
+    # A different available presenter is not acceptable: only the source
+    # image used by the approved 60-second video can be used.
+    from PIL import Image
+
+    Image.new("RGB", (360, 640), (60, 70, 90)).save(tmp_path / "nova-unapproved-presenter.png")
+    monkeypatch.setenv("NOVA_CREATIVE_60S_REFERENCE_PROJECT_IDS", project["id"])
+    with pytest.raises(CreativeStudioError) as exc:
+        svc.render_walking_commercial_30s("owner-351", project["id"])
+    assert exc.value.code == "PRESENTER_IMAGE_REQUIRED"
+    assert not list(tmp_path.glob("nova-walk-commercial-30s-*.mp4"))
+
+
+def test_thirty_second_commercial_rejects_truncated_narration(tmp_path, monkeypatch):
+    from app.core.nova.creative_studio import walking_presenter
+
+    monkeypatch.setattr(walking_presenter, "_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(walking_presenter, "_prepare_presenter_plate", lambda *_a, **_kw: (None, None))
+    monkeypatch.setattr(
+        walking_presenter,
+        "synthesize_female_narration",
+        lambda *_a, **_kw: {"wav_path": str(tmp_path / "fake.wav"), "duration_seconds": 35.45},
+    )
+    with pytest.raises(walking_presenter.WalkingPresenterError) as exc:
+        walking_presenter._render_walking_core(
+            output_mp4=tmp_path / "not-created.mp4",
+            script="AMICOR Nova is your business assistant.",
+            voice="en-US-JennyNeural",
+            min_seconds=28.0,
+            max_seconds=32.0,
+            target_seconds=30.0,
+            fps=6,
+            width=270,
+            height=480,
+            milestone="30s_walking_commercial",
+            render_mode="local_walking_commercial_30s",
+        )
+    assert exc.value.code == "NARRATION_TOO_LONG"
+    assert not (tmp_path / "not-created.mp4").exists()
+
+
+def test_amicor_phonetic_words_reach_neural_tts_without_changing_captions(tmp_path, monkeypatch):
+    """Offline contract: neural TTS receives phonetics while captions retain AMICOR."""
+    import sys
+    from types import SimpleNamespace
+    from app.core.nova.creative_studio import walking_presenter
+
+    calls = []
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, *, rate):
+            calls.append((text, voice, rate))
+
+        async def save(self, target):
+            Path(target).write_bytes(b"fake-audio" * 30)
+
+    monkeypatch.setitem(sys.modules, "edge_tts", SimpleNamespace(Communicate=FakeCommunicate))
+    monkeypatch.setattr(walking_presenter, "probe_duration_seconds", lambda _path: 5.0)
+    result = walking_presenter.synthesize_female_narration(
+        "Welcome to AMICOR Nova.", tmp_path / "sample.wav", voice="en-US-JennyNeural"
+    )
+    assert calls == [("Welcome to Ammy Core Nova.", "en-US-JennyNeural", "+0%")]
+    assert result["spoken_script"] == "Welcome to Ammy Core Nova."
+    assert result["caption_script"] == "Welcome to AMICOR Nova."
+    assert result["paid_provider_charges"] is False
