@@ -17,6 +17,7 @@ from app.core.nova.work_revenue.capability_classification import (
     classify_opportunity_capability,
 )
 from app.core.nova.work_revenue.flags import discovery_diagnostics, engine_guardrails, live_discovery_enabled
+from app.core.nova.work_revenue.funnel_status import funnel_stage_status
 from app.core.nova.work_revenue.safety import evaluate_live_action
 from app.runtime_contract import _resolve_runtime_environment
 from app.core.nova.work_revenue.lifecycle import (
@@ -331,6 +332,21 @@ def opportunity_out(
     owner_action_required: bool = False,
 ) -> OpportunityOut:
     qual = _with_capability(row, _parse_qual(row.qualification_json) or {})
+    stage = funnel_stage_status(
+        {
+            "status": row.status,
+            "qualification_outcome": row.qualification_outcome,
+            "eligibility_decision": (qual or {}).get("eligibility_decision"),
+            "application_state": application_state,
+            "opportunity_id": row.opportunity_id,
+            "approved_for_future_submission": application_state == "approved_for_future_submission",
+            "externally_submitted": application_state == "submitted_externally_recorded",
+            "manual_submission_recorded": application_state == "submitted_externally_recorded",
+            "approval_state": application_state
+            if application_state in {"DRAFT", "READY_FOR_OWNER_REVIEW", "NEEDS_CHANGES", "APPROVED", "REJECTED"}
+            else "",
+        }
+    )
     return OpportunityOut(
         opportunity_id=row.opportunity_id,
         organization_id=row.organization_id,
@@ -387,6 +403,9 @@ def opportunity_out(
         blocked_reason=getattr(row, "blocked_reason", None),
         archive_reason=getattr(row, "archive_reason", None),
         qualification_reason=getattr(row, "qualification_reason", None),
+        funnel_stage=stage["funnel_stage"],
+        funnel_stage_label=stage["funnel_stage_label"],
+        external_send=bool(stage["external_send"]),
     )
 
 
@@ -453,6 +472,19 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         if opportunity is not None
         else {}
     )
+    stage = funnel_stage_status(
+        {
+            "approval_state": row.approval_state,
+            "approved_for_future_submission": row.approved_for_future_submission,
+            "externally_submitted": row.externally_submitted,
+            "manual_submission_recorded": row.manual_submission_recorded,
+            "status": opportunity.status if opportunity is not None else "",
+            "qualification_outcome": opportunity.qualification_outcome if opportunity is not None else "",
+            "eligibility_decision": eligibility.get("eligibility_decision"),
+            "opportunity_id": row.opportunity_id,
+            "application_id": row.application_id,
+        }
+    )
     return ApplicationOut(
         application_id=row.application_id,
         opportunity_id=row.opportunity_id,
@@ -477,6 +509,9 @@ def application_out(db: Session, row: NovaWorkApplication) -> ApplicationOut:
         decided_at=getattr(row, "decided_at", None),
         externally_ready=False,
         approved_equals_submitted=False,
+        funnel_stage=stage["funnel_stage"],
+        funnel_stage_label=stage["funnel_stage_label"],
+        external_send=bool(stage["external_send"]),
     )
 
 
