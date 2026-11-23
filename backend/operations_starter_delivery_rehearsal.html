@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nova Starter delivery rehearsal</title>
+<style>body{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}button,input{font:inherit;padding:.55rem;margin:.4rem 0}output{display:block;white-space:pre-wrap;margin-top:1rem}</style>
+<h1>Nova Starter delivery rehearsal</h1>
+<p>Use a Stripe test card and the built-in synthetic CSV.</p>
+<label>Rehearsal access token <input id="token" type="password" autocomplete="off"></label>
+<div><button id="create">Create $49 test checkout</button> <button id="verify" disabled>Verify private delivery and revoke access</button></div>
+<div id="checkout"></div><output id="result" aria-live="polite"></output>
+<script>
+let lead;
+const field = document.getElementById('token');
+const out = document.getElementById('result');
+const create = document.getElementById('create');
+const verify = document.getElementById('verify');
+async function post(path, data = {}) {
+  const response = await fetch(path, {
+    method:'POST', cache:'no-store',
+    headers:{'Content-Type':'application/json','X-Nova-Rehearsal':field.value},
+    body:JSON.stringify(data),
+  });
+  const body = await response.json();
+  if (!response.ok) throw Error('HTTP ' + response.status + ' ' + (typeof body.detail === 'string' ? body.detail : 'Request rejected'));
+  return body;
+}
+create.onclick = async () => {
+  try {
+    create.disabled = true;
+    const response = await post('/api/marketing/leads', {
+      lead_type:'anonymous_operations', service_plan:'starter_49', contact_name:'Synthetic Buyer',
+      organization_name:'AMICOR Synthetic Rehearsal', work_email:'rehearsal-'+crypto.randomUUID()+'@example.invalid',
+      consent:true, lead_source:'sandbox_checkout', message:'Synthetic checkout and private delivery rehearsal.',
+    });
+    lead = response.data.lead_id;
+    const session = await post('/api/marketing/leads/'+lead+'/checkout');
+    if (!session.checkout_session_id.startsWith('cs_test_') || new URL(session.checkout_url).origin !== 'https://checkout.stripe.com') throw Error('Expected Stripe test checkout');
+    const link = document.createElement('a');
+    link.href = session.checkout_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = 'Open $49 Stripe test checkout';
+    document.getElementById('checkout').replaceChildren(link);
+    verify.disabled = false;
+    out.textContent = 'Synthetic order created. Complete the test checkout, then verify delivery.';
+  } catch (error) { out.textContent = error.message; create.disabled = false; }
+};
+verify.onclick = async () => {
+  verify.disabled = true;
+  try {
+    const prepared = await post('/rehearsal/'+lead+'/fulfill');
+    const get = (token) => fetch(prepared.download, {cache:'no-store', headers:token?{Authorization:'Bearer '+token}:{}});
+    const [anonymous, other, buyer] = await Promise.all([get(), get(prepared.other), get(prepared.buyer)]);
+    const bytes = await buyer.arrayBuffer();
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+      .map(value => value.toString(16).padStart(2, '0')).join('');
+    const exact = new TextDecoder().decode(bytes) === 'Name,Status\nSynthetic Customer,Active\n';
+    await post('/rehearsal/'+prepared.download.split('/').pop()+'/revoke');
+    const revoked = await get(prepared.buyer);
+    if (anonymous.status !== 401 || other.status !== 404 || buyer.status !== 200
+        || revoked.status !== 404 || !exact || hash !== prepared.sha256
+        || buyer.headers.get('Cache-Control') !== 'private, no-store') throw Error('Delivery acceptance failed');
+    out.textContent = 'PASS · paid Stripe test order bound to one synthetic CSV task.\n'
+      + 'PASS · cleaned file and checksum matched. Verified buyer received HTTP 200.\n'
+      + 'PASS · signed-out 401, wrong account 404, revoked recipient 404.';
+    field.value = '';
+  } catch (error) { out.textContent = error.message; verify.disabled = false; }
+};
+</script>
+</html>
