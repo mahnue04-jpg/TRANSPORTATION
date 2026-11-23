@@ -1,6 +1,12 @@
 name: Starter disposable PostgreSQL integration
 
 on:
+  push:
+    branches:
+      - "review/starter-49-disposable-postgres-integration-20261122"
+    paths:
+      - "backend/tests/test_operations_starter_disposable_postgres.py"
+      - ".github/workflows/starter-disposable-postgres.yml"
   pull_request:
     paths:
       - "backend/tests/test_operations_starter_disposable_postgres.py"
