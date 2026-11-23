@@ -27,9 +27,7 @@ CREATE TABLE nova_operations_subscription_scope_approval_events (
     engagement_id VARCHAR(32) NOT NULL,
     task_id VARCHAR(32) NOT NULL,
     lead_id VARCHAR(36) NOT NULL,
-    task_fingerprint VARCHAR(64) NOT NULL CHECK (task_fingerprint ~ '^[0-9a-f]{64} consent/approval by populating this table from existing task status.
--- Approval write path and revocation audit must be implemented and separately tested.
-),
+    task_fingerprint VARCHAR(64) NOT NULL CHECK (task_fingerprint ~ '^[0-9a-f]{64}$'),
     decision VARCHAR(16) NOT NULL CHECK (decision IN ('APPROVED','REJECTED','REVOKED')),
     decided_at TIMESTAMPTZ NOT NULL
 );

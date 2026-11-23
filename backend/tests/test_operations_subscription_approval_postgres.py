@@ -6,6 +6,7 @@ import os
 import sys
 import types
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -77,8 +78,11 @@ def db(monkeypatch):
 
     engine = sa.create_engine(URL)
     Base.metadata.create_all(engine)
-    approvals.create(engine, checkfirst=True)
-    approval_events.create(engine, checkfirst=True)
+    migration = Path(__file__).resolve().parents[1] / "migrations" / (
+        "review_only_operations_subscription_scope_approvals_staging.sql"
+    )
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.exec_driver_sql(migration.read_text(encoding="utf-8"))
     with Session(engine) as session:
         session.add(FakeEngagement(engagement_id="eng_synthetic", organization_id="org_synthetic", owner_user_id="owner_synthetic"))
         session.add(FakeTask(task_id="task_synthetic", engagement_id="eng_synthetic", organization_id="org_synthetic",

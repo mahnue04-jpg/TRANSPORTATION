@@ -6,6 +6,7 @@ No Stripe credentials, hosted Neon databases, or production data.
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import os
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -42,7 +43,11 @@ def engine():
     ):
         os.environ[key] = value
     engine = sa.create_engine(URL, pool_pre_ping=True)
-    reservations.create(engine, checkfirst=True)
+    migration = Path(__file__).resolve().parents[1] / "migrations" / (
+        "review_only_operations_package_task_reservations_staging.sql"
+    )
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.exec_driver_sql(migration.read_text(encoding="utf-8"))
     yield engine
     reservations.drop(engine, checkfirst=True)
     engine.dispose()

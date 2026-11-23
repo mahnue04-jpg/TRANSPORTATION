@@ -13,12 +13,15 @@ on:
       - "backend/tests/test_operations_owner_approval_router_isolated.py"
       - "backend/tests/test_operations_owner_approval_http_isolated.py"
       - "backend/tests/test_operations_owner_approval_real_auth.py"
+      - "backend/tests/test_operations_owner_subscription_reserve_http.py"
       - "backend/app/core/nova/work_revenue/operations_owner_approval_router.py"
       - "backend/app/core/nova/work_revenue/router.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_entitlement.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_task_bridge.py"
       - "backend/app/core/nova/work_revenue/operations_authenticated_subscription_adapter.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_approvals.py"
+      - "backend/migrations/review_only_operations_package_task_reservations_staging.sql"
+      - "backend/migrations/review_only_operations_subscription_scope_approvals_staging.sql"
       - ".github/workflows/operations-package-allowances.yml"
   workflow_dispatch:
 
@@ -73,6 +76,7 @@ jobs:
               "tests/test_operations_subscription_approvals.py",
               "tests/test_operations_owner_approval_router_isolated.py",
               "tests/test_operations_owner_approval_http_isolated.py",
+              "tests/test_operations_owner_subscription_reserve_http.py",
           ]))
           PY
 
