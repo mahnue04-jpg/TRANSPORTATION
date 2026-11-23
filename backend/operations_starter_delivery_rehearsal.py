@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import hmac
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import secrets
 from urllib.parse import urlsplit
 from uuid import UUID
+import sqlalchemy as sa
 
 database = urlsplit(os.environ["DATABASE_URL"])
 storage = urlsplit(os.environ["AMICOR_DOCUMENT_S3_ENDPOINT"])
@@ -150,8 +152,35 @@ def fulfill(lead_id: UUID, db: Session = Depends(get_db)):
     job_id = result["job_id"]
     if result["status"] == "AWAITING_REVIEW":
         jobs.review_job(db, job_id=job_id, org=OWNER_ORG, owner=OWNER_ID, approve=True)
-    delivery.issue_grant(db, job_id=job_id, owner_org=OWNER_ORG, owner_id=OWNER_ID,
-                         recipient_user_id=buyer.id)
+    try:
+        delivery.issue_grant(db, job_id=job_id, owner_org=OWNER_ORG, owner_id=OWNER_ID,
+                             recipient_user_id=buyer.id)
+    except HTTPException as exc:
+        # A previous browser verification may have downloaded the approved CSV
+        # before revocation failed. Reuse ONLY the same still-active grant.
+        if exc.status_code != 409 or exc.detail != "An active delivery grant already exists":
+            raise
+        grant = db.execute(sa.select(delivery.grants).where(
+            delivery.grants.c.job_id == job_id
+        )).mappings().one_or_none()
+        if not grant:
+            raise
+        expiry = grant["expires_at"]
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if (
+            grant["organization_id"] != OWNER_ORG
+            or grant["owner_user_id"] != OWNER_ID
+            or grant["engagement_id"] != engagement_id
+            or grant["task_id"] != TASK
+            or grant["lead_id"] != lead_id
+            or grant["recipient_user_id"] != buyer.id
+            or grant["recipient_organization_id"] != buyer.organization_id
+            or grant["output_sha256"] != result["output_sha256"]
+            or grant["revoked_at"] is not None
+            or expiry <= datetime.now(timezone.utc)
+        ):
+            raise
     return JSONResponse({
         "download": CUSTOMER + "/" + job_id, "sha256": result["output_sha256"],
         "buyer": create_access_token({"sub": buyer.id, "nonce": secrets.token_hex(8)}),
@@ -160,5 +189,9 @@ def fulfill(lead_id: UUID, db: Session = Depends(get_db)):
 
 
 @app.post("/rehearsal/{job_id}/revoke")
-def revoke(job_id: UUID, db: Session = Depends(get_db)):
-    return delivery.revoke_grant(db, job_id=str(job_id), owner_org=OWNER_ORG, owner_id=OWNER_ID)
+def revoke(job_id: str, db: Session = Depends(get_db)):
+    # The stored job_id is a compact 32-character UUID. Parsing it as a UUID
+    # route parameter would insert hyphens and fail to match the grant row.
+    if len(job_id) != 32 or any(char not in "0123456789abcdef" for char in job_id):
+        raise HTTPException(404, "Synthetic job unavailable")
+    return delivery.revoke_grant(db, job_id=job_id, owner_org=OWNER_ORG, owner_id=OWNER_ID)
