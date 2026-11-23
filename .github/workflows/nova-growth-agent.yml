@@ -1,0 +1,224 @@
+name: Nova Growth Agent
+
+# Isolated from Work & Revenue and Creative Studio workflows.
+# Disposable sqlite + disposable Postgres service. No credentials. No live messaging.
+
+on:
+  pull_request:
+    branches: [main, cursor/nova-growth-agent-mvp-1565, feature/workspace-growth-readonly-20261114, feature/growth-owner-website-inbox-api-20261115]
+    paths:
+      - "backend/app/core/nova/growth_agent/**"
+      - "backend/static/nova-growth/**"
+      - "backend/static/nova-workspace/growth-readonly*"
+      - "backend/static/nova-workspace/growth-website-inquiries*" 
+      - "backend/static/nova-workspace/index.html"
+      - "backend/migrations/versions/20261112_nova_growth_agent.py"
+      - "backend/migrations/versions/20261112_nova_growth_agent_worker.py"
+      - "backend/migrations/versions/20261112_nova_growth_agent_retention_schedule.py"
+      - "backend/migrations/versions/20261118_nova_ga_campaign_review.py"
+      - "backend/tests/test_nova_growth_agent_*.py"
+      - "backend/tests/test_nova_growth_campaign_migration_schema.py"
+      - "backend/tests/test_nova_growth_production_migration_gate.py"
+      - "backend/tests/test_nova_growth_prod_migration_graph_audit.py"
+      - "backend/scripts/growth_prod_migration_graph_audit.py"
+      - "backend/tests/test_nova_growth_prod_shape_rehearsal.py"
+      - "backend/tests/test_nova_growth_owner_gate.py"
+      - "backend/tests/test_nova_growth_website_inquiries_http.py"
+      - "backend/tests/test_nova_growth_website_kv_source.py"
+      - "backend/tests/test_nova_growth_staging_preflight.py"
+      - "backend/tests/test_nova_growth_staging_start.py"
+      - "backend/tests/test_nova_growth_isolated_lifespan.py"
+      - "backend/app/main.py"
+      - "docs/nova/growth-agent/**"
+      - ".github/workflows/nova-growth-agent.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nova-growth-agent-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  growth-agent:
+    name: growth-agent-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+      - name: Audit recorded production Alembic revision graph without a DB
+        env:
+          DATABASE_URL: sqlite:///./ci-graph-audit-unconnected.db
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
+        run: python scripts/growth_prod_migration_graph_audit.py
+      - name: Run Growth Agent tests
+        env:
+          TESTING: "true"
+          DATABASE_URL: sqlite:///./test_nova_growth_agent_ci.db
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
+          NOVA_GROWTH_AGENT_ENABLED: "true"
+          NOVA_GROWTH_AGENT_DEMO_MODE: "true"
+          NOVA_GROWTH_AGENT_WIDGET_ENABLED: "true"
+          NOVA_GROWTH_AGENT_WIDGET_SECRET: ci-widget-secret
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          SECRET_KEY: ci-only-placeholder
+          JWT_SECRET: ci-only-placeholder
+          ALLOWED_ORIGINS: https://example.invalid
+          AMICOR_PUBLIC_URL: https://example.invalid
+        run: |
+          set -euo pipefail
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY \
+            HEALTH_ISF_STRIPE_SECRET_KEY NOVA_STRIPE_SECRET_KEY ANTHROPIC_API_KEY \
+            TWILIO_AUTH_TOKEN TWILIO_ACCOUNT_SID
+          python -m pytest -q \
+            tests/test_nova_growth_agent_unit.py \
+            tests/test_nova_growth_agent_integration.py \
+            tests/test_nova_growth_agent_security.py \
+            tests/test_nova_growth_agent_http.py \
+            tests/test_nova_growth_agent_worker_retention.py \
+            tests/test_nova_growth_agent_campaign_preview.py \
+            tests/test_nova_growth_agent_campaign_registry.py \
+            tests/test_nova_growth_campaign_migration_schema.py \
+            tests/test_nova_growth_production_migration_gate.py \
+            tests/test_nova_growth_prod_migration_graph_audit.py \
+            tests/test_nova_growth_owner_gate.py \
+            tests/test_nova_growth_website_inquiries_http.py \
+            tests/test_nova_growth_website_kv_source.py \
+            tests/test_nova_growth_website_inquiries_end_to_end.py \
+            tests/test_nova_growth_staging_preflight.py \
+            tests/test_nova_growth_private_schema_inventory.py \
+            tests/test_nova_growth_staging_start.py \
+            tests/test_nova_growth_isolated_lifespan.py
+
+  growth-demo-report:
+    name: growth-demo-report-node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify synthetic report cannot misrepresent live evidence
+        run: node --test backend/static/nova-growth/demo-report.test.cjs
+
+  growth-workspace-ui:
+    name: growth-workspace-ui-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check backend/static/nova-workspace/growth-readonly.js
+      - run: node --test backend/static/nova-workspace/growth-readonly.test.cjs
+      - run: node --check backend/static/nova-workspace/growth-website-inquiries.js
+      - run: node --test backend/static/nova-workspace/growth-website-inquiries.test.cjs
+
+  growth-agent-postgres:
+    name: growth-agent-postgres-dispos
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ga_ci
+          POSTGRES_PASSWORD: ga_ci_dispos
+          POSTGRES_DB: nova_ga_ci_dispos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ga_ci -d nova_ga_ci_dispos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest psycopg2-binary
+      - name: Run disposable Postgres Growth Agent verification
+        env:
+          TESTING: "true"
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
+          NOVA_GROWTH_AGENT_ENABLED: "true"
+          NOVA_GROWTH_AGENT_DEMO_MODE: "true"
+          NOVA_GROWTH_AGENT_WIDGET_ENABLED: "true"
+          NOVA_GROWTH_AGENT_WIDGET_SECRET: ci-widget-secret
+          NOVA_GROWTH_AGENT_BACKGROUND_WORKER: "true"
+          NOVA_GROWTH_AGENT_RETENTION_SCHEDULE_ENABLED: "true"
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          SECRET_KEY: ci-only-placeholder
+          JWT_SECRET: ci-only-placeholder
+          ALLOWED_ORIGINS: https://example.invalid
+          AMICOR_PUBLIC_URL: https://example.invalid
+          NOVA_GA_PG_TEST_URL: postgresql+psycopg2://ga_ci:ga_ci_dispos@localhost:5432/nova_ga_ci_dispos
+        run: |
+          set -euo pipefail
+          unset SAM_GOV_API_KEY OPENAI_API_KEY STRIPE_SECRET_KEY STRIPE_API_KEY \
+            HEALTH_ISF_STRIPE_SECRET_KEY NOVA_STRIPE_SECRET_KEY ANTHROPIC_API_KEY \
+            TWILIO_AUTH_TOKEN TWILIO_ACCOUNT_SID
+          python -m pytest -q tests/test_nova_growth_agent_postgres.py
+      - name: Rehearse production-shaped missing Growth columns in isolated CI schema
+        env:
+          TESTING: "true"
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
+          NOVA_GA_PG_TEST_URL: postgresql+psycopg2://ga_ci:ga_ci_dispos@localhost:5432/nova_ga_ci_dispos
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_nova_growth_prod_shape_rehearsal.py
+      - name: Rehearse backup and restore on disposable CI databases only
+        run: |
+          set -euo pipefail
+          # Match pg_dump/pg_restore client to the PostgreSQL 16 service.
+          # Synthetic fixture only; never access Render staging or production.
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 \
+            -e PGUSER=ga_ci -e PGPASSWORD=ga_ci_dispos \
+            -v "$RUNNER_TEMP:/backup" postgres:16 bash -se <<'SCRIPT'
+          set -euo pipefail
+          source_db=nova_ga_ci_backup_fixture
+          restored_db=nova_ga_ci_restore_fixture
+          backup_file=/backup/nova_ga_ci_fixture.dump
+          trap 'rm -f "$backup_file"' EXIT
+          createdb "$source_db"
+          psql -X -v ON_ERROR_STOP=1 -d "$source_db" <<'SQL'
+          CREATE TABLE backup_probe (id integer PRIMARY KEY, label text NOT NULL);
+          INSERT INTO backup_probe (id, label) VALUES (1, 'synthetic-one'), (2, 'synthetic-two');
+          SQL
+          pg_dump --format=custom --no-owner --no-acl --file="$backup_file" "$source_db"
+          test -s "$backup_file"
+          createdb "$restored_db"
+          pg_restore --no-owner --no-acl --exit-on-error --dbname="$restored_db" "$backup_file"
+          expected="$(psql -X -At -d "$source_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          actual="$(psql -X -At -d "$restored_db" -c "SELECT md5(string_agg(id || ':' || label, ',' ORDER BY id)) FROM backup_probe")"
+          test -n "$expected"
+          test "$expected" = "$actual"
+          test "$(psql -X -At -d "$restored_db" -c "SELECT count(*) FROM backup_probe")" = "2"
+          echo "Disposable-only backup and restore rehearsal passed; no Render database accessed"
+          SCRIPT
