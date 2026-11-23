@@ -3,7 +3,7 @@
 Revision ID: 20261112_nova_ga_worker
 Revises: 20261112_nova_growth_agent
 
-Additive only. Production-locked environments skip DDL.
+Additive only. Production-locked environments fail closed rather than stamp without DDL.
 """
 
 from alembic import op
@@ -40,7 +40,7 @@ def _has_column(table: str, column: str) -> bool:
 
 def upgrade():
     if _production_schema_locked():
-        return
+        raise RuntimeError("Growth schema migration blocked in production: owner-approved schema release required")
     bind = op.get_bind()
     existing = set(sa.inspect(bind).get_table_names())
     json_t = _json_type()
@@ -93,7 +93,7 @@ def upgrade():
 
 def downgrade():
     if _production_schema_locked():
-        return
+        raise RuntimeError("Growth schema downgrade blocked in production: owner-approved rollback required")
     bind = op.get_bind()
     existing = set(sa.inspect(bind).get_table_names())
     if "nova_ga_worker_heartbeats" in existing:
