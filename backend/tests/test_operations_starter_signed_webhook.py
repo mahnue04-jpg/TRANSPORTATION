@@ -23,7 +23,7 @@ class FakeDB:
             service_plan="starter_49", payment_status="pending", status="new",
             stripe_checkout_session_id="cs_test_starter",
             stripe_customer_id="cus_test_starter",
-            starter_paid_session_id=None,
+            starter_paid_session_id=None, starter_entitlement_state=None,
         )
         self.commits = 0
 
@@ -146,6 +146,16 @@ def test_async_payment_succeeded_must_have_paid_status():
     assert db.lead.starter_paid_session_id is None
     assert post(db, event("checkout.session.async_payment_succeeded"))["result"] == "paid"
     assert db.lead.starter_paid_session_id == "cs_test_starter"
+
+
+def test_signed_paid_webhook_does_not_restore_refund_or_dispute():
+    for blocked in ("refund_pending", "refunded", "disputed", "chargeback"):
+        db = FakeDB()
+        db.lead.starter_entitlement_state = blocked
+        assert post(db, event())["result"] == "paid"
+        assert db.lead.starter_entitlement_state == blocked
+        assert db.lead.status == "new"
+        assert db.lead.starter_paid_session_id == "cs_test_starter"
 
 
 def test_delayed_failure_and_invoice_cannot_override_starter():
