@@ -55,3 +55,58 @@ jobs:
               "tests/test_operations_package_usage_ledger.py",
           ]))
           PY
+
+  disposable-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: synthetic
+          POSTGRES_PASSWORD: synthetic_only
+          POSTGRES_DB: synthetic_ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synthetic -d synthetic_ops"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOVA_OPERATIONS_TEST_POSTGRES_URL: postgresql+psycopg://synthetic:synthetic_only@127.0.0.1:5432/synthetic_ops
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install disposable PostgreSQL test dependencies
+        run: python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3" "psycopg[binary]>=3,<4"
+      - name: Test database quotas and advisory locks with synthetic users
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          import types
+          from pathlib import Path
+          import pytest
+          root = Path.cwd()
+          for name, relative in (
+              ("app", "app"),
+              ("app.core", "app/core"),
+              ("app.core.nova", "app/core/nova"),
+              ("app.core.nova.work_revenue", "app/core/nova/work_revenue"),
+          ):
+              package = types.ModuleType(name)
+              package.__path__ = [str(root / relative)]
+              sys.modules[name] = package
+          raise SystemExit(pytest.main([
+              "-q", "--noconftest",
+              "tests/test_operations_package_postgres_integration.py",
+          ]))
+          PY
