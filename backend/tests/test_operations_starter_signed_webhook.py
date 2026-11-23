@@ -118,6 +118,36 @@ def test_signed_but_wrong_checkout_cannot_fund_task(override, expected):
     assert db.lead.payment_status != "paid"
 
 
+def test_missing_signature_is_rejected():
+    db = FakeDB()
+    data, _ = signed(event())
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(routes.nova_agent_stripe_webhook(
+            FakeRequest(data), stripe_signature=None, db=db,
+        ))
+    assert missing.value.status_code == 400
+    assert db.lead.starter_paid_session_id is None
+    assert db.commits == 0
+
+
+def test_signed_wrong_plan_cannot_mark_starter_paid():
+    db = FakeDB()
+    payload = event()
+    payload["data"]["object"]["metadata"]["nova_agent_plan"] = "launch_99"
+    response = post(db, payload)
+    assert response["result"] == "checkout_identity_mismatch"
+    assert db.lead.starter_paid_session_id is None
+    assert db.commits == 0
+
+
+def test_async_payment_succeeded_must_have_paid_status():
+    db = FakeDB()
+    assert post(db, event("checkout.session.async_payment_succeeded", payment_status="unpaid"))["result"] == "pending"
+    assert db.lead.starter_paid_session_id is None
+    assert post(db, event("checkout.session.async_payment_succeeded"))["result"] == "paid"
+    assert db.lead.starter_paid_session_id == "cs_test_starter"
+
+
 def test_delayed_failure_and_invoice_cannot_override_starter():
     db = FakeDB()
     post(db, event())
