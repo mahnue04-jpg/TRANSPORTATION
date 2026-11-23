@@ -103,6 +103,50 @@ jobs:
           AMICOR_ENVIRONMENT: test
         run: alembic upgrade heads
 
+      - name: Verify Growth tables materialized in disposable CI database
+        env:
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+          from app.core.nova.growth_agent.schema_ensure import ensure_growth_agent_schema
+          from app.core.nova.growth_agent.models import GaConversation
+          from app.core.nova.growth_agent.flags import REAL_EMAIL_SEND, REAL_SMS_SEND
+          assert os.environ["APP_ENV"] == "test"
+          assert os.environ["AMICOR_ENVIRONMENT"] == "test"
+          assert os.environ["DATABASE_URL"].startswith("postgresql://amicor:amicor@127.0.0.1:5432/amicor")
+          engine = create_engine(os.environ["DATABASE_URL"])
+          try:
+              inspector = inspect(engine)
+              required = {
+                  "nova_ga_business_profiles", "nova_ga_widget_installations",
+                  "nova_ga_contacts", "nova_ga_contact_identities", "nova_ga_lead_events",
+                  "nova_ga_conversations", "nova_ga_conversation_messages",
+                  "nova_ga_consent_records", "nova_ga_workflow_definitions",
+                  "nova_ga_workflow_runs", "nova_ga_delivery_attempts",
+                  "nova_ga_appointment_services", "nova_ga_availability_rules",
+                  "nova_ga_appointments", "nova_ga_integration_connections",
+                  "nova_ga_usage_events", "nova_ga_audit_events",
+                  "nova_ga_idempotency_keys", "nova_ga_rate_limit_counters",
+                  "nova_ga_worker_heartbeats", "nova_ga_retention_schedule_runs",
+                  "nova_ga_campaign_asset_reviews",
+              }
+              missing = required - set(inspector.get_table_names())
+              assert not missing, "Growth migration tables missing: " + ", ".join(sorted(missing))
+              columns = {c["name"] for c in inspector.get_columns("nova_ga_delivery_attempts")}
+              assert {"max_attempts", "claimed_by", "claimed_at",
+                      "lease_expires_at", "available_at"} <= columns
+              assert "is_synthetic_demo" in {
+                  c["name"] for c in inspector.get_columns("nova_ga_conversations")
+              }
+              assert REAL_EMAIL_SEND is False and REAL_SMS_SEND is False
+              print("Growth database shape verified on disposable PostgreSQL; no live data")
+          finally:
+              engine.dispose()
+          PY
+
       - name: Import app
         run: python -c "import app.main; print('app import ok')"
 
