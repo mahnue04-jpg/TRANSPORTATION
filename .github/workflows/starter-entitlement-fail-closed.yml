@@ -1,0 +1,59 @@
+name: Starter entitlement fail-closed regression
+
+on:
+  push:
+    branches:
+      - "review/starter-49-entitlement-state-20261122"
+    paths:
+      - "backend/app/modules/marketing/models.py"
+      - "backend/app/core/nova/work_revenue/operations_starter_payment_binding.py"
+      - "backend/tests/test_operations_starter_payment_binding_core.py"
+      - "backend/tests/test_operations_starter_disposable_postgres.py"
+      - ".github/workflows/starter-entitlement-fail-closed.yml"
+  pull_request:
+    paths:
+      - "backend/app/modules/marketing/models.py"
+      - "backend/app/core/nova/work_revenue/operations_starter_payment_binding.py"
+      - "backend/tests/test_operations_starter_payment_binding_core.py"
+      - "backend/tests/test_operations_starter_disposable_postgres.py"
+      - ".github/workflows/starter-entitlement-fail-closed.yml"
+  workflow_dispatch:
+
+jobs:
+  entitlement-guards:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: starter_test
+          POSTGRES_PASSWORD: starter_test
+          POSTGRES_DB: nova_starter_disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U starter_test -d nova_starter_disposable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NOVA_STARTER_DISPOSABLE_TEST_DB: "true"
+      TESTING: "true"
+      NOVA_OPERATIONS_STARTER_BINDING_ENABLED: "false"
+      NOVA_OPERATIONS_DURABLE_CSV_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED: "false"
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Verify entitlement failure is closed
+        run: python -m pytest -q tests/test_operations_starter_payment_binding_core.py tests/test_operations_starter_disposable_postgres.py tests/test_operations_starter_entitlement_policy.py

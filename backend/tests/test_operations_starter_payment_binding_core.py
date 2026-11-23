@@ -19,7 +19,7 @@ def test_binding_is_disabled_by_default(monkeypatch):
 def test_paid_lead_requires_matching_verified_session(monkeypatch):
     good = SimpleNamespace(
         lead_type="anonymous_operations", service_plan="starter_49",
-        payment_status="paid", consent=True,
+        payment_status="paid", starter_entitlement_state="active", consent=True,
         stripe_checkout_session_id="cs_test_exact",
         starter_paid_session_id="cs_test_exact",
         stripe_customer_id="cus_exact",
@@ -34,6 +34,9 @@ def test_paid_lead_requires_matching_verified_session(monkeypatch):
     assert binding._paid_lead(FakeDB(good), "test") is good
     for overrides in [
         {"payment_status": "pending"},
+        {"starter_entitlement_state": None},
+        {"starter_entitlement_state": "refunded"},
+        {"starter_entitlement_state": "disputed"},
         {"starter_paid_session_id": "cs_test_other"},
         {"starter_paid_session_id": None},
         {"stripe_customer_id": None},

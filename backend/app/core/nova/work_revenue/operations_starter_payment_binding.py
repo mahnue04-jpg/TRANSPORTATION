@@ -42,6 +42,7 @@ def _paid_lead(db: Session, lead_id: str) -> MarketingWebsiteLead:
         or lead.lead_type != "anonymous_operations"
         or lead.service_plan != "starter_49"
         or lead.payment_status != "paid"
+        or getattr(lead, "starter_entitlement_state", None) != "active"
         or not lead.consent
         or not lead.stripe_checkout_session_id
         or lead.starter_paid_session_id != lead.stripe_checkout_session_id
