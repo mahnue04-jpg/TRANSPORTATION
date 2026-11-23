@@ -5,9 +5,8 @@ Revises: 20261012_casting_org_name
 
 Safe plan, dev and disposable databases only:
 
-- Do not run DDL against production until owner review. When AMICOR_ENVIRONMENT,
-  ENVIRONMENT, or APP_ENV is production or prod, upgrade/downgrade return without
-  DDL (stamp-only on production ``alembic upgrade heads``).
+- Do not run DDL against production until owner review. Production environments
+  raise explicitly instead of silently marking migrations applied without DDL.
 - Additive only. Does not alter Delivery, Health ISF, Work & Revenue, or Creative
   Studio tables.
 - Downgrade drops Growth Agent tables only when not production-locked.
@@ -63,7 +62,7 @@ TABLES = (
 
 def upgrade():
     if _production_schema_locked():
-        return
+        raise RuntimeError("Growth schema migration blocked in production: owner-approved schema release required")
     bind = op.get_bind()
     existing = set(sa.inspect(bind).get_table_names())
     json_t = _json_type()
@@ -326,7 +325,7 @@ def upgrade():
 
 def downgrade():
     if _production_schema_locked():
-        return
+        raise RuntimeError("Growth schema downgrade blocked in production: owner-approved rollback required")
     bind = op.get_bind()
     existing = set(sa.inspect(bind).get_table_names())
     for name in reversed(TABLES):
