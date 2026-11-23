@@ -92,7 +92,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade -r requirements.txt
 
-      - name: Run Alembic upgrade
+      - name: Assert production Growth migrations fail closed
+        run: >-
+          python -m pytest -q
+          tests/test_nova_growth_production_migration_gate.py
+
+      - name: Run Alembic upgrade on disposable CI database
+        env:
+          APP_ENV: test
+          AMICOR_ENVIRONMENT: test
         run: alembic upgrade heads
 
       - name: Import app
