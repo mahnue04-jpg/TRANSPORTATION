@@ -69,10 +69,14 @@ def reserve_owner_approved_test_subscription_task(
     if not engagement or not task or task.review_required is not True:
         raise AllowanceBlocked("saved_owner_task_scope_required")
 
-    # Fail closed unless owner explicitly recorded approval of scope.
-    # A task status alone is not proof. No new endpoint can set this flag.
-    if str(task.status) != "APPROVED_FOR_EXECUTION":
-        raise AllowanceBlocked("explicit_task_approval_required")
+    # A task status or notes cannot authorize billable work. The exact
+    # synthetic request fingerprint must have a recorded owner decision.
+    from .operations_subscription_approvals import require_saved_owner_scope_approval
+    require_saved_owner_scope_approval(
+        db, organization_id=organization_id, owner_user_id=user_id,
+        engagement_id=engagement_id, task_id=task_id,
+        lead_id=lead_id, task_fingerprint=task_fingerprint,
+    )
 
     lead = db.get(MarketingWebsiteLead, lead_id)
     if (lead is None or lead.lead_type != "anonymous_operations"
