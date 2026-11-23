@@ -58,6 +58,9 @@ def test_website_inquiry_from_fake_cloudflare_kv_to_owner_http(monkeypatch):
     app.dependency_overrides[website_inquiries.get_website_inquiry_source] = lambda: source
     monkeypatch.setattr(website_inquiries, "resolve_org",
                         lambda user, requested=None: "synthetic-org")
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_ENABLED", "true")
+    monkeypatch.setenv("NOVA_GROWTH_AGENT_DEMO_MODE", "true")
+    monkeypatch.setenv("NOVA_GROWTH_SYNTHETIC_INQUIRY_HANDOFF", "true")
     with TestClient(app) as client:
         response = client.get("/api/nova/growth-agent/website-inquiries")
         repeated = client.get("/api/nova/growth-agent/website-inquiries")
@@ -76,6 +79,26 @@ def test_website_inquiry_from_fake_cloudflare_kv_to_owner_http(monkeypatch):
     assert "must-not-expose" not in response.text
     assert repeated.json()["inquiries"] == body["inquiries"]
     assert len([x for x in calls if x.startswith("values/")]) == 2
+
+    handoff = "/api/nova/growth-agent/website-inquiries/handoff"
+    with TestClient(app) as client:
+        payload = {"source_key": lead["source_key"]}
+        first = client.post(handoff, json=payload)
+        assert first.status_code == 200, first.text
+        conversation = first.json()
+        assert conversation["handler"] == "human"
+        assert conversation["status"] == "handed_off"
+        assert conversation["is_synthetic_demo"] is True
+        assert lead["source_key"] in conversation["messages"][0]["content"]
+        assert len(conversation["messages"]) == 2
+        assert client.post(handoff, json=payload).json() == conversation
+        record["consent"] = False
+        assert client.post(handoff, json=payload).status_code == 409
+        record.update(consent=True, is_synthetic=False)
+        assert client.post(handoff, json=payload).status_code == 409
+        monkeypatch.delenv("NOVA_GROWTH_SYNTHETIC_INQUIRY_HANDOFF")
+        assert client.post(handoff, json=payload).status_code == 404
+
 
 
 def test_inquiry_api_without_adapter_is_unavailable_not_zero(monkeypatch):

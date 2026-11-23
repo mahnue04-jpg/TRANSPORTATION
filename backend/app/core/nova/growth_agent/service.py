@@ -8,7 +8,7 @@ import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 # threading retained for in-process booking mutex (DB unique constraint is source of truth).
 
@@ -1012,6 +1012,28 @@ class GrowthAgentService:
                 for m in messages
             ],
         }
+
+    def handoff_website_inquiry(self, org_id: str, row: dict, actor_id: str) -> dict:
+        # The primary key makes repeated approvals converge across worker processes.
+        key = row["source_key"]
+        conversation_id = uuid5(NAMESPACE_URL, f"amicor/website-inquiry/{org_id}/{key}").hex
+        query = self._org_query(GaConversation, org_id).filter_by(id=conversation_id)
+        if query.one_or_none() is None:
+            self.db.add(GaConversation(id=conversation_id, organization_id=org_id,
+                                       subject=f"Website inquiry {key}"[:300], is_synthetic_demo=True))
+            try:
+                self.db.flush()
+            except IntegrityError:
+                self.db.rollback()
+                if query.one_or_none() is None:
+                    raise
+            else:
+                self.db.add(GaConversationMessage(
+                    id=_id(), organization_id=org_id, conversation_id=conversation_id,
+                    role="visitor", content=f"{key} — {row['product']} — {row['message']}",
+                ))
+                return self.handoff_conversation(org_id, conversation_id, actor_user_id=actor_id)
+        return self.get_conversation(org_id, conversation_id)
 
     def handoff_conversation(
         self,

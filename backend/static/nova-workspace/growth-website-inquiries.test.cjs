@@ -6,12 +6,12 @@ const vm = require("node:vm");
 const {test} = require("node:test");
 const html = fs.readFileSync(path.join(__dirname,"index.html"),"utf8");
 const code = fs.readFileSync(path.join(__dirname,"growth-website-inquiries.js"),"utf8");
-test("manually triggered owner status panel is discoverable and GET-only",()=>{
+test("manually triggered owner status panel is discoverable",()=>{
   assert.match(html,/id="growth-website-inquiries-refresh"/);
   assert.match(html,/id="growth-website-inquiries-result"/);
   assert.match(html,/growth-website-inquiries\.js/);
   assert.match(code,/method: "GET"/);
-  assert.doesNotMatch(code,/method:\s*"(POST|PUT|PATCH|DELETE)"/);
+  assert.match(code,/data.synthetic_handoff_enabled === true/);
 });
 function harness({token="example",response={state:"unavailable",inquiries:[],complete:false},status=200}={}){
   let click;

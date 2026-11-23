@@ -63,6 +63,37 @@
         (data.inquiries.length > details.length ? "Showing first 15 records only.\n" : "") +
         "This is a source snapshot, not CRM contacts, completed jobs, or paid customers.\n" +
         "No messages sent and no records imported.");
+      if (data.synthetic_handoff_enabled === true) {
+        data.inquiries.slice(0, 15).filter(function (row) {
+          return row.is_synthetic === true && row.consent === true;
+        }).forEach(function (row) {
+          var approve = document.createElement("button");
+          approve.type = "button";
+          approve.textContent = "Approve handoff for " + (row.reference_id || row.source_key);
+          output.appendChild(document.createTextNode("\n"));
+          output.appendChild(approve);
+          approve.addEventListener("click", async function () {
+            if (window.AmiCorSession?.getAccessToken() !== token) {
+              message("Session changed. Refresh the inbox.");
+              return;
+            }
+            approve.disabled = true;
+            try {
+              var result = await fetch("/api/nova/growth-agent/website-inquiries/handoff", {
+                method: "POST", headers: Object.assign({}, headers, {"Content-Type": "application/json"}),
+                credentials: "same-origin", body: JSON.stringify({source_key: row.source_key})
+              });
+              if (!result.ok) throw new Error();
+              var conversation = await result.json();
+              if (conversation.status !== "handed_off") throw new Error();
+              approve.textContent = "Handed off to owner · " + conversation.id;
+            } catch (error) {
+              approve.textContent = "Retry handoff for " + (row.reference_id || row.source_key);
+              approve.disabled = false;
+            }
+          });
+        });
+      }
     } catch (error) {
       message("Website inquiries unavailable for this review. " +
         (error && error.message || "Connection failed.") + "\nNo actions were taken.");
