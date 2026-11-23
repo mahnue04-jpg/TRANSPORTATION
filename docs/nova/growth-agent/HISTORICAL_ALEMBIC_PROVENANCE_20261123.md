@@ -29,6 +29,12 @@ Both historical parent migrations are present on `feature/nova-v3-canonical-inte
 
 These are historical provenance findings only. They do **not** reconcile the actual production Alembic pointer, authorize a stamp operation, or establish whether individual schema changes were applied.
 
+## Historical chain boundary verified
+
+The historical chain reaches `20260918_nova_work_revenue_v2`, whose migration file is **byte-identical** on the historical integration branch and current `main` (both blob SHA `c6728775e13ebcbc3371efb5138b24e06d645f2e`). Its parent is `20260909_nova_freight_settlement`.
+
+This establishes a common source-code boundary for the three observed renamed migrations (V2 hardening, V2 owner scheduler, Nova V3). It does **not** prove that production applied each historical step; that must be inferred only from a verified schema inventory/restore rehearsal, not from matching source files alone.
+
 ## Required before reconciliation
 
 1. Audit the entire original-to-current revision chain (including the historical parent aliases), not just this V3 node. Resolve any missing or renamed parent and test a one-off version normalization on an **isolated restored copy**, not production.
