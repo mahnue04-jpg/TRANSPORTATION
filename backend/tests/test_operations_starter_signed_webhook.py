@@ -24,6 +24,7 @@ class FakeDB:
             stripe_checkout_session_id="cs_test_starter",
             stripe_customer_id="cus_test_starter",
             starter_paid_session_id=None, starter_entitlement_state=None,
+            starter_payment_intent_id=None,
         )
         self.commits = 0
 
@@ -51,7 +52,7 @@ def event(event_type="checkout.session.completed", **overrides):
             "nova_agent_lead_id": "synthetic-lead",
         },
         "mode": "payment", "currency": "usd", "amount_total": 4900,
-        "payment_status": "paid",
+        "payment_status": "paid", "payment_intent": "pi_test_starter",
     }
     obj.update(overrides)
     return {
@@ -116,6 +117,20 @@ def test_signed_but_wrong_checkout_cannot_fund_task(override, expected):
     assert response["result"] == expected
     assert db.lead.starter_paid_session_id is None
     assert db.lead.payment_status != "paid"
+
+
+def test_missing_or_conflicting_payment_intent_fails_closed():
+    for intent in (None, "pi_test_other"):
+        db = FakeDB()
+        obj = event()
+        obj["data"]["object"]["payment_intent"] = intent
+        if intent == "pi_test_other":
+            db.lead.starter_payment_intent_id = "pi_test_starter"
+        result = post(db, obj)
+        assert result["handled"] is False
+        assert result["result"] == "starter_payment_intent_unverified"
+        assert db.lead.payment_status != "paid"
+        assert db.lead.starter_paid_session_id is None
 
 
 def test_missing_signature_is_rejected():
