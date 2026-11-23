@@ -78,8 +78,9 @@ def test_only_owner_decision_no_delivery(api):
 
 def test_route_only_has_decision_post(api):
     routes = [r for r in api.router.routes if isinstance(r, APIRoute)]
-    assert len(routes) == 1
-    assert routes[0].path.endswith("/decision") and routes[0].methods == {"POST"}
+    assert len(routes) == 2
+    assert {r.path.rsplit("/", 1)[-1] for r in routes} == {"decision", "reserve"}
+    assert all(r.methods == {"POST"} for r in routes)
 
 
 def test_live_sales_blocks(api, monkeypatch):
