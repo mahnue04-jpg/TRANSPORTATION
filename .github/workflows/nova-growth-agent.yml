@@ -19,6 +19,8 @@ on:
       - "backend/tests/test_nova_growth_agent_*.py"
       - "backend/tests/test_nova_growth_campaign_migration_schema.py"
       - "backend/tests/test_nova_growth_production_migration_gate.py"
+      - "backend/tests/test_nova_growth_prod_migration_graph_audit.py"
+      - "backend/scripts/growth_prod_migration_graph_audit.py"
       - "backend/tests/test_nova_growth_prod_shape_rehearsal.py"
       - "backend/tests/test_nova_growth_owner_gate.py"
       - "backend/tests/test_nova_growth_website_inquiries_http.py"
@@ -93,6 +95,7 @@ jobs:
             tests/test_nova_growth_agent_campaign_registry.py \
             tests/test_nova_growth_campaign_migration_schema.py \
             tests/test_nova_growth_production_migration_gate.py \
+            tests/test_nova_growth_prod_migration_graph_audit.py \
             tests/test_nova_growth_owner_gate.py \
             tests/test_nova_growth_website_inquiries_http.py \
             tests/test_nova_growth_website_kv_source.py \
