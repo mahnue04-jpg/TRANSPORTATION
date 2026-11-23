@@ -2,7 +2,7 @@
 
 Not a public API, Stripe webhook handler, or task execution pathway.
 The caller must independently authenticate the owner, authorize the saved
-engagement/task and retrieve the Stripe TEST subscription from Stripe.
+engagement/task and retrieve the subscription using the Stripe test API.
 No customer fulfillment occurs here. Both gates default to disabled.
 """
 from __future__ import annotations

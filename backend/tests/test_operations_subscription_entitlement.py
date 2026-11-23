@@ -50,6 +50,47 @@ def test_matching_test_paid_subscription(plan):
     assert e.period_start == START and e.period_end == END
 
 
+def current_api_fixture(plan="launch_99"):
+    subscription = fixture(plan)
+    invoice = subscription["latest_invoice"]
+    invoice.pop("paid")
+    invoice["livemode"] = False
+    invoice["parent"] = {
+        "type": "subscription_details",
+        "subscription_details": {"subscription": invoice.pop("subscription")},
+    }
+    line = invoice["lines"]["data"][0]
+    line["parent"] = {
+        "type": "subscription_item_details",
+        "subscription_item_details": {
+            "subscription": line.pop("subscription"),
+            "proration": False,
+        },
+    }
+    return subscription
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+def test_matching_current_stripe_invoice_shape(plan):
+    entitlement = reconcile(current_api_fixture(plan), plan=plan)
+    assert entitlement.paid and entitlement.period_start == START and entitlement.period_end == END
+
+
+def test_current_stripe_invoice_rejects_mismatched_parent():
+    subscription = current_api_fixture()
+    subscription["latest_invoice"]["parent"]["subscription_details"]["subscription"] = "sub_other"
+    with pytest.raises(SubscriptionNotEntitled, match="invoice_not_verified"):
+        reconcile(subscription)
+
+
+def test_current_stripe_invoice_rejects_proration_as_period_evidence():
+    subscription = current_api_fixture()
+    line = subscription["latest_invoice"]["lines"]["data"][0]
+    line["parent"]["subscription_item_details"]["proration"] = True
+    with pytest.raises(SubscriptionNotEntitled, match="invoice_period_mismatch"):
+        reconcile(subscription)
+
+
 @pytest.mark.parametrize("change", [
     lambda s: s.update(status="canceled"),
     lambda s: s.update(status="past_due"),

@@ -1,9 +1,9 @@
 """Staging-only bridge from reconciled Stripe TEST subscription to task entitlement.
 
 A saved marketing lead by itself is NEVER proof of subscription entitlement.
-Caller must have verified the Stripe webhook signature independently and
-retrieved the exact subscription from Stripe; this pure function rechecks the
-customer, plan, price, paid invoice, and period before allowing reservations.
+The caller must verify the webhook signature independently and retrieve the
+exact subscription using the Stripe API. This function rechecks the customer,
+plan, price, paid invoice, and period before allowing reservations.
 Do not expose as a public route or attach to a production worker.
 """
 from __future__ import annotations
@@ -22,6 +22,30 @@ class SubscriptionNotEntitled(ValueError):
 
 def _id(value: Any) -> Any:
     return value.get("id") if isinstance(value, dict) else value
+
+
+def _invoice_subscription(invoice: dict) -> Any:
+    if "parent" not in invoice:
+        return _id(invoice.get("subscription")) if invoice.get("paid") is True else None
+    parent = invoice["parent"]
+    if not isinstance(parent, dict) or parent.get("type") != "subscription_details":
+        return None
+    details = parent.get("subscription_details")
+    if not isinstance(details, dict):
+        return None
+    return _id(details.get("subscription"))
+
+
+def _line_subscription(line: dict) -> Any:
+    if "parent" not in line:
+        return _id(line.get("subscription"))
+    parent = line["parent"]
+    if not isinstance(parent, dict) or parent.get("type") != "subscription_item_details":
+        return None
+    details = parent.get("subscription_item_details")
+    if not isinstance(details, dict) or details.get("proration") is not False:
+        return None
+    return _id(details.get("subscription"))
 
 
 def _timestamp(value: Any) -> datetime:
@@ -66,17 +90,18 @@ def from_reconciled_test_subscription(
         raise SubscriptionNotEntitled("period_inactive")
     invoice = subscription.get("latest_invoice") or {}
     if (not isinstance(invoice, dict) or invoice.get("status") != "paid"
-            or invoice.get("paid") is not True
+            or invoice.get("livemode", False) is not False
+            or invoice.get("paid", True) is not True
             or invoice.get("currency") != "usd"
             or type(invoice.get("amount_paid")) is not int
             or invoice.get("amount_paid") != PRICES[plan]
-            or _id(invoice.get("subscription")) != saved_subscription_id
+            or _invoice_subscription(invoice) != saved_subscription_id
             or _id(invoice.get("customer")) != saved_customer_id):
         raise SubscriptionNotEntitled("invoice_not_verified")
     # A paid historical invoice must not grant tasks during a different period.
     lines = (invoice.get("lines") or {}).get("data") or []
     if not any(
-        _id(line.get("subscription")) == saved_subscription_id
+        _line_subscription(line) == saved_subscription_id
         and (line.get("period") or {}).get("start") == int(start.timestamp())
         and (line.get("period") or {}).get("end") == int(end.timestamp())
         for line in lines if isinstance(line, dict)
