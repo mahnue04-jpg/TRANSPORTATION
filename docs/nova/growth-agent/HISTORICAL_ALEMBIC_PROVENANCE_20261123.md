@@ -18,6 +18,17 @@ Line-by-line inspection found **exactly four differences across 365 lines** (two
 
 The historical parent file `20260918_nova_work_revenue_v2_owner_scheduler.py` exists on that historical branch and declares parent `20260918_nova_work_revenue_v2_hardening`.
 
+## Additional verified ancestors
+
+Both historical parent migrations are present on `feature/nova-v3-canonical-integration`, and their current `main` counterparts have identical executable migration logic in line-by-line comparison:
+
+| Historical revision ID | Current revision ID | Differing lines |
+|---|---|---|
+| `20260918_nova_work_revenue_v2_owner_scheduler` | `20260918_work_rev_owner_sched` | Four lines: revision docs and IDs |
+| `20260918_nova_work_revenue_v2_hardening` | `20260918_work_rev_v2_hardening` | Three lines: revision docs and ID |
+
+These are historical provenance findings only. They do **not** reconcile the actual production Alembic pointer, authorize a stamp operation, or establish whether individual schema changes were applied.
+
 ## Required before reconciliation
 
 1. Audit the entire original-to-current revision chain (including the historical parent aliases), not just this V3 node. Resolve any missing or renamed parent and test a one-off version normalization on an **isolated restored copy**, not production.
