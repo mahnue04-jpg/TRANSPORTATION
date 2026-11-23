@@ -121,6 +121,18 @@
 </form>
 </article>
 </section>
+<section aria-label="Growth Agent read-only status" class="card" id="growth-readonly-panel">
+<h2>Growth Agent · Read-only status</h2>
+<p class="hint">Owner review preview. Checks authenticated Growth Agent API availability and record counts only. This does not enable customer chat, delivery, approvals, or agent-to-agent handoffs.</p>
+<button id="growth-readonly-refresh" class="secondary" type="button">Check Growth Agent status</button>
+<pre id="growth-readonly-result" role="status" aria-live="polite">Sign in and press Check Growth Agent status. No requests have been made.</pre>
+</section>
+<section aria-label="Website inquiries read-only review" class="card" id="growth-website-inquiries-panel">
+<h2>Website inquiries · Owner review</h2>
+<p class="hint">Read-only website inquiry snapshot. Separate from Growth Agent CRM leads. Unavailable means the Cloudflare source has not been connected; it does not mean there are no customers.</p>
+<button id="growth-website-inquiries-refresh" class="secondary" type="button">Check website inquiries</button>
+<pre id="growth-website-inquiries-result" role="status" aria-live="polite">Sign in as an administrator, then check website inquiries. No external records have been read.</pre>
+</section>
 <section aria-label="Workspace dashboard" class="dashboard" data-nova-label="Workspace dashboard">
 <article class="card">
 <h2 data-nova-i18n="Active projects">Active projects</h2>
@@ -159,6 +171,9 @@
 <script src="/static/nova-workspace/languages.js?v=20261022.2"></script>
 <script src="/static/nova-workspace/speech.js?v=20261010.1"></script>
 <script src="/static/nova-workspace/workspace.js?v=20261010.1"></script>
+<script src="/static/nova-workspace/growth-readonly.js?v=20261114.1"></script>
+<script src="/static/nova-workspace/growth-website-inquiries.js?v=20261115.1"></script>
+
 <script src="/static/ux/novaVoiceControls.js?v=20261010.1"></script>
 </body>
 </html>
