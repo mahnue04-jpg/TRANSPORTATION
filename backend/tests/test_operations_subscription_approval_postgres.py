@@ -123,7 +123,7 @@ def test_approve_revoke_audit_and_reject(db):
 
 def test_wrong_owner_cannot_write(db):
     with Session(db) as session:
-        with pytest.raises(AllowanceBlocked, match="authenticated_owner_required"):
+        with pytest.raises(AllowanceBlocked, match="synthetic_task_scope_mismatch"):
             record_staging_owner_scope_decision(
                 session, authenticated_user=SimpleNamespace(
                     user_id="other_owner", organization_id="org_synthetic", role="admin"),
