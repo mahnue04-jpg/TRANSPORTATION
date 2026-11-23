@@ -13,6 +13,7 @@ from typing import Any
 from app.core.nova.creative_studio.flags import (
     image_provider_configured,
     image_provider_live_enabled,
+    selected_image_model,
     selected_video_provider,
     talking_presenter_provider_configured,
     talking_presenter_provider_live_enabled,
@@ -70,6 +71,7 @@ def provider_readiness_matrix() -> dict[str, Any]:
     selected = selected_video_provider()
     return {
         "image": {
+            "model": selected_image_model(),
             "configured": image_provider_configured(),
             "live_enabled": image_provider_live_enabled(),
         },

@@ -26,6 +26,7 @@ from app.ai import get_client
 from app.core.nova.creative_studio.flags import (
     image_provider_configured,
     image_provider_live_enabled,
+    selected_image_model,
     selected_video_provider,
     video_provider_configured,
     video_provider_live_enabled,
@@ -275,7 +276,7 @@ class OpenAIImageProvider:
                 "url": None,
                 "asset_generated": False,
             }
-        model = str(os.getenv("NOVA_CREATIVE_IMAGE_MODEL") or "gpt-image-2").strip()
+        model = selected_image_model()
         # Image generation can exceed the shared 30-second chat timeout.
         # Use one bounded attempt; automatic retries may duplicate paid work.
         client = get_client().with_options(timeout=300.0, max_retries=0)
@@ -285,6 +286,7 @@ class OpenAIImageProvider:
                 prompt=prompt,
                 size=self._size(aspect_ratio),
                 n=1,
+                output_format="png",
             )
         except APITimeoutError:
             return {

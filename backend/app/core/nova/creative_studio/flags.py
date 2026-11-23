@@ -27,6 +27,11 @@ def image_provider_live_enabled() -> bool:
     return _env_true("NOVA_CREATIVE_IMAGE_LIVE_ENABLED")
 
 
+def selected_image_model() -> str:
+    """Explicit deployment overrides remain authoritative during migration."""
+    return str(os.getenv("NOVA_CREATIVE_IMAGE_MODEL") or "").strip() or "gpt-image-2.6-sunburst"
+
+
 def selected_video_provider() -> str:
     return str(os.getenv("NOVA_CREATIVE_VIDEO_PROVIDER") or "runway").strip().lower()
 
@@ -81,6 +86,10 @@ def creative_guardrails() -> dict[str, bool | str]:
         "CLIENT_CONTACT_ENABLED": CLIENT_CONTACT_ENABLED,
         "IMAGE_PROVIDER_CONFIGURED": image_provider_configured(),
         "IMAGE_PROVIDER_LIVE_ENABLED": image_provider_live_enabled(),
+        "IMAGE_PROVIDER_MODEL": selected_image_model(),
+        "IMAGE_PROVIDER_MODEL_MIGRATION_REQUIRED": selected_image_model() in {
+            "gpt-image-2", "gpt-image-2-2026-04-21",
+        },
         "VIDEO_PROVIDER_CONFIGURED": video_provider_configured(),
         "VIDEO_PROVIDER_LIVE_ENABLED": video_provider_live_enabled(),
         "VOICE_PROVIDER_CONFIGURED": voice_provider_configured(),
