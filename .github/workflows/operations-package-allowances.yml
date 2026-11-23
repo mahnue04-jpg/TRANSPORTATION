@@ -32,4 +32,26 @@ jobs:
           python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3"
       - name: Test staged allowance logic, never connect to Stripe or DB
         working-directory: backend
-        run: python -m pytest -q tests/test_operations_package_allowances.py tests/test_operations_package_usage_ledger.py
+        run: |
+          python - <<'PY'
+          import sys
+          import types
+          from pathlib import Path
+          import pytest
+
+          root = Path.cwd()
+          for name, relative in (
+              ("app", "app"),
+              ("app.core", "app/core"),
+              ("app.core.nova", "app/core/nova"),
+              ("app.core.nova.work_revenue", "app/core/nova/work_revenue"),
+          ):
+              package = types.ModuleType(name)
+              package.__path__ = [str(root / relative)]
+              sys.modules[name] = package
+
+          raise SystemExit(pytest.main([
+              "-q", "tests/test_operations_package_allowances.py",
+              "tests/test_operations_package_usage_ledger.py",
+          ]))
+          PY
