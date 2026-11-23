@@ -51,7 +51,7 @@ jobs:
               sys.modules[name] = package
 
           raise SystemExit(pytest.main([
-              "-q", "tests/test_operations_package_allowances.py",
+              "-q", "--noconftest", "tests/test_operations_package_allowances.py",
               "tests/test_operations_package_usage_ledger.py",
           ]))
           PY
