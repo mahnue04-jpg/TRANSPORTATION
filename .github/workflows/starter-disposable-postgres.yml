@@ -13,6 +13,9 @@ on:
   pull_request:
     paths:
       - "backend/tests/test_operations_starter_disposable_postgres.py"
+      - "backend/tests/test_operations_starter_signed_webhook.py"
+      - "backend/tests/test_operations_starter_entitlement_policy.py"
+      - "backend/app/modules/marketing/starter_entitlement_policy.py"
       - ".github/workflows/starter-disposable-postgres.yml"
       - "backend/app/core/nova/work_revenue/operations_starter_payment_binding.py"
       - "backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py"
