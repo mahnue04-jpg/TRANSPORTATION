@@ -1,5 +1,7 @@
 """Pure offline CSV cleanup release-candidate regressions (no payment/storage)."""
+import csv
 import hashlib
+import io
 import pytest
 
 from app.core.nova.work_revenue.operations_csv_cleanup import (
@@ -20,8 +22,9 @@ def test_deduplicate_and_remove_blank_rows():
 ])
 def test_formula_injection_is_escaped(value):
     result = clean_csv_text("Formula\n" + value + "\n")
-    assert result.cleaned_csv.splitlines()[1].startswith("'")
-    assert value in result.cleaned_csv
+    parsed = list(csv.reader(io.StringIO(result.cleaned_csv)))
+    assert parsed[0] == ["Formula"]
+    assert parsed[1] == ["'" + value]
 
 
 @pytest.mark.parametrize("text", [
