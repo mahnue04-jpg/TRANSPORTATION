@@ -55,6 +55,20 @@ def test_sandbox_accepts_restricted_test_stripe_key():
     assert "SANDBOX_IMPORTED" in completed.stdout
 
 
+def test_launch_sandbox_requires_its_own_price_and_staging_environment():
+    settings = {
+        "NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED": "true",
+        "NOVA_OPERATIONS_STARTER_TEST_PRICE_ID": "",
+    }
+    without_price = _import_sandbox(**settings, NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID="")
+    assert without_price.returncode != 0
+    settings["NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID"] = "price_launch_ci_synthetic"
+    in_development = _import_sandbox(**settings, APP_ENV="development")
+    assert in_development.returncode != 0
+    in_staging = _import_sandbox(**settings)
+    assert in_staging.returncode == 0, in_staging.stderr[-1800:]
+
+
 def test_sandbox_rejects_restricted_live_stripe_key():
     completed = _import_sandbox(STRIPE_SECRET_KEY="rk_live_synthetic_ci_only")
     assert completed.returncode != 0

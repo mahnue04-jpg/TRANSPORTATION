@@ -12,6 +12,11 @@ from pathlib import Path
 # Must run before app.db.session or app.modules.marketing is imported.
 _DB_PREFIX = "sqlite:////tmp/amicor-operations-sandbox-"
 _SANDBOX_DB = os.getenv("NOVA_OPERATIONS_SANDBOX_DB_URL", "").strip()
+_LAUNCH_SANDBOX = os.getenv("NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED", "").strip().lower() == "true"
+_TEST_PLAN = "launch_99" if _LAUNCH_SANDBOX else "starter_49"
+_TEST_PRICE_ENV = (
+    "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID" if _LAUNCH_SANDBOX else "NOVA_OPERATIONS_STARTER_TEST_PRICE_ID"
+)
 
 
 def _safe_configuration() -> bool:
@@ -23,9 +28,13 @@ def _safe_configuration() -> bool:
         and ".." not in _SANDBOX_DB
         and stripe_key.startswith(("sk_test_", "rk_test_"))
         and os.getenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", "").startswith("whsec_")
-        and os.getenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "").startswith("price_")
+        and os.getenv(_TEST_PRICE_ENV, "").startswith("price_")
         and os.getenv("APP_ENV", "staging").strip().lower() != "production"
         and os.getenv("AMICOR_ENVIRONMENT", "staging").strip().lower() != "production"
+        and (not _LAUNCH_SANDBOX or (
+            os.getenv("APP_ENV", "").strip().lower() == "staging"
+            and os.getenv("AMICOR_ENVIRONMENT", "").strip().lower() == "staging"
+        ))
         and os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED", "").strip().lower() != "true"
         and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").strip().lower() != "true"
@@ -111,6 +120,8 @@ async def synthetic_only_guard(request: Request, call_next):
     if path == "/sandbox-test" and request.method == "GET":
         # UI contains no secrets; the token is entered locally by the owner.
         html = Path(__file__).with_name("operations_checkout_sandbox_ui.html").read_text(encoding="utf-8")
+        if _LAUNCH_SANDBOX:
+            html = html.replace("$49", "$99/month").replace("starter_49", _TEST_PLAN)
         return HTMLResponse(html, headers={
             "Cache-Control": "no-store",
             "Referrer-Policy": "no-referrer",
@@ -144,11 +155,11 @@ async def synthetic_only_guard(request: Request, call_next):
         if (
             not isinstance(data, dict)
             or data.get("lead_type") != "anonymous_operations"
-            or data.get("service_plan") != "starter_49"
+            or data.get("service_plan") != _TEST_PLAN
             or not str(data.get("work_email", "")).endswith(".invalid")
             or str(data.get("lead_source", "sandbox")) not in {"sandbox", "sandbox_checkout"}
         ):
-            return JSONResponse(status_code=403, content={"detail": "Only synthetic Starter requests are allowed"})
+            return JSONResponse(status_code=403, content={"detail": "Only requests for the configured synthetic plan are allowed"})
         return await call_next(request)
 
     if (path.startswith("/api/marketing/leads/") and path.endswith("/checkout")

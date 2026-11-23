@@ -20,6 +20,7 @@ from app.helpers import uuid4
 
 AGENT_PRODUCT = "nova_anonymous_operations_agent"
 AGENT_WEBHOOK_ENV = "STRIPE_NOVA_AGENT_WEBHOOK_SECRET"
+LAUNCH_TEST_PRICE_ENV = "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID"
 
 AGENT_PLANS: dict[str, dict[str, Any]] = {
     "free_scope": {
@@ -61,6 +62,9 @@ class AgentStripeClient(Protocol):
     def create_checkout_session(self, *, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         ...
 
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        ...
+
 
 class FakeAgentStripeClient:
     """In-process checkout double used by tests. Never contacts Stripe."""
@@ -68,6 +72,7 @@ class FakeAgentStripeClient:
     def __init__(self) -> None:
         self.customers: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.subscriptions: dict[str, dict[str, Any]] = {}
         self.customer_keys: dict[str, str] = {}
         self.session_keys: dict[str, str] = {}
         self.last_payload: dict[str, Any] | None = None
@@ -81,6 +86,9 @@ class FakeAgentStripeClient:
         self.customers[customer_id] = row
         self.customer_keys[idempotency_key] = customer_id
         return dict(row)
+
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        return dict(self.subscriptions[subscription_id])
 
     def create_checkout_session(self, *, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         existing = self.session_keys.get(idempotency_key)
@@ -162,6 +170,11 @@ class LiveAgentStripeClient:
         created = client.v1.checkout.sessions.create(payload, {"idempotency_key": idempotency_key})
         return self._as_dict(created)
 
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        client = self._build_client()
+        subscription = client.v1.subscriptions.retrieve(subscription_id, {"expand": ["latest_invoice"]})
+        return self._as_dict(subscription)
+
 
 def set_agent_stripe_override(client: AgentStripeClient | None) -> None:
     global _CLIENT_OVERRIDE
@@ -179,6 +192,17 @@ def agent_checkout_mode() -> str:
     if is_live_stripe_key(secret):
         return "live" if nova_live_stripe_enabled() and bool(agent_webhook_secret()) else "live_gated"
     return "test"
+
+
+def launch_checkout_test_enabled() -> bool:
+    key = stripe_secret_key() or ""
+    return (
+        key.startswith(("sk_test_", "rk_test_"))
+        and os.getenv("APP_ENV", "").strip().lower() == "staging"
+        and os.getenv("AMICOR_ENVIRONMENT", "").strip().lower() == "staging"
+        and os.getenv("NOVA_OPERATIONS_SANDBOX_ENABLED", "").strip().lower() == "true"
+        and os.getenv("NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED", "").strip().lower() == "true"
+    )
 
 
 def get_agent_stripe_client() -> AgentStripeClient:
@@ -231,6 +255,11 @@ def checkout_payload(*, lead_id: str, email: str, plan_key: str, customer_id: st
             if not test_price.startswith("price_") or len(test_price) > 128 or not test_price.isascii():
                 raise ValueError("Invalid Operations Starter sandbox price ID")
             line_item = {"price": test_price, "quantity": 1}
+    if plan_key == "launch_99" and launch_checkout_test_enabled():
+        test_price = os.getenv(LAUNCH_TEST_PRICE_ENV, "").strip()
+        if not test_price.startswith("price_") or len(test_price) > 128 or not test_price.isascii():
+            raise ValueError("Invalid Operations Launch sandbox price ID")
+        line_item = {"price": test_price, "quantity": 1}
 
     base = public_base_url()
     payload: dict[str, Any] = {

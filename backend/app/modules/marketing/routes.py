@@ -21,9 +21,11 @@ from app.modules.marketing.notify import send_lead_notification
 from app.modules.marketing.operations_billing import (
     AGENT_PLANS,
     AGENT_PRODUCT,
+    LAUNCH_TEST_PRICE_ENV,
     agent_checkout_mode,
     checkout_payload,
     get_agent_stripe_client,
+    launch_checkout_test_enabled,
     plan_payload,
     verify_agent_webhook,
 )
@@ -80,7 +82,7 @@ def _operations_plan_checkout_open(plan_key: str, db: Session | None = None) -> 
     if not _operations_checkout_sales_open():
         return False
     if agent_checkout_mode() != "live":
-        return True
+        return not launch_checkout_test_enabled() or plan_key == "launch_99"
     return bool(plan_key == "starter_49" and db is not None and _operations_live_fulfillment_ready(db))
 
 
@@ -356,6 +358,8 @@ def create_nova_agent_checkout(
 
     if lead.payment_status == "paid":
         raise HTTPException(status_code=409, detail="This Operations request is already paid")
+    if lead.service_plan == "launch_99" and launch_checkout_test_enabled() and lead.stripe_subscription_id:
+        raise HTTPException(status_code=409, detail="This test request already has a subscription")
 
     # For real-money Operations sales, a lead submission is not an agreed
     # contract. Internal review must qualify the scope before checkout.
@@ -446,6 +450,89 @@ def create_nova_agent_checkout(
     }
 
 
+_LAUNCH_CHECKOUT_EVENTS = {
+    "checkout.session.completed", "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed", "checkout.session.expired",
+}
+_LAUNCH_INVOICE_EVENTS = {"invoice.paid", "invoice.payment_failed"}
+_LAUNCH_SUBSCRIPTION_EVENTS = {"customer.subscription.updated", "customer.subscription.deleted"}
+
+
+def _stripe_reference(value):
+    return value.get("id") if isinstance(value, dict) else value
+
+
+def _launch_event_binding(event_type, obj):
+    if event_type in _LAUNCH_INVOICE_EVENTS:
+        parent = obj.get("parent") or {}
+        details = parent.get("subscription_details") or obj.get("subscription_details") or {}
+        return (details.get("metadata") or obj.get("metadata") or {},
+                _stripe_reference(details.get("subscription") or obj.get("subscription")))
+    reference = obj.get("id") if event_type in _LAUNCH_SUBSCRIPTION_EVENTS else obj.get("subscription")
+    return obj.get("metadata") or {}, _stripe_reference(reference)
+
+
+def _handle_launch_sandbox_webhook(db, event, obj, metadata, subscription_id):
+    event_type = event.get("type")
+    if event.get("livemode") is not False:
+        return {"ok": True, "handled": False, "result": "launch_requires_test_event"}
+    lead_id = metadata.get("nova_agent_lead_id")
+    lead = db.get(MarketingWebsiteLead, lead_id, with_for_update=True) if lead_id else None
+    if (lead is None or lead.lead_type != "anonymous_operations" or lead.service_plan != "launch_99"
+            or not lead.work_email.endswith(".invalid") or not lead.stripe_customer_id
+            or lead.stripe_customer_id != _stripe_reference(obj.get("customer"))):
+        return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+
+    if event_type in _LAUNCH_CHECKOUT_EVENTS:
+        if obj.get("id") != lead.stripe_checkout_session_id or obj.get("mode") != "subscription":
+            return {"ok": True, "handled": False, "result": "checkout_identity_mismatch"}
+        if event_type == "checkout.session.expired" and not lead.stripe_subscription_id:
+            lead.payment_status = "expired"
+            db.commit()
+            return {"ok": True, "handled": True, "result": "expired", "lead_id": lead.id}
+        if lead.stripe_subscription_id and subscription_id != lead.stripe_subscription_id:
+            return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+    elif not lead.stripe_subscription_id or subscription_id != lead.stripe_subscription_id:
+        return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+    if not isinstance(subscription_id, str) or not subscription_id.startswith("sub_"):
+        return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+
+    # Stripe can deliver events out of order. Reconcile current state while holding
+    # the saved lead lock so an old invoice cannot undo a cancellation or recovery.
+    try:
+        subscription = get_agent_stripe_client().retrieve_subscription(subscription_id)
+    except Exception as exc:
+        logger.warning("launch_sandbox_subscription_lookup_failed type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Stripe subscription state unavailable") from exc
+    items = (subscription.get("items") or {}).get("data") or []
+    test_price = os.getenv(LAUNCH_TEST_PRICE_ENV, "").strip()
+    if (subscription.get("id") != subscription_id or subscription.get("livemode") is not False
+            or _stripe_reference(subscription.get("customer")) != lead.stripe_customer_id
+            or any((subscription.get("metadata") or {}).get(key) != metadata.get(key)
+                   for key in ("nova_product", "nova_agent_lead_id", "nova_agent_plan"))
+            or not test_price or len(items) != 1 or items[0].get("quantity") != 1
+            or _stripe_reference(items[0].get("price")) != test_price):
+        return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
+
+    status = subscription.get("status")
+    invoice = subscription.get("latest_invoice")
+    if status in {"canceled", "incomplete_expired"}:
+        result = "canceled"
+    elif status in {"past_due", "unpaid"}:
+        result = "failed"
+    elif (status == "active" and isinstance(invoice, dict) and invoice.get("status") == "paid"
+          and invoice.get("currency") == "usd" and invoice.get("amount_paid") == AGENT_PLANS["launch_99"]["amount_cents"]):
+        result = "paid"
+    else:
+        result = "pending"
+    lead.stripe_subscription_id = subscription_id
+    lead.payment_status = result
+    if result == "paid":
+        lead.status = "qualified"
+    db.commit()
+    return {"ok": True, "handled": True, "result": result, "lead_id": lead.id}
+
+
 @router.post("/nova-agent/stripe/webhook")
 async def nova_agent_stripe_webhook(
     request: Request,
@@ -465,6 +552,12 @@ async def nova_agent_stripe_webhook(
     event_type = str(event.get("type") or "")
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     obj = data.get("object") if isinstance(data, dict) and isinstance(data.get("object"), dict) else {}
+    if launch_checkout_test_enabled() and event_type in (
+        _LAUNCH_CHECKOUT_EVENTS | _LAUNCH_INVOICE_EVENTS | _LAUNCH_SUBSCRIPTION_EVENTS
+    ):
+        launch_metadata, subscription_id = _launch_event_binding(event_type, obj)
+        if launch_metadata.get("nova_product") == AGENT_PRODUCT and launch_metadata.get("nova_agent_plan") == "launch_99":
+            return _handle_launch_sandbox_webhook(db, event, obj, launch_metadata, subscription_id)
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     if str(metadata.get("nova_product") or "") != AGENT_PRODUCT:
         return {"ok": True, "handled": False, "result": "unrelated"}

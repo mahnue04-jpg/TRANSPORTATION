@@ -363,6 +363,106 @@ def test_anonymous_operations_free_scope_never_opens_checkout():
     assert checkout.status_code == 422
 
 
+def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    from app.db.session import SessionLocal
+    from app.helpers import uuid4
+    from app.modules.marketing import routes
+    from app.modules.marketing.models import MarketingWebsiteLead
+    from app.modules.marketing.operations_billing import FakeAgentStripeClient, set_agent_stripe_override
+
+    secret = "whsec_launch_synthetic_ci_only"
+    price_id = "price_launch_synthetic_ci_only"
+    for key, value in {
+        "STRIPE_SECRET_KEY": "sk_test_launch_synthetic_ci_only",
+        "STRIPE_NOVA_AGENT_WEBHOOK_SECRET": secret,
+        "APP_ENV": "staging",
+        "AMICOR_ENVIRONMENT": "staging",
+        "NOVA_OPERATIONS_SANDBOX_ENABLED": "true",
+        "NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED": "true",
+        "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID": price_id,
+        "NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED": "false",
+    }.items():
+        monkeypatch.setenv(key, value)
+    routes._RATE_HITS.clear()
+    fake = FakeAgentStripeClient()
+    set_agent_stripe_override(fake)
+    try:
+        response = client.post("/api/marketing/leads", json={
+            "lead_type": "anonymous_operations",
+            "contact_name": "Synthetic Launch Client",
+            "work_email": f"launch-{uuid4()}@example.invalid",
+            "consent": True,
+            "service_plan": "launch_99",
+            "message": "Synthetic monthly lifecycle validation.",
+        })
+        assert response.status_code == 200, response.text
+        lead_id = response.json()["data"]["lead_id"]
+        checkout = client.post(f"/api/marketing/leads/{lead_id}/checkout")
+        assert checkout.status_code == 200, checkout.text
+        session_id = checkout.json()["checkout_session_id"]
+        customer = fake.sessions[session_id]["customer"]
+        assert fake.last_payload["mode"] == "subscription"
+        assert fake.last_payload["line_items"] == [{"price": price_id, "quantity": 1}]
+
+        metadata = fake.last_payload["subscription_data"]["metadata"]
+        subscription_id = "sub_launch_synthetic_ci_only"
+        paid_invoice = {"status": "paid", "currency": "usd", "amount_paid": 9900}
+        subscription = {
+            "id": subscription_id, "livemode": False, "customer": customer,
+            "metadata": metadata, "status": "active", "latest_invoice": paid_invoice,
+            "items": {"data": [{"price": {"id": price_id}, "quantity": 1}]},
+        }
+        fake.subscriptions[subscription_id] = subscription
+
+        def send(event_type, obj, *, livemode=False):
+            raw = json.dumps({
+                "id": f"evt_test_{uuid4()}",
+                "object": "event", "livemode": livemode, "type": event_type,
+                "data": {"object": obj},
+            }, separators=(",", ":")).encode()
+            timestamp = str(int(time.time()))
+            digest = hmac.new(secret.encode(), timestamp.encode() + b"." + raw, hashlib.sha256).hexdigest()
+            result = client.post("/api/marketing/nova-agent/stripe/webhook", content=raw,
+                                 headers={"Stripe-Signature": f"t={timestamp},v1={digest}"})
+            assert result.status_code == 200, result.text
+            return result.json()["result"]
+
+        checkout_event = {"id": session_id, "customer": customer, "mode": "subscription",
+                          "subscription": subscription_id, "metadata": metadata}
+        assert send("checkout.session.completed", checkout_event, livemode=True) == "launch_requires_test_event"
+        assert send("checkout.session.completed", checkout_event) == "paid"
+        invoice_event = {"customer": customer, "parent": {"subscription_details": {
+            "metadata": metadata, "subscription": subscription_id,
+        }}}
+        assert send("invoice.paid", invoice_event | {"customer": "cus_other"}) == "subscription_identity_mismatch"
+        assert send("invoice.paid", invoice_event) == "paid"
+
+        subscription.update(status="past_due", latest_invoice={"status": "open", "amount_paid": 0})
+        assert send("invoice.payment_failed", invoice_event) == "failed"
+        assert send("invoice.paid", invoice_event) == "failed"
+        assert client.post(f"/api/marketing/leads/{lead_id}/checkout").status_code == 409
+
+        subscription.update(status="active", latest_invoice=paid_invoice)
+        assert send("invoice.paid", invoice_event) == "paid"
+        assert send("invoice.payment_failed", invoice_event) == "paid"
+
+        subscription["status"] = "canceled"
+        assert send("customer.subscription.deleted", subscription) == "canceled"
+        assert send("checkout.session.completed", checkout_event) == "canceled"
+        with SessionLocal() as db:
+            lead = db.get(MarketingWebsiteLead, lead_id)
+            assert lead.stripe_subscription_id == subscription_id
+            assert lead.payment_status == "canceled"
+            assert not lead.starter_paid_session_id
+    finally:
+        set_agent_stripe_override(None)
+
+
 def test_operations_agent_links_shared_image_generator() -> None:
     page = (ROOT / "static" / "nova-anonymous-agent" / "index.html").read_text(encoding="utf-8")
     assert 'href="/nova/creative"' in page
