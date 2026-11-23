@@ -12,6 +12,7 @@ on:
       - "backend/tests/test_operations_subscription_approval_postgres.py"
       - "backend/tests/test_operations_owner_approval_router_isolated.py"
       - "backend/tests/test_operations_owner_approval_http_isolated.py"
+      - "backend/tests/test_operations_owner_approval_real_auth.py"
       - "backend/app/core/nova/work_revenue/operations_owner_approval_router.py"
       - "backend/app/core/nova/work_revenue/router.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_entitlement.py"
@@ -130,3 +131,26 @@ jobs:
               "tests/test_operations_subscription_approval_postgres.py",
           ]))
           PY
+
+  full-auth-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      DATABASE_URL: sqlite:////tmp/amicor-operations-full-auth-smoke.db
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_SUBSCRIPTION_OWNER_API_STAGING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies for actual auth and application routing
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pip install "pytest>=8,<10"
+      - name: Verify actual signed-in and signed-out route guards
+        working-directory: backend
+        run: python -m pytest -q tests/test_operations_owner_approval_real_auth.py
