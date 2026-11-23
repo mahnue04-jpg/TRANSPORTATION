@@ -7,8 +7,10 @@ on:
       - "backend/tests/test_operations_package_*.py"
       - "backend/tests/test_operations_subscription_entitlement.py"
       - "backend/tests/test_operations_subscription_task_bridge.py"
+      - "backend/tests/test_operations_authenticated_subscription_adapter.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_entitlement.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_task_bridge.py"
+      - "backend/app/core/nova/work_revenue/operations_authenticated_subscription_adapter.py"
       - ".github/workflows/operations-package-allowances.yml"
   workflow_dispatch:
 
@@ -59,6 +61,7 @@ jobs:
               "tests/test_operations_package_usage_ledger.py",
               "tests/test_operations_subscription_entitlement.py",
               "tests/test_operations_subscription_task_bridge.py",
+              "tests/test_operations_authenticated_subscription_adapter.py",
           ]))
           PY
 
