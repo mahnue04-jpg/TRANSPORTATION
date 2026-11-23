@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.core.nova.growth_agent.flags import synthetic_inquiry_handoff_enabled
+from app.core.nova.growth_agent.service import GrowthAgentService
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import UserContext
@@ -81,8 +87,33 @@ def website_inquiries(
             "is_synthetic": row.get("is_synthetic") is True,
             "status": "needs_review",
         })
-    return {"state": "available", "source_system": "cloudflare_amicor_leads",
+    return {"synthetic_handoff_enabled": synthetic_inquiry_handoff_enabled(),
+            "state": "available", "source_system": "cloudflare_amicor_leads",
             "inquiries": output, "complete": True}
 
 
 router.add_api_route("/website-inquiries", website_inquiries, methods=["GET"])
+
+
+class InquiryHandoff(BaseModel):
+    source_key: str = Field(min_length=6, max_length=512)
+
+
+@router.post("/website-inquiries/handoff")
+def approve_synthetic_handoff(
+    body: InquiryHandoff,
+    user: UserContext = Depends(require_growth_owner),
+    source: Any = Depends(get_website_inquiry_source),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if not synthetic_inquiry_handoff_enabled():
+        raise HTTPException(404, "Synthetic handoff is disabled")
+    snapshot = website_inquiries(None, user, source)
+    if not snapshot["complete"]:
+        raise HTTPException(503, "Inquiry source unavailable")
+    row = next((r for r in snapshot["inquiries"] if r["source_key"] == body.source_key), None)
+    if row is None:
+        raise HTTPException(404, "Inquiry not found")
+    if not row["is_synthetic"] or not row["consent"]:
+        raise HTTPException(409, "A synthetic inquiry with recorded consent is required")
+    return GrowthAgentService(db).handoff_website_inquiry(resolve_org(user), row, user.user_id)
