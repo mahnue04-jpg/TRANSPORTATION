@@ -19,9 +19,29 @@ def audit_graph(recorded_revision: str = RECORDED_PRODUCTION_REVISION) -> dict:
     cfg = Config(str(BACKEND / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND / "migrations"))
     script = ScriptDirectory.from_config(cfg)
+    # The recorded production revision may be a historical alias not present in
+    # this branch. Report that as a HARD RELEASE BLOCKER, not a passing graph.
+    revisions = list(script.walk_revisions())
+    known = {rev.revision for rev in revisions}
+    heads = list(script.get_heads())
+    if recorded_revision not in known:
+        matching = sorted(
+            rev.revision for rev in revisions
+            if rev.revision.startswith("20260918_nova_v3_live_")
+        )
+        return {
+            "recorded_production_revision": recorded_revision,
+            "repository_head": heads,
+            "status": "blocked_unknown_production_revision",
+            "candidate_repository_revisions": matching,
+            "release_ready": False,
+            "owner_review_required": True,
+            "database_connected": False,
+            "migration_applied": False,
+            "version_stamped": False,
+            "reason": "Production revision label is absent from repository graph; do not infer equivalence, stamp, or migrate",
+        }
     current = script.get_revision(recorded_revision)
-    if current is None:
-        raise RuntimeError("Recorded production revision missing from repository")
     heads = list(script.get_heads())
     if len(heads) != 1:
         raise RuntimeError(f"Expected a single migration head, found {len(heads)}")
@@ -41,6 +61,8 @@ def audit_graph(recorded_revision: str = RECORDED_PRODUCTION_REVISION) -> dict:
         "growth_revisions": [name for name in all_names if "nova_ga" in name or "growth" in name],
         "non_growth_revisions": [name for name in all_names if "nova_ga" not in name and "growth" not in name],
         "review_required": True,
+        "release_ready": False,
+        "status": "pending_manual_schema_reconciliation",
         "database_connected": False,
         "migration_applied": False,
         "version_stamped": False,
