@@ -6,6 +6,7 @@ on:
       - "review/starter-49-disposable-postgres-integration-20261122"
     paths:
       - "backend/tests/test_operations_starter_disposable_postgres.py"
+      - "backend/tests/test_operations_starter_signed_webhook.py"
       - ".github/workflows/starter-disposable-postgres.yml"
   pull_request:
     paths:
@@ -54,4 +55,4 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt pytest
       - name: Run synthetic PostgreSQL security integration
-        run: python -m pytest -q tests/test_operations_starter_disposable_postgres.py
+        run: python -m pytest -q tests/test_operations_starter_disposable_postgres.py tests/test_operations_starter_signed_webhook.py
