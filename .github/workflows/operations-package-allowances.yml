@@ -1,0 +1,35 @@
+name: Operations package allowance staging checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/core/nova/work_revenue/operations_package_*.py"
+      - "backend/tests/test_operations_package_*.py"
+      - ".github/workflows/operations-package-allowances.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  allowance-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install only test prerequisites
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3"
+      - name: Test staged allowance logic, never connect to Stripe or DB
+        working-directory: backend
+        run: python -m pytest -q tests/test_operations_package_allowances.py tests/test_operations_package_usage_ledger.py
