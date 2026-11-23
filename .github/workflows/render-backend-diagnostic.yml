@@ -117,7 +117,7 @@ jobs:
           assert os.environ["APP_ENV"] == "test"
           assert os.environ["AMICOR_ENVIRONMENT"] == "test"
           assert os.environ["DATABASE_URL"].startswith("postgresql://amicor:amicor@127.0.0.1:5432/amicor")
-          engine = create_engine(os.environ["DATABASE_URL"])
+          engine = create_engine(os.environ["DATABASE_URL"].replace("postgresql://", "postgresql+psycopg2://", 1))
           try:
               inspector = inspect(engine)
               required = {
