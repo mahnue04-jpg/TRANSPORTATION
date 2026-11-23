@@ -26,6 +26,7 @@ from app.modules.marketing.operations_billing import (
     plan_payload,
     verify_agent_webhook,
 )
+from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -371,6 +372,23 @@ async def nova_agent_stripe_webhook(
     lead = db.get(MarketingWebsiteLead, lead_id) if lead_id else None
     if lead is None or lead.lead_type != "anonymous_operations":
         return {"ok": True, "handled": False, "result": "lead_not_found"}
+
+    # A signed webhook must also match the exact stored Starter checkout,
+    # customer, 4,900-cent USD payment, and plan. Invoice events can never
+    # authorize the one-time Starter Task.
+    if lead.service_plan == "starter_49":
+        outcome = starter_checkout_outcome(lead, event_type, obj, metadata)
+        if outcome == "paid":
+            lead.payment_status = "paid"
+            lead.starter_paid_session_id = str(obj["id"])
+            lead.status = "qualified"
+            db.commit()
+            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id}
+        if outcome in {"pending", "failed", "expired"}:
+            lead.payment_status = outcome
+            db.commit()
+            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id}
+        return {"ok": True, "handled": False, "result": outcome}
 
     result = "ignored"
     if event_type == "checkout.session.completed":
