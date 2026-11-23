@@ -100,7 +100,8 @@ def test_website_inquiry_from_fake_cloudflare_kv_to_owner_http(monkeypatch):
         assert client.post(handoff, json=payload).status_code == 404
 
         # Use a separate fixture in the same tenant for the customer path.
-        key = "lead:AMQ-FIXTURE-CUSTOMER"
+        # Exact production website KV key shape: lead:<ISO timestamp>:<UUID>.
+        key = "lead:2026-11-23T20:00:00.000Z:00000000-0000-4000-8000-000000000001"
         payload = {"source_key": key}
         monkeypatch.setenv("NOVA_GROWTH_AGENT_DEMO_MODE", "false")
         monkeypatch.setenv("NOVA_GROWTH_CUSTOMER_INQUIRY_HANDOFF", "true")
