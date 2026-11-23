@@ -9,7 +9,7 @@
 - PR #586 changes 71 files, 62 additive lines in `backend/app/main.py`, 15 additive lines in shared Workspace index, no Studio or Operations file modifications. Its GitHub Actions matrix completed 12/12 jobs successfully (Growth, disposable Postgres, workspace UI, Casting, Work & Revenue, backend diagnostics, site CI).
 
 ## Pre-release blockers
-1. **Production Growth schema:** `20261112_nova_growth_agent` explicitly returns without creating tables when environment is production. A normal Alembic upgrade can therefore *stamp* the revision while skipping Growth DDL. This is NOT safe for enabling real Growth conversations; design a separately owner-reviewed migration with real DDL, schema version verification, backup, restore, and rollback on a disposable copy first.
+1. **Production Growth schema:** Prior versions of the three Growth migrations silently returned without creating tables under production flags, risking stamped but incomplete revisions. PR #586 now makes these migrations **raise explicitly** under production flags and adds regression tests. This prevents future silent stamping, but it does not provision missing production tables or repair any previously stamped history. Build a separately approved schema-release procedure with introspection, true DDL, version verification, backup, restore, and rollback on a disposable copy first.
 2. **Ingestion must remain isolated:** The actual site handler saves `lead:${receivedAt}:${uuid}` keys in `AMICOR_LEADS`; the Growth reader handles the `lead:` namespace and projects consent. Test that exact record format with synthetic values. Do not connect production Cloudflare credentials until separate approval.
 3. **Cross-product release safety:** `main` is Render auto-deployed. No merges or release toggles until a controlled deploy method, working rollback target, outage monitoring, and explicit owner go/no-go are confirmed. Production website files differ from the deployed Render commit but the backend file hashes above are identical; evaluate the automatic Render redeploy nonetheless.
 4. **Privacy/security:** Verify organization binding, owner authentication, audit trail, consent evidence, retention, no customer data in logs, and unapproved outbound channels remain disabled.
@@ -25,7 +25,8 @@
 - [x] Review GitHub diff scope (no Studio/Operations files changed)
 - [x] Execute GitHub Actions regression jobs (12/12 green)
 - [x] Verify backend code from deployed SHA and current main matches in key files
-- [ ] Approve safe production migration path (current revision is stamp-only under production flags)
+- [x] Replace unsafe production migration no-ops with explicit fail-closed errors (CI verification pending)
+- [ ] Approve a genuine production schema migration path (current migrations deliberately block in production)
 - [ ] Complete private restored-DB rehearsal and rollback verification
 - [ ] Complete isolated synthetic end-to-end test against actual website key shape
 - [ ] Verify customer source, consent, owner access, privacy/retention and monitoring
