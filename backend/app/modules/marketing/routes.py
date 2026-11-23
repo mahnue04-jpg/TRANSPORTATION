@@ -21,12 +21,12 @@ from app.modules.marketing.notify import send_lead_notification
 from app.modules.marketing.operations_billing import (
     AGENT_PLANS,
     AGENT_PRODUCT,
-    LAUNCH_TEST_PRICE_ENV,
     agent_checkout_mode,
     checkout_payload,
     get_agent_stripe_client,
-    launch_checkout_test_enabled,
     plan_payload,
+    subscription_checkout_test_plan,
+    subscription_test_price,
     verify_agent_webhook,
 )
 from app.modules.marketing.schemas import MarketingLeadCreate
@@ -82,7 +82,8 @@ def _operations_plan_checkout_open(plan_key: str, db: Session | None = None) -> 
     if not _operations_checkout_sales_open():
         return False
     if agent_checkout_mode() != "live":
-        return not launch_checkout_test_enabled() or plan_key == "launch_99"
+        sandbox_plan = subscription_checkout_test_plan()
+        return sandbox_plan is None or plan_key == sandbox_plan
     return bool(plan_key == "starter_49" and db is not None and _operations_live_fulfillment_ready(db))
 
 
@@ -358,7 +359,7 @@ def create_nova_agent_checkout(
 
     if lead.payment_status == "paid":
         raise HTTPException(status_code=409, detail="This Operations request is already paid")
-    if lead.service_plan == "launch_99" and launch_checkout_test_enabled() and lead.stripe_subscription_id:
+    if lead.service_plan == subscription_checkout_test_plan() and lead.stripe_subscription_id:
         raise HTTPException(status_code=409, detail="This test request already has a subscription")
 
     # For real-money Operations sales, a lead submission is not an agreed
@@ -450,40 +451,40 @@ def create_nova_agent_checkout(
     }
 
 
-_LAUNCH_CHECKOUT_EVENTS = {
+_SUBSCRIPTION_SANDBOX_CHECKOUT_EVENTS = {
     "checkout.session.completed", "checkout.session.async_payment_succeeded",
     "checkout.session.async_payment_failed", "checkout.session.expired",
 }
-_LAUNCH_INVOICE_EVENTS = {"invoice.paid", "invoice.payment_failed"}
-_LAUNCH_SUBSCRIPTION_EVENTS = {"customer.subscription.updated", "customer.subscription.deleted"}
+_SUBSCRIPTION_SANDBOX_INVOICE_EVENTS = {"invoice.paid", "invoice.payment_failed"}
+_SUBSCRIPTION_SANDBOX_SUBSCRIPTION_EVENTS = {"customer.subscription.updated", "customer.subscription.deleted"}
 
 
 def _stripe_reference(value):
     return value.get("id") if isinstance(value, dict) else value
 
 
-def _launch_event_binding(event_type, obj):
-    if event_type in _LAUNCH_INVOICE_EVENTS:
+def _subscription_event_binding(event_type, obj):
+    if event_type in _SUBSCRIPTION_SANDBOX_INVOICE_EVENTS:
         parent = obj.get("parent") or {}
         details = parent.get("subscription_details") or obj.get("subscription_details") or {}
         return (details.get("metadata") or obj.get("metadata") or {},
                 _stripe_reference(details.get("subscription") or obj.get("subscription")))
-    reference = obj.get("id") if event_type in _LAUNCH_SUBSCRIPTION_EVENTS else obj.get("subscription")
+    reference = obj.get("id") if event_type in _SUBSCRIPTION_SANDBOX_SUBSCRIPTION_EVENTS else obj.get("subscription")
     return obj.get("metadata") or {}, _stripe_reference(reference)
 
 
-def _handle_launch_sandbox_webhook(db, event, obj, metadata, subscription_id):
+def _handle_subscription_sandbox_webhook(db, event, obj, metadata, subscription_id, plan_key):
     event_type = event.get("type")
     if event.get("livemode") is not False:
         return {"ok": True, "handled": False, "result": "launch_requires_test_event"}
     lead_id = metadata.get("nova_agent_lead_id")
     lead = db.get(MarketingWebsiteLead, lead_id, with_for_update=True) if lead_id else None
-    if (lead is None or lead.lead_type != "anonymous_operations" or lead.service_plan != "launch_99"
+    if (lead is None or lead.lead_type != "anonymous_operations" or lead.service_plan != plan_key
             or not lead.work_email.endswith(".invalid") or not lead.stripe_customer_id
             or lead.stripe_customer_id != _stripe_reference(obj.get("customer"))):
         return {"ok": True, "handled": False, "result": "subscription_identity_mismatch"}
 
-    if event_type in _LAUNCH_CHECKOUT_EVENTS:
+    if event_type in _SUBSCRIPTION_SANDBOX_CHECKOUT_EVENTS:
         if obj.get("id") != lead.stripe_checkout_session_id or obj.get("mode") != "subscription":
             return {"ok": True, "handled": False, "result": "checkout_identity_mismatch"}
         if event_type == "checkout.session.expired" and not lead.stripe_subscription_id:
@@ -502,10 +503,10 @@ def _handle_launch_sandbox_webhook(db, event, obj, metadata, subscription_id):
     try:
         subscription = get_agent_stripe_client().retrieve_subscription(subscription_id)
     except Exception as exc:
-        logger.warning("launch_sandbox_subscription_lookup_failed type=%s", type(exc).__name__)
+        logger.warning("sandbox_subscription_lookup_failed type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Stripe subscription state unavailable") from exc
     items = (subscription.get("items") or {}).get("data") or []
-    test_price = os.getenv(LAUNCH_TEST_PRICE_ENV, "").strip()
+    test_price = subscription_test_price(plan_key)
     if (subscription.get("id") != subscription_id or subscription.get("livemode") is not False
             or _stripe_reference(subscription.get("customer")) != lead.stripe_customer_id
             or any((subscription.get("metadata") or {}).get(key) != metadata.get(key)
@@ -521,7 +522,7 @@ def _handle_launch_sandbox_webhook(db, event, obj, metadata, subscription_id):
     elif status in {"past_due", "unpaid"}:
         result = "failed"
     elif (status == "active" and isinstance(invoice, dict) and invoice.get("status") == "paid"
-          and invoice.get("currency") == "usd" and invoice.get("amount_paid") == AGENT_PLANS["launch_99"]["amount_cents"]):
+          and invoice.get("currency") == "usd" and invoice.get("amount_paid") == AGENT_PLANS[plan_key]["amount_cents"]):
         result = "paid"
     else:
         result = "pending"
@@ -552,12 +553,17 @@ async def nova_agent_stripe_webhook(
     event_type = str(event.get("type") or "")
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     obj = data.get("object") if isinstance(data, dict) and isinstance(data.get("object"), dict) else {}
-    if launch_checkout_test_enabled() and event_type in (
-        _LAUNCH_CHECKOUT_EVENTS | _LAUNCH_INVOICE_EVENTS | _LAUNCH_SUBSCRIPTION_EVENTS
+    sandbox_plan = subscription_checkout_test_plan()
+    if sandbox_plan and event_type in (
+        _SUBSCRIPTION_SANDBOX_CHECKOUT_EVENTS | _SUBSCRIPTION_SANDBOX_INVOICE_EVENTS | _SUBSCRIPTION_SANDBOX_SUBSCRIPTION_EVENTS
     ):
-        launch_metadata, subscription_id = _launch_event_binding(event_type, obj)
-        if launch_metadata.get("nova_product") == AGENT_PRODUCT and launch_metadata.get("nova_agent_plan") == "launch_99":
-            return _handle_launch_sandbox_webhook(db, event, obj, launch_metadata, subscription_id)
+        subscription_metadata, subscription_id = _subscription_event_binding(event_type, obj)
+        if (subscription_metadata.get("nova_product") != AGENT_PRODUCT
+                or subscription_metadata.get("nova_agent_plan") != sandbox_plan):
+            return {"ok": True, "handled": False, "result": "unrelated"}
+        return _handle_subscription_sandbox_webhook(
+            db, event, obj, subscription_metadata, subscription_id, sandbox_plan,
+        )
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     if str(metadata.get("nova_product") or "") != AGENT_PRODUCT:
         return {"ok": True, "handled": False, "result": "unrelated"}

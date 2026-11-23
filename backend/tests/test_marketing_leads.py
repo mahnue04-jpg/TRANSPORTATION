@@ -363,7 +363,11 @@ def test_anonymous_operations_free_scope_never_opens_checkout():
     assert checkout.status_code == 422
 
 
-def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
+@pytest.mark.parametrize(("plan", "tier", "amount"), [
+    ("launch_99", "LAUNCH", 9900),
+    ("business_299", "BUSINESS", 29900),
+])
+def test_operations_sandbox_tracks_subscription_lifecycle(monkeypatch, plan, tier, amount):
     import hashlib
     import hmac
     import json
@@ -383,8 +387,8 @@ def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
         "APP_ENV": "staging",
         "AMICOR_ENVIRONMENT": "staging",
         "NOVA_OPERATIONS_SANDBOX_ENABLED": "true",
-        "NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED": "true",
-        "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID": price_id,
+        f"NOVA_OPERATIONS_{tier}_SANDBOX_ENABLED": "true",
+        f"NOVA_OPERATIONS_{tier}_TEST_PRICE_ID": price_id,
         "NOVA_OPERATIONS_DURABLE_RECEIPT_ENABLED": "false",
     }.items():
         monkeypatch.setenv(key, value)
@@ -394,10 +398,10 @@ def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
     try:
         response = client.post("/api/marketing/leads", json={
             "lead_type": "anonymous_operations",
-            "contact_name": "Synthetic Launch Client",
+            "contact_name": "Synthetic Operations Client",
             "work_email": f"launch-{uuid4()}@example.invalid",
             "consent": True,
-            "service_plan": "launch_99",
+            "service_plan": plan,
             "message": "Synthetic monthly lifecycle validation.",
         })
         assert response.status_code == 200, response.text
@@ -411,7 +415,7 @@ def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
 
         metadata = fake.last_payload["subscription_data"]["metadata"]
         subscription_id = "sub_launch_synthetic_ci_only"
-        paid_invoice = {"status": "paid", "currency": "usd", "amount_paid": 9900}
+        paid_invoice = {"status": "paid", "currency": "usd", "amount_paid": amount}
         subscription = {
             "id": subscription_id, "livemode": False, "customer": customer,
             "metadata": metadata, "status": "active", "latest_invoice": paid_invoice,
@@ -435,6 +439,16 @@ def test_operations_launch_sandbox_tracks_subscription_lifecycle(monkeypatch):
         checkout_event = {"id": session_id, "customer": customer, "mode": "subscription",
                           "subscription": subscription_id, "metadata": metadata}
         assert send("checkout.session.completed", checkout_event, livemode=True) == "launch_requires_test_event"
+        other_plan = "launch_99" if plan == "business_299" else "business_299"
+        assert send("checkout.session.completed", checkout_event | {
+            "metadata": metadata | {"nova_agent_plan": other_plan},
+        }) == "unrelated"
+        subscription["items"]["data"][0]["price"] = {"id": "price_wrong_tier"}
+        assert send("checkout.session.completed", checkout_event) == "subscription_identity_mismatch"
+        subscription["items"]["data"][0]["price"] = {"id": price_id}
+        subscription["latest_invoice"] = paid_invoice | {"amount_paid": 9900 if amount == 29900 else 29900}
+        assert send("checkout.session.completed", checkout_event) == "pending"
+        subscription["latest_invoice"] = paid_invoice
         assert send("checkout.session.completed", checkout_event) == "paid"
         invoice_event = {"customer": customer, "parent": {"subscription_details": {
             "metadata": metadata, "subscription": subscription_id,

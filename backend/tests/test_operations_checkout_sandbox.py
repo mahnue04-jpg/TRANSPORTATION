@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -55,18 +57,31 @@ def test_sandbox_accepts_restricted_test_stripe_key():
     assert "SANDBOX_IMPORTED" in completed.stdout
 
 
-def test_launch_sandbox_requires_its_own_price_and_staging_environment():
+@pytest.mark.parametrize("tier", ["LAUNCH", "BUSINESS"])
+def test_subscription_sandbox_requires_its_own_price_and_staging_environment(tier):
     settings = {
-        "NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED": "true",
+        f"NOVA_OPERATIONS_{tier}_SANDBOX_ENABLED": "true",
         "NOVA_OPERATIONS_STARTER_TEST_PRICE_ID": "",
     }
-    without_price = _import_sandbox(**settings, NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID="")
+    price_key = f"NOVA_OPERATIONS_{tier}_TEST_PRICE_ID"
+    without_price = _import_sandbox(**settings, **{price_key: ""})
     assert without_price.returncode != 0
-    settings["NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID"] = "price_launch_ci_synthetic"
+    settings[price_key] = "price_subscription_ci_synthetic"
     in_development = _import_sandbox(**settings, APP_ENV="development")
     assert in_development.returncode != 0
     in_staging = _import_sandbox(**settings)
     assert in_staging.returncode == 0, in_staging.stderr[-1800:]
+
+
+def test_sandbox_rejects_conflicting_subscription_tiers():
+    completed = _import_sandbox(
+        NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED="true",
+        NOVA_OPERATIONS_BUSINESS_SANDBOX_ENABLED="true",
+        NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID="price_launch_ci_synthetic",
+        NOVA_OPERATIONS_BUSINESS_TEST_PRICE_ID="price_business_ci_synthetic",
+    )
+    assert completed.returncode != 0
+    assert "Select only one Operations subscription sandbox plan" in completed.stderr
 
 
 def test_sandbox_rejects_restricted_live_stripe_key():

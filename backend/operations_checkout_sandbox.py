@@ -12,11 +12,21 @@ from pathlib import Path
 # Must run before app.db.session or app.modules.marketing is imported.
 _DB_PREFIX = "sqlite:////tmp/amicor-operations-sandbox-"
 _SANDBOX_DB = os.getenv("NOVA_OPERATIONS_SANDBOX_DB_URL", "").strip()
-_LAUNCH_SANDBOX = os.getenv("NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED", "").strip().lower() == "true"
-_TEST_PLAN = "launch_99" if _LAUNCH_SANDBOX else "starter_49"
-_TEST_PRICE_ENV = (
-    "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID" if _LAUNCH_SANDBOX else "NOVA_OPERATIONS_STARTER_TEST_PRICE_ID"
+# Select the plan before importing modules that initialize the database.
+from app.modules.marketing.operations_billing import (  # noqa: E402
+    AGENT_PLANS,
+    configured_subscription_sandbox_plan,
+    subscription_test_price,
 )
+
+_SUBSCRIPTION_PLAN = configured_subscription_sandbox_plan()
+_TEST_PLAN = _SUBSCRIPTION_PLAN or "starter_49"
+
+
+def _test_price() -> str:
+    if _SUBSCRIPTION_PLAN:
+        return subscription_test_price(_SUBSCRIPTION_PLAN)
+    return os.getenv("NOVA_OPERATIONS_STARTER_TEST_PRICE_ID", "").strip()
 
 
 def _safe_configuration() -> bool:
@@ -28,10 +38,10 @@ def _safe_configuration() -> bool:
         and ".." not in _SANDBOX_DB
         and stripe_key.startswith(("sk_test_", "rk_test_"))
         and os.getenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", "").startswith("whsec_")
-        and os.getenv(_TEST_PRICE_ENV, "").startswith("price_")
+        and _test_price().startswith("price_")
         and os.getenv("APP_ENV", "staging").strip().lower() != "production"
         and os.getenv("AMICOR_ENVIRONMENT", "staging").strip().lower() != "production"
-        and (not _LAUNCH_SANDBOX or (
+        and (not _SUBSCRIPTION_PLAN or (
             os.getenv("APP_ENV", "").strip().lower() == "staging"
             and os.getenv("AMICOR_ENVIRONMENT", "").strip().lower() == "staging"
         ))
@@ -120,8 +130,9 @@ async def synthetic_only_guard(request: Request, call_next):
     if path == "/sandbox-test" and request.method == "GET":
         # UI contains no secrets; the token is entered locally by the owner.
         html = Path(__file__).with_name("operations_checkout_sandbox_ui.html").read_text(encoding="utf-8")
-        if _LAUNCH_SANDBOX:
-            html = html.replace("$49", "$99/month").replace("starter_49", _TEST_PLAN)
+        if _SUBSCRIPTION_PLAN:
+            amount = AGENT_PLANS[_TEST_PLAN]["amount_cents"] // 100
+            html = html.replace("$49", f"${amount}/month").replace("starter_49", _TEST_PLAN)
         return HTMLResponse(html, headers={
             "Cache-Control": "no-store",
             "Referrer-Policy": "no-referrer",

@@ -20,7 +20,10 @@ from app.helpers import uuid4
 
 AGENT_PRODUCT = "nova_anonymous_operations_agent"
 AGENT_WEBHOOK_ENV = "STRIPE_NOVA_AGENT_WEBHOOK_SECRET"
-LAUNCH_TEST_PRICE_ENV = "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID"
+SUBSCRIPTION_SANDBOX_SETTINGS = {
+    "launch_99": ("NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED", "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID"),
+    "business_299": ("NOVA_OPERATIONS_BUSINESS_SANDBOX_ENABLED", "NOVA_OPERATIONS_BUSINESS_TEST_PRICE_ID"),
+}
 
 AGENT_PLANS: dict[str, dict[str, Any]] = {
     "free_scope": {
@@ -194,15 +197,31 @@ def agent_checkout_mode() -> str:
     return "test"
 
 
-def launch_checkout_test_enabled() -> bool:
+def configured_subscription_sandbox_plan() -> str | None:
+    selected = [
+        plan for plan, (flag, _) in SUBSCRIPTION_SANDBOX_SETTINGS.items()
+        if os.getenv(flag, "").strip().lower() == "true"
+    ]
+    if len(selected) > 1:
+        raise ValueError("Select only one Operations subscription sandbox plan")
+    return next(iter(selected), None)
+
+
+def subscription_checkout_test_plan() -> str | None:
     key = stripe_secret_key() or ""
-    return (
+    if (
         key.startswith(("sk_test_", "rk_test_"))
         and os.getenv("APP_ENV", "").strip().lower() == "staging"
         and os.getenv("AMICOR_ENVIRONMENT", "").strip().lower() == "staging"
         and os.getenv("NOVA_OPERATIONS_SANDBOX_ENABLED", "").strip().lower() == "true"
-        and os.getenv("NOVA_OPERATIONS_LAUNCH_SANDBOX_ENABLED", "").strip().lower() == "true"
-    )
+    ):
+        return configured_subscription_sandbox_plan()
+    return None
+
+
+def subscription_test_price(plan_key: str) -> str:
+    _, price_env = SUBSCRIPTION_SANDBOX_SETTINGS[plan_key]
+    return os.getenv(price_env, "").strip()
 
 
 def get_agent_stripe_client() -> AgentStripeClient:
@@ -255,10 +274,10 @@ def checkout_payload(*, lead_id: str, email: str, plan_key: str, customer_id: st
             if not test_price.startswith("price_") or len(test_price) > 128 or not test_price.isascii():
                 raise ValueError("Invalid Operations Starter sandbox price ID")
             line_item = {"price": test_price, "quantity": 1}
-    if plan_key == "launch_99" and launch_checkout_test_enabled():
-        test_price = os.getenv(LAUNCH_TEST_PRICE_ENV, "").strip()
+    if plan_key == subscription_checkout_test_plan():
+        test_price = subscription_test_price(plan_key)
         if not test_price.startswith("price_") or len(test_price) > 128 or not test_price.isascii():
-            raise ValueError("Invalid Operations Launch sandbox price ID")
+            raise ValueError("Invalid Operations subscription sandbox price ID")
         line_item = {"price": test_price, "quantity": 1}
 
     base = public_base_url()
