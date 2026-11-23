@@ -10,6 +10,9 @@ on:
       - "backend/tests/test_operations_authenticated_subscription_adapter.py"
       - "backend/tests/test_operations_subscription_approvals.py"
       - "backend/tests/test_operations_subscription_approval_postgres.py"
+      - "backend/tests/test_operations_owner_approval_router_isolated.py"
+      - "backend/app/core/nova/work_revenue/operations_owner_approval_router.py"
+      - "backend/app/core/nova/work_revenue/router.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_entitlement.py"
       - "backend/app/core/nova/work_revenue/operations_subscription_task_bridge.py"
       - "backend/app/core/nova/work_revenue/operations_authenticated_subscription_adapter.py"
@@ -38,7 +41,7 @@ jobs:
       - name: Install only test prerequisites
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3"
+          python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3" "fastapi>=0.115,<1"
       - name: Test staged allowance logic, never connect to Stripe or DB
         working-directory: backend
         run: |
@@ -66,6 +69,7 @@ jobs:
               "tests/test_operations_subscription_task_bridge.py",
               "tests/test_operations_authenticated_subscription_adapter.py",
               "tests/test_operations_subscription_approvals.py",
+              "tests/test_operations_owner_approval_router_isolated.py",
           ]))
           PY
 
