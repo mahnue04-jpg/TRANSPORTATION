@@ -1,0 +1,27 @@
+name: Website lead normalization
+on:
+  pull_request:
+    paths:
+      - website/lib/website-lead-normalize.mjs
+      - website/tests/website-lead-normalize.test.mjs
+      - website/lib/website-lead-reader.mjs
+      - website/tests/website-lead-reader.test.mjs
+      - website/lib/website-lead-owner-service.mjs
+      - website/tests/website-lead-owner-service.test.mjs
+      - .github/workflows/website-lead-normalization.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  normalize-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run website inquiry and owner boundary tests
+        run: node --test website/tests/website-lead-normalize.test.mjs website/tests/website-lead-reader.test.mjs website/tests/website-lead-owner-service.test.mjs
