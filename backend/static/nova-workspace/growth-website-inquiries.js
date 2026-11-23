@@ -63,9 +63,10 @@
         (data.inquiries.length > details.length ? "Showing first 15 records only.\n" : "") +
         "This is a source snapshot, not CRM contacts, completed jobs, or paid customers.\n" +
         "No messages sent and no records imported.");
-      if (data.synthetic_handoff_enabled === true) {
+      if (data.synthetic_handoff_enabled === true || data.customer_handoff_enabled === true) {
         data.inquiries.slice(0, 15).filter(function (row) {
-          return row.is_synthetic === true && row.consent === true;
+          var enabled = row.is_synthetic === true ? data.synthetic_handoff_enabled : data.customer_handoff_enabled;
+          return enabled === true && row.consent === true;
         }).forEach(function (row) {
           var approve = document.createElement("button");
           approve.type = "button";

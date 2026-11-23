@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.nova.growth_agent.flags import synthetic_inquiry_handoff_enabled
+from app.core.nova.growth_agent.flags import customer_inquiry_handoff_enabled, synthetic_inquiry_handoff_enabled
 from app.core.nova.growth_agent.service import GrowthAgentService
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -88,6 +88,7 @@ def website_inquiries(
             "status": "needs_review",
         })
     return {"synthetic_handoff_enabled": synthetic_inquiry_handoff_enabled(),
+            "customer_handoff_enabled": customer_inquiry_handoff_enabled(),
             "state": "available", "source_system": "cloudflare_amicor_leads",
             "inquiries": output, "complete": True}
 
@@ -100,20 +101,23 @@ class InquiryHandoff(BaseModel):
 
 
 @router.post("/website-inquiries/handoff")
-def approve_synthetic_handoff(
+def approve_inquiry_handoff(
     body: InquiryHandoff,
     user: UserContext = Depends(require_growth_owner),
     source: Any = Depends(get_website_inquiry_source),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if not synthetic_inquiry_handoff_enabled():
-        raise HTTPException(404, "Synthetic handoff is disabled")
+    synthetic_enabled = synthetic_inquiry_handoff_enabled()
+    customer_enabled = customer_inquiry_handoff_enabled()
+    if not (synthetic_enabled or customer_enabled):
+        raise HTTPException(404, "Website inquiry handoff is disabled")
     snapshot = website_inquiries(None, user, source)
     if not snapshot["complete"]:
         raise HTTPException(503, "Inquiry source unavailable")
     row = next((r for r in snapshot["inquiries"] if r["source_key"] == body.source_key), None)
     if row is None:
         raise HTTPException(404, "Inquiry not found")
-    if not row["is_synthetic"] or not row["consent"]:
-        raise HTTPException(409, "A synthetic inquiry with recorded consent is required")
+    eligible = synthetic_enabled if row["is_synthetic"] else customer_enabled
+    if not eligible or not row["consent"]:
+        raise HTTPException(409, "Handoff requires an enabled inquiry type and recorded consent")
     return GrowthAgentService(db).handoff_website_inquiry(resolve_org(user), row, user.user_id)

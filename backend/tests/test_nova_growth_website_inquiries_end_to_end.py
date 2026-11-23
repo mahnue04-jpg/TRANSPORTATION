@@ -99,6 +99,23 @@ def test_website_inquiry_from_fake_cloudflare_kv_to_owner_http(monkeypatch):
         monkeypatch.delenv("NOVA_GROWTH_SYNTHETIC_INQUIRY_HANDOFF")
         assert client.post(handoff, json=payload).status_code == 404
 
+        # Use a separate fixture in the same tenant for the customer path.
+        key = "lead:AMQ-FIXTURE-CUSTOMER"
+        payload = {"source_key": key}
+        monkeypatch.setenv("NOVA_GROWTH_AGENT_DEMO_MODE", "false")
+        monkeypatch.setenv("NOVA_GROWTH_CUSTOMER_INQUIRY_HANDOFF", "true")
+        record["consent"] = False
+        assert client.post(handoff, json=payload).status_code == 409
+        record["consent"] = True
+        customer = client.post(handoff, json=payload)
+        assert customer.status_code == 200, customer.text
+        assert customer.json()["is_synthetic_demo"] is False
+        assert customer.json()["status"] == "handed_off"
+        assert key in customer.json()["messages"][0]["content"]
+        assert client.post(handoff, json=payload).json() == customer.json()
+        record["is_synthetic"] = True
+        assert client.post(handoff, json=payload).status_code == 409
+
 
 
 def test_inquiry_api_without_adapter_is_unavailable_not_zero(monkeypatch):

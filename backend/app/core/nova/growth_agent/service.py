@@ -1020,7 +1020,7 @@ class GrowthAgentService:
         query = self._org_query(GaConversation, org_id).filter_by(id=conversation_id)
         if query.one_or_none() is None:
             self.db.add(GaConversation(id=conversation_id, organization_id=org_id,
-                                       subject=f"Website inquiry {key}"[:300], is_synthetic_demo=True))
+                                       subject=f"Website inquiry {key}"[:300], is_synthetic_demo=row["is_synthetic"]))
             try:
                 self.db.flush()
             except IntegrityError:

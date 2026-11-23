@@ -31,6 +31,10 @@ def synthetic_inquiry_handoff_enabled() -> bool:
     return demo_mode_enabled() and _env_enabled("NOVA_GROWTH_SYNTHETIC_INQUIRY_HANDOFF")
 
 
+def customer_inquiry_handoff_enabled() -> bool:
+    return growth_agent_enabled() and _env_enabled("NOVA_GROWTH_CUSTOMER_INQUIRY_HANDOFF")
+
+
 def widget_public_enabled() -> bool:
     """Public widget chat endpoints. Still requires signed install token."""
     if not growth_agent_enabled():
