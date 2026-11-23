@@ -44,6 +44,7 @@ def test_verified_payment_matches_only_one_owner_task(engine, monkeypatch):
     paid = SimpleNamespace(
         id="synthetic-lead", lead_type="anonymous_operations",
         service_plan="starter_49", consent=True, payment_status="paid",
+        starter_entitlement_state="active",
         stripe_checkout_session_id="cs_test_synthetic",
         starter_paid_session_id="cs_test_synthetic",
         stripe_customer_id="cus_test_synthetic",
