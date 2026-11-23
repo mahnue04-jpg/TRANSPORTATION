@@ -1,0 +1,160 @@
+name: Operations package allowance staging checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/core/nova/work_revenue/operations_package_*.py"
+      - "backend/tests/test_operations_package_*.py"
+      - "backend/tests/test_operations_subscription_entitlement.py"
+      - "backend/tests/test_operations_subscription_task_bridge.py"
+      - "backend/tests/test_operations_authenticated_subscription_adapter.py"
+      - "backend/tests/test_operations_subscription_approvals.py"
+      - "backend/tests/test_operations_subscription_approval_postgres.py"
+      - "backend/tests/test_operations_owner_approval_router_isolated.py"
+      - "backend/tests/test_operations_owner_approval_http_isolated.py"
+      - "backend/tests/test_operations_owner_approval_real_auth.py"
+      - "backend/tests/test_operations_owner_subscription_reserve_http.py"
+      - "backend/app/core/nova/work_revenue/operations_owner_approval_router.py"
+      - "backend/app/core/nova/work_revenue/router.py"
+      - "backend/app/core/nova/work_revenue/operations_subscription_entitlement.py"
+      - "backend/app/core/nova/work_revenue/operations_subscription_task_bridge.py"
+      - "backend/app/core/nova/work_revenue/operations_authenticated_subscription_adapter.py"
+      - "backend/app/core/nova/work_revenue/operations_subscription_approvals.py"
+      - "backend/migrations/review_only_operations_package_task_reservations_staging.sql"
+      - "backend/migrations/review_only_operations_subscription_scope_approvals_staging.sql"
+      - ".github/workflows/operations-package-allowances.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  allowance-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install only test prerequisites
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3" "fastapi>=0.115,<1" "httpx>=0.27,<1"
+      - name: Test staged allowance logic, never connect to Stripe or DB
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          import types
+          from pathlib import Path
+          import pytest
+
+          root = Path.cwd()
+          for name, relative in (
+              ("app", "app"),
+              ("app.core", "app/core"),
+              ("app.core.nova", "app/core/nova"),
+              ("app.core.nova.work_revenue", "app/core/nova/work_revenue"),
+          ):
+              package = types.ModuleType(name)
+              package.__path__ = [str(root / relative)]
+              sys.modules[name] = package
+
+          raise SystemExit(pytest.main([
+              "-q", "--noconftest", "tests/test_operations_package_allowances.py",
+              "tests/test_operations_package_usage_ledger.py",
+              "tests/test_operations_subscription_entitlement.py",
+              "tests/test_operations_subscription_task_bridge.py",
+              "tests/test_operations_authenticated_subscription_adapter.py",
+              "tests/test_operations_subscription_approvals.py",
+              "tests/test_operations_owner_approval_router_isolated.py",
+              "tests/test_operations_owner_approval_http_isolated.py",
+              "tests/test_operations_owner_subscription_reserve_http.py",
+          ]))
+          PY
+
+  disposable-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: synthetic
+          POSTGRES_PASSWORD: synthetic_only
+          POSTGRES_DB: synthetic_ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synthetic -d synthetic_ops"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOVA_OPERATIONS_TEST_POSTGRES_URL: postgresql+psycopg://synthetic:synthetic_only@127.0.0.1:5432/synthetic_ops
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install disposable PostgreSQL test dependencies
+        run: python -m pip install "pytest>=8,<10" "SQLAlchemy>=2,<3" "psycopg[binary]>=3,<4"
+      - name: Test database quotas and advisory locks with synthetic users
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import sys
+          import types
+          from pathlib import Path
+          import pytest
+          root = Path.cwd()
+          for name, relative in (
+              ("app", "app"),
+              ("app.core", "app/core"),
+              ("app.core.nova", "app/core/nova"),
+              ("app.core.nova.work_revenue", "app/core/nova/work_revenue"),
+          ):
+              package = types.ModuleType(name)
+              package.__path__ = [str(root / relative)]
+              sys.modules[name] = package
+          raise SystemExit(pytest.main([
+              "-q", "--noconftest",
+              "tests/test_operations_package_postgres_integration.py",
+              "tests/test_operations_subscription_approval_postgres.py",
+          ]))
+          PY
+
+  full-auth-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: staging
+      AMICOR_ENVIRONMENT: staging
+      DATABASE_URL: sqlite:////tmp/amicor-operations-full-auth-smoke.db
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+      NOVA_OPERATIONS_SUBSCRIPTION_OWNER_API_STAGING_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies for actual auth and application routing
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pip install "pytest>=8,<10"
+      - name: Verify actual signed-in and signed-out route guards
+        working-directory: backend
+        run: python -m pytest -q tests/test_operations_owner_approval_real_auth.py
