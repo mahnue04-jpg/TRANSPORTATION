@@ -27,6 +27,7 @@ from app.modules.marketing.operations_billing import (
     verify_agent_webhook,
 )
 from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
+from app.modules.marketing.starter_entitlement_policy import transition_entitlement
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -381,7 +382,13 @@ async def nova_agent_stripe_webhook(
         if outcome == "paid":
             lead.payment_status = "paid"
             lead.starter_paid_session_id = str(obj["id"])
-            lead.status = "qualified"
+            lead.starter_entitlement_state = transition_entitlement(
+                lead.starter_entitlement_state, "paid",
+            )
+            # A delayed Stripe success may confirm history, but never
+            # restore an entitlement that was revoked for refund or dispute.
+            if lead.starter_entitlement_state == "active":
+                lead.status = "qualified"
             db.commit()
             return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id}
         if outcome in {"pending", "failed", "expired"}:
