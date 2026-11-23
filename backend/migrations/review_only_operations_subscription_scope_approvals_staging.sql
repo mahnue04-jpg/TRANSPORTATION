@@ -20,6 +20,22 @@ CREATE TABLE nova_operations_subscription_task_scope_approvals (
 CREATE INDEX ix_nova_ops_subscription_approval_scope
   ON nova_operations_subscription_task_scope_approvals
   (organization_id, owner_user_id, engagement_id, task_id, lead_id);
+CREATE TABLE nova_operations_subscription_scope_approval_events (
+    event_id VARCHAR(64) PRIMARY KEY,
+    organization_id VARCHAR(36) NOT NULL,
+    owner_user_id VARCHAR(36) NOT NULL,
+    engagement_id VARCHAR(32) NOT NULL,
+    task_id VARCHAR(32) NOT NULL,
+    lead_id VARCHAR(36) NOT NULL,
+    task_fingerprint VARCHAR(64) NOT NULL CHECK (task_fingerprint ~ '^[0-9a-f]{64} consent/approval by populating this table from existing task status.
+-- Approval write path and revocation audit must be implemented and separately tested.
+),
+    decision VARCHAR(16) NOT NULL CHECK (decision IN ('APPROVED','REJECTED','REVOKED')),
+    decided_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_nova_ops_approval_events_scope
+ ON nova_operations_subscription_scope_approval_events
+ (organization_id, owner_user_id, task_id, lead_id, decided_at);
 COMMIT;
 -- NEVER infer consent/approval by populating this table from existing task status.
 -- Approval write path and revocation audit must be implemented and separately tested.
