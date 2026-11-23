@@ -28,6 +28,7 @@ from app.modules.marketing.operations_billing import (
 )
 from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
 from app.modules.marketing.starter_entitlement_policy import transition_entitlement
+from app.modules.marketing.starter_payment_intent import verified_starter_payment_intent
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -380,6 +381,16 @@ async def nova_agent_stripe_webhook(
     if lead.service_plan == "starter_49":
         outcome = starter_checkout_outcome(lead, event_type, obj, metadata)
         if outcome == "paid":
+            # Signed checkout identity is already matched above. A unique,
+            # durable PaymentIntent is required before this order can ever
+            # authorize a paid customer task. Fail closed on missing/conflicting
+            # identifiers, including replayed or out-of-order events.
+            intent = verified_starter_payment_intent(
+                obj, lead.starter_payment_intent_id,
+            )
+            if intent is None:
+                return {"ok": True, "handled": False, "result": "starter_payment_intent_unverified"}
+            lead.starter_payment_intent_id = intent
             lead.payment_status = "paid"
             lead.starter_paid_session_id = str(obj["id"])
             lead.starter_entitlement_state = transition_entitlement(
