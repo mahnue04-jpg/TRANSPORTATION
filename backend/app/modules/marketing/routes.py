@@ -287,6 +287,16 @@ def create_nova_agent_checkout(
     if plan["mode"] not in {"payment", "subscription"}:
         raise HTTPException(status_code=422, detail="This starting option does not require checkout")
 
+    # Production release gate: the main branch does not yet include the
+    # verified paid-task binding, private CSV storage and customer-grant flow.
+    # Do not issue or reuse payable live Checkout URLs until that complete
+    # fulfillment stack is integrated and separately approved.
+    if agent_checkout_mode() == "live":
+        raise HTTPException(
+            status_code=503,
+            detail="Operations live checkout is closed pending fulfillment approval",
+        )
+
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
         return {
             "checkout_url": lead.checkout_url,
