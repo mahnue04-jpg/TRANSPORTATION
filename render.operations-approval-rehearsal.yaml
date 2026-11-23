@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: nova-operations-approval-rehearsal-583
+    runtime: python
+    plan: free
+    region: virginia
+    rootDir: backend
+    autoDeployTrigger: "off"
+    buildCommand: python -m pip install -r requirements.txt
+    startCommand: exec uvicorn operations_hosted_approval_rehearsal:app --host 0.0.0.0 --port "$PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nova-operations-approval-rehearsal-db-583
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: "3.12.12"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_ENV
+        value: staging
+      - key: AMICOR_ENVIRONMENT
+        value: staging
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: NOVA_STRIPE_LIVE_ENABLED
+        value: "false"
+      - key: NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED
+        value: "false"
+      - key: NOVA_OPERATIONS_SUBSCRIPTION_OWNER_API_STAGING_ENABLED
+        value: "true"
+      - key: NOVA_OPERATIONS_SUBSCRIPTION_RESERVATION_API_STAGING_ENABLED
+        value: "true"
+      - key: NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED
+        value: "true"
+      - key: NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED
+        value: "true"
+      - key: NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED
+        value: "true"
+databases:
+  - name: nova-operations-approval-rehearsal-db-583
+    databaseName: nova_ops_approval_rehearsal_583
+    region: virginia
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList: []
