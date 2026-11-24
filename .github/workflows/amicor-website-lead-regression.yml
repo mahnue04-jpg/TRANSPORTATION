@@ -1,11 +1,21 @@
 name: AMICOR Website Lead Regression
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "website/functions/nova-growth/owner/api.js"
+      - "website/nova-growth/owner/index.html"
+      - "website/tests/growth_owner_inbox.test.mjs"
+      - ".github/workflows/amicor-website-lead-regression.yml"
   pull_request:
     paths:
       - "website/assets/js/site.js"
       - "website/functions/api/leads.js"
       - "website/tests/test_early_access_honeypot.py"
+      - "website/functions/nova-growth/owner/api.js"
+      - "website/nova-growth/owner/index.html"
+      - "website/tests/growth_owner_inbox.test.mjs"
       - ".github/workflows/amicor-website-lead-regression.yml"
   workflow_dispatch:
 
@@ -24,4 +34,6 @@ jobs:
         with:
           node-version: "22"
       - name: Verify website lead handling and attribution
-        run: python website/tests/test_early_access_honeypot.py
+        run: |
+          python website/tests/test_early_access_honeypot.py
+          node --test website/tests/growth_owner_inbox.test.mjs
