@@ -2,18 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>AMICOR · Private Growth Inquiry Review</title>
-<style>
-:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#173148;background:#f5f8fa}*{box-sizing:border-box}body{margin:0}
-header{background:#102c45;color:#fff;padding:20px max(20px,calc((100vw - 1080px)/2))}header strong{font-size:20px}main{max-width:1080px;margin:0 auto;padding:32px 20px 65px}
-h1{font-size:clamp(28px,4vw,40px);margin:12px 0}p{line-height:1.6;color:#496376}
-.panel{background:white;border:1px solid #d6e3ea;border-radius:14px;padding:22px;margin:16px 0}
-button{background:#11687b;color:#fff;border:0;border-radius:9px;padding:12px 20px;font:inherit;font-weight:750;cursor:pointer}
-button:focus-visible,a:focus-visible{outline:3px solid #e4a83b;outline-offset:3px}button:disabled{opacity:.65}
-.note{font-size:14px}.muted{color:#556e7e}.item{border-top:1px solid #dce7eb;padding:18px 0}.item:first-child{border-top:0}
-.meta{font-size:14px;color:#4b6473;overflow-wrap:anywhere}.message{white-space:pre-wrap;overflow-wrap:anywhere;color:#213c4e}
-.state{font-weight:700}.error{color:#8c2727}.ok{color:#136342}.warning{color:#8c5b08}
-a{color:#11687b}
-</style></head>
+<link rel="stylesheet" href="/nova-growth/owner/owner.css"></head>
 <body><header><strong>AMICOR Nova · Owner Inquiry Review</strong></header>
 <main>
 <p class="muted">Private Growth workspace · Cloudflare website inquiries</p><h1>Growth inquiry inbox</h1>
@@ -26,40 +15,4 @@ a{color:#11687b}
 <div id="results" class="panel" hidden><h2>Recent consented inquiries</h2><p id="count" class="muted"></p><div id="list"></div></div>
 <p class="note"><a href="/nova-growth/">Back to public Growth page</a></p>
 </main>
-<script>
-(function(){
-  "use strict";
-  const status=document.getElementById("status"), results=document.getElementById("results"),
-    list=document.getElementById("list"), count=document.getElementById("count"),btn=document.getElementById("load");
-  function el(name,cls,value){const node=document.createElement(name);if(cls)node.className=cls;if(value!==undefined)node.textContent=String(value);return node;}
-  function state(message,style){status.textContent=message;status.className="state "+(style||"");}
-  async function load(){
-    btn.disabled=true;results.hidden=true;list.replaceChildren();state("Checking owner access…","");
-    try{
-      const response=await fetch("/nova-growth/owner/api",{credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json"}});
-      const type=response.headers.get("content-type")||"";
-      if(!type.includes("application/json")){state("Owner authentication is required. Confirm Cloudflare Access is configured for this private route.","error");return;}
-      const data=await response.json();
-      if(!response.ok||!data.ok){
-        state(response.status===503?"Private inbox is not configured or unavailable. No customer data was returned.":"Owner access denied. No customer data was returned.","error");
-        return;
-      }
-      if(!Array.isArray(data.rows)){state("Unexpected response. Inbox remains unavailable.","error");return;}
-      state("Owner-verified inbox connected.","ok");results.hidden=false;
-      count.textContent=data.rows.length+" recent consented inquiries"+(data.complete?"":" (partial listing; more entries may exist)");
-      for(const item of data.rows){
-        const article=el("article","item");
-        article.appendChild(el("h3","",item.name||"Unnamed contact"));
-        article.appendChild(el("p","meta",[item.company,item.product,item.receivedAt].filter(Boolean).join(" · ")));
-        article.appendChild(el("p","meta",[item.email,item.phone].filter(Boolean).join(" · ")));
-        article.appendChild(el("p","message",item.message||""));
-        article.appendChild(el("p","meta","Status: needs owner review. No automatic messages were sent."));
-        list.appendChild(article);
-      }
-      if(!data.rows.length)list.appendChild(el("p","muted","No consented inquiries were returned."));
-    }catch{state("Unable to reach the private inbox. No customer data was returned.","error");}
-    finally{btn.disabled=false;}
-  }
-  btn.addEventListener("click",load);
-})();
-</script></body></html>
+<script src="/nova-growth/owner/owner.js" defer></script></body></html>
