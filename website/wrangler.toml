@@ -13,3 +13,9 @@ id = "aef188e1167a41c98ee81deabbbce50d"
 [[env.preview.kv_namespaces]]
 binding = "AMICOR_LEADS"
 id = "e02be1f5a9c748528cd64f04e3f2b4a0"
+
+# Owner-only Growth inbox Access JWT validation; these are public identifiers, not secrets.
+[vars]
+GROWTH_ACCESS_DOMAIN = "https://misty-snowflake-9ded.cloudflareaccess.com"
+GROWTH_ACCESS_AUD = "c1a4d81a155c58bdb99868beca3f2fd405709f913fff574c9c0d9c7e5637e859"
+GROWTH_OWNER_EMAIL = "mahnue04@gmail.com"
