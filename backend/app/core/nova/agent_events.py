@@ -193,3 +193,53 @@ class SyntheticEventLedger:
         self._keys[item.idempotency_key] = item
         self._ids[item.event_id] = item
         return True
+
+
+class SyntheticHandoff:
+    """Single-task, in-memory rehearsal with preconfigured synthetic evidence.
+
+    Evidence is supplied by the test harness, never inferred from event claims.
+    No real identity verification, consent lookup, dispatch or persistence.
+    """
+
+    def __init__(self, organization_id: str, correlation_id: str, *,
+                 lead_id: str, consent_reference: str, opportunity_id: str,
+                 task_id: str, approval_reference: str) -> None:
+        for value, label in ((lead_id, "lead_id"), (consent_reference, "consent_reference"),
+                             (opportunity_id, "opportunity_id"), (task_id, "task_id"),
+                             (approval_reference, "approval_reference")):
+            _identifier(value, label)
+        self._ledger = SyntheticEventLedger(organization_id, correlation_id)
+        self._expected = (
+            (EventType.LEAD_QUALIFIED, "lead", lead_id, consent_reference, None),
+            (EventType.OPPORTUNITY_REVIEW, "opportunity", opportunity_id, None, None),
+            (EventType.TASK_APPROVED, "task", task_id, None, approval_reference),
+            (EventType.TASK_COMPLETED, "task", task_id, None, None),
+        )
+        self._accepted: list[AgentEvent] = []
+
+    @property
+    def completed(self) -> bool:
+        return len(self._accepted) == len(self._expected)
+
+    @property
+    def accepted_count(self) -> int:
+        return len(self._accepted)
+
+    def advance(self, item: AgentEvent) -> bool:
+        if not isinstance(item, AgentEvent) or not item.synthetic:
+            raise ValueError("synthetic event required")
+        if item in self._accepted:
+            return False
+        if self.completed:
+            raise ValueError("rehearsal already completed")
+        actual = (item.event_type, item.subject_kind, item.subject_id,
+                  item.consent_reference, item.approval_reference)
+        if actual != self._expected[len(self._accepted)]:
+            raise ValueError("event does not match expected step or evidence")
+        if self._accepted and item.occurred_at < self._accepted[-1].occurred_at:
+            raise ValueError("event timestamp precedes previous step")
+        if not self._ledger.record(item):
+            return False
+        self._accepted.append(item)
+        return True
