@@ -184,3 +184,81 @@ def test_synthetic_ledger_rejects_out_of_scope_events(changes):
     with pytest.raises(ValueError):
         ledger.record(event(**changes))
     assert ledger.record(event()) is True
+
+
+def synthetic_handoff_fixture():
+    controller = _module.SyntheticHandoff(
+        "org-001", "journey-001", lead_id="lead-001",
+        consent_reference="consent-001", opportunity_id="opp-001",
+        task_id="task-001", approval_reference="approval-001",
+    )
+    specs = [
+        (Agent.GROWTH, Agent.WORK_REVENUE, EventType.LEAD_QUALIFIED,
+         "lead", "lead-001", "consent-001", None),
+        (Agent.WORK_REVENUE, Agent.OWNER, EventType.OPPORTUNITY_REVIEW,
+         "opportunity", "opp-001", None, None),
+        (Agent.OWNER, Agent.OPERATIONS, EventType.TASK_APPROVED,
+         "task", "task-001", None, "approval-001"),
+        (Agent.OPERATIONS, Agent.OWNER, EventType.TASK_COMPLETED,
+         "task", "task-001", None, None),
+    ]
+    items = [
+        event(event_id=f"handoff-{i}", idempotency_key=f"handoff-key-{i}",
+              source_agent=source, target_agent=target, event_type=kind,
+              subject_kind=subject_kind, subject_id=subject_id,
+              consent_reference=consent, approval_reference=approval)
+        for i, (source, target, kind, subject_kind, subject_id, consent, approval)
+        in enumerate(specs)
+    ]
+    return controller, items
+
+
+def test_synthetic_handoff_completes_once_and_replays_are_noops():
+    controller, items = synthetic_handoff_fixture()
+    assert not controller.completed
+    for i, item in enumerate(items, 1):
+        assert controller.advance(item) is True
+        assert controller.advance(item) is False
+        assert controller.accepted_count == i
+        assert controller.completed == (i == len(items))
+    for item in items:
+        assert controller.advance(item) is False
+    assert controller.accepted_count == 4
+
+
+@pytest.mark.parametrize("step,changes", [
+    (0, {"consent_reference": "wrong-consent"}),
+    (0, {"subject_id": "wrong-lead"}),
+    (0, {"organization_id": "wrong-org"}),
+    (0, {"synthetic": False}),
+    (1, {"subject_id": "wrong-opportunity"}),
+    (2, {"approval_reference": "wrong-approval"}),
+    (2, {"subject_id": "wrong-task"}),
+    (3, {"subject_id": "wrong-task"}),
+    (3, {"correlation_id": "wrong-journey"}),
+    (3, {"occurred_at": datetime(2026, 11, 16, tzinfo=timezone.utc)}),
+    (3, {"idempotency_key": "handoff-key-2"}),
+])
+def test_synthetic_handoff_rejects_bad_evidence_without_advancing(step, changes):
+    from dataclasses import replace
+    controller, items = synthetic_handoff_fixture()
+    for item in items[:step]:
+        assert controller.advance(item)
+    with pytest.raises(ValueError):
+        controller.advance(replace(items[step], **changes))
+    assert controller.accepted_count == step
+    assert not controller.completed
+    for item in items[step:]:
+        assert controller.advance(item)
+    assert controller.completed
+
+
+@pytest.mark.parametrize("step,premature", [(0, 1), (0, 2), (0, 3), (1, 3), (2, 3)])
+def test_synthetic_handoff_rejects_skipped_steps(step, premature):
+    controller, items = synthetic_handoff_fixture()
+    for item in items[:step]:
+        assert controller.advance(item)
+    with pytest.raises(ValueError, match="expected step"):
+        controller.advance(items[premature])
+    assert controller.accepted_count == step
+    assert not controller.completed
