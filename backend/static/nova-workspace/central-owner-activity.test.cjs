@@ -64,3 +64,18 @@ test("handoff rejects malformed, live or changed-session responses",async()=>{
     assert.match(h.output.textContent,/No status shown/);assert.equal(h.button.disabled,false);
   }
 });
+
+
+test("persisted status accurately displays every valid stage",async()=>{
+  for(let count=0;count<=4;count++){
+    const h=handoffHarness({body:{...handoffData,mode:"read_only_persisted_rehearsal",persistent_storage_connected:true,accepted_count:count,completed:count===4}});
+    await h.click();assert.match(h.output.textContent,new RegExp("Synthetic rehearsal: "+count+" of 4"));
+    assert.match(h.output.textContent,/Read-only persisted rehearsal/);
+  }
+});
+test("persisted status rejects inconsistent count, completion and storage flags",async()=>{
+  const base={...handoffData,mode:"read_only_persisted_rehearsal",persistent_storage_connected:true};
+  for(const body of [{...base,accepted_count:2},{...base,accepted_count:5},{...base,accepted_count:-1},{...base,persistent_storage_connected:false},{...base,completed:false}]){
+    const h=handoffHarness({body});await h.click();assert.match(h.output.textContent,/No status shown/);
+  }
+});
