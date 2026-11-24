@@ -3,6 +3,41 @@
   const button = document.getElementById("central-activity-refresh");
   const output = document.getElementById("central-activity-output");
   if (!button || !output) return;
+  const handoffButton = document.getElementById("central-handoff-refresh");
+  const handoffOutput = document.getElementById("central-handoff-output");
+  if (handoffButton && handoffOutput) {
+    handoffButton.addEventListener("click", async () => {
+      handoffOutput.textContent = "Checking synthetic handoff...";
+      const getHeaders = () => window.AmiCorSession?.getAuthHeaders?.();
+      const headers = getHeaders();
+      if (!headers?.Authorization) {
+        handoffOutput.textContent = "Sign in with your authorized AMICOR owner account first.";
+        return;
+      }
+      handoffButton.disabled = true;
+      try {
+        const response = await fetch("/api/nova/work/agent-handoff-rehearsal", {
+          method: "GET", headers, credentials: "same-origin", cache: "no-store", redirect: "error"
+        });
+        if (response.status === 401 || response.status === 403) {
+          handoffOutput.textContent = "Owner access required. No handoff status returned.";
+          return;
+        }
+        if (!response.ok) throw new Error("Unavailable");
+        const data = await response.json();
+        if (getHeaders()?.Authorization !== headers.Authorization ||
+            data?.synthetic !== true || data.mode !== "read_only_in_memory_demo" ||
+            data.accepted_count !== 4 || data.completed !== true ||
+            data.live_dispatch !== false || data.persistent_storage_connected !== false ||
+            data.real_approval_verified !== false) throw new Error("Invalid status");
+        handoffOutput.textContent = "Synthetic rehearsal: 4 of 4 steps completed.\n" +
+          "Growth → Work & Revenue → Owner → Operations → Owner.\n" +
+          "Read-only demonstration. Persistent storage not connected; no real approvals or live dispatch.";
+      } catch (_) {
+        handoffOutput.textContent = "Rehearsal unavailable. No status shown; no actions taken.";
+      } finally { handoffButton.disabled = false; }
+    });
+  }
   const fields = [
     ["work_opportunities", "Tracked opportunities"],
     ["applications_needing_approval", "Applications awaiting approval"],
