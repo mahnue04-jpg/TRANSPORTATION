@@ -25,14 +25,19 @@
         }
         if (!response.ok) throw new Error("Unavailable");
         const data = await response.json();
+        const persisted = data?.mode === "read_only_persisted_rehearsal";
+        const demo = data?.mode === "read_only_in_memory_demo";
         if (getHeaders()?.Authorization !== headers.Authorization ||
-            data?.synthetic !== true || data.mode !== "read_only_in_memory_demo" ||
-            data.accepted_count !== 4 || data.completed !== true ||
-            data.live_dispatch !== false || data.persistent_storage_connected !== false ||
+            data?.synthetic !== true || (!persisted && !demo) ||
+            !Number.isInteger(data.accepted_count) || data.accepted_count < 0 ||
+            data.accepted_count > 4 || data.completed !== (data.accepted_count === 4) ||
+            (demo && data.accepted_count !== 4) ||
+            data.live_dispatch !== false || data.persistent_storage_connected !== persisted ||
             data.real_approval_verified !== false) throw new Error("Invalid status");
-        handoffOutput.textContent = "Synthetic rehearsal: 4 of 4 steps completed.\n" +
+        handoffOutput.textContent = "Synthetic rehearsal: " + data.accepted_count + " of 4 steps completed.\n" +
           "Growth → Work & Revenue → Owner → Operations → Owner.\n" +
-          "Read-only demonstration. Persistent storage not connected; no real approvals or live dispatch.";
+          (persisted ? "Read-only persisted rehearsal." : "Read-only demonstration. Persistent storage not connected;") +
+          " no real approvals or live dispatch.";
       } catch (_) {
         handoffOutput.textContent = "Rehearsal unavailable. No status shown; no actions taken.";
       } finally { handoffButton.disabled = false; }
