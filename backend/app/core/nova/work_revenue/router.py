@@ -174,7 +174,30 @@ def agent_handoff_rehearsal(
     from datetime import timezone
     from app.core.nova.agent_events import (
         Agent, AgentEvent, EventType, SCHEMA_VERSION, SyntheticHandoff,
+        DurableSyntheticHandoff,
     )
+
+    database_path = os.getenv("NOVA_AGENT_HANDOFF_REHEARSAL_DATABASE", "").strip()
+    if database_path:
+        from pathlib import Path
+        import sqlite3
+        try:
+            path = Path(database_path)
+            if not path.is_absolute() or not path.is_file():
+                raise ValueError("Dedicated rehearsal database required")
+            controller = DurableSyntheticHandoff(
+                path, "syn-org", "syn-journey", lead_id="syn-lead",
+                consent_reference="syn-consent", opportunity_id="syn-opportunity",
+                task_id="syn-task", approval_reference="syn-approval", read_only=True,
+            )
+            status = controller.status()
+        except (ValueError, OSError, sqlite3.Error, TypeError, KeyError):
+            raise HTTPException(status_code=503, detail="Rehearsal storage unavailable") from None
+        return {
+            **status, "mode": "read_only_persisted_rehearsal",
+            "live_dispatch": False, "persistent_storage_connected": True,
+            "real_approval_verified": False,
+        }
 
     controller = SyntheticHandoff(
         "syn-org", "syn-journey", lead_id="syn-lead",
