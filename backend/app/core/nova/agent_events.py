@@ -160,3 +160,36 @@ class AgentEvent:
             "consent_reference": self.consent_reference,
             "approval_reference": self.approval_reference,
         }
+
+
+class SyntheticEventLedger:
+    """In-memory rehearsal only; no authorization, dispatch or durable storage.
+
+    Scope one instance to a single synthetic organization and journey.
+    Exact replays return False; conflicting identifiers fail closed.
+    Not safe for concurrent callers or production execution.
+    """
+
+    def __init__(self, organization_id: str, correlation_id: str) -> None:
+        _identifier(organization_id, "organization_id")
+        _identifier(correlation_id, "correlation_id")
+        self._organization_id = organization_id
+        self._correlation_id = correlation_id
+        self._keys: dict[str, AgentEvent] = {}
+        self._ids: dict[str, AgentEvent] = {}
+
+    def record(self, item: AgentEvent) -> bool:
+        if not isinstance(item, AgentEvent) or not item.synthetic:
+            raise ValueError("synthetic event required")
+        if (item.organization_id != self._organization_id
+                or item.correlation_id != self._correlation_id):
+            raise ValueError("event outside rehearsal scope")
+        previous_key = self._keys.get(item.idempotency_key)
+        previous_id = self._ids.get(item.event_id)
+        if previous_key is not None or previous_id is not None:
+            if previous_key == item and previous_id == item:
+                return False
+            raise ValueError("conflicting event replay")
+        self._keys[item.idempotency_key] = item
+        self._ids[item.event_id] = item
+        return True
