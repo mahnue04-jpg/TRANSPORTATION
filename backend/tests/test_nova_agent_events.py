@@ -120,3 +120,35 @@ def test_event_contract_does_not_dispatch():
     item = event()
     assert "approval_reference" in item.to_mapping()
     assert not hasattr(item, "execute")
+
+
+def test_synthetic_handoff_chain_contract():
+    """Rehearse the envelope sequence only, not runtime authorization or dispatch."""
+    route_specs = [
+        (Agent.GROWTH, Agent.WORK_REVENUE, EventType.LEAD_QUALIFIED,
+         "lead", "syn-lead-1", "syn-consent-1", None),
+        (Agent.WORK_REVENUE, Agent.OWNER, EventType.OPPORTUNITY_REVIEW,
+         "opportunity", "syn-opp-1", None, None),
+        (Agent.OWNER, Agent.OPERATIONS, EventType.TASK_APPROVED,
+         "task", "syn-task-1", None, "syn-approval-1"),
+        (Agent.OPERATIONS, Agent.OWNER, EventType.TASK_COMPLETED,
+         "task", "syn-task-1", None, None),
+    ]
+    journey = []
+    for i, (source, target, kind, subject_kind, subject_id, consent, approval) in enumerate(route_specs):
+        envelope = event(
+            event_id=f"syn-event-{i}", correlation_id="syn-journey-1",
+            organization_id="syn-org-1", source_agent=source, target_agent=target,
+            event_type=kind, subject_kind=subject_kind, subject_id=subject_id,
+            idempotency_key=f"syn-journey-1:{i}", payload_reference=f"syn-payload-{i}",
+            consent_reference=consent, approval_reference=approval,
+        )
+        journey.append(AgentEvent.from_mapping(envelope.to_mapping()))
+    assert all(item.synthetic for item in journey)
+    assert {item.organization_id for item in journey} == {"syn-org-1"}
+    assert {item.correlation_id for item in journey} == {"syn-journey-1"}
+    assert len({item.idempotency_key for item in journey}) == len(journey)
+    assert all(first.target_agent == second.source_agent
+               for first, second in zip(journey, journey[1:]))
+    assert journey[-2].subject_id == journey[-1].subject_id
+    assert journey[-1].target_agent == Agent.OWNER
