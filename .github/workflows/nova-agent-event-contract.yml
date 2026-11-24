@@ -1,0 +1,36 @@
+name: Nova agent event contract tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/app/core/nova/agent_events.py"
+      - "backend/tests/test_nova_agent_events.py"
+      - ".github/workflows/nova-agent-event-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test runner only
+        run: python -m pip install pytest
+      - name: Check syntax and execute pure contract tests
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python -m py_compile app/core/nova/agent_events.py tests/test_nova_agent_events.py
+          python -m pytest tests/test_nova_agent_events.py -q --tb=short --noconftest

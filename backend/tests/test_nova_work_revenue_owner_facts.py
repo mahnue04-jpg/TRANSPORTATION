@@ -295,3 +295,47 @@ def test_catalog_readiness_does_not_enable_live_paths() -> None:
     tech = next(item for item in catalog["facts"] if item["fact_id"] == "technology_capability")
     assert "Capability & Work Execution" in tech["value_display"] or "Research support" in tech["value_display"]
     assert tech["value_status"] == "VERIFIED"
+
+
+def test_agent_handoff_rehearsal_http_owner_boundary(client, monkeypatch):
+    import base64
+    import json
+
+    route = "/api/nova/work/agent-handoff-rehearsal"
+    owner = _headers(client, "admin@amicor.local")
+    token = owner["Authorization"].split(" ", 1)[1]
+    payload = token.split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    # Read only the test-issued token's organization claim. No authentication
+    # override: the actual route dependencies still verify the bearer token.
+    org = claims.get("organization_id") or claims.get("org_id")
+    assert org, "test token must carry an organization scope"
+    monkeypatch.setenv("NOVA_V3_OWNER_EMAILS", "admin@amicor.local")
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", str(org))
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_OWNER", "admin@amicor.local")
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
+    monkeypatch.delenv("NOVA_AGENT_HANDOFF_REHEARSAL_ENABLED", raising=False)
+    assert client.get(route, headers=owner).status_code == 404
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ENABLED", "true")
+    assert client.get(route).status_code in (401, 403)
+    result = client.get(route, headers=owner)
+    assert result.status_code == 200, result.text
+    assert result.json() == {
+        "synthetic": True, "mode": "read_only_in_memory_demo",
+        "accepted_count": 4, "completed": True, "live_dispatch": False,
+        "persistent_storage_connected": False, "real_approval_verified": False,
+    }
+    assert client.get(route, headers=owner).json() == result.json()
+    assert client.post(route, headers=owner, json={}).status_code == 405
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", "wrong-org")
+    assert client.get(route, headers=owner).status_code == 403
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", str(org))
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_OWNER", "different@example.invalid")
+    assert client.get(route, headers=owner).status_code == 403
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_OWNER", "admin@amicor.local")
+    monkeypatch.setenv("APP_ENV", "production")
+    assert client.get(route, headers=owner).status_code == 404
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("AMICOR_ENVIRONMENT", "production")
+    assert client.get(route, headers=owner).status_code == 404
