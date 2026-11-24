@@ -155,6 +155,84 @@ def work_today_summary(
     return service.today_summary(db, organization_id=_resolve_org(user, organization_id), user=user)
 
 
+@router.get("/agent-handoff-rehearsal")
+def agent_handoff_rehearsal(
+    user: UserContext = Depends(get_current_user_context),
+):
+    """Read-only, deterministic synthetic demonstration; never dispatches."""
+    if (os.getenv("NOVA_AGENT_HANDOFF_REHEARSAL_ENABLED") != "true"
+            or os.getenv("APP_ENV") != "staging"
+            or os.getenv("AMICOR_ENVIRONMENT") != "staging"):
+        raise HTTPException(status_code=404, detail="Rehearsal unavailable")
+    allowed_org = os.getenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", "").strip()
+    allowed_owner = os.getenv("NOVA_AGENT_HANDOFF_REHEARSAL_OWNER", "").strip().lower()
+    if (not allowed_org or not allowed_owner
+            or str(user.organization_id) != allowed_org
+            or str(user.email or "").strip().lower() != allowed_owner):
+        raise HTTPException(status_code=403, detail="Rehearsal access denied")
+
+    from datetime import timezone
+    from app.core.nova.agent_events import (
+        Agent, AgentEvent, EventType, SCHEMA_VERSION, SyntheticHandoff,
+        DurableSyntheticHandoff,
+    )
+
+    database_path = os.getenv("NOVA_AGENT_HANDOFF_REHEARSAL_DATABASE", "").strip()
+    if database_path:
+        from pathlib import Path
+        import sqlite3
+        try:
+            path = Path(database_path)
+            if not path.is_absolute() or not path.is_file():
+                raise ValueError("Dedicated rehearsal database required")
+            controller = DurableSyntheticHandoff(
+                path, "syn-org", "syn-journey", lead_id="syn-lead",
+                consent_reference="syn-consent", opportunity_id="syn-opportunity",
+                task_id="syn-task", approval_reference="syn-approval", read_only=True,
+            )
+            status = controller.status()
+        except (ValueError, OSError, sqlite3.Error, TypeError, KeyError):
+            raise HTTPException(status_code=503, detail="Rehearsal storage unavailable") from None
+        return {
+            **status, "mode": "read_only_persisted_rehearsal",
+            "live_dispatch": False, "persistent_storage_connected": True,
+            "real_approval_verified": False,
+        }
+
+    controller = SyntheticHandoff(
+        "syn-org", "syn-journey", lead_id="syn-lead",
+        consent_reference="syn-consent", opportunity_id="syn-opportunity",
+        task_id="syn-task", approval_reference="syn-approval",
+    )
+    steps = (
+        (Agent.GROWTH, Agent.WORK_REVENUE, EventType.LEAD_QUALIFIED,
+         "lead", "syn-lead", "syn-consent", None),
+        (Agent.WORK_REVENUE, Agent.OWNER, EventType.OPPORTUNITY_REVIEW,
+         "opportunity", "syn-opportunity", None, None),
+        (Agent.OWNER, Agent.OPERATIONS, EventType.TASK_APPROVED,
+         "task", "syn-task", None, "syn-approval"),
+        (Agent.OPERATIONS, Agent.OWNER, EventType.TASK_COMPLETED,
+         "task", "syn-task", None, None),
+    )
+    for index, (source, target, kind, subject_kind, subject, consent, approval) in enumerate(steps):
+        controller.advance(AgentEvent(
+            schema_version=SCHEMA_VERSION, event_id=f"syn-event-{index}",
+            correlation_id="syn-journey", organization_id="syn-org",
+            source_agent=source, target_agent=target, event_type=kind,
+            subject_kind=subject_kind, subject_id=subject, synthetic=True,
+            occurred_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            idempotency_key=f"syn-key-{index}", payload_reference=f"syn-payload-{index}",
+            consent_reference=consent, approval_reference=approval,
+        ))
+    return {
+        "synthetic": True, "mode": "read_only_in_memory_demo",
+        "accepted_count": controller.accepted_count,
+        "completed": controller.completed,
+        "live_dispatch": False, "persistent_storage_connected": False,
+        "real_approval_verified": False,
+    }
+
+
 @router.get("/capabilities", response_model=list[CapabilityOut])
 def work_capabilities(user: UserContext = Depends(get_current_user_context)):
     return service.capabilities()

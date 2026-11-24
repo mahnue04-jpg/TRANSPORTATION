@@ -1,0 +1,27 @@
+name: Central owner activity validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/static/nova-workspace/central-owner-activity*'
+      - 'backend/static/nova-workspace/index.html'
+      - '.github/workflows/central-owner-activity.yml'
+  push:
+    branches: [feature/central-owner-activity-20261124]
+permissions:
+  contents: read
+jobs:
+  owner-activity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check backend/static/nova-workspace/central-owner-activity.js
+      - run: node --test backend/static/nova-workspace/central-owner-activity.test.cjs
+      - run: |
+          grep -F 'id="central-activity-refresh"' backend/static/nova-workspace/index.html
+          grep -F 'id="central-activity-output"' backend/static/nova-workspace/index.html
+          grep -F 'central-owner-activity.js' backend/static/nova-workspace/index.html
