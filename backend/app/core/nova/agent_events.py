@@ -254,7 +254,7 @@ class DurableSyntheticHandoff:
 
     def __init__(self, database_path, organization_id: str, correlation_id: str, *,
                  lead_id: str, consent_reference: str, opportunity_id: str,
-                 task_id: str, approval_reference: str):
+                 task_id: str, approval_reference: str, read_only: bool = False):
         import json
         import sqlite3
         from pathlib import Path
@@ -262,12 +262,17 @@ class DurableSyntheticHandoff:
         self._path = Path(database_path).resolve()
         if not self._path.name.startswith("synthetic-handoff-") or self._path.suffix != ".sqlite3":
             raise ValueError("dedicated synthetic-handoff-*.sqlite3 file required")
+        self._read_only = read_only
         self._scope = (organization_id, correlation_id)
         self._evidence = dict(lead_id=lead_id, consent_reference=consent_reference,
                               opportunity_id=opportunity_id, task_id=task_id,
                               approval_reference=approval_reference)
         self._controller()
         self._config = json.dumps(self._evidence, sort_keys=True)
+        if self._read_only:
+            with self._transaction() as db:
+                self._restore(db)
+            return
         with self._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS rehearsal_config "
                        "(org TEXT, journey TEXT, evidence TEXT NOT NULL, "
@@ -288,9 +293,10 @@ class DurableSyntheticHandoff:
 
         @contextmanager
         def transaction():
-            db = sqlite3.connect(str(self._path), timeout=5)
+            db = (sqlite3.connect(self._path.as_uri() + "?mode=ro", uri=True, timeout=5)
+                  if self._read_only else sqlite3.connect(str(self._path), timeout=5))
             try:
-                db.execute("BEGIN IMMEDIATE")
+                db.execute("BEGIN" if self._read_only else "BEGIN IMMEDIATE")
                 yield db
                 db.commit()
             except BaseException:
@@ -319,6 +325,8 @@ class DurableSyntheticHandoff:
 
     def advance(self, item: AgentEvent) -> bool:
         import json
+        if self._read_only:
+            raise ValueError("read-only rehearsal")
         with self._transaction() as db:
             controller = self._restore(db)
             if not controller.advance(item):
