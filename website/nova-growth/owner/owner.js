@@ -12,7 +12,7 @@
       if(!type.includes("application/json")){state("Owner authentication is required. Confirm Cloudflare Access is configured for this private route.","error");return;}
       const data=await response.json();
       if(!response.ok||!data.ok){
-        state(response.status===503?"Private inbox is not configured or unavailable. No customer data was returned.":"Owner access denied. No customer data was returned.","error");
+        state(response.status===503?"Private inbox is not configured or unavailable. No customer data was returned.":("Owner access denied ("+(typeof data.reason==="string"?data.reason:"verification_failed")+"). No customer data was returned."),"error");
         return;
       }
       if(!Array.isArray(data.rows)){state("Unexpected response. Inbox remains unavailable.","error");return;}
