@@ -68,7 +68,7 @@ export async function onRequest(context){
       const batch=selected.slice(i,i+10);
       const data=await Promise.all(batch.map(async k=>{try{return {key:k.name,value:await env.AMICOR_LEADS.get(k.name,{type:"json"})};}catch{return null;}}));
       for(const r of data){
-        if(!r||!r.value||r.value.consent!==true)continue;
+        if(!r||!r.value||r.value.consent!==true||r.value.product!=="Nova Growth Agent")continue;
         const p=r.value;
         const limit=(v,n)=>String(v??"").slice(0,n);
         rows.push({key:r.key,receivedAt:limit(p.receivedAt,40),name:limit(p.name,120),
