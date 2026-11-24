@@ -30,7 +30,7 @@ async function authorize(request,env){
     if(!Array.isArray(body.aud)||!body.aud.includes(aud))return {status:403,reason:"application_audience_mismatch"};
     if(typeof body.exp!=="number"||body.exp<=now||
        (body.nbf!==undefined&&(typeof body.nbf!=="number"||body.nbf>now))||
-       (body.iat!==undefined&&(typeof body.iat!=="number"||body.iat>now+60))return {status:403,reason:"access_token_time_invalid"};
+       (body.iat!==undefined&&(typeof body.iat!=="number"||body.iat>now+60)))return {status:403,reason:"access_token_time_invalid"};
     if(String(body.email||"").toLowerCase()!==owner)return {status:403,reason:"owner_identity_mismatch"};
     const response=await fetch(domain+"/cdn-cgi/access/certs",{redirect:"error"});
     if(!response.ok)return {status:503};
