@@ -262,3 +262,68 @@ def test_synthetic_handoff_rejects_skipped_steps(step, premature):
         controller.advance(items[premature])
     assert controller.accepted_count == step
     assert not controller.completed
+
+
+def durable_fixture(path, **changes):
+    evidence = dict(lead_id="lead-001", consent_reference="consent-001",
+                    opportunity_id="opp-001", task_id="task-001",
+                    approval_reference="approval-001")
+    evidence.update(changes)
+    return _module.DurableSyntheticHandoff(path, "org-001", "journey-001", **evidence)
+
+
+def test_durable_handoff_recovers_after_reopen(tmp_path):
+    path = tmp_path / "synthetic-handoff-test.sqlite3"
+    _, items = synthetic_handoff_fixture()
+    first = durable_fixture(path)
+    assert first.advance(items[0])
+    assert first.advance(items[1])
+    second = durable_fixture(path)
+    assert second.status() == {"synthetic": True, "accepted_count": 2, "completed": False}
+    assert second.advance(items[0]) is False
+    assert second.advance(items[2])
+    assert first.advance(items[3])
+    third = durable_fixture(path)
+    assert third.status()["completed"]
+    assert third.advance(items[3]) is False
+    assert third.status()["accepted_count"] == 4
+
+
+def test_durable_handoff_rejection_preserves_state(tmp_path):
+    from dataclasses import replace
+    path = tmp_path / "synthetic-handoff-test.sqlite3"
+    _, items = synthetic_handoff_fixture()
+    controller = durable_fixture(path)
+    with pytest.raises(ValueError):
+        controller.advance(items[3])
+    assert controller.advance(items[0])
+    assert controller.advance(items[1])
+    with pytest.raises(ValueError):
+        controller.advance(replace(items[2], approval_reference="wrong"))
+    assert durable_fixture(path).status()["accepted_count"] == 2
+    assert controller.advance(items[2])
+
+
+def test_durable_handoff_rejects_changed_evidence(tmp_path):
+    path = tmp_path / "synthetic-handoff-test.sqlite3"
+    durable_fixture(path)
+    with pytest.raises(ValueError, match="configuration mismatch"):
+        durable_fixture(path, approval_reference="wrong")
+    assert durable_fixture(path).status()["accepted_count"] == 0
+
+
+def test_durable_handoff_concurrent_replay(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    path = tmp_path / "synthetic-handoff-test.sqlite3"
+    _, items = synthetic_handoff_fixture()
+    first, second = durable_fixture(path), durable_fixture(path)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda c: c.advance(items[0]), [first, second]))
+    assert sorted(results) == [False, True]
+    assert first.status()["accepted_count"] == 1
+
+
+def test_durable_handoff_refuses_generic_database_name(tmp_path):
+    with pytest.raises(ValueError, match="dedicated"):
+        durable_fixture(tmp_path / "production.db")
+    assert not (tmp_path / "production.db").exists()
