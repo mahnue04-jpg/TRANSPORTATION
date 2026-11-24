@@ -297,10 +297,11 @@ def test_catalog_readiness_does_not_enable_live_paths() -> None:
     assert tech["value_status"] == "VERIFIED"
 
 
-def test_agent_handoff_rehearsal_http_owner_boundary(client, monkeypatch):
+def test_agent_handoff_rehearsal_http_owner_boundary(client, monkeypatch, tmp_path):
     import base64
     import json
 
+    monkeypatch.delenv("NOVA_AGENT_HANDOFF_REHEARSAL_DATABASE", raising=False)
     route = "/api/nova/work/agent-handoff-rehearsal"
     owner = _headers(client, "admin@amicor.local")
     token = owner["Authorization"].split(" ", 1)[1]
@@ -328,6 +329,43 @@ def test_agent_handoff_rehearsal_http_owner_boundary(client, monkeypatch):
     }
     assert client.get(route, headers=owner).json() == result.json()
     assert client.post(route, headers=owner, json={}).status_code == 405
+    from app.core.nova.agent_events import (
+        DurableSyntheticHandoff, AgentEvent, Agent, EventType, SCHEMA_VERSION,
+    )
+    path = tmp_path / "synthetic-handoff-http.sqlite3"
+    monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_DATABASE", str(path))
+    assert client.get(route, headers=owner).status_code == 503
+    assert not path.exists()
+    store = DurableSyntheticHandoff(
+        path, "syn-org", "syn-journey", lead_id="syn-lead",
+        consent_reference="syn-consent", opportunity_id="syn-opportunity",
+        task_id="syn-task", approval_reference="syn-approval",
+    )
+    status = client.get(route, headers=owner)
+    assert status.status_code == 200, status.text
+    assert status.json() == {
+        "synthetic": True, "mode": "read_only_persisted_rehearsal",
+        "accepted_count": 0, "completed": False, "live_dispatch": False,
+        "persistent_storage_connected": True, "real_approval_verified": False,
+    }
+    store.advance(AgentEvent(
+        schema_version=SCHEMA_VERSION, event_id="syn-test-event",
+        correlation_id="syn-journey", organization_id="syn-org",
+        source_agent=Agent.GROWTH, target_agent=Agent.WORK_REVENUE,
+        event_type=EventType.LEAD_QUALIFIED, subject_kind="lead",
+        subject_id="syn-lead", synthetic=True,
+        occurred_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        idempotency_key="syn-test-key", payload_reference="syn-test-payload",
+        consent_reference="syn-consent",
+    ))
+    before = path.read_bytes()
+    for _ in range(2):
+        status = client.get(route, headers=owner)
+        assert status.status_code == 200, status.text
+        assert status.json()["accepted_count"] == 1
+        assert status.json()["completed"] is False
+    assert path.read_bytes() == before
+    assert store.status()["accepted_count"] == 1
     monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", "wrong-org")
     assert client.get(route, headers=owner).status_code == 403
     monkeypatch.setenv("NOVA_AGENT_HANDOFF_REHEARSAL_ORG", str(org))
