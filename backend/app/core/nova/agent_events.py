@@ -243,3 +243,93 @@ class SyntheticHandoff:
             return False
         self._accepted.append(item)
         return True
+
+
+class DurableSyntheticHandoff:
+    """SQLite-backed synthetic rehearsal; never dispatches or authenticates.
+
+    Use a dedicated disposable file, not an application database. Rebuild the
+    validated state from committed events within a serialized transaction.
+    """
+
+    def __init__(self, database_path, organization_id: str, correlation_id: str, *,
+                 lead_id: str, consent_reference: str, opportunity_id: str,
+                 task_id: str, approval_reference: str):
+        import json
+        import sqlite3
+        from pathlib import Path
+
+        self._path = Path(database_path).resolve()
+        if not self._path.name.startswith("synthetic-handoff-") or self._path.suffix != ".sqlite3":
+            raise ValueError("dedicated synthetic-handoff-*.sqlite3 file required")
+        self._scope = (organization_id, correlation_id)
+        self._evidence = dict(lead_id=lead_id, consent_reference=consent_reference,
+                              opportunity_id=opportunity_id, task_id=task_id,
+                              approval_reference=approval_reference)
+        self._controller()
+        self._config = json.dumps(self._evidence, sort_keys=True)
+        with self._transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS rehearsal_config "
+                       "(org TEXT, journey TEXT, evidence TEXT NOT NULL, "
+                       "PRIMARY KEY(org, journey))")
+            db.execute("CREATE TABLE IF NOT EXISTS rehearsal_events "
+                       "(org TEXT, journey TEXT, seq INTEGER, event_json TEXT NOT NULL, "
+                       "PRIMARY KEY(org, journey, seq))")
+            db.execute("INSERT OR IGNORE INTO rehearsal_config VALUES (?, ?, ?)",
+                       (*self._scope, self._config))
+            self._restore(db)
+
+    def _controller(self):
+        return SyntheticHandoff(*self._scope, **self._evidence)
+
+    def _transaction(self):
+        import sqlite3
+        from contextlib import contextmanager
+
+        @contextmanager
+        def transaction():
+            db = sqlite3.connect(str(self._path), timeout=5)
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                yield db
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+        return transaction()
+
+    def _restore(self, db):
+        import json
+        config = db.execute(
+            "SELECT evidence FROM rehearsal_config WHERE org=? AND journey=?",
+            self._scope).fetchone()
+        if config is None or config[0] != self._config:
+            raise ValueError("rehearsal evidence configuration mismatch")
+        controller = self._controller()
+        rows = db.execute(
+            "SELECT seq, event_json FROM rehearsal_events "
+            "WHERE org=? AND journey=? ORDER BY seq", self._scope)
+        for expected_seq, (seq, raw) in enumerate(rows, 1):
+            if seq != expected_seq or not controller.advance(AgentEvent.from_mapping(json.loads(raw))):
+                raise ValueError("invalid persisted rehearsal sequence")
+        return controller
+
+    def advance(self, item: AgentEvent) -> bool:
+        import json
+        with self._transaction() as db:
+            controller = self._restore(db)
+            if not controller.advance(item):
+                return False
+            db.execute("INSERT INTO rehearsal_events VALUES (?, ?, ?, ?)",
+                       (*self._scope, controller.accepted_count,
+                        json.dumps(item.to_mapping(), sort_keys=True)))
+            return True
+
+    def status(self) -> dict[str, object]:
+        with self._transaction() as db:
+            controller = self._restore(db)
+            return {"synthetic": True, "accepted_count": controller.accepted_count,
+                    "completed": controller.completed}
