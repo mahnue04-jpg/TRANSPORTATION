@@ -152,3 +152,35 @@ def test_synthetic_handoff_chain_contract():
                for first, second in zip(journey, journey[1:]))
     assert journey[-2].subject_id == journey[-1].subject_id
     assert journey[-1].target_agent == Agent.OWNER
+
+
+def test_synthetic_ledger_exact_replay_is_not_recorded_twice():
+    ledger = _module.SyntheticEventLedger("org-001", "journey-001")
+    original = event()
+    assert ledger.record(original) is True
+    assert ledger.record(AgentEvent.from_mapping(original.to_mapping())) is False
+
+
+@pytest.mark.parametrize("changes", [
+    {"event_id": "evt-002"},
+    {"idempotency_key": "different-key"},
+    {"payload_reference": "different-payload"},
+])
+def test_synthetic_ledger_rejects_conflicting_replay(changes):
+    ledger = _module.SyntheticEventLedger("org-001", "journey-001")
+    assert ledger.record(event()) is True
+    with pytest.raises(ValueError, match="conflicting event replay"):
+        ledger.record(event(**changes))
+    assert ledger.record(event()) is False
+
+
+@pytest.mark.parametrize("changes", [
+    {"organization_id": "other-org"},
+    {"correlation_id": "other-journey"},
+    {"synthetic": False},
+])
+def test_synthetic_ledger_rejects_out_of_scope_events(changes):
+    ledger = _module.SyntheticEventLedger("org-001", "journey-001")
+    with pytest.raises(ValueError):
+        ledger.record(event(**changes))
+    assert ledger.record(event()) is True
