@@ -57,6 +57,7 @@ jobs:
               "-q", "--noconftest", "tests/test_operations_package_allowances.py",
               "tests/test_operations_package_usage_ledger.py",
               "tests/test_starter_self_service.py",
+              "tests/test_subscription_reversal_evidence.py",
               "tests/test_operations_subscription_entitlement.py",
               "tests/test_operations_subscription_task_bridge.py",
               "tests/test_operations_authenticated_subscription_adapter.py",
