@@ -88,7 +88,7 @@ def _owned(db: Session, job_id: str, org: str, owner: str, *, lock: bool = False
 
 def submit_review_job(
     db: Session, *, org: str, owner: str, engagement_id: str, task_id: str,
-    request_key: str, raw: bytes,
+    request_key: str, raw: bytes, retry_synthetic_failure: bool = False,
 ) -> dict:
     """Synchronous bounded processing, durable metadata, review-only private output.
 
@@ -103,6 +103,16 @@ def submit_review_job(
         raise CustomerCSVBlocked("Valid Idempotency-Key required", 400)
     if not isinstance(raw, bytes) or not 0 < len(raw) <= 1_000_000:
         raise CustomerCSVBlocked("CSV must be between 1 byte and 1 MB", 413)
+    if retry_synthetic_failure and (
+        os.getenv("NOVA_OPS_REHEARSAL_ENABLED") != "true"
+        or any(os.getenv(k) != "staging" for k in ("APP_ENV", "AMICOR_ENVIRONMENT"))
+        or any(os.getenv(k) != "false" for k in ("NOVA_STRIPE_LIVE_ENABLED", "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED"))
+        or org != "synthetic-rehearsal-owner-org" or owner != "synthetic-rehearsal-owner"
+        or task_id != "synthetic-starter-csv"
+        or raw != b"Name,Status\nSynthetic Customer,Active\nSynthetic Customer,Active\n"
+        or request_key.replace("-", "") != engagement_id
+    ):
+        raise CustomerCSVBlocked("Synthetic retry unavailable", 403)
     fingerprint = hashlib.sha256(raw).hexdigest()
     now = _utc()
     job_id = secrets.token_hex(16)
@@ -129,7 +139,23 @@ def submit_review_job(
             fingerprint, engagement_id, task_id
         ):
             raise CustomerCSVBlocked("Idempotency-Key used for different work", 409)
-        return {"job_id": row["id"], "status": row["status"], "replayed": True}
+        if not retry_synthetic_failure or row["status"] != "FAILED":
+            return {"job_id": row["id"], "status": row["status"], "output_sha256": row["output_sha256"], "replayed": True}
+        # Reclaim the exact failed, artifact-free synthetic reservation once.
+        # A concurrent request cannot win the same conditional transition.
+        job_id = row["id"]
+        changed = db.execute(sa.update(jobs).where(
+            jobs.c.id == job_id, jobs.c.organization_id == org,
+            jobs.c.owner_user_id == owner, jobs.c.engagement_id == engagement_id,
+            jobs.c.task_id == task_id, jobs.c.request_key == request_key,
+            jobs.c.input_sha256 == fingerprint, jobs.c.status == "FAILED",
+            jobs.c.output_ref.is_(None), jobs.c.output_sha256.is_(None),
+            jobs.c.reviewer_user_id.is_(None),
+        ).values(status="PROCESSING", updated_at=now))
+        if changed.rowcount != 1:
+            db.rollback()
+            raise CustomerCSVBlocked("Synthetic retry reservation unavailable", 409)
+        db.commit()
 
     # A crashed PROCESSING job remains visible, never claims completion. A
     # recovery worker must be designed before allowing unattended acceptance.
