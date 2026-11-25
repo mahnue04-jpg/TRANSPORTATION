@@ -311,7 +311,7 @@ def owner_issue_customer_delivery_by_paid_order(
         raise HTTPException(403, "Explicit owner delivery approval required")
     _guard(db)
     try:
-        from .operations_owner_csv_api import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
+        from .operations_delivery_authorization import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
     except ImportError as exc:
         raise HTTPException(503, "Owner CSV authorization unavailable") from exc
 
@@ -357,7 +357,7 @@ def owner_issue_customer_delivery(
         raise HTTPException(403, "Explicit owner delivery approval required")
     _guard(db)
     try:
-        from .operations_owner_csv_api import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
+        from .operations_delivery_authorization import _check_saved_csv_assignment, _reject_queued_job_in_legacy_path
     except ImportError as exc:
         raise HTTPException(503, "Owner CSV authorization unavailable") from exc
     org, owner_id = str(owner.organization_id or ""), str(owner.user_id)
