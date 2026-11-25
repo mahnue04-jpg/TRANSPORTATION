@@ -366,3 +366,31 @@ def test_starter_http_invalid_plan(starter_http, goal):
     client, state = starter_http
     assert client.post("/api/nova/starter/plan", headers=AUTH, json={"goal": goal}).status_code == 422
     assert state.reads == 0
+
+
+def test_starter_interface_private(starter_http):
+    client, state = starter_http
+    url = "/api/nova/starter/interface"
+    assert client.get(url).status_code == 401
+    assert state.reads == 0
+    response = client.get(url, headers=AUTH)
+    assert response.status_code == 200
+    assert "Starter workspace" in response.text
+    assert "text/html" in response.headers["content-type"]
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "connect-src 'self'" in response.headers["content-security-policy"]
+    assert state.reads == 1
+    state.subscription["status"] = "canceled"
+    assert client.get(url, headers=AUTH).status_code == 403
+
+
+@pytest.mark.parametrize("flag", [
+    "APP_ENV", "AMICOR_ENVIRONMENT", "NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED",
+    "NOVA_STRIPE_LIVE_ENABLED", "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED",
+])
+def test_starter_registration_requires_explicit_staging(starter_http, monkeypatch, flag):
+    from app.core.nova.billing.starter_feature_routes import starter_routes_enabled
+    assert starter_routes_enabled()
+    monkeypatch.delenv(flag)
+    assert not starter_routes_enabled()
