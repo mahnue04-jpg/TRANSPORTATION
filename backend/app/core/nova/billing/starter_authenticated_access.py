@@ -4,6 +4,7 @@ import os
 
 from .starter_self_service import FEATURES
 from .starter_subscription_evidence import verify_starter_feature
+from .subscription_reversal_evidence import verify_current_invoice_payment
 
 
 def authenticated_starter_access(db, *, authenticated_user, feature: str) -> bool:
@@ -50,8 +51,11 @@ def authenticated_starter_access(db, *, authenticated_user, feature: str) -> boo
         subscription = result.to_dict_recursive() if hasattr(result, "to_dict_recursive") else result
         if not isinstance(subscription, dict):
             return False
-        return verify_starter_feature(feature=feature, tenant_id=tenant_id,
-            row=row, subscription=subscription, now=datetime.now(timezone.utc))
+        if not verify_starter_feature(feature=feature, tenant_id=tenant_id,
+            row=row, subscription=subscription, now=datetime.now(timezone.utc)):
+            return False
+        return verify_current_invoice_payment(client, plan="starter",
+            customer_id=row.stripe_customer_id, subscription=subscription)
     except Exception:
         # Do not leak payment identifiers, credentials or provider errors.
         return False
