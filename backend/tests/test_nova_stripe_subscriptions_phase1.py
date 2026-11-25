@@ -526,6 +526,12 @@ def test_unrelated_payment_events_do_not_activate_or_record_revenue(monkeypatch)
             dict(base, customer="cus_unrelated"),
             dict(base, id="cs_unrelated"),
             dict(base, mode="payment"),
+            {key: value for key, value in base.items() if key != "subscription"},
+            dict(base, subscription=None),
+            dict(base, subscription=""),
+            dict(base, subscription="pi_not_a_subscription"),
+            dict(base, subscription={"id": None}),
+            dict(base, subscription=123),
             dict(base, metadata={"nova_tenant_id": uuid4()}),
             dict(base, metadata={"nova_tenant_id": tenant, "nova_plan_key": "business"}),
         ]
