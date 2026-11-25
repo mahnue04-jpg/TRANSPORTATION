@@ -116,3 +116,28 @@ def test_one_subscription_period_does_not_consume_next_period(engine):
         period_end=NOW+timedelta(days=29), payment_id=first.payment_id,
     )
     assert reserve(engine, second, "new-month")["consumed"]
+
+
+def test_failed_binding_rolls_back_quota_and_retry_consumes_once(engine):
+    e = entitlement("launch_99", "cus_atomic_binding")
+    def reject_binding(reservation_id):
+        assert reservation_id
+        raise AllowanceBlocked("binding_failed")
+    with Session(engine) as session:
+        with pytest.raises(AllowanceBlocked, match="binding_failed"):
+            reserve_staging_task(session, entitlement=e, customer_id=e.customer_id,
+                request_key="atomic-task", task_fingerprint="a"*64, now=NOW,
+                before_commit=reject_binding)
+    with Session(engine) as session:
+        assert session.scalar(sa.select(sa.func.count()).select_from(reservations).where(
+            reservations.c.customer_id == e.customer_id)) == 0
+    first = reserve(engine, e, "atomic-task")
+    assert first["consumed"]
+    with Session(engine) as session:
+        with pytest.raises(AllowanceBlocked, match="binding_failed"):
+            reserve_staging_task(session, entitlement=e, customer_id=e.customer_id,
+                request_key="atomic-task", task_fingerprint="a"*64, now=NOW,
+                before_commit=reject_binding)
+    replay = reserve(engine, e, "atomic-task")
+    assert replay["replayed"] and not replay["consumed"]
+    assert replay["reservation_id"] == first["reservation_id"]
