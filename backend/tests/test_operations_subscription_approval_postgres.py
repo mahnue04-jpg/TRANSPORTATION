@@ -148,3 +148,55 @@ def test_wrong_task_fingerprint_cannot_use_approval(db):
         )
         with pytest.raises(AllowanceBlocked, match="explicit_owner_approval_missing"):
             require_saved_owner_scope_approval(session, **{**SCOPE, "task_fingerprint": "b"*64})
+
+
+def test_subscription_csv_binding_exact_identity_replay_and_revoke(db, monkeypatch):
+    from datetime import timedelta
+    from app.core.nova.work_revenue.operations_package_allowances import VerifiedEntitlement
+    from app.core.nova.work_revenue.operations_package_usage_ledger import reservations, reserve_staging_task
+    from app.core.nova.work_revenue.operations_subscription_csv_binding import (
+        bindings, bind_reserved_csv_task, request_key_for_task,
+    )
+    monkeypatch.setenv("NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED", "true")
+    monkeypatch.setenv("NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_STAGING_ENABLED", "true")
+    migrations = Path(__file__).resolve().parents[1] / "migrations"
+    with db.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        for name in ("review_only_operations_package_task_reservations_staging.sql",
+                     "review_only_operations_subscription_csv_bindings_staging.sql"):
+            connection.exec_driver_sql((migrations / name).read_text(encoding="utf-8"))
+    scope = {k: v for k, v in SCOPE.items() if k != "task_fingerprint"}
+    now = datetime.now(timezone.utc)
+    entitlement = VerifiedEntitlement(plan="launch_99", customer_id="cus_synthetic",
+        paid=True, status="active", subscription_id="sub_synthetic",
+        period_start=now-timedelta(days=1), period_end=now+timedelta(days=29))
+    try:
+        with Session(db) as session:
+            record_staging_owner_scope_decision(session, authenticated_user=OWNER,
+                decision="APPROVED", **{k: v for k,v in SCOPE.items() if k != "owner_user_id"})
+            reservation = reserve_staging_task(session, entitlement=entitlement,
+                customer_id=entitlement.customer_id, request_key=request_key_for_task(**scope),
+                task_fingerprint=SCOPE["task_fingerprint"], now=now)
+            args = dict(**scope, reservation_id=reservation["reservation_id"],
+                customer_id=entitlement.customer_id, subscription_id=entitlement.subscription_id,
+                plan=entitlement.plan, period_key=entitlement.period_start.isoformat(),
+                input_sha256=SCOPE["task_fingerprint"])
+            with pytest.raises(AllowanceBlocked, match="exact_csv_reservation_required"):
+                bind_reserved_csv_task(session, **{**args, "customer_id": "cus_wrong"})
+            session.rollback()
+            result = bind_reserved_csv_task(session, **args)
+            assert not result["replayed"] and not result["executed"] and not result["delivered"]
+            session.commit()
+            assert bind_reserved_csv_task(session, **args)["replayed"]
+            session.commit()
+            assert session.scalar(sa.select(sa.func.count()).select_from(bindings)) == 1
+            record_staging_owner_scope_decision(session, authenticated_user=OWNER,
+                decision="REVOKED", **{k: v for k,v in SCOPE.items() if k != "owner_user_id"})
+            with pytest.raises(AllowanceBlocked, match="explicit_owner_approval_missing"):
+                bind_reserved_csv_task(session, **args)
+            session.rollback()
+            monkeypatch.setenv("NOVA_STRIPE_LIVE_ENABLED", "true")
+            with pytest.raises(AllowanceBlocked):
+                bind_reserved_csv_task(session, **args)
+    finally:
+        bindings.drop(db, checkfirst=True)
+        reservations.drop(db, checkfirst=True)
