@@ -166,3 +166,97 @@ def test_missing_invoice_fails_closed():
     assert not check(row, sub)
     row, sub = evidence()
     assert not check(row, sub, "managed_task")
+
+
+import sys
+from types import ModuleType
+from app.core.nova.billing.starter_authenticated_access import authenticated_starter_access
+from app.core.nova.billing import starter_authenticated_access as adapter
+
+
+@pytest.fixture
+def adapter_fixture(monkeypatch):
+    row, sub = evidence()
+    user = SimpleNamespace(organization_id=row.tenant_id,
+        user_id="synthetic-user", email="starter@example.invalid")
+    state = SimpleNamespace(row=row, subscription=sub, key="sk_test_fixture",
+        queries=0, reads=0, fail=False)
+    from sqlalchemy import Table, Column, String, MetaData
+    table = Table("synthetic_subscription", MetaData(), Column("tenant_id", String))
+    models = ModuleType("app.core.nova.billing.models")
+    models.NovaTenantSubscription = table
+    signup_client = ModuleType("app.core.nova.signup.stripe_client")
+    signup_client.stripe_secret_key = lambda: state.key
+    billing_client = ModuleType("app.core.nova.billing.stripe_client")
+
+    def retrieve(sub_id, params):
+        state.reads += 1
+        assert sub_id == row.stripe_subscription_id
+        assert params == {"expand": ["latest_invoice"]}
+        if state.fail:
+            raise RuntimeError("synthetic provider failure")
+        return state.subscription
+
+    billing_client.LiveNovaBillingStripeClient = lambda api_key: SimpleNamespace(
+        _build_client=lambda: SimpleNamespace(v1=SimpleNamespace(
+            subscriptions=SimpleNamespace(retrieve=retrieve))))
+    for module in (models, signup_client, billing_client):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    def execute(statement):
+        state.queries += 1
+        assert statement.compile().params == {"tenant_id_1": user.organization_id}
+        return SimpleNamespace(scalar_one_or_none=lambda: state.row)
+
+    db = SimpleNamespace(execute=execute)
+    monkeypatch.setattr(adapter, "datetime", SimpleNamespace(now=lambda tz: NOW))
+    return db, user, state
+
+
+@pytest.mark.parametrize("feature", sorted(FEATURES))
+def test_authenticated_adapter_valid(adapter_fixture, feature):
+    db, user, state = adapter_fixture
+    assert authenticated_starter_access(db, authenticated_user=user, feature=feature)
+    assert state.queries == 1 and state.reads == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("organization_id", ""), ("user_id", ""), ("email", "customer@example.com"),
+])
+def test_authenticated_adapter_invalid_identity(adapter_fixture, field, value):
+    db, user, state = adapter_fixture
+    setattr(user, field, value)
+    assert not authenticated_starter_access(db, authenticated_user=user, feature="basic_workspace")
+    assert state.queries == 0 and state.reads == 0
+
+
+@pytest.mark.parametrize("failure", ["missing_row", "wrong_tenant", "wrong_plan",
+    "live_key", "missing_key", "provider_failure", "canceled", "unpaid",
+    "managed_task", "disabled"])
+def test_authenticated_adapter_failures(adapter_fixture, monkeypatch, failure):
+    db, user, state = adapter_fixture
+    feature = "basic_workspace"
+    if failure == "missing_row":
+        state.row = None
+    elif failure == "wrong_tenant":
+        state.row.tenant_id = "other-tenant"
+    elif failure == "wrong_plan":
+        state.row.plan_key = "business"
+    elif failure == "live_key":
+        state.key = "sk_live_fixture"
+    elif failure == "missing_key":
+        state.key = ""
+    elif failure == "provider_failure":
+        state.fail = True
+    elif failure == "canceled":
+        state.subscription["status"] = "canceled"
+    elif failure == "unpaid":
+        state.subscription["latest_invoice"]["status"] = "open"
+    elif failure == "managed_task":
+        feature = "managed_task"
+    elif failure == "disabled":
+        monkeypatch.setenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED", "false")
+    assert not authenticated_starter_access(db, authenticated_user=user, feature=feature)
+    if failure in {"missing_row", "wrong_plan", "live_key", "missing_key",
+                   "managed_task", "disabled"}:
+        assert state.reads == 0
