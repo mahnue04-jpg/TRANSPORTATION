@@ -92,7 +92,13 @@ def reserve_owner_approved_test_subscription_task(
         raise AllowanceBlocked("test_price_not_configured")
 
     try:
-        subscription = get_agent_stripe_client().retrieve_subscription(lead.stripe_subscription_id)
+        stripe = get_agent_stripe_client()
+        subscription = stripe.retrieve_subscription(lead.stripe_subscription_id)
+        if stripe.verify_subscription_payment(plan=lead.service_plan,
+                customer_id=lead.stripe_customer_id, subscription=subscription) is not True:
+            raise AllowanceBlocked("subscription_payment_reversed_or_unverified")
+    except AllowanceBlocked:
+        raise
     except Exception as exc:
         raise AllowanceBlocked("stripe_subscription_unavailable") from exc
 
