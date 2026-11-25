@@ -90,7 +90,8 @@ def bind_reserved_csv_task(
                   subscription_id=subscription_id, plan=plan, period_key=period_key,
                   input_sha256=input_sha256)
     from sqlalchemy.dialects.postgresql import insert
-    result = db.execute(insert(bindings).values(**values).on_conflict_do_nothing())
+    inserted = db.execute(insert(bindings).values(**values).on_conflict_do_nothing()
+                          .returning(bindings.c.reservation_id)).scalar_one_or_none()
     existing = db.execute(sa.select(bindings).where(
         bindings.c.organization_id == organization_id,
         bindings.c.owner_user_id == owner_user_id,
@@ -99,5 +100,5 @@ def bind_reserved_csv_task(
     )).mappings().one_or_none()
     if existing is None or any(existing[k] != v for k, v in values.items()):
         raise AllowanceBlocked("csv_task_already_bound_to_different_reservation")
-    return {"reservation_id": reservation_id, "replayed": result.rowcount == 0,
+    return {"reservation_id": reservation_id, "replayed": inserted is None,
             "executed": False, "delivered": False}
