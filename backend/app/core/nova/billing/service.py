@@ -436,6 +436,22 @@ def _row_for_event(db: Session, obj: dict[str, Any], event_type: str) -> NovaTen
     plan = metadata.get("nova_plan_key")
     if plan and plan != row.plan_key:
         return None
+    if event_type.startswith("customer.subscription."):
+        # A subscription update must not silently change the agreed price or quantity.
+        items = obj.get("items")
+        if items is not None:
+            data = items.get("data") if isinstance(items, dict) else None
+            if not isinstance(data, list) or len(data) != 1 or items.get("has_more"):
+                return None
+            item = data[0]
+            if not isinstance(item, dict):
+                return None
+            price = item.get("price")
+            price_id = price.get("id") if isinstance(price, dict) else price
+            if not row.stripe_price_id or price_id != row.stripe_price_id:
+                return None
+            if item.get("quantity", 1) != 1:
+                return None
     if event_type == "checkout.session.completed":
         if obj.get("id") != row.stripe_checkout_session_id:
             return None
