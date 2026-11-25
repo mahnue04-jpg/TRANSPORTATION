@@ -280,3 +280,120 @@ def test_owner_grant_rejects_missing_verified_customer(isolated_postgres, monkey
         assert db.execute(sa.select(delivery.grants)).mappings().all() == []
 
 
+
+
+@pytest.mark.parametrize("plan,amount", [("launch_99", 9900), ("business_299", 29900)])
+def test_subscription_execution_and_delivery(isolated_postgres, monkeypatch, plan, amount):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app.modules.marketing import operations_billing as billing
+    from app.core.nova.work_revenue import operations_delivery_authorization as assignment
+    from app.core.nova.work_revenue.operations_package_usage_ledger import (
+        AllowanceBlocked, reservations, reserve_staging_task,
+    )
+    from app.core.nova.work_revenue.operations_package_allowances import VerifiedEntitlement
+    from app.core.nova.work_revenue.operations_subscription_approvals import approvals
+    from app.core.nova.work_revenue.operations_subscription_csv_binding import (
+        bindings, bind_reserved_csv_task, request_key_for_task,
+    )
+    from app.core.nova.work_revenue.operations_subscription_csv_execution import execute_reserved_subscription_csv
+    from app.core.nova.work_revenue.operations_subscription_delivery import (
+        issue_subscription_grant, download_subscription_grant, revoke_subscription_grant,
+    )
+
+    engine, _ = isolated_postgres
+    for flag in ("NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED",
+                 "NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED",
+                 "NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_STAGING_ENABLED",
+                 "NOVA_OPERATIONS_SUBSCRIPTION_EXECUTION_STAGING_ENABLED",
+                 "NOVA_OPERATIONS_SUBSCRIPTION_DELIVERY_STAGING_ENABLED"):
+        monkeypatch.setenv(flag, "true")
+    monkeypatch.setenv("NOVA_STRIPE_LIVE_ENABLED", "false")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "false")
+    # Saved-work authorization is tested separately. Here use actual SQL
+    # reservation, approval, job and grant tables and the real entitlement guard.
+    monkeypatch.setattr(assignment, "_check_saved_csv_assignment", lambda *a, **kw: None)
+    monkeypatch.setattr(assignment, "_reject_queued_job_in_legacy_path", lambda *a, **kw: None)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    start, end = now-timedelta(days=1), now+timedelta(days=29)
+    scope = dict(organization_id="synthetic-owner-org", owner_user_id="synthetic-owner",
+                 engagement_id="synthetic-eng", task_id="synthetic-task", lead_id="synthetic-lead")
+    owner = SimpleNamespace(user_id=scope["owner_user_id"], organization_id=scope["organization_id"], role="admin")
+    buyer = SimpleNamespace(user_id="synthetic-recipient", organization_id="synthetic-customer-org")
+    wrong = SimpleNamespace(user_id="synthetic-other", organization_id="synthetic-other-org")
+    raw = b"Name\nAda\nAda\n"
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    entitlement = VerifiedEntitlement(plan=plan, customer_id="cus_synthetic", paid=True,
+        status="active", subscription_id="sub_synthetic", period_start=start, period_end=end)
+    sub = dict(id="sub_synthetic", customer="cus_synthetic", livemode=False, status="active",
+        metadata=dict(nova_product="nova_anonymous_operations_agent",
+                      nova_agent_lead_id=scope["lead_id"], nova_agent_plan=plan),
+        items={"data":[dict(quantity=1, price="price_synthetic",
+                             current_period_start=int(start.timestamp()),
+                             current_period_end=int(end.timestamp()))]},
+        latest_invoice=dict(status="paid", paid=True, livemode=False, currency="usd",
+            amount_paid=amount, subscription="sub_synthetic", customer="cus_synthetic",
+            lines={"data":[dict(subscription="sub_synthetic",
+                               period=dict(start=int(start.timestamp()), end=int(end.timestamp())))]}))
+    stripe = Mock()
+    stripe.retrieve_subscription.return_value = sub
+    monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
+    monkeypatch.setattr(billing, "subscription_test_price", lambda plan: "price_synthetic")
+    monkeypatch.setattr(billing, "get_agent_stripe_client", lambda: stripe)
+    tables = [reservations, approvals, bindings]
+    for table in tables:
+        table.create(engine, checkfirst=True)
+    try:
+        with Session(engine) as db:
+            for user, email in ((buyer, "buyer@example.invalid"), (wrong, "other@example.invalid")):
+                db.execute(sa.insert(PlatformUser.__table__).values(
+                    id=user.user_id, email=email, hashed_password="synthetic-only",
+                    role="staff", organization_id=user.organization_id, is_active=True, is_verified=True))
+            db.execute(sa.insert(MarketingWebsiteLead.__table__).values(
+                id=scope["lead_id"], lead_type="anonymous_operations", status="qualified",
+                contact_name="Synthetic Buyer", organization_name="Synthetic Buyer Company",
+                work_email="buyer@example.invalid", consent=True, service_plan=plan,
+                payment_status="paid", stripe_customer_id="cus_synthetic",
+                stripe_subscription_id="sub_synthetic"))
+            db.execute(sa.insert(approvals).values(approval_id="synthetic-approval",
+                **scope, task_fingerprint=fingerprint, decision="APPROVED", decided_at=now))
+            db.commit()
+            reservation = reserve_staging_task(db, entitlement=entitlement,
+                customer_id=entitlement.customer_id, request_key=request_key_for_task(**scope),
+                task_fingerprint=fingerprint, now=now)
+            bind_reserved_csv_task(db, **scope, reservation_id=reservation["reservation_id"],
+                customer_id=entitlement.customer_id, subscription_id=entitlement.subscription_id,
+                plan=plan, period_key=start.isoformat(), input_sha256=fingerprint)
+            db.commit()
+            args = dict(authenticated_user=owner, engagement_id=scope["engagement_id"],
+                        task_id=scope["task_id"], raw=raw)
+            result = execute_reserved_subscription_csv(db, **args)
+            job = result["job_id"]
+            assert result["status"] == "AWAITING_REVIEW"
+            assert execute_reserved_subscription_csv(db, **args)["job_id"] == job
+            assert db.scalar(sa.select(sa.func.count()).select_from(reservations)) == 1
+            assert db.scalar(sa.select(sa.func.count()).select_from(csv.jobs)) == 1
+            grant_args = dict(authenticated_owner=owner, job_id=job,
+                              recipient_user_id=buyer.user_id, explicit_approval=True)
+            with pytest.raises(AllowanceBlocked, match="approved_subscription_artifact_required"):
+                issue_subscription_grant(db, **grant_args)
+            csv.review_job(db, org=owner.organization_id, owner=owner.user_id, job_id=job, approve=True)
+            with pytest.raises(AllowanceBlocked, match="verified_subscription_recipient_required"):
+                issue_subscription_grant(db, **{**grant_args, "recipient_user_id":wrong.user_id})
+            assert issue_subscription_grant(db, **grant_args)["grant_status"] == "issued"
+            assert download_subscription_grant(db, authenticated_recipient=buyer, job_id=job) == b"Name\nAda\n"
+            with pytest.raises(delivery.HTTPException) as denied:
+                download_subscription_grant(db, authenticated_recipient=wrong, job_id=job)
+            assert denied.value.status_code == 404
+            sub["status"] = "canceled"
+            with pytest.raises(AllowanceBlocked, match="subscription_not_currently_entitled"):
+                download_subscription_grant(db, authenticated_recipient=buyer, job_id=job)
+            assert revoke_subscription_grant(db, authenticated_owner=owner, job_id=job)["grant_status"] == "revoked"
+            sub["status"] = "active"
+            with pytest.raises(delivery.HTTPException) as revoked:
+                download_subscription_grant(db, authenticated_recipient=buyer, job_id=job)
+            assert revoked.value.status_code == 404
+    finally:
+        for table in reversed(tables):
+            table.drop(engine, checkfirst=True)
