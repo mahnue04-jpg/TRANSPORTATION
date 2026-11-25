@@ -1,0 +1,32 @@
+name: CFSS Budget Co-Pilot local planning checks
+on:
+  pull_request:
+    paths:
+      - "website/cfss-copilot/**"
+      - "website/tests/cfss_calculation.mjs"
+      - "website/tests/cfss_browser_click_smoke.mjs"
+      - "website/tests/test_cfss_copilot.py"
+      - ".github/workflows/cfss-copilot-checks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cfss-planning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify CFSS local-only planning and program boundaries
+        run: python website/tests/test_cfss_copilot.py
+      - name: Verify CFSS budget scenario math without network
+        run: node website/tests/cfss_calculation.mjs
+      - name: Verify fictional example click and visible budget results
+        run: node website/tests/cfss_browser_click_smoke.mjs

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="description" content="An offline-first, privacy-conscious demonstration of a Minnesota CFSS budget-model planning assistant. Not an official authorization or FMS record.">
+<title>CFSS Budget Co-Pilot | AMICOR Nova</title>
+<link rel="stylesheet" href="./style.css">
+
+</head>
+<body>
+<header><a href="https://getamicor.com/">AMICOR NOVA</a><div class="sub">Private-on-device planning preview</div></header>
+<main>
+<section class="intro">
+<span class="topline">CFSS budget model · Planning prototype</span>
+<h1>CFSS Budget Co-Pilot</h1>
+<p>Explore how planned support-worker costs, approved goods and other expenses could fit inside your <strong>existing authorized CFSS service budget</strong>. For this public evaluation, select <strong>Load fictional example</strong> or enter invented numbers only. Do not use a real service plan or FMS report.</p>
+</section>
+<div class="notice"><strong>Not an official DHS or FMS system.</strong> This tool does not establish eligibility, calculate a DHS authorization, approve purchases, process payroll or replace your consultation services provider, lead agency, case manager or financial management services (FMS) provider. All costs are user-entered assumptions. Do not enter names, case numbers, SSNs, medical information, or other sensitive information.</div>
+<div class="layout">
+<section class="panel" aria-labelledby="formtitle">
+<h2 id="formtitle">Plan your budget</h2>
+<p class="help">Use fictional amounts only during this evaluation. Fields marked * are required. Entered values remain in this browser unless you explicitly save or export a file; they are not sent to AMICOR.</p>
+<form id="budgetForm" novalidate>
+<fieldset class="section">
+<legend>1. Authorized budget and spending</legend>
+<div class="fieldgrid">
+<label>Authorized budget ($) *<input id="budget" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Fictional budget, e.g., 48000" required><span>For evaluation, use invented figures only. Real decisions must use an approved CFSS plan.</span></label>
+<label>Months in service plan *<input id="months" type="number" min="1" max="12" step="1" inputmode="numeric" value="12" required><span>Use a hypothetical plan period; actual authorization must be confirmed later</span></label>
+<label>Months already elapsed *<input id="elapsed" type="number" min="0" max="12" step="1" inputmode="numeric" value="0" required><span>Whole months for this simplified forecast</span></label>
+<label>Actual spent to date ($) *<input id="spent" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" value="0" required><span>Use an invented spent-to-date value for demonstration; never copy a real FMS report</span></label>
+</div>
+</fieldset>
+<fieldset class="section">
+<legend>2. Monthly FMS spending reconciliation (optional)</legend>
+<p class="help">Enter each hypothetical month’s <strong>individual spending amount</strong> using fictional figures. If a report shows a cumulative year-to-date total, do <strong>not</strong> enter that cumulative balance as the month’s spending; first confirm the individual-month amount with your FMS provider. Leave unknown months blank, not zero. These figures only check against “Actual spent to date” and never replace the official FMS report.</p>
+<details><summary class="cfss-summary">Enter monthly FMS figures (up to 12 months)</summary>
+<div class="fieldgrid fms-fields">
+<label>Month 1 FMS reported amount ($)<input id="fms1" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 2 FMS reported amount ($)<input id="fms2" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 3 FMS reported amount ($)<input id="fms3" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 4 FMS reported amount ($)<input id="fms4" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 5 FMS reported amount ($)<input id="fms5" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 6 FMS reported amount ($)<input id="fms6" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 7 FMS reported amount ($)<input id="fms7" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 8 FMS reported amount ($)<input id="fms8" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 9 FMS reported amount ($)<input id="fms9" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 10 FMS reported amount ($)<input id="fms10" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 11 FMS reported amount ($)<input id="fms11" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Month 12 FMS reported amount ($)<input id="fms12" type="number" min="0" max="100000000" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+</div></details>
+</fieldset>
+<fieldset class="section">
+<legend>3. Planned support-worker schedule</legend>
+<div class="fieldgrid">
+<label>Hourly worker wage ($) *<input id="wage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="e.g., 20.00" required><span>Planning input only: verify CFSS tiered wage floor, bargaining agreement, and any applicable state/local wage laws with your FMS provider</span></label>
+<label>Scheduled hours per week *<input id="hours" type="number" min="0" max="168" step="0.25" inputmode="decimal" placeholder="e.g., 30" required></label>
+<label>Employer-related costs (%) *<input id="burden" type="number" min="0" max="200" step="0.1" inputmode="decimal" placeholder="Enter FMS estimate" required><span>Taxes, insurance and applicable benefits; ask FMS</span></label>
+<label>Other recurring expenses ($/mo) *<input id="other" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0" required><span>Only approved costs within this SAME budget. If including an FMS fee, first verify whether it has a separate authorization line. Do not double-count.</span></label>
+<label>Additional one-time purchases ($) *<input id="onetime" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" value="0" required><span>Future approved purchases only</span></label>
+</div>
+</fieldset>
+<fieldset class="section">
+<legend>4. Compare another staffing scenario</legend>
+<p class="help">Optional: enter an alternative wage and weekly hours. All other assumptions remain the same.</p>
+<div class="fieldgrid">
+<label>Alternative hourly wage ($)<input id="altWage" type="number" min="0" max="500" step="0.01" inputmode="decimal" placeholder="Optional"></label>
+<label>Alternative hours/week<input id="altHours" type="number" min="0" max="168" step="0.25" inputmode="decimal" placeholder="Optional"></label>
+</div>
+</fieldset>
+<div id="error" role="alert" aria-live="assertive"></div>
+<div class="actions">
+<button type="submit">Calculate scenarios</button>
+<button type="button" class="secondary" id="example">Load fictional example</button>
+<button type="button" class="secondary" id="reset">Start fresh</button>
+<button type="button" class="secondary" id="restoreBtn">Open saved plan (JSON)</button>
+<input type="file" id="restoreFile" accept=".json,application/json" hidden aria-label="Choose a saved CFSS planning JSON file">
+</div>
+</form>
+</section>
+<section class="panel" aria-labelledby="resultTitle">
+<h2 id="resultTitle" tabindex="-1">Budget outlook</h2>
+<div id="status" class="status" aria-live="polite">Enter an authorized budget and planned costs, then choose <strong>Calculate scenarios</strong>.</div>
+<div id="results" hidden>
+<span id="demoTag" class="badge" hidden>Fictional illustration — not real spending</span>
+<div class="metrics">
+<div class="metric"><div class="name">Approved plan budget (entered)</div><strong id="rBudget">$0</strong><small>Not calculated by this tool</small></div>
+<div class="metric"><div class="name">Unspent amount reported</div><strong id="rRemaining">$0</strong><small>Budget less actual reported spending</small></div>
+<div class="metric"><div class="name">Projected period-end spending</div><strong id="rProjected">$0</strong><small>Actual so far plus planned future cost</small></div>
+<div id="varianceTile" class="metric"><div class="name">Projected budget difference</div><strong id="rVariance">$0</strong><small id="rVarianceLabel">After planned future spending</small></div>
+<div class="metric"><div class="name">Illustrative weekly hours budget may cover</div><strong id="rMaxHours">—</strong><small>For entered wage, employer costs, remaining months and other planned expenses; not authorized hours</small></div>
+</div>
+<table class="result-table">
+<caption>Scenario A — planned costs</caption>
+<tbody>
+<tr><th scope="row">Months left</th><td id="rMonths">—</td></tr>
+<tr><th scope="row">Average monthly budget</th><td id="rAverage">—</td></tr>
+<tr><th scope="row">Estimated monthly worker wages</th><td id="rWages">—</td></tr>
+<tr><th scope="row">Monthly employer-related estimate</th><td id="rEmployer">—</td></tr>
+<tr><th scope="row">Other recurring costs per month</th><td id="rOther">—</td></tr>
+<tr><th scope="row">Monthly total estimate</th><td id="rMonthly">—</td></tr>
+<tr><th scope="row">One-time planned purchases</th><td id="rOneTime">—</td></tr>
+<tr><th scope="row">Projected future spending</th><td id="rFuture">—</td></tr>
+</tbody>
+</table>
+<div class="summary" id="fmsReconcile" aria-live="polite">Enter amounts from monthly FMS reports if you want a reconciliation check.</div>
+<div class="summary"><strong>Before using this forecast:</strong> The wage shown is not checked against Minnesota CFSS tiered wage floors, collective bargaining terms, or applicable wage laws. Confirm payroll burden and any separately authorized FMS fees with the FMS provider. Even if the calculator shows money remaining, no wages, schedules, goods, or services are approved by this result.</div>
+<div id="comparison" hidden>
+<table class="result-table"><caption>Scenario B — alternative schedule</caption><tbody>
+<tr><th scope="row">Alternative monthly total</th><td id="rAltMonthly">—</td></tr>
+<tr><th scope="row">Alternative period-end spending</th><td id="rAltProjected">—</td></tr>
+<tr><th scope="row">Difference from Scenario A</th><td id="rAltDifference">—</td></tr>
+<tr><th scope="row">Alternative budget difference</th><td id="rAltVariance">—</td></tr>
+</tbody></table>
+</div>
+<div class="summary" id="interpretation"></div>
+<div class="actions">
+<button id="download" type="button">Export scenario CSV</button>
+<button id="savePlan" type="button" class="secondary">Save plan (JSON)</button>
+<button id="print" type="button" class="secondary">Print plan</button>
+</div>
+</div>
+</section>
+</div>
+<section class="privacy" aria-label="Planning safeguards">
+<div><strong><span aria-hidden="true">🔒</span> No accounts or uploads</strong><p>Calculations and FMS report comparisons run in your browser without third-party analytics or uploading the figures you enter. Normal website hosting access logs may still record page visits. Refreshing discards entries unless you choose to download a private JSON plan.</p></div>
+<div><strong><span aria-hidden="true">📋</span> Confirm official numbers</strong><p>Use your approved service delivery plan and the latest FMS monthly spending report as the source of truth. Budget spending rules, allowable purchases and costs require consultation/FMS review. A projected affordable schedule is never an approved service authorization.</p></div>
+<div><strong><span aria-hidden="true">🧮</span> Estimates, not authorization</strong><p>Monthly worker cost uses 52 weeks divided by 12 months. It assumes a constant schedule and user-supplied employer burden, not DHS rate formulas.</p></div>
+</section>
+<section class="evaluation-note" aria-labelledby="evaluation-heading">
+<h2 id="evaluation-heading">Help evaluate CFSS Budget Co-Pilot</h2>
+<p>The planning prototype is available for evaluation with fictional numbers only. If you notice a usability issue or want to discuss a supervised evaluation, send AMICOR a general business inquiry. <strong>Do not include participant names, medical information, actual budget figures, FMS statements, payroll records, or saved JSON plans.</strong> The inquiry form is separate from this calculator and does not receive your entries.</p>
+<p><a class="evaluation-link" href="https://getamicor.com/early-access/?product=CFSS%20Budget%20Co-Pilot">Send evaluation feedback or request details</a></p>
+</section>
+</main>
+<footer>
+<p><strong>Source references:</strong> <a href="https://mn.gov/dhs/disability-aging/home-and-community-services/programs-and-services/cfss-faq/" rel="noopener noreferrer">Minnesota DHS CFSS FAQ</a> · <a href="https://www.revisor.mn.gov/statutes/2026/cite/256B.85" rel="noopener noreferrer">Minn. Stat. §256B.85</a> · <a href="https://www.dhs.state.mn.us/main/idcplg?IdcService=GET_DYNAMIC_CONVERSION&amp;dID=148519" rel="noopener noreferrer">DHS FMS responsibilities and fee rules</a>. Review current DHS/FMS guidance before making financial commitments.</p>
+<p>AMICOR HEALTH ISF LLC · Local planning prototype · Not affiliated with or approved by the Minnesota Department of Human Services · No payments accepted</p>
+</footer>
+<script src="./app.js" defer></script>
+</body>
+</html>
