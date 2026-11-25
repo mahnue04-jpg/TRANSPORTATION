@@ -83,3 +83,15 @@ No migrations, runtime configuration, checkout links or production flags are cha
 - $49: previously verified hosted synthetic payment-to-private-delivery and revocation; no real revenue. Renew scoped staging storage credential before Dec 2 expiry.
 - $99/$299: disposable PostgreSQL integration passed with simulated Stripe/storage. Hosted checkout creation awaits existing sandbox access tokens; do not reset or expose tokens. Hosted fulfillment is not verified.
 - Live tax determination, refund/dispute and renewal lifecycle verification, migration review, production authorization and website publication remain release gates. No live sales authorized.
+
+
+## Monthly lifecycle and reversal integration update
+
+Verified Operations CI at commit 607173cdbec9ee2ddb91ddfc11d52ae67dd09aa6 (run 45723624279), and Casting regression (45723624321). Backend diagnostic 45723624244 remained in progress when checked.
+
+- Starter authenticated self-service checks freshly retrieve the current invoice payment, PaymentIntent and charge. Synthetic HTTP tests deny partial/full refunds, disputes and missing payment evidence.
+- Launch and Business owner reservation and bound execution/delivery guards require fresh unreversed payment verification. Synthetic PostgreSQL integration denies execution and download when the payment verifier denies access; reservation tests deny consumption when verification is false or missing.
+- Monthly renewal and cancellation boundaries tested with synthetic evidence. Previous-period reservations are conservatively blocked rather than rolled over.
+- These results are not hosted Stripe acceptance. The shared verifier assumes a single full card payment, denies unsupported response shapes, and requires actual sandbox SDK/API verification. Persistent reversal-event reconciliation, restored/dispute-won handling, exact invoice line price/item identity, and legacy route bypass review remain open.
+- Next hosted acceptance requires access to Stripe test mode (the connector currently exposes live mode only) and the existing Launch/Business sandbox access tokens. Never substitute live credentials or rotate tokens without owner approval.
+- No production deployment or live checkout publication authorized.
