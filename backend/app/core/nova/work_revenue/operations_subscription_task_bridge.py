@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, Callable
 
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ def reserve_verified_subscription_task(
     request_key: str,
     task_fingerprint: str,
     now: datetime,
+    bind_reservation: Callable[[str, Any], None] | None = None,
 ) -> dict:
     """Reserve quota only after owner approval and exact paid subscription checks.
 
@@ -56,7 +57,10 @@ def reserve_verified_subscription_task(
         subscription=retrieved_test_subscription,
         now=now,
     )
+    options = {}
+    if bind_reservation is not None:
+        options["before_commit"] = lambda reservation_id: bind_reservation(reservation_id, entitlement)
     return reserve_staging_task(
         db, entitlement=entitlement, customer_id=saved_customer_id,
-        request_key=request_key, task_fingerprint=task_fingerprint, now=now,
+        request_key=request_key, task_fingerprint=task_fingerprint, now=now, **options,
     )
