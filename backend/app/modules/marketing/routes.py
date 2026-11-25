@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from datetime import timedelta
@@ -26,6 +27,9 @@ from app.modules.marketing.operations_billing import (
     plan_payload,
     verify_agent_webhook,
 )
+from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
+from app.modules.marketing.starter_entitlement_policy import transition_entitlement
+from app.modules.marketing.starter_payment_intent import verified_starter_payment_intent
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -371,6 +375,47 @@ async def nova_agent_stripe_webhook(
     lead = db.get(MarketingWebsiteLead, lead_id) if lead_id else None
     if lead is None or lead.lead_type != "anonymous_operations":
         return {"ok": True, "handled": False, "result": "lead_not_found"}
+
+    # A signed webhook must also match the exact stored Starter checkout,
+    # customer, 4,900-cent USD payment, and plan. Invoice events can never
+    # authorize the one-time Starter Task.
+    if lead.service_plan == "starter_49":
+        if (os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
+                or event.get("livemode") is not False
+                or agent_checkout_mode() != "test"):
+            return {"ok": True, "handled": False, "result": "starter_staging_only"}
+        outcome = starter_checkout_outcome(lead, event_type, obj, metadata)
+        if outcome == "paid":
+            # Signed checkout identity is already matched above. A unique,
+            # durable PaymentIntent is required before this order can ever
+            # authorize a paid customer task. Fail closed on missing/conflicting
+            # identifiers, including replayed or out-of-order events.
+            intent = verified_starter_payment_intent(
+                obj, lead.starter_payment_intent_id,
+            )
+            if intent is None:
+                return {"ok": True, "handled": False, "result": "starter_payment_intent_unverified"}
+            lead.starter_payment_intent_id = intent
+            lead.payment_status = "paid"
+            lead.starter_paid_session_id = str(obj["id"])
+            lead.starter_entitlement_state = transition_entitlement(
+                lead.starter_entitlement_state, "paid",
+            )
+            # A delayed Stripe success may confirm history, but never
+            # restore an entitlement that was revoked for refund or dispute.
+            if lead.starter_entitlement_state == "active":
+                lead.status = "qualified"
+            db.commit()
+            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id}
+        if outcome in {"pending", "failed", "expired"}:
+            lead.payment_status = outcome
+            db.commit()
+            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id}
+        return {"ok": True, "handled": False, "result": outcome}
 
     result = "ignored"
     if event_type == "checkout.session.completed":
