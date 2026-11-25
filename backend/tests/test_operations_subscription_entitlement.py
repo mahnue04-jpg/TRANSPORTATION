@@ -120,3 +120,31 @@ def test_saved_failed_payment_is_denied():
 def test_subscription_not_for_one_time_starter():
     with pytest.raises(SubscriptionNotEntitled):
         reconcile(fixture(), plan="starter_49")
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+def test_renewal_requires_fresh_paid_invoice(plan):
+    sub = current_api_fixture(plan)
+    sub["cancel_at_period_end"] = True
+    assert reconcile(sub, plan=plan).period_end == END
+    with pytest.raises(SubscriptionNotEntitled):
+        reconcile(sub, plan=plan, now=END)
+    item = sub["items"]["data"][0]
+    next_end = END + timedelta(days=30)
+    item.update(current_period_start=int(END.timestamp()),
+                current_period_end=int(next_end.timestamp()))
+    sub["cancel_at_period_end"] = False
+    with pytest.raises(SubscriptionNotEntitled, match="invoice_period_mismatch"):
+        reconcile(sub, plan=plan, now=END)
+    invoice = sub["latest_invoice"]
+    invoice["lines"]["data"][0]["period"] = {
+        "start": int(END.timestamp()), "end": int(next_end.timestamp())}
+    invoice["status"] = "open"
+    with pytest.raises(SubscriptionNotEntitled):
+        reconcile(sub, plan=plan, now=END)
+    invoice["status"] = "paid"
+    entitlement = reconcile(sub, plan=plan, now=END)
+    assert entitlement.period_start == END and entitlement.period_end == next_end
+    sub["status"] = "canceled"
+    with pytest.raises(SubscriptionNotEntitled):
+        reconcile(sub, plan=plan, now=END)
