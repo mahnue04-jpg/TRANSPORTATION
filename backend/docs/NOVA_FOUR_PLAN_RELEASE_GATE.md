@@ -1,6 +1,6 @@
 # Nova four-plan payment integration — November 24, 2026
 
-Status: proposed mapping; production checkout remains disabled. No live transaction authorized.
+Status: owner-supplied live price mapping recorded; production checkout remains disabled. No live transaction authorized.
 
 | Offer | USD | Mode | Proposed existing key |
 | --- | --- | --- | --- |
@@ -9,7 +9,7 @@ Status: proposed mapping; production checkout remains disabled. No live transact
 | Launch Operations | 99 monthly | subscription | professional |
 | Business Operations | 299 monthly | subscription | business |
 
-Owner created four live Payment Links and activated a hosted billing portal. Their URLs are not price IDs or proof of payment. Do not publish checkout links before acceptance. Confirm product entitlements and exact Stripe price IDs before mapping. Do not infer a customer tenant from email or an untrusted client_reference_id alone.
+Owner created four live Payment Links and activated a hosted billing portal. Their URLs are not price IDs or proof of payment. Do not publish checkout links before acceptance. Confirm product entitlements and independently verify the owner-supplied Stripe price IDs below before enabling runtime mapping. Do not infer a customer tenant from email or an untrusted client_reference_id alone.
 
 ## Integration direction
 Prefer authenticated server-created Checkout sessions for subscriptions, reusing POST /api/nova/billing/checkout and the existing tenant binding. Existing direct links require a separately verified order/account association and must not automatically grant access. The $49 one-time workflow must remain isolated. Use the authenticated portal endpoint or verified hosted portal for billing management. Keep the free demo available without paid access. Existing trial behavior applies seven days automatically to eligible tenants; resolve this against the no-trial Payment Links before release.
@@ -24,3 +24,14 @@ Prefer authenticated server-created Checkout sessions for subscriptions, reusing
 - Test with synthetic data and sandbox only, then obtain explicit owner approval for any controlled live test and production publication.
 
 Keep NOVA_STRIPE_LIVE_ENABLED=false. No keys or signing secrets in GitHub. No real charges or changes to other AMICOR billing surfaces.
+
+## Owner-confirmed price inventory (November 24, 2026 CT)
+
+| Offer | Live Price ID | Expected USD cents | Mode |
+| --- | --- | --- | --- |
+| Starter Plan | `price_1UfWpDBCDlIbm4gm7kY4yIva` | 999 | monthly subscription |
+| Starter Task | `price_1URDdoBCDlIbm4gmtQqEQgey` | 4900 | one-time payment |
+| Launch Operations | `price_1UfWrXBCDlIbm4gmsdgH2js5` | 9900 | monthly subscription |
+| Business Operations | `price_1UfWsqBCDlIbm4gm8dVahkxS` | 29900 | monthly subscription |
+
+Owner supplied all four identifiers after creating or confirming the products in the live dashboard. Support email saved and hosted portal activated per owner confirmation. Live API verification of price objects, portal configuration and link-to-price association remains pending. This inventory is documentation only, not runtime configuration. Never substitute these IDs into sandbox tests. Live checkout and public links remain disabled pending all release gates above.
