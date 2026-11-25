@@ -1,5 +1,9 @@
 """Isolated Starter self-service rehearsal API. No legacy route changes."""
+from pathlib import Path
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -61,3 +65,23 @@ def assistance(response: Response, user: UserContext = Depends(get_current_user_
         "Review your output before using it",
         "Request a separately scoped managed task if you need AMICOR to execute work"],
         "mode": "static_guidance", "external_ai": False, "managed_execution": False}
+
+
+def starter_routes_enabled():
+    return (
+        os.getenv("APP_ENV") == "staging"
+        and os.getenv("AMICOR_ENVIRONMENT") == "staging"
+        and os.getenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED") == "true"
+        and os.getenv("NOVA_STRIPE_LIVE_ENABLED") == "false"
+        and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") == "false"
+    )
+
+
+@router.get("/interface", response_class=HTMLResponse, include_in_schema=False)
+def interface(user: UserContext = Depends(get_current_user_context),
+              db: Session = Depends(get_db)):
+    require_feature(db, user, "basic_workspace")
+    return HTMLResponse(Path(__file__).with_name("starter_ui.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                 "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
+                 "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"})
