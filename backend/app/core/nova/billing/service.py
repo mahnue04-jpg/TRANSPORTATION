@@ -26,6 +26,7 @@ from app.core.nova.billing.plans import (
     STATUS_TRIALING,
     STRIPE_STATUS_MAP,
     nova_free_trial_days,
+    nova_checkout_trial_enabled,
     nova_past_due_has_access,
     nova_subscription_enforcement_enabled,
     price_id_for_plan,
@@ -221,7 +222,7 @@ def start_checkout(
         row.stripe_customer_id = customer_id
 
     trial_days = nova_free_trial_days()
-    apply_trial = _trial_eligible(row)
+    apply_trial = nova_checkout_trial_enabled() and _trial_eligible(row)
     subscription_data: dict[str, Any] = {
         "metadata": {
             "nova_product": "nova_saas",
