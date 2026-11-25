@@ -270,3 +270,99 @@ def test_authenticated_adapter_failures(adapter_fixture, monkeypatch, failure):
         assert state.reads == 0
     else:
         assert state.queries == 1 and state.reads == 1
+
+
+@pytest.fixture
+def starter_http(monkeypatch, adapter_fixture):
+    import importlib
+    from fastapi import FastAPI, HTTPException, Header
+    from fastapi.testclient import TestClient
+
+    db, user, state = adapter_fixture
+    auth = ModuleType("app.auth")
+    auth.UserContext = SimpleNamespace
+
+    def authenticate(authorization: str = Header(default="")):
+        if authorization != "Bearer synthetic-test":
+            raise HTTPException(401, "Authentication required")
+        return user
+
+    auth.get_current_user_context = authenticate
+    session = ModuleType("app.db.session")
+    session.get_db = lambda: db
+    monkeypatch.setitem(sys.modules, "app.auth", auth)
+    monkeypatch.setitem(sys.modules, "app.db.session", session)
+    module_name = "app.core.nova.billing.starter_feature_routes"
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+    routes = importlib.import_module(module_name)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        yield client, state
+    sys.modules.pop(module_name, None)
+
+
+ROUTES = [
+    ("GET", "/workspace", None),
+    ("POST", "/plan", {"goal": "Synthetic weekly review"}),
+    ("GET", "/templates", None),
+    ("GET", "/assistance", None),
+]
+AUTH = {"Authorization": "Bearer synthetic-test"}
+
+
+@pytest.mark.parametrize("method,path,body", ROUTES)
+def test_starter_http_requires_authentication(starter_http, method, path, body):
+    client, state = starter_http
+    response = client.request(method, "/api/nova/starter"+path, json=body)
+    assert response.status_code == 401
+    assert state.reads == 0
+
+
+@pytest.mark.parametrize("method,path,body", ROUTES)
+def test_starter_http_valid_subscription(starter_http, method, path, body):
+    client, state = starter_http
+    response = client.request(method, "/api/nova/starter"+path, json=body, headers=AUTH)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert state.reads == 1
+    result = response.json()
+    if path == "/workspace":
+        assert result["managed_tasks"] == 0 and result["monthly_usd_cents"] == 999
+    elif path == "/plan":
+        assert result["goal"] == body["goal"] and result["saved"] is False
+        assert result["execution"] == "customer_self_service"
+    elif path == "/templates":
+        assert len(result["templates"]) == 3
+    else:
+        assert result["external_ai"] is False and result["managed_execution"] is False
+
+
+@pytest.mark.parametrize("method,path,body", ROUTES)
+@pytest.mark.parametrize("failure", ["canceled", "unpaid", "live", "disabled"])
+def test_starter_http_denies_invalid_subscription(starter_http, monkeypatch, method, path, body, failure):
+    client, state = starter_http
+    if failure == "canceled":
+        state.subscription["status"] = "canceled"
+    elif failure == "unpaid":
+        state.subscription["latest_invoice"]["status"] = "open"
+    elif failure == "live":
+        state.key = "sk_live_fixture"
+    else:
+        monkeypatch.setenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED", "false")
+    response = client.request(method, "/api/nova/starter"+path, json=body, headers=AUTH)
+    assert response.status_code == 403
+    assert "synthetic" not in response.text
+
+
+def test_starter_http_no_execution_route(starter_http):
+    client, state = starter_http
+    assert client.post("/api/nova/starter/execute", headers=AUTH).status_code == 404
+    assert state.reads == 0
+
+
+@pytest.mark.parametrize("goal", ["", "x"*501])
+def test_starter_http_invalid_plan(starter_http, goal):
+    client, state = starter_http
+    assert client.post("/api/nova/starter/plan", headers=AUTH, json={"goal": goal}).status_code == 422
+    assert state.reads == 0
