@@ -1,0 +1,50 @@
+name: Starter synthetic recovery regression
+on:
+  push:
+    branches: [feat/operations-starter-private-delivery-rehearsal]
+    paths:
+      - 'backend/app/core/nova/work_revenue/operations_customer_csv_jobs.py'
+      - 'backend/operations_starter_delivery_rehearsal.py'
+      - 'backend/tests/test_nova_operations_customer_csv_postgres.py'
+      - '.github/workflows/starter-synthetic-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: synthetic_ci
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U ci -d synthetic_ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TESTING: 'true'
+      DATABASE_URL: sqlite:///./synthetic_ci.db
+      NOVA_CSV_CI_DATABASE_URL: postgresql+psycopg2://ci:ci@127.0.0.1:5432/synthetic_ci
+      APP_ENV: development
+      AMICOR_ENVIRONMENT: development
+      SECRET_KEY: ci-only-placeholder
+      JWT_SECRET: ci-only-placeholder
+      NOVA_STRIPE_LIVE_ENABLED: 'false'
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: 'false'
+      HEALTH_ISF_STRIPE_ENABLED: 'false'
+      ALLOWED_ORIGINS: https://example.invalid
+      AMICOR_PUBLIC_URL: https://example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m py_compile operations_starter_delivery_rehearsal.py app/core/nova/work_revenue/operations_customer_csv_jobs.py
+      - name: Run isolated recovery and idempotency tests
+        run: python -m pytest -v tests/test_nova_operations_customer_csv_postgres.py -k 'synthetic_storage_failure_retries_same_job_only or two_connection_idempotency or concurrent_duplicate_key'
