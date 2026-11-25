@@ -59,7 +59,52 @@ def _completed_task_ids(engagement: dict) -> set[str]:
 
 def _check_saved_csv_assignment(
     db: Session, *, owner: UserContext, engagement_id: str, task_id: str,
+) -> None:
+    org = str(getattr(owner, "organization_id", "") or "").strip()
+    if not org or org.lower() == "global":
+        raise HTTPException(403, "Specific owner organization required")
+    try:
+        engagement = service.get_engagement(
+            db, engagement_id, organization_id=org, user=owner,
+        )
+    except service.NovaWorkError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    if not _eligible_engagement(engagement, org, str(owner.user_id)):
+        raise HTTPException(409, "Engagement no longer eligible")
+    task = next(
+        (item for item in engagement.get("tasks") or []
+         if isinstance(item, dict) and item.get("task_id") == task_id),
+        None,
+    )
+    if task is None:
+        raise HTTPException(404, "Task not found on authorized engagement")
+    if not _eligible_task(task, _completed_task_ids(engagement)):
+        raise HTTPException(409, "Task not authorized for CSV processing")
+
 
 def _reject_queued_job_in_legacy_path(
     db: Session, *, job_id: str, owner: UserContext,
+) -> None:
+    """Prevent legacy review/download/recover from bypassing queued lease gates.
 
+    The original synchronous path remains available if the lease table has not
+    been migrated. Database inspection errors fail closed instead of treating
+    queued jobs as unguarded legacy work.
+    """
+    import sqlalchemy as sa
+    from sqlalchemy import MetaData, Table
+
+    try:
+        table_name = "nova_operations_processing_leases"
+        if not sa.inspect(db.get_bind()).has_table(table_name):
+            return
+        lease_jobs = Table(table_name, MetaData(), autoload_with=db.get_bind())
+        scoped = db.execute(sa.select(lease_jobs.c.job_id).where(
+            lease_jobs.c.job_id == job_id,
+            lease_jobs.c.organization_id == str(owner.organization_id),
+            lease_jobs.c.owner_user_id == str(owner.user_id),
+        )).first()
+    except Exception as exc:
+        raise HTTPException(503, "CSV job mode cannot be verified") from exc
+    if scoped is not None:
+        raise HTTPException(409, "Queued job requires supervised owner workflow")
