@@ -12,7 +12,7 @@ Status: owner-supplied live price mapping recorded; production checkout remains 
 Owner created four live Payment Links and activated a hosted billing portal. Their URLs are not price IDs or proof of payment. Do not publish checkout links before acceptance. Confirm product entitlements and independently verify the owner-supplied Stripe price IDs below before enabling runtime mapping. Do not infer a customer tenant from email or an untrusted client_reference_id alone.
 
 ## Integration direction
-Prefer authenticated server-created Checkout sessions for subscriptions, reusing POST /api/nova/billing/checkout and the existing tenant binding. Existing direct links require a separately verified order/account association and must not automatically grant access. The $49 one-time workflow must remain isolated. Use the authenticated portal endpoint or verified hosted portal for billing management. Keep the free demo available without paid access. Existing trial behavior applies seven days automatically to eligible tenants; resolve this against the no-trial Payment Links before release.
+Prefer authenticated server-created Checkout sessions for subscriptions, reusing POST /api/nova/billing/checkout and the existing tenant binding. Existing direct links require a separately verified order/account association and must not automatically grant access. The $49 one-time workflow must remain isolated. Use the authenticated portal endpoint or verified hosted portal for billing management. Keep the free demo available without paid access. Existing trial behavior remains the default for legacy services. For the four-plan subscription release, explicitly set NOVA_BILLING_CHECKOUT_TRIAL_ENABLED=false; the checkout service now honors that setting.
 
 ## Required verification before live launch
 - Confirm live Stripe price IDs, currency, interval, amount, active state, and distinct product scope. Verify test/live mode isolation.
@@ -35,3 +35,17 @@ Keep NOVA_STRIPE_LIVE_ENABLED=false. No keys or signing secrets in GitHub. No re
 | Business Operations | `price_1UfWsqBCDlIbm4gm8dVahkxS` | 29900 | monthly subscription |
 
 Owner supplied all four identifiers after creating or confirming the products in the live dashboard. Support email saved and hosted portal activated per owner confirmation. Live API verification of price objects, portal configuration and link-to-price association remains pending. This inventory is documentation only, not runtime configuration. Never substitute these IDs into sandbox tests. Live checkout and public links remain disabled pending all release gates above.
+
+## Deployment configuration checklist (not applied)
+
+For the subscription service, the existing environment keys map to the owner-supplied inventory as follows:
+
+- `NOVA_STRIPE_PRICE_STARTER`: $9.99 monthly Starter Plan.
+- `NOVA_STRIPE_PRICE_PROFESSIONAL`: $99 monthly Launch Operations.
+- `NOVA_STRIPE_PRICE_BUSINESS`: $299 monthly Business Operations.
+- `NOVA_BILLING_CHECKOUT_TRIAL_ENABLED=false`: no automatic trial for this offer set. Do not change shared legacy deployments without reviewing scope.
+- `NOVA_STRIPE_LIVE_ENABLED=false`: retain the live-payment hold.
+
+Use independently verified sandbox prices in staging; use independently verified live prices only in the approved isolated production configuration. Do not set the $49 price in any subscription variable. Its separate one-time checkout and delivery integration must be reviewed independently. Configure signing secrets only in the deployment secret store, never in source control. Keep subscription enforcement unchanged until entitlement tests and migration review pass.
+
+Validation evidence for commit `2fc36529ba24d3b87558567d0abbc10a1fd1a5cc`: Nova Stripe billing tests (45556294391), Jekyll site CI (45556294218), and website upload package (45556294227) succeeded. Backend diagnostic and Work & Revenue regression were still running at the time of this review. This is not production acceptance.
