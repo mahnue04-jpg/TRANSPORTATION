@@ -47,7 +47,10 @@ class MarketingWebsiteLead(Base):
     payment_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    starter_paid_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    starter_payment_intent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    starter_entitlement_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    stripe_subscription_id: Mapped[str | None> = mapped_column(String(128), nullable=True)
     checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
@@ -85,6 +88,9 @@ def ensure_marketing_schema() -> None:
             alters.append("ALTER TABLE marketing_website_leads ADD COLUMN stripe_customer_id VARCHAR(128)")
         if "stripe_checkout_session_id" not in existing_cols:
             alters.append("ALTER TABLE marketing_website_leads ADD COLUMN stripe_checkout_session_id VARCHAR(128)")
+        for column, width in (("starter_paid_session_id", 128), ("starter_payment_intent_id", 128), ("starter_entitlement_state", 32)):
+            if column not in existing_cols:
+                alters.append(f"ALTER TABLE marketing_website_leads ADD COLUMN {column} VARCHAR({width})")
         if "stripe_subscription_id" not in existing_cols:
             alters.append("ALTER TABLE marketing_website_leads ADD COLUMN stripe_subscription_id VARCHAR(128)")
         if "checkout_url" not in existing_cols:
