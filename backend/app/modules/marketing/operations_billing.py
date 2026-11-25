@@ -69,6 +69,9 @@ class AgentStripeClient(Protocol):
     def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
         ...
 
+    def verify_subscription_payment(self, *, plan: str, customer_id: str, subscription: dict) -> bool:
+        ...
+
 
 class FakeAgentStripeClient:
     """In-process checkout double used by tests. Never contacts Stripe."""
@@ -190,6 +193,19 @@ class LiveAgentStripeClient:
         client = self._build_client()
         subscription = client.v1.subscriptions.retrieve(subscription_id, {"expand": ["latest_invoice"]})
         return self._as_dict(subscription)
+
+    def verify_subscription_payment(self, *, plan: str, customer_id: str, subscription: dict) -> bool:
+        from app.core.nova.billing.subscription_reversal_evidence import verify_current_invoice_payment
+        if (not self.api_key.startswith(("sk_test_", "rk_test_"))
+                or os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "false"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "false"
+                or subscription.get("livemode") is not False):
+            return False
+        return verify_current_invoice_payment(self._build_client(), plan=plan,
+            customer_id=customer_id, subscription=subscription)
 
 
 def subscription_test_price(plan_key: str) -> str:
