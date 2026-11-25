@@ -247,6 +247,7 @@ def test_current_subscription_execution_guard(db, monkeypatch, plan, amount):
                                period=dict(start=int(start.timestamp()), end=int(end.timestamp())))]}))
     client = Mock()
     client.retrieve_subscription.return_value = sub
+    client.verify_subscription_payment.return_value = True
     billing = types.ModuleType("app.modules.marketing.operations_billing")
     billing.agent_checkout_mode = lambda: "test"
     billing.subscription_test_price = lambda plan: "price_synthetic"
@@ -267,6 +268,11 @@ def test_current_subscription_execution_guard(db, monkeypatch, plan, amount):
             session.commit()
             assert require_current_bound_subscription(session, **guard_scope)["authorized"]
             session.rollback()
+            client.verify_subscription_payment.return_value = False
+            with pytest.raises(AllowanceBlocked, match="subscription_payment_reversed_or_unverified"):
+                require_current_bound_subscription(session, **guard_scope)
+            session.rollback()
+            client.verify_subscription_payment.return_value = True
             for field, value in (("status", "canceled"), ("livemode", True),
                                  ("customer", "cus_wrong")):
                 previous = sub[field]
