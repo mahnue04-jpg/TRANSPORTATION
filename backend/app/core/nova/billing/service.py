@@ -26,6 +26,7 @@ from app.core.nova.billing.plans import (
     STATUS_TRIALING,
     STRIPE_STATUS_MAP,
     nova_free_trial_days,
+    nova_checkout_trial_enabled,
     nova_past_due_has_access,
     nova_subscription_enforcement_enabled,
     price_id_for_plan,
@@ -221,7 +222,7 @@ def start_checkout(
         row.stripe_customer_id = customer_id
 
     trial_days = nova_free_trial_days()
-    apply_trial = _trial_eligible(row)
+    apply_trial = nova_checkout_trial_enabled() and _trial_eligible(row)
     subscription_data: dict[str, Any] = {
         "metadata": {
             "nova_product": "nova_saas",
@@ -415,37 +416,63 @@ def _tenant_from_obj(obj: dict[str, Any]) -> str | None:
     return str(value).strip() if value else None
 
 
-def _row_for_event(db: Session, obj: dict[str, Any]) -> NovaTenantSubscription | None:
-    tenant_id = _tenant_from_obj(obj)
-    if tenant_id:
-        row = (
-            db.query(NovaTenantSubscription)
-            .filter(NovaTenantSubscription.tenant_id == tenant_id)
-            .first()
-        )
-        if row is not None:
-            return row
+def _row_for_event(db: Session, obj: dict[str, Any], event_type: str) -> NovaTenantSubscription | None:
+    # Stripe signatures authenticate the sender, not a Nova tenant association.
     customer_id = obj.get("customer")
     if isinstance(customer_id, dict):
         customer_id = customer_id.get("id")
-    if customer_id:
-        row = (
-            db.query(NovaTenantSubscription)
-            .filter(NovaTenantSubscription.stripe_customer_id == str(customer_id))
-            .first()
-        )
-        if row is not None:
-            return row
-    subscription_id = obj.get("subscription") or obj.get("id")
+    if not customer_id:
+        return None
+    row = (
+        db.query(NovaTenantSubscription)
+        .filter(NovaTenantSubscription.stripe_customer_id == str(customer_id))
+        .first()
+    )
+    if row is None:
+        return None
+    tenant_id = _tenant_from_obj(obj)
+    if tenant_id and tenant_id != row.tenant_id:
+        return None
+    metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
+    plan = metadata.get("nova_plan_key")
+    if plan and plan != row.plan_key:
+        return None
+    if event_type.startswith("customer.subscription."):
+        # A subscription update must not silently change the agreed price or quantity.
+        items = obj.get("items")
+        if items is not None:
+            data = items.get("data") if isinstance(items, dict) else None
+            if not isinstance(data, list) or len(data) != 1 or items.get("has_more"):
+                return None
+            item = data[0]
+            if not isinstance(item, dict):
+                return None
+            price = item.get("price")
+            price_id = price.get("id") if isinstance(price, dict) else price
+            if not row.stripe_price_id or price_id != row.stripe_price_id:
+                return None
+            if item.get("quantity", 1) != 1:
+                return None
+    if event_type == "checkout.session.completed":
+        if obj.get("id") != row.stripe_checkout_session_id:
+            return None
+        if obj.get("mode") not in (None, "subscription"):
+            return None
+        # A completed subscription checkout must identify the subscription.
+        checkout_subscription = obj.get("subscription")
+        if isinstance(checkout_subscription, dict):
+            checkout_subscription = checkout_subscription.get("id")
+        if not isinstance(checkout_subscription, str) or not checkout_subscription.startswith("sub_"):
+            return None
+    subscription_id = obj.get("id") if event_type.startswith("customer.subscription.") else obj.get("subscription")
     if isinstance(subscription_id, dict):
         subscription_id = subscription_id.get("id")
-    if subscription_id and str(subscription_id).startswith("sub_"):
-        return (
-            db.query(NovaTenantSubscription)
-            .filter(NovaTenantSubscription.stripe_subscription_id == str(subscription_id))
-            .first()
-        )
-    return None
+    if row.stripe_subscription_id and subscription_id and str(subscription_id) != row.stripe_subscription_id:
+        return None
+    if event_type.startswith("customer.subscription.") or event_type.startswith("invoice."):
+        if not row.stripe_subscription_id or subscription_id != row.stripe_subscription_id:
+            return None
+    return row
 
 
 def _apply_subscription_object(row: NovaTenantSubscription, obj: dict[str, Any], *, deleted: bool = False) -> None:
@@ -504,7 +531,7 @@ def process_webhook(db: Session, event: dict[str, Any]) -> dict[str, Any]:
         return {"duplicate": True, "result": "ignored"}
 
     obj = _event_object(event)
-    row = _row_for_event(db, obj)
+    row = _row_for_event(db, obj, event_type)
     result = "ignored"
     if row is None:
         result = "unmatched"
@@ -554,13 +581,14 @@ def process_webhook(db: Session, event: dict[str, Any]) -> dict[str, Any]:
     elif event_type == "charge.refunded":
         result = "refund_recorded"
 
-    _record_revenue_event(
-        db,
-        event_id=event_id,
-        event_type=event_type,
-        row=row,
-        obj=obj,
-    )
+    if row is not None:
+        _record_revenue_event(
+            db,
+            event_id=event_id,
+            event_type=event_type,
+            row=row,
+            obj=obj,
+        )
 
     db.add(
         NovaBillingWebhookEvent(

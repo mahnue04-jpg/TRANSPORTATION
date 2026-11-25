@@ -507,3 +507,144 @@ def test_live_stripe_remains_fail_closed_without_explicit_enable(monkeypatch) ->
     blocked = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
     assert blocked.status_code == 503
     assert "NOVA_STRIPE_LIVE_ENABLED" in blocked.text
+
+
+def test_unrelated_payment_events_do_not_activate_or_record_revenue(monkeypatch) -> None:
+    fake = _env(monkeypatch)
+    try:
+        client = _client()
+        headers = _login(client)
+        checkout = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
+        assert checkout.status_code == 200
+        tenant = _admin_org()
+        customer = next(iter(fake.customers))
+        session = checkout.json()["checkout_session_id"]
+        base = {"id": session, "customer": customer, "subscription": "sub_bound",
+                "mode": "subscription", "payment_status": "paid",
+                "metadata": {"nova_tenant_id": tenant, "nova_plan_key": "starter"}}
+        cases = [
+            dict(base, customer="cus_unrelated"),
+            dict(base, id="cs_unrelated"),
+            dict(base, mode="payment"),
+            {key: value for key, value in base.items() if key != "subscription"},
+            dict(base, subscription=None),
+            dict(base, subscription=""),
+            dict(base, subscription="pi_not_a_subscription"),
+            dict(base, subscription={"id": None}),
+            dict(base, subscription=123),
+            dict(base, metadata={"nova_tenant_id": uuid4()}),
+            dict(base, metadata={"nova_tenant_id": tenant, "nova_plan_key": "business"}),
+        ]
+        for i, obj in enumerate(cases):
+            response = _post_event(client, {"id": f"evt_bad_binding_{i}", "type": "checkout.session.completed", "data": {"object": obj}})
+            assert response.status_code == 200
+            assert response.json()["result"] == "unmatched"
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).filter_by(tenant_id=tenant).one()
+            assert row.subscription_status == "incomplete"
+            assert row.stripe_subscription_id is None
+        valid = _post_event(client, {"id": "evt_bound_checkout", "type": "checkout.session.completed", "data": {"object": base}})
+        assert valid.status_code == 200
+        assert valid.json()["result"] == "checkout_completed"
+        unrelated = _post_event(client, {"id": "evt_wrong_invoice", "type": "invoice.paid",
+            "data": {"object": {"id": "in_unrelated", "customer": customer, "subscription": "sub_unrelated",
+                                "amount_paid": 4900, "currency": "usd"}}})
+        assert unrelated.status_code == 200
+        assert unrelated.json()["result"] == "unmatched"
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).filter_by(tenant_id=tenant).one()
+            assert row.stripe_subscription_id == "sub_bound"
+            assert db.query(NovaBillingRevenueEvent).count() == 0
+    finally:
+        set_nova_billing_stripe_override(None)
+
+
+def test_subscription_updates_cannot_change_bound_price_or_quantity(monkeypatch) -> None:
+    fake = _env(monkeypatch)
+    try:
+        client = _client()
+        checkout = client.post("/api/nova/billing/checkout", headers=_login(client), json={"plan_key": "starter"})
+        assert checkout.status_code == 200
+        tenant = _admin_org()
+        customer = next(iter(fake.customers))
+        completed = {"id": checkout.json()["checkout_session_id"], "customer": customer,
+                     "subscription": "sub_price_bound", "mode": "subscription", "payment_status": "paid"}
+        response = _post_event(client, {"id": "evt_price_checkout", "type": "checkout.session.completed",
+                                       "data": {"object": completed}})
+        assert response.status_code == 200
+        assert response.json()["result"] == "checkout_completed"
+        base = {"id": "sub_price_bound", "object": "subscription", "customer": customer, "status": "active"}
+        item = {"price": {"id": PRICE_STARTER}, "quantity": 1}
+        invalid_items = [
+            {"data": [{"price": {"id": PRICE_BIZ}, "quantity": 1}]},
+            {"data": [dict(item, quantity=2)]},
+            {"data": [item, item]},
+            {"data": []},
+            {"data": [item], "has_more": True},
+            {"data": [None]},
+        ]
+        for i, items in enumerate(invalid_items):
+            response = _post_event(client, {"id": f"evt_price_invalid_{i}", "type": "customer.subscription.updated",
+                                           "data": {"object": dict(base, items=items)}})
+            assert response.status_code == 200
+            assert response.json()["result"] == "unmatched"
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).filter_by(tenant_id=tenant).one()
+            assert row.stripe_price_id == PRICE_STARTER
+            assert row.plan_key == "starter"
+            assert row.subscription_status == "trialing"
+        response = _post_event(client, {"id": "evt_price_valid", "type": "customer.subscription.updated",
+                                       "data": {"object": dict(base, items={"data": [item], "has_more": False})}})
+        assert response.status_code == 200
+        assert response.json()["result"] == "subscription_synced"
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).filter_by(tenant_id=tenant).one()
+            assert row.stripe_price_id == PRICE_STARTER
+            assert row.subscription_status == "active"
+    finally:
+        set_nova_billing_stripe_override(None)
+
+
+def test_explicit_no_trial_checkout(monkeypatch) -> None:
+    fake = _env(monkeypatch)
+    monkeypatch.setenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "false")
+    try:
+        client = _client()
+        headers = _login(client)
+        result = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
+        assert result.status_code == 200, result.text
+        assert result.json()["trial_applied"] is False
+        session = fake.sessions[result.json()["checkout_session_id"]]
+        assert "trial_period_days" not in session["subscription_data"]
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).one()
+            assert not row.trial_used
+            assert row.trial_started_at is None
+    finally:
+        set_nova_billing_stripe_override(None)
+
+
+
+def test_exact_paid_plan_access_policy() -> None:
+    from app.core.nova.billing.paid_access_policy import allows_paid_plan
+
+    current = datetime(2026, 11, 25, tzinfo=timezone.utc)
+    for plan, price in (("starter", PRICE_STARTER), ("professional", PRICE_PRO), ("business", PRICE_BIZ)):
+        evidence = dict(required_plan=plan, recorded_plan=plan, status="active",
+                        expected_price=price, recorded_price=price,
+                        verified_subscription=True, now=current,
+                        current_period_end=current + timedelta(days=30))
+        assert allows_paid_plan(**evidence)
+        for mismatch in (
+            {"recorded_plan": "unknown"},
+            {"required_plan": "starter_49"},
+            {"recorded_price": "price_wrong"},
+            {"expected_price": ""},
+            {"verified_subscription": False},
+            {"current_period_end": None},
+            {"current_period_end": current},
+            {"current_period_end": current - timedelta(seconds=1)},
+            {"current_period_end": current.replace(tzinfo=None)},
+            *({"status": state} for state in (None, "trialing", "past_due", "cancelled", "incomplete", "expired")),
+        ):
+            assert not allows_paid_plan(**(evidence | mismatch))
