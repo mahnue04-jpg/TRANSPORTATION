@@ -58,7 +58,7 @@ Payment branch PR #589: all five workflows passed at dbdd72fdd4da63b242d52bf6853
 | Offer | Approved staging allowance | Integration requirement |
 | --- | --- | --- |
 | Free Scope Check | Qualification only | Preserve public inquiry path |
-| $9.99 Starter Plan | Not yet approved | Owner defines benefits; do not infer task allowance |
+| $9.99 Starter Plan | Basic workspace, planning, templates, self-service assistance; zero managed tasks | Owner approved staging only; require authenticated paid subscription |
 | $49 Starter Task | One small scoped task | Exact paid order, PaymentIntent, task binding, private reviewed delivery |
 | $99 Launch Operations | Up to 3 tasks per verified subscription month | Current paid invoice, exact price and tenant/customer binding, durable reservations |
 | $299 Business Operations | Up to 10 tasks per verified subscription month; relative priority support | Same controls as Launch, distinct allowance and support triage |
@@ -70,7 +70,16 @@ Source for allowances: docs/nova-operations-approved-package-readiness-20261122.
 2. Establish one authoritative tenant-to-customer/subscription/order binding. Existing SaaS billing and anonymous Operations marketing leads are distinct; never link by email alone. Confirm explicit authenticated association and exact price, quantity, mode, and period.
 3. Reuse Operations reconciliation, owner approval and durable task reservation logic from PR #583. Keep synthetic-only gates and test credentials. Review additive migrations on disposable PostgreSQL with backup/restore and concurrency tests. Do not treat the isolated paid-access policy as sufficient payment proof.
 4. Reuse Starter payment binding and private delivery from PR #582 and its dependencies. Wire refund/dispute reconciliation to the exact PaymentIntent and revoke grants on reversal. Test recipient isolation, expiry, replay, concurrent requests, and revocation.
-5. Run integrated staging tests for all approved tiers; verify current paid invoice, renewal, failure, cancellation, refund, quota boundary, owner approval, execution, delivery and audit receipt. Keep $9.99 access unprovisioned pending explicit benefits approval.
+5. Run integrated staging tests for all approved tiers; verify current paid invoice, renewal, failure, cancellation, refund, quota boundary, owner approval, execution, delivery and audit receipt. Keep $9.99 access restricted to synthetic staging until hosted acceptance.
 6. Complete legal/tax/support review and obtain separate owner authorization before live credentials, deployment, public links or real charges.
 
 No migrations, runtime configuration, checkout links or production flags are changed by this document.
+
+
+## Updated staging evidence — November 25, 2026
+
+- Consolidated draft PR #590, not merged. At commit 76611d1c3fc6e4bf6ab4ee459b01f62266c1e040 all three workflows passed (45714298740, 45714298775, 45714298726).
+- Starter $9.99: owner approved four self-service benefits and no managed tasks. Authenticated feature routes and private HTML interface implemented; planning is unsaved and guidance is static. Synthetic tests pass, but actual login, Stripe sandbox payment, cancellation and browser verification remain pending. Stripe connector currently lists only live mode; sandbox price creation rejected. Do not substitute live price.
+- $49: previously verified hosted synthetic payment-to-private-delivery and revocation; no real revenue. Renew scoped staging storage credential before Dec 2 expiry.
+- $99/$299: disposable PostgreSQL integration passed with simulated Stripe/storage. Hosted checkout creation awaits existing sandbox access tokens; do not reset or expose tokens. Hosted fulfillment is not verified.
+- Live tax determination, refund/dispute and renewal lifecycle verification, migration review, production authorization and website publication remain release gates. No live sales authorized.
