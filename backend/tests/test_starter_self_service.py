@@ -179,8 +179,11 @@ def adapter_fixture(monkeypatch):
     row, sub = evidence()
     user = SimpleNamespace(organization_id=row.tenant_id,
         user_id="synthetic-user", email="starter@example.invalid")
+    from test_subscription_reversal_evidence import fixture as reversal_fixture
+    payment = reversal_fixture("starter")
+    sub["latest_invoice"]["id"] = payment["invoice_id"]
     state = SimpleNamespace(row=row, subscription=sub, key="sk_test_fixture",
-        queries=0, reads=0, fail=False)
+        queries=0, reads=0, fail=False, payment=payment, charge_reads=0)
     from sqlalchemy import String
     from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -205,9 +208,25 @@ def adapter_fixture(monkeypatch):
             raise RuntimeError("synthetic provider failure")
         return state.subscription
 
+    def list_payments(params):
+        assert params == {"invoice": state.payment["invoice_id"], "limit": 2}
+        return state.payment["invoice_payments"]
+
+    def retrieve_intent(intent_id):
+        assert intent_id == state.payment["payment_intent"]["id"]
+        return state.payment["payment_intent"]
+
+    def retrieve_charge(charge_id):
+        assert charge_id == state.payment["charge"]["id"]
+        state.charge_reads += 1
+        return state.payment["charge"]
+
     billing_client.LiveNovaBillingStripeClient = lambda api_key: SimpleNamespace(
         _build_client=lambda: SimpleNamespace(v1=SimpleNamespace(
-            subscriptions=SimpleNamespace(retrieve=retrieve))))
+            subscriptions=SimpleNamespace(retrieve=retrieve),
+            invoice_payments=SimpleNamespace(list=list_payments),
+            payment_intents=SimpleNamespace(retrieve=retrieve_intent),
+            charges=SimpleNamespace(retrieve=retrieve_charge))))
     for module in (models, signup_client, billing_client):
         monkeypatch.setitem(sys.modules, module.__name__, module)
 
@@ -419,3 +438,20 @@ def test_starter_renewal_requires_current_paid_invoice():
     assert at(boundary)
     sub["status"] = "canceled"
     assert not at(boundary)
+
+
+@pytest.mark.parametrize("method,path,body", ROUTES)
+@pytest.mark.parametrize("field,value", [("amount_refunded", 1), ("refunded", True), ("disputed", True)])
+def test_starter_http_reversal_denies_access(starter_http, method, path, body, field, value):
+    client, state = starter_http
+    state.payment["charge"][field] = value
+    response = client.request(method, "/api/nova/starter"+path, json=body, headers=AUTH)
+    assert response.status_code == 403
+    assert state.charge_reads == 1
+
+
+def test_starter_reversal_missing_invoice_payment_denied(adapter_fixture):
+    db, user, state = adapter_fixture
+    state.payment["invoice_payments"]["data"].clear()
+    assert not authenticated_starter_access(db, authenticated_user=user, feature="basic_workspace")
+    assert state.charge_reads == 0
