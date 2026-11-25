@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nova Lifesaver — Face Scan Research Prototype</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark;background:#101827;color:white}
+body{margin:0;padding:24px;max-width:660px;margin-inline:auto}
+h1{font-size:1.65rem}p{line-height:1.55;color:#d3dfec}
+section{background:#1d2b3d;border:1px solid #42546a;border-radius:16px;padding:20px;margin-block:16px}
+video{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:12px;background:#030b15;transform:scaleX(-1)}
+button{background:#58c4c1;color:#071823;border:0;padding:12px 18px;border-radius:9px;font-weight:700;margin:4px;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+label{display:flex;gap:10px;align-items:start}
+#status{font-weight:700}small{color:#c5d2df}a{color:#a4dedc}
+</style>
+</head>
+<body>
+<main>
+<h1>Nova Lifesaver Face Scan</h1>
+<p><strong>Research prototype — not a medical device.</strong> This demonstration tests permission handling and camera signal conditions only. It cannot measure heart rate, breathing, stress, BMI, skin age, or detect an emergency.</p>
+<section aria-labelledby="consent-title">
+<h2 id="consent-title">Your permission</h2>
+<p>Your camera feed stays on this device. This demonstration does not upload, save, identify, or analyze your face for health readings. Permission can be revoked by stopping or using browser controls.</p>
+<label><input id="consent" type="checkbox"> I understand this is a camera-only research demonstration and agree to turn on my camera.</label>
+</section>
+<section>
+<video id="preview" autoplay muted playsinline aria-label="Live front camera preview"></video>
+<p id="status" role="status" aria-live="polite">Camera off.</p>
+<p id="quality">Camera signal quality: not assessed.</p>
+<button id="start" disabled>Start camera preview</button>
+<button id="stop" disabled>Stop and clear camera</button>
+<p><small>Use on HTTPS or localhost. Even adequate lighting cannot establish clinical accuracy. No image or measurement is stored.</small></p>
+</section>
+</main>
+<script>
+(()=>{'use strict';
+const consent=document.getElementById('consent');
+const start=document.getElementById('start');
+const stop=document.getElementById('stop');
+const preview=document.getElementById('preview');
+const status=document.getElementById('status');
+const quality=document.getElementById('quality');
+const canvas=document.createElement('canvas');
+const context=canvas.getContext('2d',{willReadFrequently:true});
+let stream=null,frameTimer=null,requestToken=0;
+function say(message){status.textContent=message}
+function release(){
+  requestToken++;
+  if(frameTimer!==null){clearInterval(frameTimer);frameTimer=null}
+  const old=stream;stream=null;
+  if(old)old.getTracks().forEach(track=>track.stop());
+  if(preview.srcObject){const s=preview.srcObject;preview.srcObject=null;if(s!==old && s.getTracks)s.getTracks().forEach(track=>track.stop())}
+  quality.textContent='Camera signal quality: not assessed.';
+  stop.disabled=true;start.disabled=!consent.checked;
+}
+function assess(){
+  if(!stream || !preview.videoWidth || !context)return;
+  canvas.width=32;canvas.height=24;
+  let pixels;
+  try {
+    context.drawImage(preview,0,0,32,24);
+    pixels=context.getImageData(0,0,32,24).data;
+  } catch (_) {
+    quality.textContent='Lighting check unavailable; camera preview only.';
+    return;
+  }
+  let sum=0;
+  for(let i=0;i<pixels.length;i+=4)sum+=.2126*pixels[i]+.7152*pixels[i+1]+.0722*pixels[i+2];
+  const mean=sum/(pixels.length/4);
+  quality.textContent=mean<45?'Lighting check: image is too dark. Move to brighter, even lighting.':mean>225?'Lighting check: image appears very bright. Avoid direct glare.':'Lighting check: brightness appears usable for camera preview only.';
+}
+consent.addEventListener('change',()=>{if(!consent.checked){release();say('Consent withdrawn. Camera off.')}else{start.disabled=!!stream}});
+start.addEventListener('click',async()=>{
+  if(!consent.checked)return;
+  const token=++requestToken;
+  start.disabled=true;say('Requesting camera access…');
+  try{
+    if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera preview requires HTTPS/localhost and a compatible browser.');
+    const acquired=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    if(token!==requestToken||!consent.checked||document.hidden){acquired.getTracks().forEach(t=>t.stop());return}
+    stream=acquired;
+    stream.getVideoTracks().forEach(track=>track.addEventListener('ended',()=>{if(stream===acquired){release();say('Camera disconnected.')}}));
+    preview.srcObject=stream;
+    try{await preview.play()}catch(e){if(token===requestToken){release();throw e}return}
+    if(token!==requestToken||!consent.checked||document.hidden){if(stream===acquired)release();return}
+    stop.disabled=false;say('Camera on. No vital signs are being measured.');
+    frameTimer=setInterval(assess,1000);
+  }catch(e){if(token!==requestToken)return;release();say('Camera unavailable: '+(e?.name==='NotAllowedError'?'permission was denied.':e?.message||'check permissions and browser support.'))}
+});
+stop.addEventListener('click',()=>{release();say('Camera stopped and cleared.')});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){release();say('Camera stopped when page became hidden.')}});
+window.addEventListener('pagehide',release);
+window.addEventListener('beforeunload',release);
+})();
+</script>
+</body>
+</html>
