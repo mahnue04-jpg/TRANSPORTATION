@@ -87,7 +87,11 @@ def require_current_bound_subscription(
     if not price or not price.startswith("price_"):
         raise AllowanceBlocked("test_price_not_configured")
     try:
-        subscription = get_agent_stripe_client().retrieve_subscription(row["subscription_id"])
+        stripe = get_agent_stripe_client()
+        subscription = stripe.retrieve_subscription(row["subscription_id"])
+        if stripe.verify_subscription_payment(plan=row["plan"],
+                customer_id=row["customer_id"], subscription=subscription) is not True:
+            raise AllowanceBlocked("subscription_payment_reversed_or_unverified")
         entitlement = from_reconciled_test_subscription(
             plan=row["plan"], lead_id=row["lead_id"],
             saved_customer_id=row["customer_id"],
@@ -97,6 +101,8 @@ def require_current_bound_subscription(
         )
     except SubscriptionNotEntitled as exc:
         raise AllowanceBlocked("subscription_not_currently_entitled") from exc
+    except AllowanceBlocked:
+        raise
     except Exception as exc:
         raise AllowanceBlocked("stripe_subscription_unavailable") from exc
     # Conservative staging policy: do not execute or release a task reserved
