@@ -56,7 +56,7 @@ def apply(add, pages, status_table):
         card('Starter Task', '<strong>$49 one-time</strong>A supported starter task, with scope reviewed before work begins.', AGENT, 'Request a starter task'),
         card('Launch Operations', '<strong>$99/month</strong>Recurring supported digital operations. Confirm the scope and plan details in the Nova app.', AGENT, 'View plan'),
         card('Business Operations', '<strong>$299/month</strong>Business operations support within an agreed scope. Complex projects are quoted separately.', AGENT, 'View plan'),
-    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">The $9.99 plan is proposed; the other options are listed in the Nova app. Paid checkout is not available through this website while billing, tax, terms and fulfillment checks are pending. Media-provider credits and complex projects are not represented as included.</p>'
+    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">The $9.99 plan is proposed; the other options are listed in the Nova app. This corporate website does not collect payment while billing, tax, terms and fulfillment checks are pending. Media-provider credits and complex projects are not represented as included.</p>'
 
     quote_url = '/early-access/?product=Business%20Services&intent=quote'
     project_brief = (
