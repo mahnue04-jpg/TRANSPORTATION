@@ -394,3 +394,28 @@ def test_starter_registration_requires_explicit_staging(starter_http, monkeypatc
     assert starter_routes_enabled()
     monkeypatch.delenv(flag)
     assert not starter_routes_enabled()
+
+
+def test_starter_renewal_requires_current_paid_invoice():
+    row, sub = evidence()
+    item = sub["items"]["data"][0]
+    boundary = datetime.fromtimestamp(item["current_period_end"], timezone.utc)
+    def at(moment):
+        return verify_starter_feature(feature="basic_workspace",
+            tenant_id=row.tenant_id, row=row, subscription=sub, now=moment)
+    sub["cancel_at_period_end"] = True
+    assert at(boundary-timedelta(seconds=1))
+    assert not at(boundary)
+    start = int(boundary.timestamp())
+    end = int((boundary+timedelta(days=30)).timestamp())
+    item.update(current_period_start=start, current_period_end=end)
+    sub["cancel_at_period_end"] = False
+    assert not at(boundary)
+    invoice = sub["latest_invoice"]
+    invoice["lines"]["data"][0]["period"] = {"start": start, "end": end}
+    invoice["status"] = "open"
+    assert not at(boundary)
+    invoice["status"] = "paid"
+    assert at(boundary)
+    sub["status"] = "canceled"
+    assert not at(boundary)
