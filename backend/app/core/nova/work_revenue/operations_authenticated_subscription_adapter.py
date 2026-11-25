@@ -7,7 +7,7 @@ UserContext from get_current_user_context, not from a request JSON body.
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -96,6 +96,22 @@ def reserve_owner_approved_test_subscription_task(
     except Exception as exc:
         raise AllowanceBlocked("stripe_subscription_unavailable") from exc
 
+    from .operations_subscription_csv_binding import bind_reserved_csv_task, request_key_for_task
+    scope = dict(organization_id=organization_id, owner_user_id=user_id,
+                 engagement_id=engagement_id, task_id=task_id, lead_id=lead.id)
+    if request_key != request_key_for_task(**scope):
+        raise AllowanceBlocked("exact_csv_request_key_required")
+
+    def bind(reservation_id, entitlement):
+        bind_reserved_csv_task(
+            db, reservation_id=reservation_id, **scope,
+            customer_id=entitlement.customer_id,
+            subscription_id=entitlement.subscription_id,
+            plan=entitlement.plan,
+            period_key=entitlement.period_start.astimezone(timezone.utc).isoformat(),
+            input_sha256=task_fingerprint,
+        )
+
     return reserve_verified_subscription_task(
         db, owner_scope_approved=True,
         plan=lead.service_plan,
@@ -107,5 +123,5 @@ def reserve_owner_approved_test_subscription_task(
         retrieved_test_subscription=subscription,
         request_key=request_key,
         task_fingerprint=task_fingerprint,
-        now=now,
+        now=now, bind_reservation=bind,
     )
