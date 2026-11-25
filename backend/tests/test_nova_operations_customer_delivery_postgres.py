@@ -338,6 +338,7 @@ def test_subscription_execution_and_delivery(isolated_postgres, monkeypatch, pla
                                period=dict(start=int(start.timestamp()), end=int(end.timestamp())))]}))
     stripe = Mock()
     stripe.retrieve_subscription.return_value = sub
+    stripe.verify_subscription_payment.return_value = True
     monkeypatch.setattr(billing, "agent_checkout_mode", lambda: "test")
     monkeypatch.setattr(billing, "subscription_test_price", lambda plan: "price_synthetic")
     monkeypatch.setattr(billing, "get_agent_stripe_client", lambda: stripe)
@@ -368,6 +369,12 @@ def test_subscription_execution_and_delivery(isolated_postgres, monkeypatch, pla
             db.commit()
             args = dict(authenticated_user=owner, engagement_id=scope["engagement_id"],
                         task_id=scope["task_id"], raw=raw)
+            stripe.verify_subscription_payment.return_value = False
+            with pytest.raises(AllowanceBlocked, match="subscription_payment_reversed_or_unverified"):
+                execute_reserved_subscription_csv(db, **args)
+            assert db.scalar(sa.select(sa.func.count()).select_from(csv.jobs)) == 0
+            db.rollback()
+            stripe.verify_subscription_payment.return_value = True
             result = execute_reserved_subscription_csv(db, **args)
             job = result["job_id"]
             assert result["status"] == "AWAITING_REVIEW"
@@ -386,6 +393,11 @@ def test_subscription_execution_and_delivery(isolated_postgres, monkeypatch, pla
             with pytest.raises(delivery.HTTPException) as denied:
                 download_subscription_grant(db, authenticated_recipient=wrong, job_id=job)
             assert denied.value.status_code == 404
+            stripe.verify_subscription_payment.return_value = False
+            with pytest.raises(AllowanceBlocked, match="subscription_payment_reversed_or_unverified"):
+                download_subscription_grant(db, authenticated_recipient=buyer, job_id=job)
+            db.rollback()
+            stripe.verify_subscription_payment.return_value = True
             sub["status"] = "canceled"
             with pytest.raises(AllowanceBlocked, match="subscription_not_currently_entitled"):
                 download_subscription_grant(db, authenticated_recipient=buyer, job_id=job)
