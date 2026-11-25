@@ -51,6 +51,11 @@ def nova_free_trial_days() -> int:
     return days if days > 0 else DEFAULT_TRIAL_DAYS
 
 
+def nova_checkout_trial_enabled() -> bool:
+    """Legacy trial behavior unless explicitly disabled for a no-trial offer."""
+    return _truthy(os.getenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "true"))
+
+
 def nova_subscription_enforcement_enabled() -> bool:
     return _truthy(os.getenv("NOVA_SUBSCRIPTION_ENFORCEMENT", "false"))
 
