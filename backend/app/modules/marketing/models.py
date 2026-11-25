@@ -50,7 +50,7 @@ class MarketingWebsiteLead(Base):
     starter_paid_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     starter_payment_intent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     starter_entitlement_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    stripe_subscription_id: Mapped[str | None> = mapped_column(String(128), nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
