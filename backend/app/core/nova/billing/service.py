@@ -458,6 +458,12 @@ def _row_for_event(db: Session, obj: dict[str, Any], event_type: str) -> NovaTen
             return None
         if obj.get("mode") not in (None, "subscription"):
             return None
+        # A completed subscription checkout must identify the subscription.
+        checkout_subscription = obj.get("subscription")
+        if isinstance(checkout_subscription, dict):
+            checkout_subscription = checkout_subscription.get("id")
+        if not isinstance(checkout_subscription, str) or not checkout_subscription.startswith("sub_"):
+            return None
     subscription_id = obj.get("id") if event_type.startswith("customer.subscription.") else obj.get("subscription")
     if isinstance(subscription_id, dict):
         subscription_id = subscription_id.get("id")
