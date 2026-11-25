@@ -11,6 +11,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from typing import Callable
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -89,6 +90,7 @@ def _owned(db: Session, job_id: str, org: str, owner: str, *, lock: bool = False
 def submit_review_job(
     db: Session, *, org: str, owner: str, engagement_id: str, task_id: str,
     request_key: str, raw: bytes,
+    authorize: Callable[[], None] | None = None,
 ) -> dict:
     """Synchronous bounded processing, durable metadata, review-only private output.
 
@@ -109,6 +111,8 @@ def submit_review_job(
     # Reserve with DB uniqueness before paid work or object storage.
     # A failed reservation is inspected for scope/content consistency.
     try:
+        if authorize is not None:
+            authorize()
         db.execute(sa.insert(jobs).values(
             id=job_id, organization_id=org, owner_user_id=owner,
             engagement_id=engagement_id, task_id=task_id,
@@ -129,12 +133,16 @@ def submit_review_job(
             fingerprint, engagement_id, task_id
         ):
             raise CustomerCSVBlocked("Idempotency-Key used for different work", 409)
-        return {"job_id": row["id"], "status": row["status"], "replayed": True}
+        if authorize is not None:
+            authorize()
+        return {"job_id": row["id"], "status": row["status"], "output_sha256": row["output_sha256"], "replayed": True}
 
     # A crashed PROCESSING job remains visible, never claims completion. A
     # recovery worker must be designed before allowing unattended acceptance.
     storage_ref = None
     try:
+        if authorize is not None:
+            authorize()
         text = raw.decode("utf-8-sig", errors="strict")
         result = clean_csv_text(text, max_bytes=1_000_000, max_rows=10_000)
         saved = _store().store(
@@ -146,6 +154,8 @@ def submit_review_job(
         storage_ref = saved[1]
         if saved[2] != len(result.cleaned_csv.encode("utf-8")):
             raise CustomerCSVBlocked("Artifact size mismatch", 503)
+        if authorize is not None:
+            authorize()
         finalized = db.execute(sa.update(jobs).where(
             jobs.c.id == job_id, jobs.c.status == "PROCESSING",
         ).values(
