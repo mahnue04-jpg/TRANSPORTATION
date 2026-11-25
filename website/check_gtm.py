@@ -12,6 +12,11 @@ def main():
     failures = []
     for path in pages:
         html = path.read_text(encoding="utf-8")
+        # Private owner review must not load third-party tracking.
+        if path.relative_to(ROOT).as_posix() == "nova-growth/owner/index.html":
+            if "googletagmanager.com" in html or GTM_ID in html:
+                failures.append(f"{path.relative_to(ROOT)}: tracking forbidden on private owner page")
+            continue
         # Retired-route redirect documents do not load the site template.
         if '<meta http-equiv="refresh"' in html or '<meta http-equiv="refresh"' in html.lower():
             continue
