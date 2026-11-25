@@ -148,7 +148,7 @@ def fulfill(lead_id: UUID, db: Session = Depends(get_db)):
     buyer = _test_user(db, lead_id, lead.work_email, "synthetic-buyer-org")
     other = _test_user(db, "synthetic-other", "other-rehearsal@example.invalid", "synthetic-other-org")
     result = jobs.submit_review_job(db, org=OWNER_ORG, owner=OWNER_ID, engagement_id=engagement_id,
-                                    task_id=TASK, request_key=lead_id, raw=CSV)
+                                    task_id=TASK, request_key=lead_id, raw=CSV, retry_synthetic_failure=True)
     job_id = result["job_id"]
     if result["status"] == "AWAITING_REVIEW":
         jobs.review_job(db, job_id=job_id, org=OWNER_ORG, owner=OWNER_ID, approve=True)
