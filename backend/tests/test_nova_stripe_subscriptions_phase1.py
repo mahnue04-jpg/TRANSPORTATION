@@ -617,3 +617,28 @@ def test_explicit_no_trial_checkout(monkeypatch) -> None:
     finally:
         set_nova_billing_stripe_override(None)
 
+
+
+def test_exact_paid_plan_access_policy() -> None:
+    from app.core.nova.billing.paid_access_policy import allows_paid_plan
+
+    current = datetime(2026, 11, 25, tzinfo=timezone.utc)
+    for plan, price in (("starter", PRICE_STARTER), ("professional", PRICE_PRO), ("business", PRICE_BIZ)):
+        evidence = dict(required_plan=plan, recorded_plan=plan, status="active",
+                        expected_price=price, recorded_price=price,
+                        verified_subscription=True, now=current,
+                        current_period_end=current + timedelta(days=30))
+        assert allows_paid_plan(**evidence)
+        for mismatch in (
+            {"recorded_plan": "unknown"},
+            {"required_plan": "starter_49"},
+            {"recorded_price": "price_wrong"},
+            {"expected_price": ""},
+            {"verified_subscription": False},
+            {"current_period_end": None},
+            {"current_period_end": current},
+            {"current_period_end": current - timedelta(seconds=1)},
+            {"current_period_end": current.replace(tzinfo=None)},
+            *({"status": state} for state in (None, "trialing", "past_due", "cancelled", "incomplete", "expired")),
+        ):
+            assert not allows_paid_plan(**(evidence | mismatch))
