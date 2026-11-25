@@ -597,3 +597,23 @@ def test_subscription_updates_cannot_change_bound_price_or_quantity(monkeypatch)
             assert row.subscription_status == "active"
     finally:
         set_nova_billing_stripe_override(None)
+
+
+def test_explicit_no_trial_checkout(monkeypatch) -> None:
+    fake = _env(monkeypatch)
+    monkeypatch.setenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "false")
+    try:
+        client = _client()
+        headers = _login(client)
+        result = client.post("/api/nova/billing/checkout", headers=headers, json={"plan_key": "starter"})
+        assert result.status_code == 200, result.text
+        assert result.json()["trial_applied"] is False
+        session = fake.sessions[result.json()["checkout_session_id"]]
+        assert "trial_period_days" not in session["subscription_data"]
+        with SessionLocal() as db:
+            row = db.query(NovaTenantSubscription).one()
+            assert not row.trial_used
+            assert row.trial_started_at is None
+    finally:
+        set_nova_billing_stripe_override(None)
+
