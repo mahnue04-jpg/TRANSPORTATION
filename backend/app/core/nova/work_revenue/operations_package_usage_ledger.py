@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import datetime, timezone
+from typing import Callable
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -77,13 +78,16 @@ def reserve_staging_task(
     request_key: str,
     task_fingerprint: str,
     now: datetime,
+    before_commit: Callable[[str], None] | None = None,
 ) -> dict:
     """Serialize and reserve one unique task, or return a safe replay.
 
     Uses a transaction-scoped Postgres advisory lock on customer+entitlement+
     period. The caller must ensure no unrelated session transaction is in flight:
     the function commits its own reservation. This is a quota reservation, *not*
-    approval or execution of the task.
+    approval or execution of the task. An internal before_commit callback may
+    bind the exact reservation using this session; it must never commit or
+    perform external side effects. Any callback failure rolls back the quota.
     """
     require_staging(db)
     if not isinstance(task_fingerprint, str) or len(task_fingerprint) != 64 or any(
@@ -122,6 +126,8 @@ def reserve_staging_task(
         if not allowed:
             raise AllowanceBlocked(reason)
         if reason == "existing_task_idempotent":
+            if before_commit is not None:
+                before_commit(row_id)
             db.commit()
             return {"reservation_id": row_id, "replayed": True, "consumed": False}
         db.execute(sa.insert(reservations).values(
@@ -130,6 +136,8 @@ def reserve_staging_task(
             request_key=request_key, task_fingerprint=task_fingerprint,
             reserved_at=now,
         ))
+        if before_commit is not None:
+            before_commit(row_id)
         db.commit()
         return {"reservation_id": row_id, "replayed": False, "consumed": True}
     except Exception:
