@@ -1522,3 +1522,39 @@ def test_read_only_s3_orphan_audit_links_to_scoped_postgres_job(
         assert "storage_ref" not in result
     finally:
         leases.lease_metadata.drop_all(engine)
+
+
+def test_synthetic_storage_failure_retries_same_job_only(postgres, monkeypatch):
+    engine, store = postgres
+    monkeypatch.setenv("NOVA_OPS_REHEARSAL_ENABLED", "true")
+    monkeypatch.setenv("NOVA_STRIPE_LIVE_ENABLED", "false")
+    monkeypatch.setenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "false")
+    key = "12345678-1234-1234-1234-123456789abc"
+    args = dict(org="synthetic-rehearsal-owner-org", owner="synthetic-rehearsal-owner",
+                engagement_id=key.replace("-", ""), task_id="synthetic-starter-csv",
+                request_key=key, raw=b"Name,Status\nSynthetic Customer,Active\nSynthetic Customer,Active\n")
+    original = store.store
+    def fail(**kwargs):
+        raise RuntimeError("synthetic storage failure")
+    monkeypatch.setattr(store, "store", fail)
+    with Session(engine) as db:
+        with pytest.raises(RuntimeError, match="synthetic storage failure"):
+            csvjobs.submit_review_job(db, **args, retry_synthetic_failure=True)
+        row = db.execute(sa.select(csvjobs.jobs)).mappings().one()
+        original_id = row["id"]
+        assert row["status"] == "FAILED"
+        assert row["output_ref"] is None
+        assert csvjobs.submit_review_job(db, **args)["status"] == "FAILED"
+    monkeypatch.setattr(store, "store", original)
+    with Session(engine) as db:
+        monkeypatch.setenv("NOVA_STRIPE_LIVE_ENABLED", "true")
+        with pytest.raises(csvjobs.CustomerCSVBlocked, match="Synthetic retry unavailable"):
+            csvjobs.submit_review_job(db, **args, retry_synthetic_failure=True)
+        monkeypatch.setenv("NOVA_STRIPE_LIVE_ENABLED", "false")
+        result = csvjobs.submit_review_job(db, **args, retry_synthetic_failure=True)
+        assert result["job_id"] == original_id
+        assert result["status"] == "AWAITING_REVIEW"
+        assert csvjobs.submit_review_job(db, **args, retry_synthetic_failure=True)["replayed"]
+        assert db.execute(sa.select(sa.func.count()).select_from(csvjobs.jobs)).scalar_one() == 1
+        assert store.put_count == 1
+        assert csvjobs.download_review(db, org=args["org"], owner=args["owner"], job_id=original_id) == b"Name,Status\nSynthetic Customer,Active\n"
