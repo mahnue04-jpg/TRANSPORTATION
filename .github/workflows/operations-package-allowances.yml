@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - "nova/four-plan-consolidated-staging-20261125"
+  pull_request:
+    branches:
+      - "nova/payment-website-gated-20261124"
   workflow_dispatch:
 
 permissions:
