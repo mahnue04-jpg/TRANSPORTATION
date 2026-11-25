@@ -181,10 +181,18 @@ def adapter_fixture(monkeypatch):
         user_id="synthetic-user", email="starter@example.invalid")
     state = SimpleNamespace(row=row, subscription=sub, key="sk_test_fixture",
         queries=0, reads=0, fail=False)
-    from sqlalchemy import Table, Column, String, MetaData
-    table = Table("synthetic_subscription", MetaData(), Column("tenant_id", String))
+    from sqlalchemy import String
+    from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+    class SyntheticBase(DeclarativeBase):
+        pass
+
+    class SyntheticSubscription(SyntheticBase):
+        __tablename__ = "synthetic_subscription"
+        tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
+
     models = ModuleType("app.core.nova.billing.models")
-    models.NovaTenantSubscription = table
+    models.NovaTenantSubscription = SyntheticSubscription
     signup_client = ModuleType("app.core.nova.signup.stripe_client")
     signup_client.stripe_secret_key = lambda: state.key
     billing_client = ModuleType("app.core.nova.billing.stripe_client")
@@ -260,3 +268,5 @@ def test_authenticated_adapter_failures(adapter_fixture, monkeypatch, failure):
     if failure in {"missing_row", "wrong_plan", "live_key", "missing_key",
                    "managed_task", "disabled"}:
         assert state.reads == 0
+    else:
+        assert state.queries == 1 and state.reads == 1
