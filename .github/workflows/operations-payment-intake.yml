@@ -1,0 +1,30 @@
+name: Operations payment intake
+on:
+  push:
+    paths:
+      - 'backend/operations_payment_intake.py'
+      - 'backend/tests/test_operations_payment_intake.py'
+      - 'backend/migrations/sql/20261126_operations_payment_events.sql'
+      - '.github/workflows/operations-payment-intake.yml'
+permissions:
+  contents: read
+jobs:
+  signed-delivery:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: synthetic_ci
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NOVA_OPERATIONS_DATABASE_URL: postgresql://postgres:synthetic_ci@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'fastapi>=0.115,<1' 'httpx>=0.27,<0.29' 'stripe>=12,<13' 'psycopg2-binary>=2.9,<3'
+      - run: psql "$NOVA_OPERATIONS_DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/sql/20261126_operations_payment_events.sql
+      - run: PYTHONPATH=backend python -m unittest discover -s backend/tests -p test_operations_payment_intake.py
