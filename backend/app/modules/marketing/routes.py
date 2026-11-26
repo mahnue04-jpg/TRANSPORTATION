@@ -292,7 +292,15 @@ def create_nova_agent_checkout(
     if plan["mode"] not in {"payment", "subscription"}:
         raise HTTPException(status_code=422, detail="This starting option does not require checkout")
 
+    checkout_mode = agent_checkout_mode()
+    if checkout_mode == "live_gated" or (
+        checkout_mode == "live" and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"
+    ):
+        raise HTTPException(status_code=503, detail="Secure checkout is not available yet.")
+
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
+        if checkout_mode in {"live", "test"} and not lead.stripe_checkout_session_id.startswith(f"cs_{checkout_mode}_"):
+            raise HTTPException(status_code=409, detail="Existing checkout belongs to a different Stripe mode.")
         return {
             "checkout_url": lead.checkout_url,
             "checkout_session_id": lead.stripe_checkout_session_id,
