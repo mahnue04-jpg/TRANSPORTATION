@@ -88,63 +88,109 @@ def plain(obj):
 def client():
     return LiveNovaBillingStripeClient(api_key=os.environ["STRIPE_SECRET_KEY"])._build_client()
 
+# Recovery revision deliberately cannot create another checkout.
 @app.post("/sandbox/checkout")
-def checkout(user: UserContext = Depends(owner), db: Session = Depends(get_db)):
-    try:
-        price = plain(client().v1.prices.retrieve(os.environ["NOVA_STRIPE_PRICE_STARTER"]))
-        if not (price["livemode"] is False and price["active"] is True
-                and price["unit_amount"] == 999 and price["currency"] == "usd"
-                and price["recurring"]["interval"] == "month"
-                and price["recurring"]["interval_count"] == 1):
-            raise ValueError("Incorrect price")
-        result = start_checkout(db, user=user, plan_key="starter")
-        if not result["checkout_session_id"].startswith("cs_test_") or result["trial_applied"]:
-            raise ValueError("Incorrect checkout mode")
-        return {"checkout_url": result["checkout_url"]}
-    except Exception:
-        db.rollback()
-        raise HTTPException(409, "Synthetic checkout unavailable")
+def checkout(user: UserContext = Depends(owner)):
+    raise HTTPException(409, "New checkout disabled; recover existing test payment")
+
+def checkout_matches(checkout, user, customer_id):
+    metadata = checkout.get("metadata") or {}
+    return (
+        str(checkout.get("id", "")).startswith("cs_test_")
+        and checkout.get("livemode") is False
+        and checkout.get("mode") == "subscription"
+        and checkout.get("status") == "complete"
+        and checkout.get("payment_status") == "paid"
+        and checkout.get("customer") == customer_id
+        and checkout.get("client_reference_id") == user.organization_id
+        and metadata.get("nova_plan_key") == "starter"
+        and metadata.get("nova_tenant_id") == user.organization_id
+        and metadata.get("nova_user_id") == user.user_id
+        and metadata.get("nova_product") == "nova_saas"
+    )
+
+def recover_checkout(stripe, user):
+    customers = plain(stripe.v1.customers.list({"email": user.email, "limit": 100}))
+    if customers.get("has_more") is not False:
+        raise ValueError("customer_list_incomplete")
+    matches = [c for c in customers["data"] if
+        c.get("livemode") is False and c.get("email") == user.email
+        and str(c.get("id", "")).startswith("cus_")
+        and (c.get("metadata") or {}).get("nova_product") == "nova_saas"
+        and (c.get("metadata") or {}).get("nova_tenant_id") == user.organization_id
+        and (c.get("metadata") or {}).get("nova_user_id") == user.user_id]
+    if len(matches) != 1:
+        raise ValueError("customer_match_not_unique")
+    customer_id = matches[0]["id"]
+    sessions = plain(stripe.v1.checkout.sessions.list({"customer": customer_id, "limit": 100}))
+    if sessions.get("has_more") is not False:
+        raise ValueError("checkout_list_incomplete")
+    paid = [c for c in sessions["data"] if checkout_matches(c, user, customer_id)]
+    if len(paid) != 1:
+        raise ValueError("paid_checkout_match_not_unique")
+    return paid[0]
 
 @app.post("/sandbox/reconcile")
 def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db)):
-    # Never trust redirect parameters; fetch the previously stored exact session.
-    # Reconcile on demand, independently of any webhook on the older sandbox.
+    stage = "local_record"
     try:
         row = db.execute(select(NovaTenantSubscription).where(
-            NovaTenantSubscription.tenant_id == user.organization_id)).scalar_one()
+            NovaTenantSubscription.tenant_id == user.organization_id)).scalar_one_or_none()
         stripe = client()
-        checkout = plain(stripe.v1.checkout.sessions.retrieve(row.stripe_checkout_session_id))
-        if not (checkout["id"] == row.stripe_checkout_session_id
-                and checkout["livemode"] is False and checkout["mode"] == "subscription"
-                and checkout["status"] == "complete" and checkout["payment_status"] == "paid"
-                and checkout["customer"] == row.stripe_customer_id
-                and checkout["client_reference_id"] == row.tenant_id
-                and checkout["metadata"]["nova_plan_key"] == "starter"
-                and checkout["metadata"]["nova_tenant_id"] == row.tenant_id
-                and checkout["metadata"]["nova_product"] == "nova_saas"):
-            raise ValueError("Unverified checkout")
+        if row is not None and row.stripe_checkout_session_id:
+            stage = "stored_checkout_retrieval"
+            checkout = plain(stripe.v1.checkout.sessions.retrieve(row.stripe_checkout_session_id))
+            stage = "stored_checkout_binding"
+            if checkout.get("id") != row.stripe_checkout_session_id or not checkout_matches(checkout, user, row.stripe_customer_id):
+                raise ValueError("checkout mismatch")
+        else:
+            stage = "stripe_test_checkout_recovery"
+            checkout = recover_checkout(stripe, user)
+        customer_id = checkout["customer"]
+        price_id = os.environ["NOVA_STRIPE_PRICE_STARTER"]
+        stage = "local_binding"
+        if row is not None and (
+            row.stripe_customer_id not in (None, customer_id)
+            or row.stripe_price_id not in (None, price_id)
+            or row.plan_key not in (None, "starter")
+        ):
+            raise ValueError("conflicting local record")
+        stage = "subscription_binding"
         sub_id = checkout["subscription"]
         if not isinstance(sub_id, str) or not sub_id.startswith("sub_"):
-            raise ValueError("Invalid subscription")
-        if row.stripe_subscription_id and row.stripe_subscription_id != sub_id:
-            raise ValueError("Conflicting subscription")
+            raise ValueError("invalid subscription")
+        if row is not None and row.stripe_subscription_id not in (None, sub_id):
+            raise ValueError("conflicting subscription")
+        stage = "stripe_subscription_retrieval"
         subscription = plain(stripe.v1.subscriptions.retrieve(sub_id, {"expand": ["latest_invoice"]}))
-        candidate = SimpleNamespace(tenant_id=row.tenant_id, plan_key=row.plan_key,
-            subscription_status="active", stripe_customer_id=row.stripe_customer_id,
-            stripe_subscription_id=sub_id, stripe_price_id=row.stripe_price_id)
-        if not verify_starter_feature(feature="basic_workspace", tenant_id=row.tenant_id,
+        candidate = SimpleNamespace(tenant_id=user.organization_id, plan_key="starter",
+            subscription_status="active", stripe_customer_id=customer_id,
+            stripe_subscription_id=sub_id, stripe_price_id=price_id)
+        stage = "subscription_and_invoice_evidence"
+        if not verify_starter_feature(feature="basic_workspace", tenant_id=user.organization_id,
                 row=candidate, subscription=subscription, now=datetime.now(timezone.utc)):
-            raise ValueError("Invalid subscription")
+            raise ValueError("invalid subscription evidence")
+        stage = "invoice_payment_and_reversal_evidence"
         if not verify_current_invoice_payment(stripe, plan="starter",
-                customer_id=row.stripe_customer_id, subscription=subscription):
-            raise ValueError("Invalid payment")
+                customer_id=customer_id, subscription=subscription):
+            raise ValueError("invalid payment evidence")
+        stage = "persist_verified_record"
+        if row is None:
+            row = NovaTenantSubscription(tenant_id=user.organization_id)
+            db.add(row)
+        row.plan_key = "starter"
+        row.stripe_customer_id = customer_id
+        row.stripe_price_id = price_id
+        row.stripe_checkout_session_id = checkout["id"]
         row.stripe_subscription_id = sub_id
         row.subscription_status = "active"
         db.commit()
         return {"verified": True, "plan": "starter", "managed_tasks": 0}
     except Exception:
         db.rollback()
-        raise HTTPException(409, "Verified paid subscription not available")
+        # Fixed diagnostic category only; no raw provider errors or identifiers.
+        raise HTTPException(409, {"stage": stage, "message": "Existing payment not yet verified"})
+
 
 @app.get("/sandbox-test", response_class=HTMLResponse)
 def page():
@@ -152,14 +198,14 @@ def page():
 <style>body{font:17px system-ui;max-width:640px;margin:40px auto;padding:20px}button,input,textarea{font:inherit;margin:8px 0;padding:10px}input,textarea{width:95%}button{display:block}pre{white-space:pre-wrap}</style>
 <h1>Operations $9.99/month sandbox</h1><p>Private synthetic test only. No real payments or managed tasks.</p>
 <label>Private sandbox access token<input id="token" type="password" autocomplete="off"></label>
-<button id="checkout">Create $9.99 test checkout</button><a id="pay" hidden rel="noreferrer">Open Stripe test checkout</a>
+<button id="checkout" disabled>New checkout disabled</button><a id="pay" hidden rel="noreferrer">Open Stripe test checkout</a>
 <button id="verify">Verify paid subscription</button><button id="workspace">Check workspace</button>
 <label>Test planning goal<textarea id="goal" maxlength="500">Prepare a weekly review</textarea></label>
 <button id="plan">Test planning</button><button id="templates">Test templates</button><button id="assistance">Test guidance</button><pre id="result" role="status"></pre>
 <script>
 const el=id=>document.getElementById(id);
-async function call(path,body,method="POST"){const r=await fetch(path,{method,headers:{"x-amicor-sandbox-token":el("token").value,"Content-Type":"application/json"},body:method==="POST"?JSON.stringify(body||{}):undefined,cache:"no-store"});if(!r.ok)throw Error("Request denied or not ready ("+r.status+")");return r.json();}
-async function run(fn){try{el("result").textContent=JSON.stringify(await fn(),null,2)}catch(e){el("result").textContent=e.message}}
+async function call(path,body,method="POST"){const r=await fetch(path,{method,headers:{"x-amicor-sandbox-token":el("token").value,"Content-Type":"application/json"},body:method==="POST"?JSON.stringify(body||{}):undefined,cache:"no-store"});if(!r.ok){let d=await r.json().catch(()=>({}));throw Error("Request denied or not ready ("+r.status+")"+(d.detail?.stage?" — "+d.detail.stage:""));}return r.json();}
+async function run(fn){el("result").textContent="Checking existing test payment or workspace…";try{el("result").textContent=JSON.stringify(await fn(),null,2)}catch(e){el("result").textContent=e.message}}
 el("checkout").onclick=()=>run(async()=>{let d=await call("/sandbox/checkout");let u=new URL(d.checkout_url);if(u.origin!=="https://checkout.stripe.com")throw Error("Unexpected checkout origin");el("pay").href=u.href;el("pay").hidden=false;return "Synthetic checkout created"});
 el("verify").onclick=()=>run(()=>call("/sandbox/reconcile"));
 el("workspace").onclick=()=>run(()=>call("/api/nova/starter/workspace",null,"GET"));
