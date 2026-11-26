@@ -52,7 +52,9 @@ def test_matching_test_paid_subscription(plan):
 
 def current_api_fixture(plan="launch_99"):
     subscription = fixture(plan)
+    subscription["items"]["data"][0]["id"] = "si_synthetic"
     invoice = subscription["latest_invoice"]
+    invoice["lines"]["has_more"] = False
     invoice.pop("paid")
     invoice["livemode"] = False
     invoice["parent"] = {
@@ -64,9 +66,12 @@ def current_api_fixture(plan="launch_99"):
         "type": "subscription_item_details",
         "subscription_item_details": {
             "subscription": line.pop("subscription"),
+            "subscription_item": "si_synthetic",
             "proration": False,
         },
     }
+    line["pricing"] = {"type": "price_details", "price_details": {"price": "price_synthetic"}}
+    line["quantity"] = 1
     return subscription
 
 
@@ -148,3 +153,17 @@ def test_renewal_requires_fresh_paid_invoice(plan):
     sub["status"] = "canceled"
     with pytest.raises(SubscriptionNotEntitled):
         reconcile(sub, plan=plan, now=END)
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+@pytest.mark.parametrize("change", [
+    lambda s: s["latest_invoice"]["lines"].update(has_more=True),
+    lambda s: s["latest_invoice"]["lines"]["data"][0]["parent"]["subscription_item_details"].update(subscription_item="si_other"),
+    lambda s: s["latest_invoice"]["lines"]["data"][0]["pricing"]["price_details"].update(price="price_other"),
+    lambda s: s["latest_invoice"]["lines"]["data"][0].update(quantity=2),
+])
+def test_current_invoice_requires_exact_item_and_price(plan, change):
+    sub = current_api_fixture(plan)
+    change(sub)
+    with pytest.raises(SubscriptionNotEntitled, match="invoice_item_price_mismatch"):
+        reconcile(sub, plan=plan)
