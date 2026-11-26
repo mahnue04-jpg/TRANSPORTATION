@@ -34,6 +34,11 @@ def allows_starter_feature(*, feature: str, tenant_id: str,
     expected_price = os.getenv("NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID", "").strip()
     if not expected_price.startswith("price_"):
         return False
+    # A configured checkout price must agree with the staging access price.
+    # Never grant access when checkout and entitlement configuration diverge.
+    checkout_price = os.getenv("NOVA_STRIPE_PRICE_STARTER", "").strip()
+    if checkout_price and checkout_price != expected_price:
+        return False
     return allows_paid_plan(required_plan="starter", recorded_plan=recorded_plan,
         status=status, expected_price=expected_price, recorded_price=recorded_price,
         verified_subscription=verified_subscription,
