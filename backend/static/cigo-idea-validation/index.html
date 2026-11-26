@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>CIGO consumer idea validation (fictional, nonpublic)</title>
+  <link rel="stylesheet" href="/dev/cigo-idea-validation/demo.css" />
+</head>
+<body>
+  <main>
+    <p class="banner">Nonpublic fictional worksheet. This page does not email anyone, does not call a provider, does not charge a card, and does not submit anything to CIGO.</p>
+    <h1>Consumer idea validation</h1>
+    <p class="lede">Read the unrendered script, then save a fictional worksheet on this machine. The local result is a worksheet label, not a market verdict.</p>
+    <p class="status" id="readiness">Assessment status: not assessment-ready. No video is rendered here.</p>
+
+    <section>
+      <h2>Unrendered script</h2>
+      <p class="hint" id="script-meta"></p>
+      <article id="script"></article>
+    </section>
+
+    <section>
+      <h2>Fictional workflow</h2>
+      <ol id="workflow"></ol>
+    </section>
+
+    <form id="worksheet">
+      <label for="consumer">Fictional consumer</label>
+      <input id="consumer" name="consumer" type="text" maxlength="500" />
+      <p class="field-error" id="error-consumer"></p>
+
+      <label for="job">Job to be done</label>
+      <textarea id="job" name="job" maxlength="500"></textarea>
+      <p class="field-error" id="error-job"></p>
+
+      <label for="idea">Idea</label>
+      <textarea id="idea" name="idea" maxlength="500"></textarea>
+      <p class="field-error" id="error-idea"></p>
+
+      <label for="assumption">Riskiest assumption</label>
+      <textarea id="assumption" name="assumption" maxlength="500"></textarea>
+      <p class="field-error" id="error-assumption"></p>
+
+      <label for="evidence">Evidence card</label>
+      <textarea id="evidence" name="evidence" maxlength="500"></textarea>
+      <p class="field-error" id="error-evidence"></p>
+
+      <label class="choice"><input id="evidence-fictional" name="evidence_is_fictional" type="checkbox" /> This evidence card is fictional.</label>
+      <p class="field-error" id="error-evidence_is_fictional"></p>
+
+      <label for="result">Local worksheet result</label>
+      <select id="result" name="result">
+        <option value="">Choose</option>
+        <option value="continue_locally">Continue the fictional worksheet</option>
+        <option value="reshape">Reshape the assumption</option>
+        <option value="pause">Pause the worksheet</option>
+      </select>
+      <p class="field-error" id="error-result"></p>
+
+      <label class="choice"><input id="consent" name="consent" type="checkbox" /> I agree this fictional worksheet can be stored on this machine for the demo.</label>
+      <p class="field-error" id="error-consent"></p>
+
+      <label class="choice"><input id="force-failure" type="checkbox" /> Simulate a storage failure</label>
+
+      <div class="actions">
+        <button type="button" id="load-example">Load fictional example</button>
+        <button type="submit">Save fictional worksheet</button>
+      </div>
+    </form>
+
+    <section id="result-card" aria-live="polite"></section>
+
+    <section>
+      <div class="row">
+        <h2>Worksheets</h2>
+        <div class="actions">
+          <a href="/dev/cigo-idea-validation/evidence">Evidence JSON</a>
+          <a href="/dev/cigo-idea-validation/export.json">Export JSON</a>
+          <a href="/dev/cigo-idea-validation/export.csv">Export CSV</a>
+          <button type="button" id="reset">Clear fictional data</button>
+        </div>
+      </div>
+      <div id="records"></div>
+    </section>
+  </main>
+  <script src="/dev/cigo-idea-validation/demo.js"></script>
+</body>
+</html>
