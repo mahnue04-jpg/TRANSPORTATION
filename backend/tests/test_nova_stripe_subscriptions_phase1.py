@@ -648,3 +648,52 @@ def test_exact_paid_plan_access_policy() -> None:
             *({"status": state} for state in (None, "trialing", "past_due", "cancelled", "incomplete", "expired")),
         ):
             assert not allows_paid_plan(**(evidence | mismatch))
+
+
+def test_isolated_paid_starter_checkout_guard(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+    import pytest
+    from app.core.nova.billing import service
+
+    flags = {
+        "APP_ENV": "staging",
+        "AMICOR_ENVIRONMENT": "staging",
+        "NOVA_STRIPE_LIVE_ENABLED": "false",
+        "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED": "false",
+        "NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED": "true",
+        "NOVA_BILLING_CHECKOUT_TRIAL_ENABLED": "false",
+        "NOVA_STRIPE_PRICE_STARTER": PRICE_STARTER,
+        "NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID": PRICE_STARTER,
+        "STRIPE_SECRET_KEY": "sk_test_synthetic_guard",
+    }
+    for key, value in flags.items():
+        monkeypatch.setenv(key, value)
+    user = SimpleNamespace(role=ROLE_ADMIN, organization_id="synthetic-tenant",
+                           user_id="synthetic-user", email="owner@example.invalid")
+    db = Mock()
+    with patch.object(service, "ensure_nova_billing_schema"), patch.object(service, "_get_or_create_row") as load, patch.object(service, "get_nova_billing_stripe_client") as stripe:
+        for key, value in [
+            ("APP_ENV", "production"),
+            ("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "true"),
+            ("NOVA_STRIPE_LIVE_ENABLED", "true"),
+            ("STRIPE_SECRET_KEY", "sk_live_synthetic_guard"),
+            ("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "true"),
+            ("NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID", "price_wrong"),
+        ]:
+            monkeypatch.setenv(key, value)
+            with pytest.raises(service.BillingError):
+                service.start_checkout(db, user=user, plan_key="starter")
+            monkeypatch.setenv(key, flags[key])
+        load.assert_not_called()
+        stripe.assert_not_called()
+        load.return_value = SimpleNamespace(trial_used=True, trial_started_at=None,
+                                            stripe_checkout_session_id=None)
+        with pytest.raises(service.BillingError, match="incompatible"):
+            service.start_checkout(db, user=user, plan_key="starter")
+        stripe.assert_not_called()
+        load.return_value = SimpleNamespace(trial_used=False, trial_started_at=None,
+            stripe_checkout_session_id="cs_test_old", stripe_price_id="price_wrong")
+        with pytest.raises(service.BillingError, match="incompatible"):
+            service.start_checkout(db, user=user, plan_key="starter")
+        stripe.assert_not_called()

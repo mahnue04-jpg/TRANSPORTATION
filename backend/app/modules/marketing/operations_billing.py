@@ -20,6 +20,10 @@ from app.helpers import uuid4
 
 AGENT_PRODUCT = "nova_anonymous_operations_agent"
 AGENT_WEBHOOK_ENV = "STRIPE_NOVA_AGENT_WEBHOOK_SECRET"
+SUBSCRIPTION_TEST_PRICE_ENV = {
+    "launch_99": "NOVA_OPERATIONS_LAUNCH_TEST_PRICE_ID",
+    "business_299": "NOVA_OPERATIONS_BUSINESS_TEST_PRICE_ID",
+}
 
 AGENT_PLANS: dict[str, dict[str, Any]] = {
     "free_scope": {
@@ -62,12 +66,20 @@ class AgentStripeClient(Protocol):
         ...
 
 
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        ...
+
+    def verify_subscription_payment(self, *, plan: str, customer_id: str, subscription: dict) -> bool:
+        ...
+
+
 class FakeAgentStripeClient:
     """In-process checkout double used by tests. Never contacts Stripe."""
 
     def __init__(self) -> None:
         self.customers: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
+        self.subscriptions: dict[str, dict[str, Any]] = {}
         self.customer_keys: dict[str, str] = {}
         self.session_keys: dict[str, str] = {}
         self.last_payload: dict[str, Any] | None = None
@@ -101,6 +113,10 @@ class FakeAgentStripeClient:
         self.session_keys[idempotency_key] = session_id
         self.last_payload = dict(payload)
         return dict(row)
+
+
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        return dict(self.subscriptions[subscription_id])
 
 
 class LiveAgentStripeClient:
@@ -161,6 +177,41 @@ class LiveAgentStripeClient:
         client = self._build_client()
         created = client.v1.checkout.sessions.create(payload, {"idempotency_key": idempotency_key})
         return self._as_dict(created)
+
+
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        # Read-only staging reconciliation; never use a live key.
+        if (not self.api_key.startswith(("sk_test_", "rk_test_"))
+                or os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"):
+            raise RuntimeError("Subscription retrieval is restricted to isolated staging.")
+        if not isinstance(subscription_id, str) or not subscription_id.startswith("sub_"):
+            raise ValueError("Invalid subscription identifier")
+        client = self._build_client()
+        subscription = client.v1.subscriptions.retrieve(subscription_id, {"expand": ["latest_invoice"]})
+        return self._as_dict(subscription)
+
+    def verify_subscription_payment(self, *, plan: str, customer_id: str, subscription: dict) -> bool:
+        from app.core.nova.billing.subscription_reversal_evidence import verify_current_invoice_payment
+        if (not self.api_key.startswith(("sk_test_", "rk_test_"))
+                or os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "false"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "false"
+                or subscription.get("livemode") is not False):
+            return False
+        return verify_current_invoice_payment(self._build_client(), plan=plan,
+            customer_id=customer_id, subscription=subscription)
+
+
+def subscription_test_price(plan_key: str) -> str:
+    env = SUBSCRIPTION_TEST_PRICE_ENV.get(plan_key)
+    price = os.getenv(env, "").strip() if env else ""
+    return price if price.startswith("price_") and len(price) <= 128 and price.isascii() else ""
 
 
 def set_agent_stripe_override(client: AgentStripeClient | None) -> None:

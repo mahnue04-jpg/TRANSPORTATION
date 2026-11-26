@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from datetime import timedelta
@@ -26,6 +27,10 @@ from app.modules.marketing.operations_billing import (
     plan_payload,
     verify_agent_webhook,
 )
+from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
+from app.modules.marketing.starter_entitlement_policy import transition_entitlement
+from app.modules.marketing.starter_payment_intent import verified_starter_payment_intent
+from app.modules.marketing.starter_reversal import REVERSALS, reversal_evidence
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
 
@@ -363,14 +368,97 @@ async def nova_agent_stripe_webhook(
     event_type = str(event.get("type") or "")
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     obj = data.get("object") if isinstance(data, dict) and isinstance(data.get("object"), dict) else {}
+    # Refund/dispute objects need not carry checkout metadata. Match only the
+    # exact previously verified PaymentIntent, and serialize with success updates.
+    if event_type in REVERSALS:
+        if (os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
+                or event.get("livemode") is not False
+                or agent_checkout_mode() != "test"):
+            return {"ok": True, "handled": False, "result": "starter_staging_only"}
+        evidence = reversal_evidence(event_type, obj)
+        if evidence is None:
+            return {"ok": True, "handled": False, "result": "reversal_evidence_unverified"}
+        intent, state = evidence
+        matches = db.query(MarketingWebsiteLead).filter(
+            MarketingWebsiteLead.lead_type == "anonymous_operations",
+            MarketingWebsiteLead.service_plan == "starter_49",
+            MarketingWebsiteLead.starter_payment_intent_id == intent,
+        ).with_for_update().limit(2).all()
+        if len(matches) != 1:
+            db.rollback()
+            # Retry unmatched events rather than acknowledge a reversal that
+            # might have arrived before the checkout success notification.
+            raise HTTPException(status_code=503, detail="Unique Starter reversal binding required")
+        matched = matches[0]
+        if (not matched.starter_paid_session_id
+                or matched.starter_paid_session_id != matched.stripe_checkout_session_id
+                or not matched.stripe_customer_id):
+            db.rollback()
+            raise HTTPException(status_code=503, detail="Starter reversal checkout binding required")
+        customer = obj.get("customer")
+        if customer is not None and customer != matched.stripe_customer_id:
+            db.rollback()
+            return {"ok": True, "handled": False, "result": "reversal_customer_mismatch"}
+        matched.starter_entitlement_state = transition_entitlement(
+            matched.starter_entitlement_state, state,
+        )
+        db.commit()
+        return {"ok": True, "handled": True, "result": "starter_entitlement_blocked"}
+
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     if str(metadata.get("nova_product") or "") != AGENT_PRODUCT:
         return {"ok": True, "handled": False, "result": "unrelated"}
 
     lead_id = str(metadata.get("nova_agent_lead_id") or obj.get("client_reference_id") or "").strip()
-    lead = db.get(MarketingWebsiteLead, lead_id) if lead_id else None
+    lead = (db.query(MarketingWebsiteLead).filter(MarketingWebsiteLead.id == lead_id)
+            .with_for_update().populate_existing().one_or_none()) if lead_id else None
     if lead is None or lead.lead_type != "anonymous_operations":
         return {"ok": True, "handled": False, "result": "lead_not_found"}
+
+    # A signed webhook must also match the exact stored Starter checkout,
+    # customer, 4,900-cent USD payment, and plan. Invoice events can never
+    # authorize the one-time Starter Task.
+    if lead.service_plan == "starter_49":
+        if (os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED") != "true"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
+                or event.get("livemode") is not False
+                or agent_checkout_mode() != "test"):
+            return {"ok": True, "handled": False, "result": "starter_staging_only"}
+        outcome = starter_checkout_outcome(lead, event_type, obj, metadata)
+        if outcome == "paid":
+            # Signed checkout identity is already matched above. A unique,
+            # durable PaymentIntent is required before this order can ever
+            # authorize a paid customer task. Fail closed on missing/conflicting
+            # identifiers, including replayed or out-of-order events.
+            intent = verified_starter_payment_intent(
+                obj, lead.starter_payment_intent_id,
+            )
+            if intent is None:
+                return {"ok": True, "handled": False, "result": "starter_payment_intent_unverified"}
+            lead.starter_payment_intent_id = intent
+            lead.payment_status = "paid"
+            lead.starter_paid_session_id = str(obj["id"])
+            lead.starter_entitlement_state = transition_entitlement(
+                lead.starter_entitlement_state, "paid",
+            )
+            # A delayed Stripe success may confirm history, but never
+            # restore an entitlement that was revoked for refund or dispute.
+            if lead.starter_entitlement_state == "active":
+                lead.status = "qualified"
+            db.commit()
+            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id}
+        if outcome in {"pending", "failed", "expired"}:
+            lead.payment_status = outcome
+            db.commit()
+            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id}
+        return {"ok": True, "handled": False, "result": outcome}
 
     result = "ignored"
     if event_type == "checkout.session.completed":

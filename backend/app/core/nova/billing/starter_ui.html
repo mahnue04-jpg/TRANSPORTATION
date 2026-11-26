@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>AMICOR Nova Starter</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#142338;font:16px system-ui,sans-serif}main{max-width:850px;margin:auto;padding:24px}header{padding:24px;background:#142338;color:white;border-radius:16px}h1{margin:12px 0}small{color:#ccd8e6}section{background:white;padding:20px;border:1px solid #d7dfe8;border-radius:12px;margin:16px 0}button,input,textarea{font:inherit}button{background:#164e63;color:white;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}button:disabled{opacity:.5;cursor:default}textarea{display:block;width:100%;min-height:90px;padding:12px;border:1px solid #a7b5c4;border-radius:8px;margin:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}p{line-height:1.5}[hidden]{display:none!important}
+</style></head><body><main>
+<header><small>AMICOR NOVA · PRIVATE STAGING</small><h1>Starter workspace</h1><p>$9.99/month · Self-service only · No managed tasks</p></header>
+<section><h2>Subscription access</h2><p id="status" role="status" aria-live="polite">Check your signed-in account to begin.</p><button id="check">Verify my access</button></section>
+<div id="features" hidden>
+<section><h2>Task planner</h2><label for="goal">What would you like to accomplish?</label><textarea id="goal" maxlength="500"></textarea><button id="plan">Create checklist</button><pre id="planResult" aria-live="polite"></pre><p>Draft only. Not saved or executed by Nova.</p></section>
+<section><h2>Business templates</h2><button id="templates">Load templates</button><pre id="templateResult" aria-live="polite"></pre></section>
+<section><h2>Self-service guidance</h2><button id="assist">Show guidance</button><pre id="assistResult" aria-live="polite"></pre><p>Static guidance preview, not an AI conversation.</p></section>
+</div><p>Private synthetic rehearsal. No checkout, external AI calls or customer work execution from this page.</p>
+</main><script>
+"use strict";
+const el=id=>document.getElementById(id);
+const clear=()=>{el("features").hidden=true;for(const id of ["planResult","templateResult","assistResult"])el(id).textContent="";el("goal").value="";};
+async function api(path,body){
+const options={credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json"}};
+if(body!==undefined){options.method="POST";options.headers["Content-Type"]="application/json";options.body=JSON.stringify(body);}
+const r=await fetch("/api/nova/starter/"+path,options);
+if(!r.ok){if(r.status===401||r.status===403){clear();el("status").textContent="Access unavailable. Sign in with your verified staging subscriber account.";}throw new Error("Request unavailable");}
+return r.json();
+}
+async function action(id,fn){const b=el(id);b.disabled=true;try{await fn();}catch{if(!el("features").hidden)el("status").textContent="Request unavailable. Please retry.";else if(el("status").textContent==="Checking access…")el("status").textContent="Access could not be verified.";}finally{b.disabled=false;}}
+el("check").onclick=()=>action("check",async()=>{clear();el("status").textContent="Checking access…";const data=await api("workspace");if(data.plan!=="starter"||data.staging_only!==true||data.managed_tasks!==0)throw new Error("Unexpected access");el("status").textContent="Verified Starter staging access.";el("features").hidden=false;});
+el("plan").onclick=()=>action("plan",async()=>{const goal=el("goal").value.trim();if(!goal){el("planResult").textContent="Enter a goal first.";return;}const data=await api("plan",{goal});el("planResult").textContent=data.steps.map((x,i)=>(i+1)+". "+x).join("\n");});
+el("templates").onclick=()=>action("templates",async()=>{const data=await api("templates");el("templateResult").textContent=data.templates.map(x=>x.name+"\n"+x.fields.map(f=>f+": ______").join("\n")).join("\n\n");});
+el("assist").onclick=()=>action("assist",async()=>{const data=await api("assistance");el("assistResult").textContent=data.guidance.join("\n");});
+</script></body></html>
