@@ -35,6 +35,9 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
             return False
         item = items["data"][0]
         price = item["price"]
+        item_id = item["id"]
+        if not isinstance(item_id, str) or not item_id.startswith("si_"):
+            return False
         if (type(item["quantity"]) is not int or item["quantity"] != 1
                 or price["id"] != row.stripe_price_id
                 or price["livemode"] is not False
@@ -66,6 +69,10 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
         if (line["parent"]["type"] != "subscription_item_details"
                 or details["proration"] is not False
                 or _id(details["subscription"]) != row.stripe_subscription_id
+                or _id(details["subscription_item"]) != item_id
+                or line["pricing"]["type"] != "price_details"
+                or _id(line["pricing"]["price_details"]["price"]) != price["id"]
+                or type(line["quantity"]) is not int or line["quantity"] != 1
                 or line["period"]["start"] != start or line["period"]["end"] != end):
             return False
         return allows_starter_feature(feature=feature, tenant_id=tenant_id,
