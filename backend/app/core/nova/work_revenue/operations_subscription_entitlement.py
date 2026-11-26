@@ -59,7 +59,7 @@ def from_reconciled_test_subscription(
     *, plan: str, lead_id: str, saved_customer_id: str,
     saved_subscription_id: str, saved_payment_status: str,
     test_price_id: str, subscription: Mapping[str, Any],
-    now: datetime,
+    now: datetime, require_current_invoice: bool = False,
 ) -> VerifiedEntitlement:
     """Fail closed: a verified current paid invoice is required for every period."""
     if plan not in PRICES or not lead_id or not saved_customer_id or not saved_subscription_id:
@@ -98,6 +98,9 @@ def from_reconciled_test_subscription(
             or _invoice_subscription(invoice) != saved_subscription_id
             or _id(invoice.get("customer")) != saved_customer_id):
         raise SubscriptionNotEntitled("invoice_not_verified")
+    # Never permit legacy invoice evidence at the hosted acceptance gate.
+    if require_current_invoice and "parent" not in invoice:
+        raise SubscriptionNotEntitled("current_invoice_required")
     # Current Stripe invoice lines must bind the exact subscription item and price.
     # Legacy fixtures retain their separate compatibility path in staging only.
     if "parent" in invoice:
