@@ -300,6 +300,86 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
         raise HTTPException(409, {"stage": stage, "message": "Existing payment not yet verified"})
 
 
+# Signed notification rehearsal only. Never use event payloads to grant access.
+# The existing owner-only reconcile path remains the sole activation path;
+# every feature request checks fresh provider evidence, including reversals.
+from fastapi import Request
+from sqlalchemy.exc import IntegrityError
+from app.core.nova.billing.models import NovaBillingWebhookEvent
+import json
+import stripe as stripe_sdk
+
+@app.post("/api/marketing/nova-agent/stripe/webhook")
+async def starter_webhook(request: Request, db: Session = Depends(get_db)):
+    if not safe_configuration() or os.getenv("NOVA_STARTER_SIGNED_WEBHOOK_STAGING_ENABLED") != "true":
+        raise HTTPException(503, "Staging webhook disabled")
+    secret = os.getenv("STRIPE_NOVA_AGENT_WEBHOOK_SECRET", "")
+    signature = request.headers.get("Stripe-Signature", "")
+    if not secret.startswith("whsec_"):
+        raise HTTPException(503, "Signing secret unavailable")
+    if not signature:
+        raise HTTPException(400, "Signature required")
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload.extend(chunk)
+        if len(payload) > 262144:
+            raise HTTPException(413, "Event too large")
+    try:
+        stripe_sdk.Webhook.construct_event(bytes(payload), signature, secret, tolerance=300)
+        event = json.loads(payload)
+    except Exception:
+        raise HTTPException(400, "Invalid signed event") from None
+    if not isinstance(event, dict) or event.get("livemode") is not False or event.get("account"):
+        raise HTTPException(400, "Unexpected event mode or account")
+    event_id = event.get("id")
+    kind = event.get("type")
+    data = event.get("data")
+    obj = data.get("object") if isinstance(data, dict) else None
+    if not isinstance(event_id, str) or not re.fullmatch(r"evt_[A-Za-z0-9_]{1,120}", event_id) or not isinstance(obj, dict):
+        raise HTTPException(400, "Malformed event")
+    customer_id = os.getenv("NOVA_STARTER_RECOVERY_CUSTOMER_ID", "")
+    subscription_id = os.getenv("NOVA_STARTER_RECOVERY_SUBSCRIPTION_ID", "")
+    checkout_id = os.getenv("NOVA_STARTER_RECOVERY_CHECKOUT_ID", "")
+    if not (customer_id.startswith("cus_") and subscription_id.startswith("sub_") and checkout_id.startswith("cs_test_")):
+        raise HTTPException(503, "Synthetic identifiers unavailable")
+    # Accept only the exact configured rehearsal object. Other billing events
+    # are acknowledged as ignored; this endpoint never processes other plans.
+    if kind == "checkout.session.completed":
+        matched = (obj.get("id") == checkout_id and obj.get("customer") == customer_id
+                   and obj.get("subscription") == subscription_id)
+    elif kind in ("customer.subscription.updated", "customer.subscription.deleted"):
+        matched = obj.get("id") == subscription_id and obj.get("customer") == customer_id
+    elif kind in ("invoice.paid", "invoice.payment_failed"):
+        parent = obj.get("parent") or {}
+        details = parent.get("subscription_details") or {} if isinstance(parent, dict) else {}
+        sub = details.get("subscription") if isinstance(details, dict) else None
+        matched = obj.get("customer") == customer_id and sub == subscription_id
+    else:
+        matched = False
+    if not matched or obj.get("livemode") is not False:
+        return {"received": True, "result": "ignored"}
+    # Receipt-only audit. A signed notification is not payment proof; do not
+    # mutate entitlement or revenue state from a potentially stale snapshot.
+    existing = db.execute(select(NovaBillingWebhookEvent).where(
+        NovaBillingWebhookEvent.stripe_event_id == event_id)).scalar_one_or_none()
+    if existing:
+        if existing.event_type != kind:
+            raise HTTPException(409, "Event identity conflict")
+        return {"received": True, "result": "duplicate"}
+    db.add(NovaBillingWebhookEvent(stripe_event_id=event_id, event_type=kind,
+        tenant_id="starter-999-synthetic-tenant", processing_result="receipt_only"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.execute(select(NovaBillingWebhookEvent).where(
+            NovaBillingWebhookEvent.stripe_event_id == event_id)).scalar_one_or_none()
+        if existing and existing.event_type == kind:
+            return {"received": True, "result": "duplicate"}
+        raise HTTPException(503, "Receipt persistence unavailable")
+    return {"received": True, "result": "receipt_only"}
+
+
 @app.get("/sandbox-test", response_class=HTMLResponse)
 def page():
     return HTMLResponse("""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Starter subscription test</title>
