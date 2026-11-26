@@ -110,25 +110,26 @@ def checkout_matches(checkout, user, customer_id):
     )
 
 def recover_checkout(stripe, user):
-    customers = plain(stripe.v1.customers.list({"email": user.email, "limit": 100}))
-    if customers.get("has_more") is not False:
-        raise ValueError("customer_list_incomplete")
-    matches = [c for c in customers["data"] if
-        c.get("livemode") is False and c.get("email") == user.email
-        and str(c.get("id", "")).startswith("cus_")
-        and (c.get("metadata") or {}).get("nova_product") == "nova_saas"
-        and (c.get("metadata") or {}).get("nova_tenant_id") == user.organization_id
-        and (c.get("metadata") or {}).get("nova_user_id") == user.user_id]
-    if len(matches) != 1:
-        raise ValueError("customer_match_not_unique")
-    customer_id = matches[0]["id"]
-    sessions = plain(stripe.v1.checkout.sessions.list({"customer": customer_id, "limit": 100}))
-    if sessions.get("has_more") is not False:
-        raise ValueError("checkout_list_incomplete")
-    paid = [c for c in sessions["data"] if checkout_matches(c, user, customer_id)]
-    if len(paid) != 1:
-        raise ValueError("paid_checkout_match_not_unique")
-    return paid[0]
+    """Recover only the owner's exact, previously paid synthetic session.
+
+    Dashboard evidence is a locator, not proof of payment. The checkout and
+    subscription metadata and current invoice must still pass all checks.
+    """
+    session_id = os.getenv("NOVA_STARTER_RECOVERY_CHECKOUT_ID", "").strip()
+    customer_id = os.getenv("NOVA_STARTER_RECOVERY_CUSTOMER_ID", "").strip()
+    subscription_id = os.getenv("NOVA_STARTER_RECOVERY_SUBSCRIPTION_ID", "").strip()
+    if not (session_id.startswith("cs_test_") and customer_id.startswith("cus_")
+            and subscription_id.startswith("sub_")):
+        raise ValueError("Exact synthetic recovery identifiers required")
+    checkout = plain(stripe.v1.checkout.sessions.retrieve(session_id))
+    if not (checkout.get("id") == session_id
+            and checkout.get("subscription") == subscription_id
+            and checkout_matches(checkout, user, customer_id)
+            and checkout.get("amount_total") == 999
+            and checkout.get("currency") == "usd"):
+        raise ValueError("Exact synthetic checkout binding mismatch")
+    return checkout
+
 
 @app.post("/sandbox/reconcile")
 def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db)):
@@ -144,7 +145,7 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
             if checkout.get("id") != row.stripe_checkout_session_id or not checkout_matches(checkout, user, row.stripe_customer_id):
                 raise ValueError("checkout mismatch")
         else:
-            stage = "stripe_test_checkout_recovery"
+            stage = "exact_test_checkout_recovery"
             checkout = recover_checkout(stripe, user)
         customer_id = checkout["customer"]
         price_id = os.environ["NOVA_STRIPE_PRICE_STARTER"]
