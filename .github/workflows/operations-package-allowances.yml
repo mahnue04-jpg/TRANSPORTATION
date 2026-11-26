@@ -152,6 +152,11 @@ jobs:
         run: |
           python -m pytest -q --noconftest tests/test_nova_stripe_subscriptions_phase1.py -k isolated_paid_starter_checkout_guard
 
+      - name: Exercise hosted Starter recovery and workspace against fake Stripe JSON
+        working-directory: backend
+        run: |
+          python -m pytest -q --noconftest tests/test_operations_starter_hosted_recovery.py
+
   private-delivery:
     runs-on: ubuntu-latest
     timeout-minutes: 15
