@@ -91,7 +91,7 @@ def evidence():
     sub = dict(id="sub_synthetic", customer="cus_synthetic", livemode=False,
         status="active", metadata=dict(nova_product="nova_saas",
             nova_tenant_id=row.tenant_id, nova_plan_key="starter"),
-        items=dict(has_more=False, data=[dict(quantity=1,
+        items=dict(has_more=False, data=[dict(id="si_synthetic", quantity=1,
             current_period_start=start, current_period_end=end,
             price=dict(id=row.stripe_price_id, livemode=False, unit_amount=999,
                 currency="usd", recurring=dict(interval="month", interval_count=1)))]),
@@ -101,7 +101,9 @@ def evidence():
                 subscription=row.stripe_subscription_id)),
             lines=dict(has_more=False, data=[dict(
                 parent=dict(type="subscription_item_details",
-                    subscription_item_details=dict(proration=False, subscription=row.stripe_subscription_id)),
+                    subscription_item_details=dict(proration=False, subscription=row.stripe_subscription_id,
+                        subscription_item="si_synthetic")),
+                quantity=1, pricing=dict(type="price_details", price_details=dict(price=row.stripe_price_id)),
                 period=dict(start=start, end=end))])))
     return row, sub
 
@@ -137,6 +139,10 @@ def test_exact_subscription_evidence(feature):
     (("latest_invoice", "customer"), "cus_wrong"),
     (("latest_invoice", "parent", "subscription_details", "subscription"), "sub_wrong"),
     (("latest_invoice", "lines", "has_more"), True),
+    (("items", "data", 0, "id"), "si_other"),
+    (("latest_invoice", "lines", "data", 0, "pricing", "price_details", "price"), "price_other"),
+    (("latest_invoice", "lines", "data", 0, "parent", "subscription_item_details", "subscription_item"), "si_other"),
+    (("latest_invoice", "lines", "data", 0, "quantity"), 2),
     (("latest_invoice", "lines", "data", 0, "period", "end"), 0),
     (("latest_invoice", "lines", "data", 0, "parent", "subscription_item_details", "proration"), True),
 ])
