@@ -56,7 +56,7 @@ def apply(add, pages, status_table):
         card('Starter Task', '<strong>$49 one-time</strong>One small supported task, with scope reviewed before work begins.', AGENT, 'Request a starter task'),
         card('Launch Operations', '<strong>$99/month</strong>Up to 3 scoped managed tasks per paid subscription month, with human review.', AGENT, 'View plan'),
         card('Business Operations', '<strong>$299/month</strong>Up to 10 scoped managed tasks per paid subscription month, with relative priority support. Complex projects are quoted separately.', AGENT, 'View plan'),
-    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">Package benefits are defined; paid access is not yet open. Request a scope check or register interest while billing, tax, terms and fulfillment checks are completed. Media-provider credits and complex projects are not included.</p>'
+    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">Package benefits are defined; paid access is not yet open. This corporate website does not collect payment while billing, tax, terms and fulfillment checks are pending. Request a scope check or register interest. Media-provider credits and complex projects are not included.</p>'
 
     quote_url = '/early-access/?product=Business%20Services&intent=quote'
     project_brief = (
