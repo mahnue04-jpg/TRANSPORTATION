@@ -167,3 +167,10 @@ def test_current_invoice_requires_exact_item_and_price(plan, change):
     change(sub)
     with pytest.raises(SubscriptionNotEntitled, match="invoice_item_price_mismatch"):
         reconcile(sub, plan=plan)
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+def test_hosted_acceptance_requires_current_invoice(plan):
+    with pytest.raises(SubscriptionNotEntitled, match="current_invoice_required"):
+        reconcile(fixture(plan), plan=plan, require_current_invoice=True)
+    assert reconcile(current_api_fixture(plan), plan=plan, require_current_invoice=True).paid
