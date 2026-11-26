@@ -1,13 +1,41 @@
 """Dedicated Operations payment event intake. Sales routes are registered separately."""
 
 import os
+from contextlib import asynccontextmanager
 
 import psycopg2
 import stripe
 from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+def verify_writer(database_url):
+    connection = psycopg2.connect(database_url, connect_timeout=5)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT current_user = 'nova_ops_event_writer'
+                    AND current_database() = 'amicor'
+                    AND has_column_privilege('public.nova_operations_payment_events', 'event_id', 'SELECT')
+                    AND has_column_privilege('public.nova_operations_payment_events', 'event_id', 'INSERT')
+                    AND has_column_privilege('public.nova_operations_payment_events', 'event_type', 'INSERT')
+                    AND has_column_privilege('public.nova_operations_payment_events', 'object_id', 'INSERT')
+                    AND NOT has_table_privilege('public.nova_operations_payment_events', 'DELETE')"""
+            )
+            if cursor.fetchone() != (True,):
+                raise RuntimeError("Operations payment writer permissions do not match")
+    finally:
+        connection.close()
+
+
+@asynccontextmanager
+async def lifespan(app):
+    database_url = os.getenv("NOVA_OPERATIONS_DATABASE_URL")
+    if database_url:
+        await run_in_threadpool(verify_writer, database_url)
+    yield
+
+
+app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None, lifespan=lifespan)
 EVENT_TYPES = frozenset({
     "checkout.session.completed", "checkout.session.async_payment_succeeded",
     "checkout.session.async_payment_failed", "customer.subscription.updated",
