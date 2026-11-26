@@ -109,25 +109,53 @@ def checkout_matches(checkout, user, customer_id):
         and metadata.get("nova_product") == "nova_saas"
     )
 
-def recover_checkout(stripe, user):
-    """Recover only the owner's exact, previously paid synthetic session.
+class RecoveryError(Exception):
+    """Only fixed, non-sensitive diagnostic codes are exposed."""
+    def __init__(self, code):
+        self.code = code
 
-    Dashboard evidence is a locator, not proof of payment. The checkout and
-    subscription metadata and current invoice must still pass all checks.
-    """
+def require_recovery(condition, code):
+    if not condition:
+        raise RecoveryError(code)
+
+def read_provider(fn, stage):
+    try:
+        return plain(fn())
+    except Exception as exc:
+        status = getattr(exc, "http_status", None)
+        suffix = {401: "authentication", 403: "permission", 404: "not_found",
+                  429: "rate_limit"}.get(status, "provider_error")
+        raise RecoveryError(stage + "_" + suffix) from None
+
+def recover_checkout(stripe, user):
     session_id = os.getenv("NOVA_STARTER_RECOVERY_CHECKOUT_ID", "").strip()
     customer_id = os.getenv("NOVA_STARTER_RECOVERY_CUSTOMER_ID", "").strip()
     subscription_id = os.getenv("NOVA_STARTER_RECOVERY_SUBSCRIPTION_ID", "").strip()
-    if not (session_id.startswith("cs_test_") and customer_id.startswith("cus_")
-            and subscription_id.startswith("sub_")):
-        raise ValueError("Exact synthetic recovery identifiers required")
-    checkout = plain(stripe.v1.checkout.sessions.retrieve(session_id))
-    if not (checkout.get("id") == session_id
-            and checkout.get("subscription") == subscription_id
-            and checkout_matches(checkout, user, customer_id)
-            and checkout.get("amount_total") == 999
-            and checkout.get("currency") == "usd"):
-        raise ValueError("Exact synthetic checkout binding mismatch")
+    require_recovery(session_id.startswith("cs_test_") and customer_id.startswith("cus_")
+                     and subscription_id.startswith("sub_"), "recovery_configuration")
+    checkout = read_provider(lambda: stripe.v1.checkout.sessions.retrieve(session_id),
+                             "checkout_read")
+    require_recovery(checkout.get("id") == session_id, "checkout_id")
+    require_recovery(checkout.get("livemode") is False, "checkout_mode_live")
+    require_recovery(checkout.get("subscription") == subscription_id, "checkout_subscription")
+    require_recovery(checkout.get("customer") == customer_id, "checkout_customer")
+    require_recovery(checkout.get("mode") == "subscription", "checkout_mode")
+    require_recovery(checkout.get("status") == "complete" and checkout.get("payment_status") == "paid",
+                     "checkout_payment_status")
+    require_recovery(checkout.get("amount_total") == 999 and checkout.get("currency") == "usd",
+                     "checkout_amount")
+    # Independently verify the exact subscription and its paid invoice in
+    # reconcile(). The fixed owner-only locator is not a public account claim.
+    # A missing Checkout metadata field is allowed ONLY when no supplied
+    # field contradicts the synthetic identity and the subscription itself
+    # has all required tenant metadata (checked by verify_starter_feature).
+    metadata = checkout.get("metadata") or {}
+    expected = {"nova_plan_key": "starter", "nova_tenant_id": user.organization_id,
+                "nova_user_id": user.user_id, "nova_product": "nova_saas"}
+    require_recovery(all(k not in metadata or metadata[k] == v for k, v in expected.items()),
+                     "checkout_metadata_conflict")
+    require_recovery(checkout.get("client_reference_id") in (None, "", user.organization_id),
+                     "checkout_reference_conflict")
     return checkout
 
 
@@ -138,15 +166,10 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
         row = db.execute(select(NovaTenantSubscription).where(
             NovaTenantSubscription.tenant_id == user.organization_id)).scalar_one_or_none()
         stripe = client()
-        if row is not None and row.stripe_checkout_session_id:
-            stage = "stored_checkout_retrieval"
-            checkout = plain(stripe.v1.checkout.sessions.retrieve(row.stripe_checkout_session_id))
-            stage = "stored_checkout_binding"
-            if checkout.get("id") != row.stripe_checkout_session_id or not checkout_matches(checkout, user, row.stripe_customer_id):
-                raise ValueError("checkout mismatch")
-        else:
-            stage = "exact_test_checkout_recovery"
-            checkout = recover_checkout(stripe, user)
+        stage = "exact_test_checkout_recovery"
+        checkout = recover_checkout(stripe, user)
+        if row is not None and row.stripe_checkout_session_id not in (None, checkout["id"]):
+            raise RecoveryError("stored_checkout_conflict")
         customer_id = checkout["customer"]
         price_id = os.environ["NOVA_STRIPE_PRICE_STARTER"]
         stage = "local_binding"
@@ -163,7 +186,7 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
         if row is not None and row.stripe_subscription_id not in (None, sub_id):
             raise ValueError("conflicting subscription")
         stage = "stripe_subscription_retrieval"
-        subscription = plain(stripe.v1.subscriptions.retrieve(sub_id, {"expand": ["latest_invoice"]}))
+        subscription = read_provider(lambda: stripe.v1.subscriptions.retrieve(sub_id, {"expand": ["latest_invoice"]}), "subscription_read")
         candidate = SimpleNamespace(tenant_id=user.organization_id, plan_key="starter",
             subscription_status="active", stripe_customer_id=customer_id,
             stripe_subscription_id=sub_id, stripe_price_id=price_id)
@@ -187,6 +210,9 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
         row.subscription_status = "active"
         db.commit()
         return {"verified": True, "plan": "starter", "managed_tasks": 0}
+    except RecoveryError as exc:
+        db.rollback()
+        raise HTTPException(409, {"stage": exc.code, "message": "Existing payment not yet verified"})
     except Exception:
         db.rollback()
         # Fixed diagnostic category only; no raw provider errors or identifiers.
