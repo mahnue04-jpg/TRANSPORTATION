@@ -2,6 +2,7 @@ name: Build AMICOR Website Upload Package
 on:
   push:
     branches:
+      - main
       - feature/amicor-product-visual-catalog
       - feature/amicor-public-website-w1
     paths:
