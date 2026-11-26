@@ -52,11 +52,11 @@ def apply(add, pages, status_table):
 
     plans = '<div class="price-grid">' + ''.join([
         card('Explore &amp; scope', '<strong>$0</strong>Explore the public demo and request a scope check. The Nova app also offers a seven-day account trial with no card required.', AGENT, 'Explore the demo'),
-        card('Starter Plan', '<strong>$9.99/month</strong>Proposed entry-level Nova subscription. Exact benefits and access are pending release verification.', '/early-access/?product=Nova%20Operations%20Agent', 'Register interest'),
-        card('Starter Task', '<strong>$49 one-time</strong>A supported starter task, with scope reviewed before work begins.', AGENT, 'Request a starter task'),
-        card('Launch Operations', '<strong>$99/month</strong>Recurring supported digital operations. Confirm the scope and plan details in the Nova app.', AGENT, 'View plan'),
-        card('Business Operations', '<strong>$299/month</strong>Business operations support within an agreed scope. Complex projects are quoted separately.', AGENT, 'View plan'),
-    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">The $9.99 plan is proposed; the other options are listed in the Nova app. This corporate website does not collect payment while billing, tax, terms and fulfillment checks are pending. Media-provider credits and complex projects are not represented as included.</p>'
+        card('Starter Plan', '<strong>$9.99/month</strong>Basic Nova workspace, task planning, business templates and self-service guidance. No managed tasks included.', '/early-access/?product=Nova%20Operations%20Agent', 'Register interest'),
+        card('Starter Task', '<strong>$49 one-time</strong>One small supported task, with scope reviewed before work begins.', AGENT, 'Request a starter task'),
+        card('Launch Operations', '<strong>$99/month</strong>Up to 3 scoped managed tasks per paid subscription month, with human review.', AGENT, 'View plan'),
+        card('Business Operations', '<strong>$299/month</strong>Up to 10 scoped managed tasks per paid subscription month, with relative priority support. Complex projects are quoted separately.', AGENT, 'View plan'),
+    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">Package benefits are defined; paid access is not yet open. Request a scope check or register interest while billing, tax, terms and fulfillment checks are completed. Media-provider credits and complex projects are not included.</p>'
 
     quote_url = '/early-access/?product=Business%20Services&intent=quote'
     project_brief = (
@@ -115,7 +115,7 @@ def apply(add, pages, status_table):
     replace('/nova-operations/', 'Nova Operations Agent — AMICOR Business Support', 'Explore Nova Operations Agent, its public demo, trial and starting plans.', operations)
     replace('/technologies/autonomous-operations-agent/', 'Nova Operations Agent — canonical page', 'Autonomous Operations Agent is an earlier name for Nova Operations Agent, not a second product.',
         hero('Earlier name', 'Not a separate product.', 'Autonomous Operations Agent is an earlier name for Nova Operations Agent. Pricing and the product description live on the canonical page.', button('/nova-operations/', 'Open Nova Operations Agent')))
-    replace('/pricing/', 'AMICOR Nova Pricing and Project Quotes', 'Nova starting options: free exploration, proposed $9.99/month starter plan, $49 starter task, $99/month and $299/month. Complex projects are quoted separately.',
+    replace('/pricing/', 'AMICOR Nova Pricing and Project Quotes', 'Nova starting options: free exploration, $9.99/month starter plan, $49 starter task, $99/month and $299/month. Complex projects are quoted separately.',
         hero('Pricing', 'Start small. Scope the work clearly.', 'Explore Nova before choosing a task or recurring support plan.', button(SIGNUP, 'Start a Seven-Day Trial') + button('/early-access/?product=Business%20Services&intent=quote', 'Request a Project Quote', False)) + section('Nova Operations Agent', plans) + section('Larger projects', '<p>Research projects, CRM assessments, custom workflow design, and other complex engagements receive a separate quote based on scope and deliverables.</p>'))
     replace('/signin/', 'Sign In to AMICOR Nova', 'Use your existing Nova account or create an account for the seven-day trial.',
         hero('Your Nova account', 'Welcome back.', 'Continue to the Nova app to sign in with your existing account.', button(LOGIN, 'Sign In to Nova') + button(SIGNUP, 'Create an Account', False)) + section('One account, your Nova workspace', '<p>Use your account for Ask Nova and the Operations Agent. Product and module access depend on your plan. Creative Studio requires sign-in and enabled capabilities.</p>'))
