@@ -95,3 +95,10 @@ Verified Operations CI at commit 607173cdbec9ee2ddb91ddfc11d52ae67dd09aa6 (run 4
 - These results are not hosted Stripe acceptance. The shared verifier assumes a single full card payment, denies unsupported response shapes, and requires actual sandbox SDK/API verification. Persistent reversal-event reconciliation, restored/dispute-won handling, exact invoice line price/item identity, and legacy route bypass review remain open.
 - Next hosted acceptance requires access to Stripe test mode (the connector currently exposes live mode only) and the existing Launch/Business sandbox access tokens. Never substitute live credentials or rotate tokens without owner approval.
 - No production deployment or live checkout publication authorized.
+
+
+## Owner-provided Starter sandbox price — November 26, 2026 UTC
+
+The owner reported active test catalog entries for all four offers and supplied the $9.99 monthly USD Starter product `prod_VhG6ddXy8MvHCs` and price `price_1UfraiBCDlIbm4gmdMLtof9d`. These identifiers are non-secret, owner-provided evidence only; independent Stripe test-mode API retrieval is still required. The connector currently exposes only the live account. Do not use live credentials as a workaround.
+
+For an isolated authenticated Starter rehearsal, after verifying the price object in test mode, configure both `NOVA_STRIPE_PRICE_STARTER` and `NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID` to that same sandbox price. Keep both environment markers staging, live Stripe and customer sales false, and the checkout trial disabled. Enable the Starter staging feature only on the isolated candidate. A configured checkout price that differs from the access price now denies access. Existing hosted rehearsals are pinned to separate commits; no Render service was reconfigured by this update. Hosted acceptance and independent sandbox authorization remain outstanding.
