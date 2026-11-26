@@ -9,6 +9,7 @@ import json
 import os
 from typing import Any, Protocol
 
+from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
 from app.core.nova.signup.stripe_client import (
     STRIPE_HTTP_TIMEOUT_SECONDS,
     is_live_stripe_key,
@@ -284,6 +285,10 @@ def checkout_payload(*, lead_id: str, email: str, plan_key: str, customer_id: st
         "cancel_url": f"{base}/nova/anonymous-agent?checkout=cancelled&lead_id={lead_id}",
         "customer_update": {"name": "auto", "address": "auto"},
     }
+    if is_live_stripe_key(stripe_secret_key() or ""):
+        if agent_checkout_mode() != "live" or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true":
+            raise RuntimeError("Live Operations checkout is unavailable.")
+        payload["line_items"] = [{"price": LIVE_OPERATIONS_PRICES[plan_key], "quantity": 1}]
     if plan["mode"] == "subscription":
         payload["subscription_data"] = {"metadata": metadata}
     else:
