@@ -98,6 +98,28 @@ def from_reconciled_test_subscription(
             or _invoice_subscription(invoice) != saved_subscription_id
             or _id(invoice.get("customer")) != saved_customer_id):
         raise SubscriptionNotEntitled("invoice_not_verified")
+    # Current Stripe invoice lines must bind the exact subscription item and price.
+    # Legacy fixtures retain their separate compatibility path in staging only.
+    if "parent" in invoice:
+        item_id = item.get("id")
+        line_list = invoice.get("lines") or {}
+        current_lines = line_list.get("data") or []
+        if (not isinstance(item_id, str) or not item_id.startswith("si_")
+                or line_list.get("has_more") is not False or len(current_lines) != 1):
+            raise SubscriptionNotEntitled("invoice_item_price_mismatch")
+        line = current_lines[0]
+        if not isinstance(line, dict):
+            raise SubscriptionNotEntitled("invoice_item_price_mismatch")
+        parent = line.get("parent") or {}
+        details = parent.get("subscription_item_details") or {}
+        pricing = line.get("pricing") or {}
+        price_details = pricing.get("price_details") or {}
+        if (parent.get("type") != "subscription_item_details"
+                or _id(details.get("subscription_item")) != item_id
+                or pricing.get("type") != "price_details"
+                or _id(price_details.get("price")) != test_price_id
+                or type(line.get("quantity")) is not int or line["quantity"] != 1):
+            raise SubscriptionNotEntitled("invoice_item_price_mismatch")
     # A paid historical invoice must not grant tasks during a different period.
     lines = (invoice.get("lines") or {}).get("data") or []
     if not any(
