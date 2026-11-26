@@ -56,6 +56,7 @@ def reserve_verified_subscription_task(
         test_price_id=test_price_id,
         subscription=retrieved_test_subscription,
         now=now,
+        require_current_invoice=os.getenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING") == "true",
     )
     options = {}
     if bind_reservation is not None:
