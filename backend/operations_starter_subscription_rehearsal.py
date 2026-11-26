@@ -82,11 +82,90 @@ def health():
     return {"status": "sandbox_only", "stripe_live": False,
             "customer_sales": False, "plan": "starter", "amount_cents": 999}
 
+# Isolated recovery uses Stripe JSON responses directly, not SDK objects.
+# This transport has no write methods or caller-supplied URLs.
+import requests
+import re
+import logging
+logger = logging.getLogger("nova.starter.recovery")
+
+class StripeReadError(Exception):
+    def __init__(self, status):
+        self.http_status = status
+
+class StripeReadResource:
+    def __init__(self, transport, resource, prefix):
+        self.transport, self.resource, self.prefix = transport, resource, prefix
+
+    def retrieve(self, identifier, params=None):
+        if not isinstance(identifier, str) or not re.fullmatch(self.prefix + r"[A-Za-z0-9_]+", identifier):
+            raise ValueError("Invalid Stripe identifier")
+        return self.transport.get(self.resource + "/" + identifier, params)
+
+    def list(self, params):
+        return self.transport.get(self.resource, params)
+
+class StripeReadTransport:
+    def __init__(self, key):
+        if not key.startswith(("sk_test_", "rk_test_")):
+            raise ValueError("Test key required")
+        self.key = key
+        self.v1 = SimpleNamespace(
+            checkout=SimpleNamespace(sessions=StripeReadResource(self, "checkout/sessions", "cs_test_")),
+            subscriptions=StripeReadResource(self, "subscriptions", "sub_"),
+            invoice_payments=StripeReadResource(self, "invoice_payments", "inpay_"),
+            payment_intents=StripeReadResource(self, "payment_intents", "pi_"),
+            charges=StripeReadResource(self, "charges", "ch_"),
+        )
+
+    def get(self, resource, params=None):
+        query = []
+        for k, v in (params or {}).items():
+            if isinstance(v, list):
+                query.extend((k + "[]", item) for item in v)
+            else:
+                query.append((k, v))
+        response = requests.get("https://api.stripe.com/v1/" + resource,
+            headers={"Authorization": "Bearer " + self.key,
+                     "Stripe-Version": "2025-06-30.basil"},
+            params=query, timeout=15, allow_redirects=False)
+        if response.status_code != 200:
+            raise StripeReadError(response.status_code)
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Non-object provider response")
+        return payload
+
 def plain(obj):
-    return obj.to_dict_recursive() if hasattr(obj, "to_dict_recursive") else obj
+    if not isinstance(obj, dict):
+        raise ValueError("Expected provider JSON object")
+    return obj
 
 def client():
-    return LiveNovaBillingStripeClient(api_key=os.environ["STRIPE_SECRET_KEY"])._build_client()
+    return StripeReadTransport(os.environ["STRIPE_SECRET_KEY"])
+
+def rehearsal_feature_access(db, authenticated_user, feature):
+    if not safe_configuration() or authenticated_user.email != "starter-999@example.invalid":
+        return False
+    try:
+        row = db.execute(select(NovaTenantSubscription).where(
+            NovaTenantSubscription.tenant_id == authenticated_user.organization_id
+        )).scalar_one_or_none()
+        if row is None or row.stripe_subscription_id != os.getenv("NOVA_STARTER_RECOVERY_SUBSCRIPTION_ID"):
+            return False
+        stripe = client()
+        subscription = stripe.v1.subscriptions.retrieve(row.stripe_subscription_id, {"expand": ["latest_invoice"]})
+        return (verify_starter_feature(feature=feature, tenant_id=authenticated_user.organization_id,
+            row=row, subscription=subscription, now=datetime.now(timezone.utc))
+            and verify_current_invoice_payment(stripe, plan="starter", customer_id=row.stripe_customer_id,
+                subscription=subscription))
+    except Exception as exc:
+        logger.warning("starter_workspace_failure exception_type=%s", type(exc).__name__)
+        return False
+
+# Only this standalone process overrides the staging route adapter.
+import app.core.nova.billing.starter_feature_routes as feature_routes
+feature_routes.authenticated_starter_access = rehearsal_feature_access
 
 # Recovery revision deliberately cannot create another checkout.
 @app.post("/sandbox/checkout")
@@ -211,9 +290,11 @@ def reconcile(user: UserContext = Depends(owner), db: Session = Depends(get_db))
         db.commit()
         return {"verified": True, "plan": "starter", "managed_tasks": 0}
     except RecoveryError as exc:
+        logger.warning("starter_recovery_failure code=%s", exc.code)
         db.rollback()
         raise HTTPException(409, {"stage": exc.code, "message": "Existing payment not yet verified"})
-    except Exception:
+    except Exception as exc:
+        logger.warning("starter_recovery_failure stage=%s exception_type=%s", stage, type(exc).__name__)
         db.rollback()
         # Fixed diagnostic category only; no raw provider errors or identifiers.
         raise HTTPException(409, {"stage": stage, "message": "Existing payment not yet verified"})
