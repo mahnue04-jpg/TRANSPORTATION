@@ -9,6 +9,7 @@ owner's approval.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timezone
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -111,7 +112,11 @@ def _materials_changed_after_approval(
     )
     for row in rows:
         updated = getattr(row, "updated_at", None)
-        if updated is not None and updated > decided_at:
+        if updated is None:
+            continue
+        left = updated if updated.tzinfo is not None else updated.replace(tzinfo=timezone.utc)
+        right = decided_at if getattr(decided_at, "tzinfo", None) is not None else decided_at.replace(tzinfo=timezone.utc)
+        if left > right:
             return True
     return False
 
@@ -265,7 +270,9 @@ def _approved_email_body(
     return cleaned
 
 
-_EMAIL_RE = re.compile(r"(?i)(?<![A-Z0-9._%+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![A-Z0-9._%+-])")
+_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?![A-Za-z0-9_%+-])"
+)
 _APPLY_CONTEXT_RE = re.compile(
     r"(?i)\b(apply|application|resume|résumé|proposal|cv|send|email)\b"
 )

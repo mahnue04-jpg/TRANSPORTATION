@@ -77,6 +77,8 @@ def test_genuine_credential_requirements_stay_blocked(description):
     "5+ years of experience preferred.",
     "5+ years of experience is not required.",
     "No minimum 5 years of experience required.",
+    "Preferred: 1-2 years of hands-on payroll experience.",
+    "1\u20132 years of hands-on payroll experience preferred.",
 ])
 def test_preferred_or_negated_experience_is_not_mandatory(description):
     assert unverified_experience_required(job(description)) is False
@@ -93,6 +95,10 @@ def test_preferred_or_negated_experience_is_not_mandatory(description):
     "Preferred: 5+ years of experience. Minimum 7 years of experience required.",
     "Preferred: must have 5 years of experience.",
     "Preferred: 5+ years of experience required.",
+    "Minimum 1-2 years of hands-on payroll processing experience.",
+    "Minimum 1\u20132 years of hands-on UK payroll processing experience.",
+    "Minimum 1\u00e2\u0080\u00932 years of hands-on UK payroll processing experience.",
+    "1-2 years of hands-on payroll processing experience.",
 ])
 def test_genuine_experience_requirements_stay_blocked(description):
     assert unverified_experience_required(job(description)) is True

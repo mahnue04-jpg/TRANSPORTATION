@@ -22,8 +22,10 @@ from app.core.nova.v3.multi_source_discovery import (
     PENDING_PROVIDERS,
     MinnesotaOspLiveProvider,
     JobicyLiveProvider,
+    _funnel_key,
     _parse_mn_osp_page,
     _query_relevant,
+    opportunity_dedupe_key,
     PROVIDER_TYPES,
     ProviderMeta,
     RemotiveLiveProvider,
@@ -820,6 +822,13 @@ def test_admin_search_expands_queries_and_requires_positive_title_fit(monkeypatc
     assert result["count"] == 1
     assert result["jobs"][0]["title"] == "Virtual Assistant Contractor"
     assert result["provider_screened_counts"]["positive_fit_fixture"] >= 2
+    assert result["exclusion_reason_counts"].get("title_not_administrative_archetype", 0) >= 1
+    assert any(
+        sample["title"] == "Regional Sales Manager"
+        and sample["exclusion_reason"] == "title_not_administrative_archetype"
+        and sample["source_url"] == "https://example.test/sales-1"
+        for sample in result["exclusion_samples"]
+    )
     assert "remote administrative support contractor" in result["query_variants"]
 
 
@@ -1025,6 +1034,39 @@ def test_minnesota_osp_public_page_parses_open_vendor_solicitation() -> None:
     assert row["job_type"] == "contract"
     assert row["simulated"] is False
     assert row["response_deadline"] == "10/15/2026 at 03:00 PM"
+
+
+def test_shared_bulletin_url_keeps_each_minnesota_notice() -> None:
+    """One OSP page lists many solicitations. They must not collapse into one row."""
+    sample = """
+    <div>REFERENCE NUMBER: PT5154</div>
+    <div>Title: Minnesota State Capitol Complex Surveillance Audit</div>
+    <div>Contracting Agency: Public Safety Department</div>
+    <div>Description of Work: Proposals for a capitol surveillance audit.</div>
+    <div>REFERENCE NUMBER: PT5148</div>
+    <div>Title: Analyze Transforming Maternal Health Model</div>
+    <div>Contracting Agency: Department of Human Services</div>
+    <div>Description of Work: Analyze access to whole-person perinatal care. This description is intentionally longer so a URL-only merge would steal it.</div>
+    """
+    rows = _parse_mn_osp_page(
+        sample,
+        provider_id="mn_osp_pt",
+        source_name="Minnesota OSP Professional/Technical",
+        source_url="https://osp.admin.mn.gov/PT-auto",
+    )
+    assert len(rows) == 2
+    assert opportunity_dedupe_key(rows[0]) != opportunity_dedupe_key(rows[1])
+    merged = dedupe_opportunities(rows)
+    assert len(merged) == 2
+    by_ref = {row["provider_identifier"]: row for row in merged}
+    assert by_ref["PT5154"]["title"] == "Minnesota State Capitol Complex Surveillance Audit"
+    assert "surveillance audit" in by_ref["PT5154"]["description"].lower()
+    assert "perinatal" not in by_ref["PT5154"]["description"].lower()
+    assert "perinatal" in by_ref["PT5148"]["description"].lower()
+    assert by_ref["PT5154"]["source_url"] == "https://osp.admin.mn.gov/PT-auto"
+    assert { _funnel_key(row) for row in rows } == {
+        opportunity_dedupe_key(row) for row in rows
+    }
 
 
 def test_minnesota_osp_skips_single_source_notice_that_is_not_open_bid() -> None:
