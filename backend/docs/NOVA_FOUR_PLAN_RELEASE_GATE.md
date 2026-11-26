@@ -102,3 +102,19 @@ Verified Operations CI at commit 607173cdbec9ee2ddb91ddfc11d52ae67dd09aa6 (run 4
 The owner reported active test catalog entries for all four offers and supplied the $9.99 monthly USD Starter product `prod_VhG6ddXy8MvHCs` and price `price_1UfraiBCDlIbm4gmdMLtof9d`. These identifiers are non-secret, owner-provided evidence only; independent Stripe test-mode API retrieval is still required. The connector currently exposes only the live account. Do not use live credentials as a workaround.
 
 For an isolated authenticated Starter rehearsal, after verifying the price object in test mode, configure both `NOVA_STRIPE_PRICE_STARTER` and `NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID` to that same sandbox price. Keep both environment markers staging, live Stripe and customer sales false, and the checkout trial disabled. Enable the Starter staging feature only on the isolated candidate. A configured checkout price that differs from the access price now denies access. Existing hosted rehearsals are pinned to separate commits; no Render service was reconfigured by this update. Hosted acceptance and independent sandbox authorization remain outstanding.
+
+
+## Hosted Starter acceptance — November 25, 2026 CT
+
+**Accepted: isolated $9.99 synthetic subscription recovery and all four self-service features.** Render service nova-operations-checkout-sandbox deployed revision a0d53623fb112ec7d5fd018eca3f3f05b50ac88e, deployment dep-dc3s38rl550s73fefjg0. All four GitHub workflows passed; Operations run 45760092411, signed-starter-webhook job 139707805491: 40 payment/binding tests, one checkout guard and nine hosted recovery tests passed.
+
+The owner confirmed a successful USD 999 test-mode payment and paid invoice in Stripe. The hosted recovery initially failed because the restricted test key lacked subscription read permission. Owner updated the existing sandbox key's permissions; no key rotation or production credential change. Render logs independently confirm HTTP 200 for:
+- POST /sandbox/reconcile at 05:42:31 UTC November 26.
+- GET /api/nova/starter/workspace at 05:43:33 UTC.
+- POST /api/nova/starter/plan at 05:44:02 UTC.
+- GET /api/nova/starter/templates at 05:44:18 UTC.
+- GET /api/nova/starter/assistance at 05:44:36 UTC.
+
+Owner screenshots confirm the $9.99 plan, zero managed tasks, unsaved checklist planning, three templates and static guidance (no external AI or managed execution). The rehearsal uses an owner token and exact test checkout recovery; it is not production customer authentication or durable production storage. New checkout is disabled. All four offer amounts have successful Stripe test-payment evidence; $49 private delivery and revocation previously passed, while hosted integrated $99/$299 fulfillment remains unverified.
+
+**Do not repeat completed payments.** Legacy marketing webhook requests to the repurposed sandbox returned 404; the recovery path is direct read-only verification, not a webhook acceptance. Next work: isolated signed test webhook acceptance with exact event identity, durable idempotency and fresh provider evidence; verify production authentication, lifecycle and managed-task fulfillment; tax/terms and explicit production approval. Do not enable public checkout, live Stripe or real customer processing. No secrets or checkout session identifiers in this document.
