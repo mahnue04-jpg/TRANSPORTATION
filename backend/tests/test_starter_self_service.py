@@ -461,3 +461,11 @@ def test_starter_reversal_missing_invoice_payment_denied(adapter_fixture):
     state.payment["invoice_payments"]["data"].clear()
     assert not authenticated_starter_access(db, authenticated_user=user, feature="basic_workspace")
     assert state.charge_reads == 0
+
+
+@pytest.mark.parametrize("checkout_price,allowed", [
+    ("price_synthetic_starter", True), ("price_other", False),
+])
+def test_checkout_and_entitlement_prices_must_agree(monkeypatch, checkout_price, allowed):
+    monkeypatch.setenv("NOVA_STRIPE_PRICE_STARTER", checkout_price)
+    assert allows_starter_feature(**BASE) is allowed
