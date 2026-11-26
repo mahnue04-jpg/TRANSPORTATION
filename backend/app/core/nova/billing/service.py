@@ -176,7 +176,28 @@ def start_checkout(
         raise BillingError("Stripe price is not configured for this plan", status_code=503)
     _require_stripe_mode()
 
+    # The isolated paid Starter rehearsal must never fall back to legacy
+    # trial behavior or a live Stripe account.
+    import os
+    strict_starter = os.getenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED") == "true"
+    if strict_starter:
+        if (os.getenv("APP_ENV") != "staging"
+                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "false"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "false"
+                or not str(stripe_secret_key() or "").startswith(("sk_test_", "rk_test_"))
+                or plan != "starter"
+                or not str(user.email or "").lower().endswith(".invalid")
+                or nova_checkout_trial_enabled()
+                or price_id != os.getenv("NOVA_STARTER_SELF_SERVICE_TEST_PRICE_ID", "").strip()):
+            raise BillingError("Isolated paid Starter configuration required", status_code=503)
+
     row = _get_or_create_row(db, tenant)
+    if strict_starter and (row.trial_used or row.trial_started_at
+            or (row.stripe_checkout_session_id and (
+                row.stripe_price_id != price_id
+                or not row.stripe_checkout_session_id.startswith("cs_test_")))):
+        raise BillingError("Existing checkout is incompatible with paid Starter rehearsal", status_code=409)
     if row.subscription_status in {STATUS_TRIALING, STATUS_ACTIVE} and row.stripe_subscription_id:
         raise BillingError("Tenant already has an active subscription", status_code=409)
     if (
