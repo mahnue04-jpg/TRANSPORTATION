@@ -59,6 +59,12 @@
   if (requestedProduct && productAliases[requestedProduct]) requestedProduct = productAliases[requestedProduct];
   if (product && requestedProduct) product.value = requestedProduct;
   var message = document.querySelector("[name=message]");
+  var selectedPlan = params.get("plan");
+  var operationsPlans = ["Starter Plan", "Starter Task", "Launch Operations", "Business Operations"];
+  if (message && requestedProduct === "Nova Operations Agent" && operationsPlans.indexOf(selectedPlan) !== -1 && !message.value) {
+    message.value = "Requested Operations plan: " + selectedPlan + "\nBusiness goal or task:\n";
+  }
+
   if (message && params.get("intent") === "demo" && !message.value) {
     message.value = "I would like a product demo.";
   }
