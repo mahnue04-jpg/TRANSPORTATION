@@ -98,6 +98,7 @@ def require_current_bound_subscription(
             saved_subscription_id=row["subscription_id"],
             saved_payment_status=lead.payment_status,
             test_price_id=price, subscription=subscription, now=now,
+            require_current_invoice=os.getenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING") == "true",
         )
     except SubscriptionNotEntitled as exc:
         raise AllowanceBlocked("subscription_not_currently_entitled") from exc
