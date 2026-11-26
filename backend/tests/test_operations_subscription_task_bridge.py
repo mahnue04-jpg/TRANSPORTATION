@@ -106,3 +106,31 @@ def test_live_sales_setting_blocks_bridge(staging, monkeypatch):
         with pytest.raises(AllowanceBlocked):
             reserve(Mock())
         write.assert_not_called()
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+def test_strict_hosted_bridge_denies_legacy_invoice(staging, monkeypatch, plan):
+    monkeypatch.setenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING", "true")
+    with patch("app.core.nova.work_revenue.operations_subscription_task_bridge.reserve_staging_task") as write:
+        with pytest.raises(ValueError, match="current_invoice_required"):
+            reserve(Mock(), plan=plan)
+        write.assert_not_called()
+
+
+@pytest.mark.parametrize("plan", ["launch_99", "business_299"])
+def test_strict_hosted_bridge_accepts_bound_current_invoice(staging, monkeypatch, plan):
+    monkeypatch.setenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING", "true")
+    data = subscription(plan)
+    data["items"]["data"][0]["id"] = "si_synthetic"
+    invoice = data["latest_invoice"]
+    invoice["livemode"] = False
+    invoice["parent"] = {"type": "subscription_details", "subscription_details": {"subscription": invoice.pop("subscription")}}
+    invoice["lines"]["has_more"] = False
+    line = invoice["lines"]["data"][0]
+    line["parent"] = {"type": "subscription_item_details", "subscription_item_details": {"subscription": line.pop("subscription"), "subscription_item": "si_synthetic", "proration": False}}
+    line["pricing"] = {"type": "price_details", "price_details": {"price": "price_synthetic"}}
+    line["quantity"] = 1
+    with patch("app.core.nova.work_revenue.operations_subscription_task_bridge.reserve_staging_task") as write:
+        write.return_value = {"consumed": True}
+        assert reserve(Mock(), plan=plan, data=data)["consumed"]
+        write.assert_called_once()
