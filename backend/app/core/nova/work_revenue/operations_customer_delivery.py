@@ -5,7 +5,6 @@ and private artifact storage. Disabled by default; never sends notifications.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User as PlatformUser
 from app.modules.marketing.models import MarketingWebsiteLead
+from .operations_commercial_mode import resolve_operations_mode
 from .operations_starter_payment_binding import require_paid_starter, starter_bindings
 from . import operations_customer_csv_jobs as csv_jobs
 
@@ -40,12 +40,15 @@ grants = sa.Table(
 )
 
 
+def customer_delivery_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_CUSTOMER_DELIVERY_LIVE_ENABLED",),
+    )
+
+
 def _guard(db: Session) -> None:
-    if (os.getenv("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED", "").lower() != "true"
-            or os.getenv("APP_ENV") != "staging"
-            or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-            or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"):
+    if customer_delivery_mode() is None:
         raise HTTPException(503, "Customer delivery disabled")
     try:
         csv_jobs.require_runtime(db)

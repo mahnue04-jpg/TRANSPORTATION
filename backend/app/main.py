@@ -491,15 +491,10 @@ app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_work_router)
 
-# Private Starter delivery routes are registered only in explicitly enabled,
-# non-selling staging environments. Each request also enforces its own guard.
-if (
-    os.getenv("APP_ENV") == "staging"
-    and os.getenv("AMICOR_ENVIRONMENT") == "staging"
-    and os.getenv("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED", "").lower() == "true"
-    and os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() != "true"
-    and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() != "true"
-):
+# Private Starter delivery routes register only under an explicit commercial
+# mode. Each request also enforces its own guard; live sales stay opt-in.
+from app.core.nova.work_revenue.operations_customer_delivery import customer_delivery_mode
+if customer_delivery_mode() is not None:
     from app.core.nova.work_revenue.operations_customer_delivery import (
         customer_delivery_router, owner_delivery_router,
     )

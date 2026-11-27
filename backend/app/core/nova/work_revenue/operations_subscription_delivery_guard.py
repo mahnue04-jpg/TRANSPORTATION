@@ -5,24 +5,33 @@ Callers must hold the transaction until the grant or download decision ends.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from .operations_commercial_mode import resolve_operations_mode
 from .operations_package_usage_ledger import AllowanceBlocked
 from .operations_subscription_csv_binding import request_key_for_task
 from .operations_subscription_execution_guard import require_current_bound_subscription
 
 
+def subscription_delivery_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_SUBSCRIPTION_DELIVERY_STAGING_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_SUBSCRIPTION_DELIVERY_LIVE_ENABLED",),
+    )
+
+
 def require_subscription_delivery(db: Session, *, job, recipient) -> dict:
-    """Authorize the exact approved artifact for a verified synthetic buyer.
+    """Authorize the exact approved artifact for a verified paid buyer.
 
     Job and recipient must be loaded from trusted database records by the
     authenticated delivery caller, not supplied by an HTTP request body.
     """
-    if os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_DELIVERY_STAGING_ENABLED") != "true":
+    mode = subscription_delivery_mode()
+    if mode is None:
         raise AllowanceBlocked("subscription_delivery_disabled")
+    live = mode == "live"
     if (
         job["status"] != "APPROVED_FOR_DOWNLOAD"
         or not job["output_ref"] or not job["output_sha256"]
@@ -41,6 +50,7 @@ def require_subscription_delivery(db: Session, *, job, recipient) -> dict:
     from app.modules.marketing.models import MarketingWebsiteLead
     lead = db.get(MarketingWebsiteLead, proof["lead_id"], populate_existing=True)
     email = str(getattr(recipient, "email", "") or "").strip().casefold()
+    lead_email = str(lead.work_email or "").strip().casefold() if lead is not None else ""
     if (
         lead is None or recipient is None
         or not getattr(recipient, "id", None)
@@ -48,10 +58,14 @@ def require_subscription_delivery(db: Session, *, job, recipient) -> dict:
         or getattr(recipient, "is_verified", False) is not True
         or not getattr(recipient, "organization_id", None)
         or recipient.organization_id == job["organization_id"]
-        or not email.endswith(".invalid")
-        or email != str(lead.work_email or "").strip().casefold()
+        or not email
+        or email != lead_email
     ):
+        raise AllowanceBlocked("verified_subscription_recipient_required")
+    if live and email.endswith(".invalid"):
+        raise AllowanceBlocked("verified_subscription_recipient_required")
+    if not live and not email.endswith(".invalid"):
         raise AllowanceBlocked("verified_subscription_recipient_required")
     return dict(**proof, recipient_user_id=recipient.id,
                 recipient_organization_id=recipient.organization_id,
-                output_sha256=job["output_sha256"])
+                output_sha256=job["output_sha256"], mode=mode)

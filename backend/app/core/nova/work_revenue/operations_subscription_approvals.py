@@ -11,6 +11,7 @@ import os
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from .operations_commercial_mode import resolve_operations_mode
 from .operations_package_usage_ledger import AllowanceBlocked
 
 metadata = sa.MetaData()
@@ -77,18 +78,26 @@ def require_saved_owner_scope_approval(
         raise AllowanceBlocked("explicit_owner_approval_missing")
 
 
+def subscription_approval_write_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_LIVE_ENABLED",),
+    )
+
+
 def record_staging_owner_scope_decision(
     db: Session, *, authenticated_user, organization_id: str,
     engagement_id: str, task_id: str, lead_id: str,
     task_fingerprint: str, decision: str,
 ) -> dict:
-    """Save or revoke a synthetic scope decision. No work is executed.
+    """Save or revoke a scope decision. No work is executed.
 
     Only a trusted server component may supply authenticated_user from the
     session dependency. The operation is gated and stored in PostgreSQL.
     Every change is accompanied by an append-only decision event.
     """
-    require_approval_staging(db)
+    mode = require_approval_write(db)
+    live = mode == "live"
     user_id = str(getattr(authenticated_user, "user_id", "") or "")
     user_org = str(getattr(authenticated_user, "organization_id", "") or "")
     role = str(getattr(authenticated_user, "role", "") or "").lower()
@@ -117,10 +126,14 @@ def record_staging_owner_scope_decision(
         NovaWorkTask.owner_user_id == user_id,
     )).scalar_one_or_none()
     lead = db.get(MarketingWebsiteLead, lead_id)
+    email = str(lead.work_email or "") if lead is not None else ""
     if (engagement is None or task is None or task.review_required is not True
             or lead is None or lead.lead_type != "anonymous_operations"
-            or lead.service_plan not in {"launch_99", "business_299"}
-            or not str(lead.work_email or "").endswith(".invalid")):
+            or lead.service_plan not in {"launch_99", "business_299"}):
+        raise AllowanceBlocked("synthetic_task_scope_mismatch")
+    if live and email.lower().endswith(".invalid"):
+        raise AllowanceBlocked("live_task_scope_mismatch")
+    if not live and not email.endswith(".invalid"):
         raise AllowanceBlocked("synthetic_task_scope_mismatch")
 
     from datetime import datetime, timezone
@@ -153,7 +166,8 @@ def record_staging_owner_scope_decision(
     except Exception:
         db.rollback()
         raise
-    return {"decision": decision, "event_id": event_id, "task_id": task_id, "executed": False}
+    return {"decision": decision, "event_id": event_id, "task_id": task_id,
+            "executed": False, "mode": mode}
 
 
 # Append-only audit events. This table must be explicitly migrated alongside
@@ -173,14 +187,14 @@ approval_events = sa.Table(
 
 
 def require_approval_staging(db: Session) -> None:
-    if (
-        os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED") != "true"
-        or os.getenv("APP_ENV") != "staging"
-        or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-        or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-        or db.get_bind().dialect.name != "postgresql"
-    ):
+    """Backward-compatible staging-only gate used by older callers/tests."""
+    require_approval_write(db)
+
+
+def require_approval_write(db: Session) -> str:
+    mode = subscription_approval_write_mode()
+    if mode is None or db.get_bind().dialect.name != "postgresql":
         raise AllowanceBlocked("subscription_approval_ledger_disabled")
     if not sa.inspect(db.get_bind()).has_table(approvals.name):
         raise AllowanceBlocked("approval_migration_required")
+    return mode

@@ -1,0 +1,20 @@
+AMICOR Nova Operations commercial release verification
+Branch: release/operations-live-catalog-20261126
+Zone: America/Chicago
+Generated: 2026-11-27
+
+Packages covered
+- Free Scope Check preserved (no checkout / no revenue)
+- $9.99 Starter Plan (SaaS authenticated self-service; staging + production-gated)
+- $49 Starter Task (binding + private delivery; staging + production-gated)
+- $99 Launch Operations (strict webhook + fulfillment twins)
+- $299 Business Operations (strict webhook + fulfillment twins)
+
+Safety
+- NOVA_STRIPE_LIVE_ENABLED / NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED remain default-off
+- No real charges, no production migrations, no website redesign, no merge/deploy
+
+Local pytest evidence
+368 passed across commercial release, signed webhook, binding, allowances,
+authenticated adapter, entitlement, task bridge, reversal, ledger, approvals,
+and starter self-service suites.

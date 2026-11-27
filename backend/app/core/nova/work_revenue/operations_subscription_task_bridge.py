@@ -48,7 +48,7 @@ def reserve_verified_subscription_task(
                 or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "true"
                 or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"):
             raise AllowanceBlocked("subscription_bridge_live_disabled")
-        from app.modules.marketing.operations_billing import LIVE_OPERATIONS_PRICES
+        from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
         if plan not in {"launch_99", "business_299"} or test_price_id != LIVE_OPERATIONS_PRICES.get(plan):
             raise AllowanceBlocked("live_price_mismatch")
         if bind_reservation is None:

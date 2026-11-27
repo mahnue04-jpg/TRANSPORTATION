@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - "nova/four-plan-consolidated-staging-20261125"
+      - "release/operations-live-catalog-20261126"
   pull_request:
     branches:
       - "nova/payment-website-gated-20261124"
+      - "release/operations-live-catalog-20261126"
+      - "nova/four-plan-consolidated-staging-20261125"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +66,7 @@ jobs:
               "tests/test_operations_authenticated_subscription_adapter.py",
               "tests/test_operations_subscription_approvals.py",
               "tests/test_operations_starter_reversal_evidence.py",
+              "tests/test_operations_commercial_release_gates.py",
           ]))
           PY
 
