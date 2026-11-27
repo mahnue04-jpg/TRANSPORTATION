@@ -1,16 +1,18 @@
-"""Read-only validation of exact tenant-bound Starter sandbox subscription evidence."""
+"""Read-only validation of exact tenant-bound Starter mode-bound subscription evidence."""
 from datetime import datetime, timezone
 
-from .starter_self_service import allows_starter_feature
+from .starter_self_service import allows_starter_feature, allows_live_starter_feature
 
 
 def _id(value):
     return value.get("id") if isinstance(value, dict) else value
 
 
-def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
+def verify_starter_feature(*, feature, tenant_id, row, subscription, now, expected_livemode=False):
     """Inputs must originate from trusted DB and freshly retrieved Stripe records."""
     try:
+        if type(expected_livemode) is not bool:
+            return False
         if row.tenant_id != tenant_id or row.plan_key != "starter":
             return False
         if row.subscription_status != "active":
@@ -21,7 +23,7 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
             return False
         if (subscription.get("id") != row.stripe_subscription_id
                 or _id(subscription.get("customer")) != row.stripe_customer_id
-                or subscription.get("livemode") is not False
+                or subscription.get("livemode") is not expected_livemode
                 or subscription.get("status") != "active"):
             return False
         metadata = subscription["metadata"]
@@ -40,7 +42,7 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
             return False
         if (type(item["quantity"]) is not int or item["quantity"] != 1
                 or price["id"] != row.stripe_price_id
-                or price["livemode"] is not False
+                or price["livemode"] is not expected_livemode
                 or price["unit_amount"] != 999 or price["currency"] != "usd"
                 or price["recurring"]["interval"] != "month"
                 or price["recurring"]["interval_count"] != 1):
@@ -53,7 +55,7 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
         if now.utcoffset() is None or not period_start <= now < period_end:
             return False
         invoice = subscription["latest_invoice"]
-        if (invoice["livemode"] is not False or invoice["status"] != "paid"
+        if (invoice["livemode"] is not expected_livemode or invoice["status"] != "paid"
                 or invoice["currency"] != "usd" or invoice["amount_paid"] != 999
                 or _id(invoice["customer"]) != row.stripe_customer_id):
             return False
@@ -75,7 +77,8 @@ def verify_starter_feature(*, feature, tenant_id, row, subscription, now):
                 or type(line["quantity"]) is not int or line["quantity"] != 1
                 or line["period"]["start"] != start or line["period"]["end"] != end):
             return False
-        return allows_starter_feature(feature=feature, tenant_id=tenant_id,
+        policy = allows_live_starter_feature if expected_livemode else allows_starter_feature
+        return policy(feature=feature, tenant_id=tenant_id,
             verified_tenant_id=metadata["nova_tenant_id"], recorded_plan=row.plan_key,
             status=subscription["status"], recorded_price=price["id"],
             verified_subscription=True, verified_paid_invoice=True,
