@@ -14,7 +14,11 @@ Safety
 - NOVA_STRIPE_LIVE_ENABLED / NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED remain default-off
 - No real charges, no production migrations, no website redesign, no merge/deploy
 
-Local pytest evidence
-368 passed across commercial release, signed webhook, binding, allowances,
-authenticated adapter, entitlement, task bridge, reversal, ledger, approvals,
-and starter self-service suites.
+Local pytest evidence (commercial release + acceptance)
+343 passed across commercial release, production acceptance, signed webhook,
+binding, allowances, authenticated adapter, entitlement, task bridge, reversal,
+ledger, approvals, and starter self-service suites (allowance-policy job set).
+Additional: 61 signed/storage, 13 disposable-postgres, 25 private-delivery,
+1 payment-intake (writer role), 1 isolated starter checkout guard.
+
+Final acceptance detail: evidence/operations-production-acceptance-20261127.txt

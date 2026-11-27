@@ -167,3 +167,13 @@ files: test_operations_commercial_release_gates.py,
 ```
 
 Still require separate owner authorization before enabling live flags, applying migrations, publishing checkout links, or deploying.
+
+## Final production acceptance — November 27, 2026 (America/Chicago)
+
+Synthetic acceptance against release branch code descending from deployed commit `841603bb` verified all four paid packages plus Free Scope Check for authentication gates, checkout readiness, webhook routing, fulfillment twins, private storage isolation, and revenue recording. The dedicated payment receiver (`POST /payments/stripe/webhook`) remains functional with least-privilege `nova_ops_event_writer` on database `amicor`.
+
+Defects closed in this acceptance pass:
+- Launch/Business confirmation now requires exact integer `amount_total` (missing/zero totals no longer soft-pass when line items are unexpanded).
+- Payment-intake CI now provisions the production-shaped writer role/grants instead of connecting as `postgres` (which failed `verify_writer`).
+
+Evidence: `evidence/operations-production-acceptance-20261127.txt`. Live sales flags remain default-off. Exact remaining production configuration (secrets, live twins, migrations, private S3, Stripe Dashboard webhooks, $49 Payment Link fee review, tax/terms, owner enablement) is listed in that evidence file.

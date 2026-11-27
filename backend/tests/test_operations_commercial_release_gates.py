@@ -184,6 +184,14 @@ def test_subscription_checkout_rejects_amount_or_price_mismatch(clear_mode, monk
         lead, "checkout.session.completed", bad_amount, {"nova_agent_plan": plan},
         expected_livemode=False,
     ) == "subscription_payment_amount_mismatch"
+    missing_amount = {
+        "id": "cs_sub", "customer": "cus_sub", "mode": "subscription",
+        "currency": "usd", "payment_status": "paid", "livemode": False,
+    }
+    assert subscription_checkout_outcome(
+        lead, "checkout.session.completed", missing_amount, {"nova_agent_plan": plan},
+        expected_livemode=False,
+    ) == "subscription_payment_amount_mismatch"
     bad_price = {
         "id": "cs_sub", "customer": "cus_sub", "mode": "subscription",
         "currency": "usd", "amount_total": amount, "payment_status": "paid",

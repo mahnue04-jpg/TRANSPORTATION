@@ -54,8 +54,10 @@ def subscription_checkout_outcome(
             return "checkout_identity_mismatch"
         if obj.get("mode") != "subscription" or obj.get("currency") != "usd":
             return "subscription_checkout_mismatch"
+        # Always require the exact package amount. Missing/zero totals must not
+        # mark Launch/Business paid when line_items are unexpanded.
         amount = obj.get("amount_total")
-        if amount is not None and amount != expected_amount:
+        if type(amount) is not int or amount != expected_amount:
             return "subscription_payment_amount_mismatch"
         price_id = _price_id_from_session(obj)
         if price_id is not None and price_id != expected_price:

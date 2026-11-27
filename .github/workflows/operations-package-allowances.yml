@@ -161,6 +161,15 @@ jobs:
         run: |
           python -m pytest -q --noconftest tests/test_operations_starter_hosted_recovery.py
 
+      - name: Production acceptance matrix (synthetic; sales remain disabled)
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:////tmp/nova-production-acceptance-ci.db
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+        run: |
+          python -m pytest -q --noconftest tests/test_operations_production_acceptance.py
+
   private-delivery:
     runs-on: ubuntu-latest
     timeout-minutes: 15
