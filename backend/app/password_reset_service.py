@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -9,7 +10,8 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
+from urllib.request import Request, urlopen
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -57,6 +59,15 @@ def get_test_reset_token(email: str | None = None) -> str | None:
 
 
 def _test_capture_enabled() -> bool:
+    # This diagnostic captures plaintext one-time links; never allow it in production.
+    # Render itself is not a production signal (staging previews also run on Render).
+    production_names = ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT", "FLASK_ENV")
+    if any((os.getenv(name) or "").strip().lower() in {"production", "prod"} for name in production_names):
+        return False
+    # Opt-in alone is insufficient: staging and unspecified environments must
+    # not expose plaintext reset tokens through the diagnostic test helper.
+    if (os.getenv("APP_ENV") or "").strip().lower() != "test":
+        return False
     return (os.getenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE") or "").strip().lower() in {
         "1",
         "true",
@@ -65,10 +76,60 @@ def _test_capture_enabled() -> bool:
     }
 
 
+def _sendgrid_configured() -> bool:
+    return bool(
+        (os.getenv("SENDGRID_API_KEY") or "").strip()
+        and (os.getenv("SENDGRID_FROM_EMAIL") or "").strip()
+    )
+
+
 def password_reset_email_configured() -> bool:
+    if _sendgrid_configured():
+        return True
     host = (os.getenv("AUTH_SMTP_HOST") or os.getenv("MARKETING_SMTP_HOST") or "").strip()
     mail_from = (os.getenv("AUTH_SMTP_FROM") or os.getenv("MARKETING_SMTP_FROM") or "").strip()
     return bool(host and mail_from)
+
+
+def _send_reset_via_sendgrid(*, to_email: str, reset_url: str) -> dict[str, Any]:
+    """Send only through SendGrid's HTTPS API; never log keys, links, or tokens."""
+    mail_from = (os.getenv("SENDGRID_FROM_EMAIL") or "").strip()
+    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": mail_from},
+        "subject": "AMICOR password reset",
+        "content": [{
+            "type": "text/plain",
+            "value": (
+                "Use this one-time link to set a new password. "
+                "It expires in one hour.\n\n"
+                + reset_url
+                + "\n\nIf you did not request a reset, you can ignore this message."
+            ),
+        }],
+    }
+    request = Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            status = response.status
+        if status != 202:
+            logger.warning("password_reset_email_failed provider=sendgrid reason=unexpected_status")
+            return {"attempted": True, "sent": False, "reason": "send_failed"}
+        logger.info("password_reset_email_accepted provider=sendgrid")
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+    except Exception:
+        # Never log exception details: provider errors could contain sensitive headers.
+        logger.warning("password_reset_email_failed provider=sendgrid")
+        return {"attempted": True, "sent": False, "reason": "send_failed"}
 
 
 def _public_base_url() -> str:
@@ -76,11 +137,72 @@ def _public_base_url() -> str:
         os.getenv("AMICOR_PUBLIC_BASE_URL")
         or os.getenv("NOVA_SIGNUP_PUBLIC_BASE_URL")
         or os.getenv("PUBLIC_BASE_URL")
+        or os.getenv("AMICOR_PUBLIC_URL")
         or "https://amicor-health-isf-py.onrender.com"
     ).rstrip("/")
 
 
+def _validated_reset_base_url() -> str | None:
+    """Fail closed on unsafe reset-link destinations before creating tokens.
+
+    Never allow a configured HTTP origin, userinfo, query, fragment, or
+    embedded path to carry a one-time password-reset secret.
+    """
+    # Staging must explicitly name its own public origin. Never fall back to
+    # a default production address for a staging password-reset email.
+    env_values = {
+        (os.getenv(name) or "").strip().lower()
+        for name in ("APP_ENV", "AMICOR_ENVIRONMENT", "ENVIRONMENT")
+    }
+    isolated_env = bool(env_values & {"staging", "stage", "preview"})
+    # Render preview services can lack an APP_ENV label. Also recognize the
+    # platform-provided public URL so preview links never default to production.
+    render_origin = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+    try:
+        render_host = (urlsplit(render_origin).hostname or "").lower()
+    except ValueError:
+        render_host = ""
+    if render_host.endswith(".onrender.com") and "-pr-" in render_host:
+        isolated_env = True
+    if isolated_env and not (os.getenv("AMICOR_PUBLIC_BASE_URL") or "").strip():
+        return None
+    base = _public_base_url()
+    if any(ord(char) < 33 or ord(char) == 127 for char in base):
+        return None
+    try:
+        parsed = urlsplit(base)
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
+        # Reject invalid ports and malformed hosts rather than constructing
+        # an email link that could expose a token to another destination.
+        _ = parsed.port
+        if isolated_env and parsed.hostname.lower().rstrip(".") in {
+            "amicor-health-isf-py.onrender.com",
+            "amicor-health-isf.onrender.com",
+            "getamicor.com",
+            "www.getamicor.com",
+        }:
+            return None
+    except ValueError:
+        return None
+    return base
+
+
 def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
+    if _sendgrid_configured():
+        return _send_reset_via_sendgrid(to_email=to_email, reset_url=reset_url)
+    if (os.getenv("SENDGRID_API_KEY") or "").strip() or (os.getenv("SENDGRID_FROM_EMAIL") or "").strip():
+        # Partial HTTPS configuration must not silently fall back to SMTP.
+        logger.warning("password_reset_email_skipped reason=incomplete_https_config")
+        return {"attempted": False, "sent": False, "reason": "not_configured"}
     if not password_reset_email_configured():
         logger.info("password_reset_email_skipped reason=not_configured")
         return {"attempted": False, "sent": False, "reason": "not_configured"}
@@ -114,8 +236,63 @@ def _send_reset_email(*, to_email: str, reset_url: str) -> dict[str, Any]:
         logger.info("password_reset_email_sent")
         return {"attempted": True, "sent": True, "reason": "sent"}
     except Exception:
-        logger.exception("password_reset_email_failed")
+        # SMTP exception messages can contain credentials or message details.
+        logger.warning("password_reset_email_failed provider=smtp")
         return {"attempted": True, "sent": False, "reason": "send_failed"}
+
+
+def _finalize_reset_delivery(
+    db: Session, *, new_token: PasswordResetToken, accepted: bool,
+    expected_auth_version: int | None = None,
+) -> None:
+    """Serialize accepted sends by account; preserve prior links on failure.
+
+    Provider acceptance means queued, not delivered. The account row lock makes
+    overlapping PostgreSQL finalizations execute in sequence, so the latest
+    accepted request revokes earlier outstanding reset tokens atomically.
+    """
+    from app.db.models import User as UserModel
+
+    if not accepted:
+        db.delete(new_token)
+        db.commit()
+        return
+
+    account = (
+        db.query(UserModel)
+        .filter(func.lower(UserModel.email) == new_token.email.lower())
+        .with_for_update()
+        .one_or_none()
+    )
+    if account is None or (
+        expected_auth_version is not None
+        and int(getattr(account, "auth_version", 0) or 0) != expected_auth_version
+    ):
+        # Account deleted or password changed while email was in flight.
+        # A delayed provider acceptance must never revive a pre-reset link.
+        db.delete(new_token)
+        db.commit()
+        return
+
+    # A concurrent accepted request may already have retired our token.
+    # Do not let an obsolete finalizer invalidate the currently usable link.
+    db.refresh(new_token)
+    if new_token.used_at is not None:
+        db.commit()
+        return
+
+    # New tokens are stored with an already-expired expiry until mail acceptance.
+    # Retire only *active* older links; in-flight pending sends must not be
+    # invalidated by another sender before they have received a provider result.
+    stamp = now()
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == new_token.email,
+        PasswordResetToken.token_hash != new_token.token_hash,
+        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.expires_at > stamp,
+    ).update({PasswordResetToken.used_at: stamp}, synchronize_session=False)
+    new_token.expires_at = default_reset_expiry()
+    db.commit()
 
 
 def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
@@ -123,7 +300,7 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     from app.auth import _validate_email
     from app.db.models import User as UserModel
 
-    ensure_password_reset_schema()
+    ensure_password_reset_schema(engine=db.get_bind())
     public_response = {"status": "ok", "message": GENERIC_REQUEST_MESSAGE}
     try:
         normalized = _validate_email(email)
@@ -138,31 +315,34 @@ def request_password_reset(db: Session, *, email: str) -> dict[str, Any]:
     if user is None or not bool(getattr(user, "is_active", True)):
         return public_response
 
+    # Bind the in-flight email request to this account's credential generation.
+    # If another request resets the password before mail acceptance, reject it.
+    auth_version_at_request = int(getattr(user, "auth_version", 0) or 0)
+    base_url = _validated_reset_base_url()
+    if base_url is None:
+        logger.warning("password_reset_email_skipped reason=invalid_public_origin")
+        return public_response
     plain = secrets.token_urlsafe(RESET_TOKEN_BYTES)
     token_hash = hash_reset_token(plain)
-    # Invalidate prior unused tokens for this email.
-    pending = (
-        db.query(PasswordResetToken)
-        .filter(
-            PasswordResetToken.email == normalized,
-            PasswordResetToken.used_at.is_(None),
-        )
-        .all()
+    # Keep older usable links until the replacement email is accepted.
+    new_token = PasswordResetToken(
+        email=normalized,
+        token_hash=token_hash,
+        # Pending/unusable until the provider accepts email; no schema change.
+        # Crashed or rejected deliveries leave only expired tokens.
+        expires_at=now(),
     )
-    stamp = now()
-    for row in pending:
-        row.used_at = stamp
-    db.add(
-        PasswordResetToken(
-            email=normalized,
-            token_hash=token_hash,
-            expires_at=default_reset_expiry(),
-        )
-    )
+    db.add(new_token)
     db.commit()
 
-    reset_url = f"{_public_base_url()}/nova/reset-password?token={quote(plain)}"
+    reset_url = f"{base_url}/nova/reset-password?token={quote(plain)}"
     send_result = _send_reset_email(to_email=normalized, reset_url=reset_url)
+    _finalize_reset_delivery(
+        db, new_token=new_token, accepted=send_result["sent"],
+        expected_auth_version=auth_version_at_request,
+    )
+    # Test-only capture also covers configured-but-offline mail transports.
+    # This flag is explicitly denied in production by _test_capture_enabled().
     if _test_capture_enabled():
         _TEST_CAPTURE[normalized] = plain
     return public_response
@@ -175,7 +355,7 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
     from app.core.nova.signup.schema_ensure import ensure_nova_signup_schema
     from app.db.models import RefreshToken as RefreshTokenModel, User as UserModel
 
-    ensure_password_reset_schema()
+    ensure_password_reset_schema(engine=db.get_bind())
     _validate_password(new_password)
     raw = str(token or "").strip()
     if not raw:
@@ -189,14 +369,20 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
     if row is None or row.used_at is not None or token_is_expired(row.expires_at):
         raise ValueError("Invalid or expired reset link")
 
+    # Serialize resets for the same account on PostgreSQL. A concurrent
+    # request must re-check its token after the account row lock is obtained.
     users = (
         db.query(UserModel)
         .filter(func.lower(UserModel.email) == str(row.email).lower())
+        .with_for_update()
         .all()
     )
     if len(users) != 1:
         raise ValueError("Invalid or expired reset link")
     user = users[0]
+    db.refresh(row)
+    if row.used_at is not None or token_is_expired(row.expires_at):
+        raise ValueError("Invalid or expired reset link")
     # Snapshot identity fields so callers can assert they did not change.
     before = {
         "role": user.role,
@@ -211,9 +397,14 @@ def apply_password_reset(db: Session, *, token: str, new_password: str) -> dict[
         RefreshTokenModel.user_id == user.id,
         RefreshTokenModel.revoked == False,  # noqa: E712
     ).update({RefreshTokenModel.revoked: True}, synchronize_session=False)
-    row.used_at = now()
+    # Consumption of one link revokes every other outstanding link for
+    # the account, in the same transaction as the password change.
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == str(row.email).lower(),
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now()}, synchronize_session=False)
 
-    ensure_nova_signup_schema()
+    ensure_nova_signup_schema(engine=db.get_bind())
     signup = (
         db.query(NovaSignupAccount)
         .filter(func.lower(NovaSignupAccount.email) == str(row.email).lower())

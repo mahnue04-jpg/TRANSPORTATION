@@ -48,6 +48,11 @@ def _free_signup(client: TestClient) -> dict:
 
 def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
     monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    # Offline tests simulate provider acceptance without sending real mail.
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
     clear_test_reset_capture()
     client = _client()
     assert client.get("/nova/forgot-password").status_code == 200
@@ -78,6 +83,11 @@ def test_forgot_password_pages_and_generic_response(monkeypatch) -> None:
 
 def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
     monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    # Offline tests simulate provider acceptance without sending real mail.
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
     clear_test_reset_capture()
     client = _client()
     payload = _free_signup(client)
@@ -172,3 +182,278 @@ def test_reset_token_expiry_single_use_and_password_swap(monkeypatch) -> None:
         } == before_snap
         assert verify_password(new_password, after.hashed_password)
         assert not verify_password(old_password, after.hashed_password)
+
+
+def test_using_one_reset_link_revokes_other_outstanding_links(monkeypatch) -> None:
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    asked = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert asked.status_code == 200
+    active_token = get_test_reset_token(payload["email"])
+    assert active_token
+
+    # Represent a second outstanding reset request using offline-only test data.
+    other_token = "second-test-only-reset-" + uuid4()
+    with SessionLocal() as db:
+        from app.password_reset import default_reset_expiry
+
+        db.add(PasswordResetToken(
+            email=payload["email"].lower(),
+            token_hash=hash_reset_token(other_token),
+            expires_at=default_reset_expiry(),
+        ))
+        db.commit()
+
+    new_password = _password()
+    accepted = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": active_token,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(rows) == 2
+        assert all(row.used_at is not None for row in rows)
+
+    replay_password = _password()
+    replay = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": other_token,
+            "new_password": replay_password,
+            "confirm_password": replay_password,
+        },
+    )
+    assert replay.status_code == 400
+
+
+def test_failed_replacement_email_keeps_previous_reset_link_usable(monkeypatch) -> None:
+    """Integration regression: provider failure cannot destroy a usable reset link."""
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    attempts = iter([
+        {"attempted": True, "sent": True, "reason": "accepted"},
+        {"attempted": True, "sent": False, "reason": "send_failed"},
+    ])
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: next(attempts),
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    first = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert first.status_code == 200
+    valid_token = get_test_reset_token(payload["email"])
+    assert valid_token
+
+    second = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+    with SessionLocal() as db:
+        tokens = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(tokens) == 1
+        assert tokens[0].token_hash == hash_reset_token(valid_token)
+        assert tokens[0].used_at is None
+
+    new_password = _password()
+    completed = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": valid_token,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    login = client.post(
+        "/api/auth/login",
+        json={"email": payload["email"], "password": new_password},
+    )
+    assert login.status_code == 200, login.text
+
+
+def test_unavailable_email_provider_leaves_no_unusable_reset_link(monkeypatch) -> None:
+    """No mail transport means no new stored recovery link or account enumeration."""
+    monkeypatch.delenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", raising=False)
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": False, "sent": False, "reason": "not_configured"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    missing = client.post(
+        "/api/auth/forgot-password",
+        json={"email": "absent-" + uuid4() + "@example.com"},
+    )
+    existing = client.post("/api/auth/forgot-password", json={"email": payload["email"]})
+    assert existing.status_code == missing.status_code == 200
+    assert existing.json() == missing.json()
+    with SessionLocal() as db:
+        tokens = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert tokens == []
+    assert get_test_reset_token(payload["email"]) is None
+
+
+def test_second_accepted_reset_email_invalidates_first_link(monkeypatch) -> None:
+    """Sequential acceptance behavior; real PostgreSQL concurrency remains separate."""
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    monkeypatch.setattr(
+        "app.password_reset_service._send_reset_email",
+        lambda **kwargs: {"attempted": True, "sent": True, "reason": "accepted"},
+    )
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+
+    assert client.post(
+        "/api/auth/forgot-password", json={"email": payload["email"]}
+    ).status_code == 200
+    first_token = get_test_reset_token(payload["email"])
+    assert first_token
+    assert client.post(
+        "/api/auth/forgot-password", json={"email": payload["email"]}
+    ).status_code == 200
+    second_token = get_test_reset_token(payload["email"])
+    assert second_token and second_token != first_token
+
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert len(rows) == 2
+        first = next(row for row in rows if row.token_hash == hash_reset_token(first_token))
+        second = next(row for row in rows if row.token_hash == hash_reset_token(second_token))
+        assert first.used_at is not None
+        assert second.used_at is None
+
+    password = _password()
+    rejected = client.post(
+        "/api/auth/reset-password",
+        json={"token": first_token, "new_password": password, "confirm_password": password},
+    )
+    assert rejected.status_code == 400
+    accepted = client.post(
+        "/api/auth/reset-password",
+        json={"token": second_token, "new_password": password, "confirm_password": password},
+    )
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_reset_link_is_unusable_while_email_delivery_is_pending(monkeypatch) -> None:
+    """A blocked mail provider must not expose a usable token prematurely."""
+    from threading import Event, Thread
+
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    reached_provider = Event()
+    release_provider = Event()
+    responses = []
+
+    def blocked_provider(**kwargs):
+        reached_provider.set()
+        assert release_provider.wait(timeout=15)
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+
+    monkeypatch.setattr("app.password_reset_service._send_reset_email", blocked_provider)
+
+    def request_reset():
+        responses.append(client.post(
+            "/api/auth/forgot-password", json={"email": payload["email"]}
+        ))
+
+    worker = Thread(target=request_reset, daemon=True)
+    worker.start()
+    try:
+        assert reached_provider.wait(timeout=15)
+        with SessionLocal() as db:
+            rows = db.query(PasswordResetToken).filter(
+                PasswordResetToken.email == payload["email"].lower()
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].used_at is None
+            from app.password_reset import token_is_expired
+            assert token_is_expired(rows[0].expires_at)
+    finally:
+        release_provider.set()
+        worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert len(responses) == 1 and responses[0].status_code == 200
+    captured = get_test_reset_token(payload["email"])
+    assert captured
+    with SessionLocal() as db:
+        token = db.query(PasswordResetToken).filter(
+            PasswordResetToken.token_hash == hash_reset_token(captured)
+        ).one()
+        from app.password_reset import token_is_expired
+        assert token.used_at is None
+        assert not token_is_expired(token.expires_at)
+
+
+def test_inflight_email_rejected_after_credential_generation_changes(monkeypatch) -> None:
+    """Provider acceptance cannot resurrect a link after account credentials change."""
+    from threading import Event, Thread
+
+    monkeypatch.setenv("AMICOR_PASSWORD_RESET_TEST_CAPTURE", "1")
+    clear_test_reset_capture()
+    client = _client()
+    payload = _free_signup(client)
+    provider_entered = Event()
+    release_provider = Event()
+    responses = []
+
+    def blocked_provider(**kwargs):
+        provider_entered.set()
+        assert release_provider.wait(timeout=15)
+        return {"attempted": True, "sent": True, "reason": "accepted"}
+
+    monkeypatch.setattr("app.password_reset_service._send_reset_email", blocked_provider)
+
+    def request_reset():
+        responses.append(client.post(
+            "/api/auth/forgot-password", json={"email": payload["email"]}
+        ))
+
+    worker = Thread(target=request_reset, daemon=True)
+    worker.start()
+    try:
+        assert provider_entered.wait(timeout=15)
+        with SessionLocal() as db:
+            user = db.query(UserModel).filter(
+                UserModel.email == payload["email"].lower()
+            ).one()
+            user.auth_version += 1
+            db.commit()
+    finally:
+        release_provider.set()
+        worker.join(timeout=20)
+
+    assert not worker.is_alive()
+    assert len(responses) == 1 and responses[0].status_code == 200
+    with SessionLocal() as db:
+        rows = db.query(PasswordResetToken).filter(
+            PasswordResetToken.email == payload["email"].lower()
+        ).all()
+        assert rows == []
