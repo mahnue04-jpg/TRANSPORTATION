@@ -1,0 +1,60 @@
+name: Operations fulfillment migration rehearsal
+on:
+  push:
+    branches: ["release/operations-live-catalog-20261126"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: synthetic
+          POSTGRES_PASSWORD: synthetic_only
+          POSTGRES_DB: amicor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U synthetic -d amicor"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: synthetic
+      PGPASSWORD: synthetic_only
+      PGDATABASE: amicor
+      NOVA_STRIPE_LIVE_ENABLED: "false"
+      NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify isolated PostgreSQL migration and safe failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=backend/docs/review_only_operations_fulfillment_migration_candidate.sql
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE public.rehearsal_sentinel(id int primary key); INSERT INTO public.rehearsal_sentinel VALUES(1); CREATE ROLE rehearsal_reader; GRANT SELECT ON public.rehearsal_sentinel TO rehearsal_reader;"
+          createdb wrong_target
+          if psql -d wrong_target -v ON_ERROR_STOP=1 -f "$f"; then exit 1; fi
+          test "$(psql -d wrong_target -Atc "SELECT count(*) FROM pg_tables WHERE schemaname='public'")" = 0
+          # Force a late collision to prove transaction rollback.
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE public.rehearsal_collision(id int); CREATE INDEX ix_nova_operations_delivery_recipient ON public.rehearsal_collision(id);"
+          if psql -v ON_ERROR_STOP=1 -f "$f"; then exit 1; fi
+          test "$(psql -Atc "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'nova_operations_%'")" = 0
+          psql -v ON_ERROR_STOP=1 -c "DROP TABLE public.rehearsal_collision;"
+          psql -v ON_ERROR_STOP=1 -f "$f"
+          test "$(psql -Atc "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'nova_operations_%'")" = 7
+          test "$(psql -Atc "SELECT count(*) FROM public.rehearsal_sentinel WHERE id=1")" = 1
+          test "$(psql -Atc "SELECT has_table_privilege('rehearsal_reader','public.rehearsal_sentinel','SELECT')")" = t
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO nova_operations_starter_payment_bindings VALUES ('lead1','org1','owner1','eng1','task1','cs_test_1'); INSERT INTO nova_operations_package_task_reservations VALUES ('r1','cus_test','launch_99','sub_test','period','req',repeat('a',64),now());"
+          if psql -v ON_ERROR_STOP=1 -c "INSERT INTO nova_operations_starter_payment_bindings VALUES ('lead2','org2','owner2','eng2','task2','cs_test_1')"; then exit 1; fi
+          if psql -v ON_ERROR_STOP=1 -c "INSERT INTO nova_operations_package_task_reservations VALUES ('r2','cus_test','launch_99','sub_test','period','req',repeat('b',64),now())"; then exit 1; fi
+          if psql -v ON_ERROR_STOP=1 -f "$f"; then exit 1; fi
+          test "$(psql -Atc 'SELECT count(*) FROM nova_operations_starter_payment_bindings')" = 1
+          test "$(psql -Atc 'SELECT count(*) FROM nova_operations_package_task_reservations')" = 1
+          echo "Migration rehearsal passed: seven tables, wrong target denial, atomic rollback, existing record/privilege preservation, duplicate denial and safe replay."
