@@ -60,7 +60,10 @@ def parse_plan(payload):
     safety = screen_creative_text(setting, dialogue, *(r['description'] for r in cast))
     if safety['decision'] == BLOCK:
         fail('SAFETY_BLOCK', safety['message'])
-    plan = {'setting': setting, 'characters': cast, 'dialogue': dialogue, 'lines': lines}
+    # Re-saving an older no-media plan must rebuild scenes with the corrected
+    # style-aware prompt, even when the owner's dialogue is unchanged.
+    plan = {'setting': setting, 'characters': cast, 'dialogue': dialogue, 'lines': lines,
+            'visual_prompt_version': 2}
     plan['revision'] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()[:20]
     return plan
 
@@ -117,7 +120,7 @@ class ShortDramaMixin:
         self.store.delete_scenes(project_id, owner_id)
         cast = '; '.join(f"{r['name']}: {r['description']}" for r in plan['characters'])
         for index, line in enumerate(plan['lines'], 1):
-            prompt = (f"Cinematic realistic live-action short drama. {plan['setting']} Cast: {cast}. "
+            prompt = (f"Two-character story. Follow the visual style specified in the setting and cast. {plan['setting']} Cast: {cast}. "
                 f"Full-body two-person shot, {line['speaker']} gestures naturally while the other listens. "
                 'Subtle body movement, grounded feet, natural hands, slow camera push-in. '
                 'Consistent wardrobe and setting. No text, logos, subtitles or watermark.')
