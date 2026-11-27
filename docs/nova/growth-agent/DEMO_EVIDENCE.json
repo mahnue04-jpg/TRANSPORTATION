@@ -1,0 +1,127 @@
+{
+  "label": "SYNTHETIC DEMO \u2014 not live customers",
+  "business": "Cedar Ridge Home Services (SYNTHETIC DEMO)",
+  "chat": {
+    "grounded": true,
+    "ai_disclosed": true,
+    "duplicate_contact_reused": true
+  },
+  "crm_edit": {
+    "lead_state": "qualified",
+    "notes": "Synthetic demo \u2014 qualified after FAQ chat"
+  },
+  "booking_idempotent_replay": true,
+  "cancel_rebook": {
+    "cancelled_status": "cancelled",
+    "rebooked_id": "4a079ce801fa4906bbc9e9ad22f08beb",
+    "reused_same_row": true
+  },
+  "reschedule": {
+    "status": "rescheduled",
+    "starts_at_utc": "2026-11-16T15:30:00Z"
+  },
+  "reminder_status": "approved",
+  "reminder_live_send": false,
+  "restart_recovery": {
+    "recovered_count": 2,
+    "live_send": false
+  },
+  "mock_worker": {
+    "deferred_queue": true,
+    "tick_processed": 1,
+    "tick_live_send": false,
+    "tick_mock_only": true
+  },
+  "diagnostics": {
+    "mock_processing_only": true,
+    "live_delivery": false,
+    "pending_jobs": 0,
+    "sent_mock": 3,
+    "ui_flag_strip": "live_delivery=false \u00b7 mock_worker=on \u00b7 retention_schedule=on \u00b7 retention_mode=dry_run \u00b7 retention_delete=off"
+  },
+  "retention_preview": {
+    "dry_run": true,
+    "delete_enabled": false,
+    "retain_always": [
+      "consent_records",
+      "business_profiles",
+      "contacts",
+      "contact_identities",
+      "appointments"
+    ],
+    "total_would_delete": 0
+  },
+  "retention_schedule": {
+    "schedule_enabled_default": false,
+    "dry_run_default": true,
+    "delete_separately_gated": true,
+    "duplicate_window_protected": true,
+    "lease_reclaim_tested": true,
+    "ui_schedule_tick": "dry_run / already_completed_window or processed"
+  },
+  "owner_ui_screenshots": [
+    "docs/nova/growth-agent/screenshots/01-login-or-landing.jpg",
+    "docs/nova/growth-agent/screenshots/02-setup-activated.jpg",
+    "docs/nova/growth-agent/screenshots/03-synthetic-demo.jpg",
+    "docs/nova/growth-agent/screenshots/04-crm-leads.jpg",
+    "docs/nova/growth-agent/screenshots/05-booking-appointments.jpg",
+    "docs/nova/growth-agent/screenshots/06-diagnostics-flags.jpg",
+    "docs/nova/growth-agent/screenshots/07-retention-preview.jpg",
+    "docs/nova/growth-agent/screenshots/08-worker-tick.jpg",
+    "docs/nova/growth-agent/screenshots/09-retention-schedule-tick.jpg",
+    "docs/nova/growth-agent/screenshots/10-kill-switch.jpg",
+    "docs/nova/growth-agent/screenshots/WALKTHROUGH_NOTES.json"
+  ],
+  "disposable_postgres": {
+    "alembic_upgrade": "20261112_nova_ga_retention ALEMBIC_OK on nova_ga_dispos_mig",
+    "suite": "6 passed on nova_ga_dispos_test"
+  },
+  "handoff": {
+    "status": "handed_off",
+    "handler": "human"
+  },
+  "marketing_suppressed_status": "suppressed",
+  "double_book_blocked": "DOUBLE_BOOK",
+  "analytics": {
+    "window_days": 30,
+    "denominator_note": "Counts are org-scoped events created in the window; not attribution claims.",
+    "inquiries": 1,
+    "consented_leads": 4,
+    "booked_appointments": 1,
+    "delivery_success": 2,
+    "delivery_failure_or_suppressed": 1,
+    "opt_outs": 1,
+    "usage_cost_estimate_usd": 0.008126,
+    "billed": false,
+    "is_attribution": false
+  },
+  "export_includes": {
+    "appointments": 1,
+    "consent_records": 5,
+    "conversation_messages": 2
+  },
+  "health_live_flags": {
+    "email": false,
+    "sms": false,
+    "calendar": false,
+    "stripe": false,
+    "voice": false
+  },
+  "test_results": {
+    "growth_agent_suite": "46 passed",
+    "disposable_postgres_suite": "6 passed",
+    "focused_regressions": "69 passed",
+    "staging_verified": true,
+    "ci_postgres_job": "passed on 5e78296f (growth-agent-tests + growth-agent-postgres-dispos)",
+    "ci_verified": true,
+    "ci_run_url": "https://github.com/mahnue04-jpg/TRANSPORTATION/actions/runs/43255525824",
+    "staging_url": "http://127.0.0.1:8770/nova/growth",
+    "staging_commit": "a81de10b7cc5c483a08877eb641680542962bb3a",
+    "staging_scope": "isolated disposable Postgres staging in agent environment; remote Render isolated service not found"
+  },
+  "graceful_shutdown": {
+    "claim_on_stop": false,
+    "release_held_claims_on_join": true,
+    "crash_lease_reclaim": true
+  }
+}
