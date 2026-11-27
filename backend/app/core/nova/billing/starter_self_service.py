@@ -9,6 +9,8 @@ import os
 
 from .paid_access_policy import allows_paid_plan
 
+LIVE_STARTER_PRICE = "price_1UfWpDBCDlIbm4gm7kY4yIva"
+
 FEATURES = frozenset({"basic_workspace", "task_planning", "templates", "self_service_assistance"})
 MANAGED_TASKS_INCLUDED = 0
 
@@ -41,5 +43,32 @@ def allows_starter_feature(*, feature: str, tenant_id: str,
         return False
     return allows_paid_plan(required_plan="starter", recorded_plan=recorded_plan,
         status=status, expected_price=expected_price, recorded_price=recorded_price,
+        verified_subscription=verified_subscription,
+        current_period_end=current_period_end, now=now)
+
+
+def allows_live_starter_feature(*, feature: str, tenant_id: str,
+                                verified_tenant_id: str, recorded_plan: str,
+                                status: str, recorded_price: str,
+                                verified_subscription: bool, verified_paid_invoice: bool,
+                                stripe_livemode: bool, current_period_end: datetime,
+                                now: datetime) -> bool:
+    """Unwired production policy: callers must independently verify fresh payment evidence."""
+    if (
+        os.getenv("APP_ENV") != "production"
+        or os.getenv("AMICOR_ENVIRONMENT") != "production"
+        or os.getenv("NOVA_STARTER_SELF_SERVICE_PRODUCTION_ENABLED") != "true"
+        or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "true"
+        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"
+        or os.getenv("NOVA_STRIPE_PRICE_STARTER") != LIVE_STARTER_PRICE
+        or os.getenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED") != "false"
+    ):
+        return False
+    if (feature not in FEATURES or not tenant_id
+            or tenant_id != verified_tenant_id or stripe_livemode is not True
+            or verified_paid_invoice is not True):
+        return False
+    return allows_paid_plan(required_plan="starter", recorded_plan=recorded_plan,
+        status=status, expected_price=LIVE_STARTER_PRICE, recorded_price=recorded_price,
         verified_subscription=verified_subscription,
         current_period_end=current_period_end, now=now)
