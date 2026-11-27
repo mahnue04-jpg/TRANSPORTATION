@@ -78,3 +78,21 @@ def test_one_time_plan_not_accepted():
     evidence = fixture("starter")
     evidence["plan"] = "starter_49"
     assert not unreversed_monthly_payment(**evidence)
+
+
+@pytest.mark.parametrize("plan", sorted(AMOUNTS))
+def test_live_evidence_requires_explicit_live_mode(plan):
+    evidence = fixture(plan)
+    for record in (evidence["invoice_payments"]["data"][0],
+                   evidence["payment_intent"], evidence["charge"]):
+        record["livemode"] = True
+    assert unreversed_monthly_payment(**evidence, expected_livemode=True)
+    assert not unreversed_monthly_payment(**evidence)
+    assert not unreversed_monthly_payment(**evidence, expected_livemode=None)
+    for record in (evidence["invoice_payments"]["data"][0],
+                   evidence["payment_intent"], evidence["charge"]):
+        record["livemode"] = False
+        assert not unreversed_monthly_payment(**evidence, expected_livemode=True)
+        record["livemode"] = True
+    evidence["charge"]["amount_refunded"] = 1
+    assert not unreversed_monthly_payment(**evidence, expected_livemode=True)
