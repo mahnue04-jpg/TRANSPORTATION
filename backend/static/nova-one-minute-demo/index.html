@@ -31,6 +31,19 @@
   </header>
 
   <main class="demo-shell">
+    <section class="saved-video" aria-label="Saved 60-second full-body video">
+      <h2>Saved 60-second full-body video</h2>
+      <p class="production-note">This file loops the existing full-body Genova motion under the Coral narration and burns in the same captions. It does not claim lip-sync, and it does not replace the original presenter or narration files.</p>
+      <p class="production-note acceptance-fail" id="release-acceptance">Release acceptance 2026-10-12: not assessment-ready. Measured 59.88s, 1280×948 landscape, with about 5.04s of standing motion repeated under separate Coral narration. Not a 9:16 sitting lip-synced presenter, and commercial use is not cleared. <a href="/static/nova-one-minute-demo/acceptance.json">Acceptance record</a></p>
+      <video id="saved-full-body" controls playsinline preload="metadata" aria-label="60-second full-body Genova video with Coral narration and captions">
+        <source src="/static/nova-one-minute-demo/amicor-nova-60-second-full-body.mp4" type="video/mp4" />
+      </video>
+      <div class="header-actions">
+        <a class="button secondary" href="/static/nova-one-minute-demo/amicor-nova-60-second-full-body.mp4" download>Download saved video</a>
+        <a class="button secondary" href="/static/nova-one-minute-demo/amicor-nova-60-second-full-body.vtt" download>Download captions</a>
+      </div>
+    </section>
+
     <section class="player-card">
       <div class="screen-stage">
         <iframe id="demo-frame" title="AMICOR Nova product screen" src="/nova?nova_demo_embed=1"></iframe>
