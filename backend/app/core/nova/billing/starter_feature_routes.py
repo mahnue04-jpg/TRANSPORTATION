@@ -1,6 +1,5 @@
-"""Isolated Starter self-service rehearsal API. No legacy route changes."""
+"""Mode-gated Starter self-service API. No legacy route changes."""
 from pathlib import Path
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse
@@ -9,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import UserContext, get_current_user_context
 from app.db.session import get_db
-from .starter_authenticated_access import authenticated_starter_access
+from .starter_authenticated_access import authenticated_starter_access, starter_access_mode
 
-router = APIRouter(prefix="/api/nova/starter", tags=["nova-starter-staging"])
+router = APIRouter(prefix="/api/nova/starter", tags=["nova-starter"])
 
 
 class PlanningRequest(BaseModel):
@@ -20,7 +19,7 @@ class PlanningRequest(BaseModel):
 
 def require_feature(db, user, feature):
     if not authenticated_starter_access(db, authenticated_user=user, feature=feature):
-        raise HTTPException(status_code=403, detail="Verified Starter staging subscription required")
+        raise HTTPException(status_code=403, detail="Verified Starter subscription required")
 
 
 @router.get("/workspace")
@@ -30,7 +29,7 @@ def workspace(response: Response, user: UserContext = Depends(get_current_user_c
     response.headers["Cache-Control"] = "no-store"
     return {"plan": "starter", "monthly_usd_cents": 999, "managed_tasks": 0,
             "features": ["basic_workspace", "task_planning", "templates", "self_service_assistance"],
-            "staging_only": True}
+            "staging_only": starter_access_mode() != "live"}
 
 
 @router.post("/plan")
@@ -68,13 +67,7 @@ def assistance(response: Response, user: UserContext = Depends(get_current_user_
 
 
 def starter_routes_enabled():
-    return (
-        os.getenv("APP_ENV") == "staging"
-        and os.getenv("AMICOR_ENVIRONMENT") == "staging"
-        and os.getenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED") == "true"
-        and os.getenv("NOVA_STRIPE_LIVE_ENABLED") == "false"
-        and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") == "false"
-    )
+    return starter_access_mode() is not None
 
 
 @router.get("/interface", response_class=HTMLResponse, include_in_schema=False)
