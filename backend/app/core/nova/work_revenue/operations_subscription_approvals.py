@@ -34,17 +34,29 @@ def require_saved_owner_scope_approval(
     db: Session, *, organization_id: str, owner_user_id: str,
     engagement_id: str, task_id: str, lead_id: str,
     task_fingerprint: str,
+    expected_livemode: bool = False,
 ) -> None:
     """Read exact owner decision: absence, missing migration or rejection deny."""
-    if (
-        os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED") != "true"
-        or os.getenv("APP_ENV") != "staging"
-        or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-        or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-        or db.get_bind().dialect.name != "postgresql"
-    ):
-        raise AllowanceBlocked("subscription_approval_ledger_disabled")
+    if type(expected_livemode) is not bool:
+        raise AllowanceBlocked("invalid_payment_mode")
+    if expected_livemode:
+        if (os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_LIVE_ENABLED") != "true"
+                or os.getenv("APP_ENV") != "production"
+                or os.getenv("AMICOR_ENVIRONMENT") != "production"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"
+                or db.get_bind().dialect.name != "postgresql"):
+            raise AllowanceBlocked("subscription_approval_live_disabled")
+    else:
+        if (
+            os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_STAGING_ENABLED") != "true"
+            or os.getenv("APP_ENV") != "staging"
+            or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+            or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
+            or db.get_bind().dialect.name != "postgresql"
+        ):
+            raise AllowanceBlocked("subscription_approval_ledger_disabled")
     if not sa.inspect(db.get_bind()).has_table(approvals.name):
         raise AllowanceBlocked("approval_migration_required")
     if not all((organization_id, owner_user_id, engagement_id, task_id, lead_id)):
