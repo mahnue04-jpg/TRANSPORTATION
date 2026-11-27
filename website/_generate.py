@@ -174,6 +174,9 @@ def page(
         current_attr = ' aria-current="page"' if href == current else ""
         nav.append(f'<a href="{href}"{current_attr}>{label}</a>')
     nav_html = "\n          ".join(nav)
+    checkout_script = ""
+    if path == "/pricing/":
+        checkout_script = f'\n  <script src="{prefix}assets/js/operations-checkout.js"></script>'
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -272,7 +275,7 @@ def page(
     </div>
   </footer>
   <script src="{prefix}assets/js/site-config.js"></script>
-  <script src="{prefix}assets/js/site.js"></script>
+  <script src="{prefix}assets/js/site.js"></script>{checkout_script}
 </body>
 </html>
 """

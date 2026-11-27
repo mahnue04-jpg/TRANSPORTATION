@@ -527,6 +527,14 @@ app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
 app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
+from app.core.nova.work_revenue.operations_authenticated_checkout import (
+    router as nova_operations_checkout_router,
+)
+from app.core.nova.work_revenue.operations_owner_storage_probe import (
+    router as nova_operations_storage_probe_router,
+)
+app.include_router(nova_operations_checkout_router)
+app.include_router(nova_operations_storage_probe_router)
 # Register the isolated Starter rehearsal only under explicit staging flags.
 from app.core.nova.billing.starter_feature_routes import starter_routes_enabled
 if starter_routes_enabled():

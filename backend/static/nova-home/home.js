@@ -53,6 +53,26 @@
     if (!response.ok) throw new Error(errorText(body, "Request failed."));
     return body;
   }
+  var OPERATIONS_PACKAGES = {starter: 1, starter_49: 1, launch_99: 1, business_299: 1};
+  function operationsPackage() {
+    var key = new URLSearchParams(window.location.search).get("operations_package") || "";
+    return OPERATIONS_PACKAGES[key] ? key : "";
+  }
+  async function resumeOperationsPurchase() {
+    var key = operationsPackage();
+    if (!key || !token()) return false;
+    var intent = await api("/api/nova/operations/checkout?package=" + encodeURIComponent(key));
+    if (!intent || intent.stripe_session_created || intent.checkout_url || intent.executes_work) {
+      showBanner("Operations checkout stayed closed.");
+      return true;
+    }
+    var label = intent.label || "This package";
+    var message = intent.sales_enabled === true
+      ? label + " is linked to your account. This page did not open a payment session."
+      : label + " is linked to your account. Public sales are still closed, so no payment session was opened.";
+    showBanner(message, true);
+    return true;
+  }
   function setSignedIn(on) {
     $("sign-out").classList.toggle("hidden", !on);
     $("login-form").classList.add("hidden");
@@ -195,6 +215,9 @@
     $("login-form").classList.remove("hidden");
     window.setTimeout(function () { if ($("login-email")) $("login-email").focus(); }, 100);
   }
+  if (operationsPackage() && token()) {
+    resumeOperationsPurchase().catch(function (err) { showBanner(err.message); });
+  }
 
   $("command-form").addEventListener("submit", async function (event) {
     event.preventDefault();
@@ -240,7 +263,10 @@
       });
     }
     await refreshBrain();
-    showBanner("Signed in. Mrs. Nova Brain is available.", true);
+    var resumed = false;
+    try { resumed = await resumeOperationsPurchase(); }
+    catch (err) { showBanner(err.message || "Operations purchase could not be confirmed."); return; }
+    if (!resumed) showBanner("Signed in. Mrs. Nova Brain is available.", true);
   });
   if ($("upgrade-nova")) {
     $("upgrade-nova").addEventListener("click", async function () {

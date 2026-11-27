@@ -1,6 +1,7 @@
 """Operations-only production artifact storage. No shared credentials or disk fallback."""
 
 from dataclasses import dataclass
+from io import BytesIO
 import os
 import re
 from urllib.parse import urlsplit
@@ -82,3 +83,55 @@ class OperationsPrivateArtifactStorage(S3PrivateDocumentStorage):
             endpoint_url=settings.endpoint,
             config=Config(signature_version="s3v4", connect_timeout=5, read_timeout=10),
         )
+
+
+SYNTHETIC_PROBE_BODY = b"AMICOR synthetic operations storage probe. No customer data.\n"
+_PROBE_ORGANIZATION = "owner-storage-probe"
+_PROBE_APPLICATION = "synthetic-storage-probe"
+
+
+def run_synthetic_storage_probe() -> dict[str, bool | None]:
+    """Upload, read back, verify, and delete one synthetic private object.
+
+    The result has no bucket name, object key, file bytes, or credentials.
+    Store or retrieve errors still attempt delete before they escape.
+    A failed delete is reported and does not include the provider error.
+    """
+    storage = OperationsPrivateArtifactStorage()
+    ref: str | None = None
+    uploaded = retrieved = verified = deleted = absent = False
+    try:
+        _, ref, size = storage.store(
+            organization_id=_PROBE_ORGANIZATION,
+            application_id=_PROBE_APPLICATION,
+            category="owner-storage-probe",
+            filename="probe.txt",
+            content_type="text/plain",
+            stream=BytesIO(SYNTHETIC_PROBE_BODY),
+        )
+        uploaded = bool(ref) and size == len(SYNTHETIC_PROBE_BODY)
+        body, content_type = storage.retrieve(storage_ref=ref)
+        retrieved = True
+        verified = body == SYNTHETIC_PROBE_BODY and content_type == "text/plain"
+    finally:
+        if ref:
+            try:
+                storage.delete(storage_ref=ref)
+                deleted = True
+            except Exception:
+                deleted = False
+            else:
+                try:
+                    storage.retrieve(storage_ref=ref)
+                except Exception:
+                    absent = True
+    return {
+        "ok": bool(uploaded and retrieved and verified and deleted and absent),
+        "uploaded": uploaded,
+        "retrieved": retrieved,
+        "verified": verified,
+        "deleted": deleted,
+        "absent_after_delete": absent,
+        "synthetic": True,
+        "public_url": None,
+    }

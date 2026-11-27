@@ -195,6 +195,17 @@ def test_customer_paths_and_price_consistency() -> None:
             assert price in text
         assert "$29/month" not in text
         assert "does not collect payment" in text
+    pricing = _html(PAGES["/pricing/"])
+    script = (ROOT / "assets" / "js" / "operations-checkout.js").read_text(encoding="utf-8")
+    for package in ("starter", "starter_49", "launch_99", "business_299"):
+        assert f'data-operations-package="{package}"' in pricing
+        assert f"operations_package={package}" in pricing
+        assert package + ": true" in script
+    assert "Sign in to purchase" in pricing
+    assert "operations-checkout.js" in pricing
+    assert "data-operations-sales=\"disabled\"" in pricing
+    assert "checkout.stripe.com" not in pricing
+    assert "fetch(" not in script
     assert "class=\"footer-links\"" in _html(PAGES["/"])
 
 

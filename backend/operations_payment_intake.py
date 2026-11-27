@@ -163,6 +163,10 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
     live_sales = _truthy("NOVA_STRIPE_LIVE_ENABLED") and _truthy(
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED"
     )
+    from app.core.nova.work_revenue.operations_webhook_contract import (
+        operations_webhook_contract,
+    )
+
     return {
         "service": "nova-operations",
         "live_sales_enabled": live_sales,
@@ -201,6 +205,7 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
                 os.getenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "").strip() == "false"
             ),
         },
+        "stripe_webhooks": operations_webhook_contract(),
     }
 
 
