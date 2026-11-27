@@ -48,6 +48,7 @@ def bind_reserved_csv_task(
     db: Session, *, reservation_id: str, organization_id: str, owner_user_id: str,
     engagement_id: str, task_id: str, lead_id: str, customer_id: str,
     subscription_id: str, plan: str, period_key: str, input_sha256: str,
+    expected_livemode: bool = False,
 ) -> dict:
     """Bind exact reservation and approval inside caller's transaction.
 
@@ -55,8 +56,11 @@ def bind_reserved_csv_task(
     subscription. This helper never commits; it can be used in the same
     transaction as the allowance reservation. No public caller is permitted.
     """
-    require_staging(db)
-    if (os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_STAGING_ENABLED") != "true"
+    require_staging(db, expected_livemode=expected_livemode)
+    if expected_livemode:
+        if os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_LIVE_ENABLED") != "true":
+            raise AllowanceBlocked("subscription_csv_binding_live_disabled")
+    elif (os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_STAGING_ENABLED") != "true"
             or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "false"
             or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "false"):
         raise AllowanceBlocked("subscription_csv_binding_disabled")
@@ -67,7 +71,8 @@ def bind_reserved_csv_task(
     scope = dict(organization_id=organization_id, owner_user_id=owner_user_id,
                  engagement_id=engagement_id, task_id=task_id, lead_id=lead_id)
     key = request_key_for_task(**scope)
-    require_saved_owner_scope_approval(db, **scope, task_fingerprint=input_sha256)
+    require_saved_owner_scope_approval(db, **scope, task_fingerprint=input_sha256,
+                                       expected_livemode=expected_livemode)
     # Lock the exact approval row so a concurrent revoke cannot overtake binding.
     decision = db.execute(sa.select(approvals.c.decision).where(
         *(approvals.c[k] == v for k, v in scope.items()),
