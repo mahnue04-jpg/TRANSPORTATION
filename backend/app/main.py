@@ -2697,19 +2697,27 @@ if os.path.isdir(_static_dir):
     app.mount("/assets", StaticFiles(directory=_static_dir), name="assets")
 
 # Creative Studio media uses the Render persistent disk when available so
-# generated images/audio/video survive deploys and restarts.
-_nova_media_configured = str(os.getenv("NOVA_CREATIVE_MEDIA_DIR") or "").strip()
-if _nova_media_configured:
-    _nova_media_dir = _nova_media_configured
-elif os.path.isdir("/data/onboarding_docs"):
-    _nova_media_dir = "/data/onboarding_docs/nova_creative_media"
-else:
-    _nova_media_dir = os.path.join(_static_dir, "generated", "nova-creative")
+# generated images/audio/video survive deploys and restarts. The directory
+# matches the writer in creative_studio.providers.
+from app.core.nova.creative_studio.providers import _creative_media_root_and_prefix
+
+class _CreativePublicMediaFiles(StaticFiles):
+    """Legacy owner video imports must never be served by anonymous static URLs."""
+
+    async def get_response(self, path, scope):
+        from urllib.parse import unquote
+        file_name = unquote(str(path or "")).replace("\\\\", "/").rsplit("/", 1)[-1]
+        if file_name.startswith("imported_video_"):
+            return Response(status_code=404)
+        return await super().get_response(path, scope)
+
+
+_nova_media_dir = str(_creative_media_root_and_prefix()[0])
 try:
     os.makedirs(_nova_media_dir, exist_ok=True)
     app.mount(
         "/media/nova-creative",
-        StaticFiles(directory=_nova_media_dir),
+        _CreativePublicMediaFiles(directory=_nova_media_dir),
         name="nova-creative-media",
     )
 except OSError:

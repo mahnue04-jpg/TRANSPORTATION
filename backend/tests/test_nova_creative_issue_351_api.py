@@ -145,7 +145,8 @@ def test_signed_in_walking_commercial_download(monkeypatch, tmp_path):
     rendered = client.post(f"/api/nova/creative/projects/{project_id}/assemble/walking-commercial-30s")
     assert rendered.status_code == 200, rendered.text
     body = rendered.json()
-    assert body["lip_sync"] is True
+    assert body["lip_sync"] is False
+    assert body["asset"]["metadata"]["lip_sync"] is False
     assert body["mobile_download_ready"] is True
     assert body["license_status"] == "GREEN"
     assert body["paid_provider_charges"] is False

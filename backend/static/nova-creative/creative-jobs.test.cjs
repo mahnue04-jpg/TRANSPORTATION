@@ -3,12 +3,155 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/creative.js', 'utf8');
+const briefSync = source.slice(source.indexOf('  function syncContentBrief('), source.indexOf('  function updateActiveProjectLabel('));
 const polling = source.slice(source.indexOf('  async function waitForScene('), source.indexOf('  async function waitForFinalPromo('));
+
+function selectionContext(extra = {}) {
+  const elements = {};
+  const ctx = vm.createContext({
+    activeProjectId: 'original', activeProjectRevision: 0,
+    presenterScriptProjectId: 'original', presenterSavedScriptValue: 'saved script',
+    activeProjectKey: 'test-active-project', latestPreflight: {project_id: 'original'},
+    $: id => elements[id], elements,
+    localStorage: {setItem() {}, removeItem() {}}, updateActiveProjectLabel() {},
+    renderProductionReadiness() {},
+    renderPreflight: () => { ctx.latestPreflight = null; },
+    ...extra,
+  });
+  vm.runInContext(source.slice(source.indexOf('  function setActiveProjectId('), source.indexOf('  function updateActiveProjectLabel(')), ctx);
+  return ctx;
+}
+
+test('switching projects clears the previous quote, script, file picks and approval choices', () => {
+  const ctx = selectionContext();
+  for (const id of ['presenter-script', 'genova-narration-script', 'genova-image-file', 'genova-narration-file']) ctx.elements[id] = {value: 'old input'};
+  ctx.elements['genova-image-choices'] = {textContent: 'original image'};
+  ctx.elements['save-presenter-script'] = {disabled: false};
+  ctx.setActiveProjectId('next');
+  assert.equal(ctx.activeProjectId, 'next');
+  assert.equal(ctx.latestPreflight, null);
+  assert.equal(ctx.elements['presenter-script'].value, '');
+  assert.equal(ctx.elements['genova-image-file'].value, '');
+  assert.doesNotMatch(ctx.elements['genova-image-choices'].textContent, /original image/);
+  assert.equal(ctx.elements['save-presenter-script'].disabled, true);
+});
+
+test('late readiness and image responses cannot repopulate a newly selected project', async () => {
+  for (const kind of ['readiness', 'images']) {
+    let resolve;
+    const ctx = selectionContext({api: () => new Promise(r => { resolve = r; })});
+    ctx.elements['genova-avatar-readiness-result'] = {textContent: ''};
+    ctx.elements['check-genova-avatar-readiness'] = {};
+    ctx.elements['genova-image-choices'] = {textContent: ''};
+    const start = kind === 'readiness' ? '  async function checkGenovaAvatarReadiness(' : '  async function genovaImageChoices(';
+    const end = kind === 'readiness' ? '  var genovaReadinessButton' : '  var genovaUpload';
+    vm.runInContext(source.slice(source.indexOf(start), source.indexOf(end)), ctx);
+    const pending = kind === 'readiness' ? ctx.checkGenovaAvatarReadiness() : ctx.genovaImageChoices();
+    ctx.setActiveProjectId('next');
+    resolve({provider_status: 'ORIGINAL_PROJECT', candidate_images: []});
+    await pending;
+    assert.doesNotMatch(ctx.elements['genova-avatar-readiness-result'].textContent, /ORIGINAL_PROJECT/);
+    assert.match(ctx.elements['genova-image-choices'].textContent, /Load the saved choices/);
+  }
+});
+
+test('an old project response is ignored even after switching away and back', async () => {
+  let resolve;
+  const ctx = selectionContext({api: () => new Promise(r => { resolve = r; })});
+  ctx.elements['genova-avatar-readiness-result'] = {};
+  ctx.elements['check-genova-avatar-readiness'] = {};
+  vm.runInContext(source.slice(source.indexOf('  async function checkGenovaAvatarReadiness('), source.indexOf('  var genovaReadinessButton')), ctx);
+  const pending = ctx.checkGenovaAvatarReadiness();
+  ctx.setActiveProjectId('next'); ctx.setActiveProjectId('original');
+  resolve({provider_status: 'STALE_BEFORE_SWITCH'});
+  await pending;
+  assert.doesNotMatch(ctx.elements['genova-avatar-readiness-result'].textContent, /STALE_BEFORE_SWITCH/);
+});
+
+test('the script editor loads the latest saved narration script and preserves an unsaved edit on refresh', () => {
+  const editor = {value: 'old page default'};
+  const ctx = vm.createContext({activeProjectId: 'original', presenterScriptProjectId: null, presenterSavedScriptValue: null, $: id => id === 'presenter-script' ? editor : null});
+  vm.runInContext(source.slice(source.indexOf('  function latestAsset('), source.indexOf('  function renderProductionReadiness(')), ctx);
+  const detail = {assets: [{kind: 'presenter_script', content: 'older revision'}, {kind: 'presenter_script', content: 'exact imported recording words'}]};
+  ctx.syncPresenterScript(detail);
+  assert.equal(editor.value, 'exact imported recording words');
+  editor.value = 'unsaved correction';
+  ctx.syncPresenterScript(detail);
+  assert.equal(editor.value, 'unsaved correction');
+  ctx.activeProjectId = 'next';
+  ctx.syncPresenterScript({assets: []});
+  assert.equal(editor.value, '');
+});
+
+test('a delayed asset fetch does not overwrite the selected project or expose mismatched download controls', async () => {
+  let resolve;
+  const elements = {'asset-list': {innerHTML: 'selected project assets'}, 'project-title': {value: 'Selected project'}};
+  const ctx = vm.createContext({
+    activeProjectId: 'original', activeProjectRevision: 0, $: id => elements[id],
+    api: () => new Promise(r => { resolve = r; }),
+    refreshDrama() {}, renderProductionReadiness() {}, document: {querySelectorAll: () => []},
+  });
+  const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('\n  var clearLegacyPreviews'));
+  vm.runInContext(refresh, ctx);
+  const pending = ctx.refreshAssets();
+  ctx.activeProjectId = 'next'; ctx.activeProjectRevision += 1;
+  resolve({project: {title: 'Wrong old project'}, assets: []});
+  await pending;
+  assert.equal(elements['project-title'].value, 'Selected project');
+  assert.equal(elements['asset-list'].innerHTML, 'selected project assets');
+});
+
+test('late preflight and budget-confirm responses cannot restore a previous project quote', async () => {
+  for (const action of ['run-preflight', 'confirm-budget']) {
+    let resolve;
+    const callbacks = {};
+    const ctx = selectionContext({
+      api: () => new Promise(r => { resolve = r; }), showBanner() {}, escapeHtml: String,
+      latestPreflight: {estimated_total_usd: 2, quote_fingerprint: 'original'},
+    });
+    ctx.elements['preflight-status'] = {};
+    for (const id of ['run-preflight', 'confirm-budget']) ctx.elements[id] = {addEventListener(_event, fn) { callbacks[id] = fn; }};
+    vm.runInContext(source.slice(source.indexOf('  function renderPreflight('), source.indexOf('  var latestStudioOrderId')), ctx);
+    const pending = callbacks[action]();
+    ctx.setActiveProjectId('next');
+    resolve(action === 'run-preflight' ? {estimated_total_usd: 99} : {quote: {estimated_total_usd: 99, owner_budget_confirmed: true}});
+    await pending;
+    assert.equal(ctx.latestPreflight, null);
+    assert.doesNotMatch(ctx.elements['preflight-status'].innerHTML || '', /99/);
+    assert.equal(ctx.elements['confirm-budget'].disabled, true);
+  }
+});
+
+test('a detached image approval button cannot approve a previously selected project', async () => {
+  const createdButtons = [];
+  const calls = [];
+  const ctx = selectionContext({
+    api: async (path, options) => { calls.push({path, options}); return {candidate_images: [{asset_id: 'old-image'}]}; },
+    session: () => null, token: () => 'test-fixture', fetch: async () => ({ok: false}),
+    window: {confirm() { throw new Error('stale image must not ask for approval'); }},
+    document: {
+      createElement(tag) {
+        const node = {appendChild() {}, style: {}, addEventListener(_event, fn) { node.callback = fn; }};
+        if (tag === 'button') createdButtons.push(node);
+        return node;
+      },
+      createTextNode: text => ({text}),
+    },
+  });
+  ctx.elements['genova-image-choices'] = {textContent: '', appendChild() {}};
+  vm.runInContext(source.slice(source.indexOf('  async function genovaImageChoices('), source.indexOf('  var genovaUpload')), ctx);
+  await ctx.genovaImageChoices();
+  assert.equal(createdButtons.length, 1);
+  ctx.setActiveProjectId('next');
+  await createdButtons[0].callback();
+  assert.equal(calls.length, 1);
+  assert.ok(calls.every(call => !call.options || call.options.method !== 'PUT'));
+});
 
 test('saved motion failures render the provider reason safely after a project reload', async () => {
   const elements = {'asset-list': {innerHTML: ''}};
   const ctx = vm.createContext({
-    activeProjectId: 'selected',
+    activeProjectId: 'selected', activeProjectRevision: 0,
     $: id => elements[id],
     api: async () => ({assets: [
       {title: 'Scene 1', kind: 'video', status: 'ERROR', content: 'Hotel lobby', metadata: {provider_result: {message: 'Runway error 400: insufficient credits <script>alert(1)</script> Bearer secret-token'}}},
@@ -23,7 +166,7 @@ test('saved motion failures render the provider reason safely after a project re
   const refresh = source.slice(source.indexOf('  function assetTypeLabel('), source.indexOf('  async function waitForScene('));
   // refreshAssets is followed by event registration; isolate its declaration.
   const end = refresh.indexOf('\n  $("reset-project-media")');
-  vm.runInContext(escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
+  vm.runInContext(briefSync + escape + memoryNotice + failure + (end >= 0 ? refresh.slice(0, end) : refresh), ctx);
   await ctx.refreshAssets();
   const html = elements['asset-list'].innerHTML;
   assert.match(html, /insufficient credits/);
@@ -118,6 +261,7 @@ test('sign-in uses one unauthenticated request and surfaces the login error with
   const ctx = vm.createContext({
     window: {AmiCorSession: {ensureReady: async () => { throw new Error('login must not refresh the old session'); }, authFetch: async () => { throw new Error('login must not replay through authFetch'); }}},
     token: () => 'old-token',
+    location: {hostname: 'amicor-health-isf-py.onrender.com'},
     detailText: body => body.detail,
     setToken: () => { throw new Error('login rejection must not clear the existing session'); },
     setSignedIn: () => { throw new Error('login rejection is not session expiry'); },
@@ -326,7 +470,7 @@ test('offline asset markup downloads through a button and never puts the file AP
   assert.ok(end > 0, "refreshAssets slice marker missing");
   const elements = {"asset-list": {innerHTML: ""}};
   const ctx = vm.createContext({
-    activeProjectId: "cproj_293e7b8547d4",
+    activeProjectId: "cproj_293e7b8547d4", activeProjectRevision: 0,
     $: (id) => elements[id],
     refreshDrama: () => {},
     renderProductionReadiness: () => {},
@@ -352,7 +496,7 @@ test('offline asset markup downloads through a button and never puts the file AP
       }],
     }),
   });
-  vm.runInContext(escape + memoryNotice + failure + labels.slice(0, end), ctx);
+  vm.runInContext(briefSync + escape + memoryNotice + failure + labels.slice(0, end), ctx);
   await ctx.refreshAssets();
   const html = elements["asset-list"].innerHTML;
   assert.match(html, /asset-auth-download/);
@@ -363,4 +507,125 @@ test('offline asset markup downloads through a button and never puts the file AP
   assert.match(html, /Presenter NOT USED/);
   assert.doesNotMatch(html, /href="\/api\/nova\/creative\/[^"]+\/file/);
   assert.doesNotMatch(html, /access_token|Bearer /);
+});
+
+test('illustrated and locally animated previews never receive the motion-MP4 readiness label', () => {
+  const helpers = source.slice(source.indexOf('  function presenterMarkedPublishReady('), source.indexOf('  function memoryHeadroomNotice('))
+    + source.slice(source.indexOf('  function clickVerified('), source.indexOf('  function assetFailureHtml('))
+    + source.slice(source.indexOf('  function latestAsset('), source.indexOf('  var dramaLoadedProject'));
+  const target = {innerHTML: '', querySelectorAll: () => []};
+  const ctx = vm.createContext({$: id => id === 'production-readiness' ? target : null, escapeHtml: String, activeProjectId: 'selected', document: {querySelectorAll: () => []}});
+  vm.runInContext(helpers, ctx);
+  function render(meta) {
+    ctx.renderProductionReadiness({project: {project_type: 'short_video'}, assets: [{kind: 'video', status: 'GENERATED', url: '/saved.mp4', metadata: {final_promo: true, captions_burned_in: true, ...meta}}]});
+    return target.innerHTML;
+  }
+  const illustrated = render({illustrated_fallback: true});
+  assert.match(illustrated, /PREVIEW_ONLY illustrated fallback/);
+  assert.doesNotMatch(illustrated, /Motion MP4 ready/);
+  const animated = render({motion_engine: 'local_plate_walk_illusion', visual_mode: 'genova_photoreal_plate'});
+  assert.match(animated, /PREVIEW_ONLY local image animation/);
+  assert.doesNotMatch(animated, /Motion MP4 ready/);
+  // A genuine saved motion candidate is still reviewable, while commercial acceptance stays separate.
+  assert.match(render({true_ai_motion_synthesis: true}), /Motion MP4 ready for owner review/);
+  assert.doesNotMatch(target.innerHTML, /COMMERCIAL COMPLETE/);
+});
+
+
+test('test-account signup controls are confined to named isolated Studio preview hosts', () => {
+  const start = source.indexOf('  function isIsolatedStudioPreview() {');
+  const end = source.indexOf('  function setSignedIn(on) {', start);
+  assert.ok(start >= 0 && end > start);
+  for (const [host, expected] of [
+    ['nova-studio-validation-350.onrender.com', true],
+    ['amicor-health-isf-pr-454.onrender.com', true],
+    ['amicor-health-isf-py.onrender.com', false],
+    ['getamicor.com', false],
+    ['amicor-health-isf-pr-454.onrender.com.evil.example', false],
+  ]) {
+    const ctx = vm.createContext({location: {hostname: host}});
+    vm.runInContext(source.slice(start, end), ctx);
+    assert.equal(ctx.isIsolatedStudioPreview(), expected, host);
+  }
+  assert.match(source, /if \(isIsolatedStudioPreview\(\)\)/);
+  assert.match(source, /\(isIsolatedStudioPreview\(\) && !on\)/);
+});
+
+test('Operations Agent narration QC is review-only and keeps publication gated', () => {
+  const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.match(html, /Operations Agent narration QC/);
+  assert.match(html, /Describe your task/);
+  assert.match(html, /customer-support drafts/);
+  assert.match(html, /Ami-h-core/);
+  assert.match(html, /NOT APPROVED FOR PUBLISHING/);
+  assert.match(html, /does not transcribe audio, correct the MP4, approve publication, or call a paid provider/);
+});
+
+test('second commercial controls link directly to saved project history', () => {
+  const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+  assert.match(html, /href="#studio-project-history"/);
+  assert.match(html, /<section id="studio-project-history"[^>]*aria-label="Project history"/);
+  assert.match(html, /id="project-list"/);
+});
+
+test('second-commercial selection reports project-list authentication failure instead of missing commercial', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  const ctx = vm.createContext({
+    refreshProjects: async () => { throw new Error('Session expired. Sign in again. (401)'); },
+    projectRowsCache: [], activeProjectId: null,
+    findSecondCommercialProject: () => null,
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  await assert.rejects(ctx.ensureSecondCommercialSelected(), /Session expired.*401/);
+  assert.doesNotMatch(source.slice(start, end), /catch \(err\) \{\s*\/\/ Keep going/);
+});
+
+test('second-commercial selection never falls back to unrelated active 30s project', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  let selected = null;
+  let assetsRefreshed = false;
+  const ctx = vm.createContext({
+    refreshProjects: async () => {},
+    projectRowsCache: [{id: 'cproj_social', title: 'social media', duration_target: 30, project_type: 'short_video'}],
+    activeProjectId: 'cproj_social',
+    findSecondCommercialProject: () => null,
+    setActiveProjectId: id => { selected = id; },
+    refreshAssets: async () => { assetsRefreshed = true; }
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  assert.equal(await ctx.ensureSecondCommercialSelected(), null);
+  assert.equal(selected, null);
+  assert.equal(assetsRefreshed, false);
+  assert.equal(ctx.activeProjectId, 'cproj_social');
+});
+
+test('second-commercial selection uses exact project when found', async () => {
+  const start = source.indexOf('  async function ensureSecondCommercialSelected() {');
+  const end = source.indexOf('  function $(id) {', start);
+  assert.ok(start >= 0 && end > start);
+  let selected = null;
+  let assetsRefreshed = false;
+  const ctx = vm.createContext({
+    refreshProjects: async () => {},
+    projectRowsCache: [{id: 'cproj_original', title: 'AMICOR Second Commercial', duration_target: 30}],
+    findSecondCommercialProject: rows => rows[0],
+    setActiveProjectId: id => { selected = id; },
+    refreshAssets: async () => { assetsRefreshed = true; }
+  });
+  vm.runInContext(source.slice(start, end), ctx);
+  assert.equal(await ctx.ensureSecondCommercialSelected(), 'cproj_original');
+  assert.equal(selected, 'cproj_original');
+  assert.equal(assetsRefreshed, true);
+});
+
+test('staging 401 message distinguishes temporary staging accounts from production login', () => {
+  const script = fs.readFileSync(__dirname + '/creative.js', 'utf8');
+  assert.match(script, /if \(isLogin\) \{/);
+  assert.match(script, /if \(isIsolatedStudioPreview\(\)\)/);
+  assert.match(script, /Staging sign-in rejected \(401\)/);
+  assert.match(script, /Do not change or reuse your production password/);
 });
