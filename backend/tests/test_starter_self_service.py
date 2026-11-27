@@ -518,3 +518,53 @@ def test_live_starter_policy_requires_every_flag(live_policy, monkeypatch, flag)
 ])
 def test_live_starter_policy_rejects_invalid_evidence(live_policy, field, value):
     assert not allows_live_starter_feature(**{**LIVE_BASE, field: value})
+
+
+@pytest.fixture
+def live_adapter(live_policy, adapter_fixture):
+    db, user, state = adapter_fixture
+    user.email = "customer@example.com"
+    state.key = "sk_live_fixture"
+    state.row.stripe_price_id = LIVE_STARTER_PRICE
+    sub = state.subscription
+    sub["livemode"] = True
+    sub["items"]["data"][0]["price"].update(id=LIVE_STARTER_PRICE, livemode=True)
+    invoice = sub["latest_invoice"]
+    invoice["livemode"] = True
+    invoice["lines"]["data"][0]["pricing"]["price_details"]["price"] = LIVE_STARTER_PRICE
+    for record in (state.payment["invoice_payments"]["data"][0],
+                   state.payment["payment_intent"], state.payment["charge"]):
+        record["livemode"] = True
+    return db, user, state
+
+
+@pytest.mark.parametrize("feature", sorted(FEATURES))
+def test_live_authenticated_adapter(live_adapter, feature):
+    db, user, state = live_adapter
+    assert authenticated_starter_access(db, authenticated_user=user, feature=feature)
+    assert state.reads == 1 and state.charge_reads == 1
+
+
+@pytest.mark.parametrize("failure", ["test_key", "test_subscription", "test_invoice",
+    "test_charge", "refund", "dispute", "wrong_customer", "wrong_tenant", "disabled"])
+def test_live_authenticated_adapter_denies_invalid_evidence(live_adapter, monkeypatch, failure):
+    db, user, state = live_adapter
+    if failure == "test_key":
+        state.key = "sk_test_fixture"
+    elif failure == "test_subscription":
+        state.subscription["livemode"] = False
+    elif failure == "test_invoice":
+        state.subscription["latest_invoice"]["livemode"] = False
+    elif failure == "test_charge":
+        state.payment["charge"]["livemode"] = False
+    elif failure == "refund":
+        state.payment["charge"]["amount_refunded"] = 1
+    elif failure == "dispute":
+        state.payment["charge"]["disputed"] = True
+    elif failure == "wrong_customer":
+        state.subscription["customer"] = "cus_other"
+    elif failure == "wrong_tenant":
+        state.row.tenant_id = "other-tenant"
+    else:
+        monkeypatch.delenv("NOVA_STARTER_SELF_SERVICE_PRODUCTION_ENABLED")
+    assert not authenticated_starter_access(db, authenticated_user=user, feature="basic_workspace")
