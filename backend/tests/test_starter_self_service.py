@@ -469,3 +469,52 @@ def test_starter_reversal_missing_invoice_payment_denied(adapter_fixture):
 def test_checkout_and_entitlement_prices_must_agree(monkeypatch, checkout_price, allowed):
     monkeypatch.setenv("NOVA_STRIPE_PRICE_STARTER", checkout_price)
     assert allows_starter_feature(**BASE) is allowed
+
+
+from app.core.nova.billing.starter_self_service import (
+    LIVE_STARTER_PRICE, allows_live_starter_feature,
+)
+
+LIVE_FLAGS = {
+    "APP_ENV": "production",
+    "AMICOR_ENVIRONMENT": "production",
+    "NOVA_STARTER_SELF_SERVICE_PRODUCTION_ENABLED": "true",
+    "NOVA_STRIPE_LIVE_ENABLED": "true",
+    "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED": "true",
+    "NOVA_STRIPE_PRICE_STARTER": LIVE_STARTER_PRICE,
+    "NOVA_BILLING_CHECKOUT_TRIAL_ENABLED": "false",
+}
+LIVE_BASE = {**BASE, "recorded_price": LIVE_STARTER_PRICE, "stripe_livemode": True}
+
+
+@pytest.fixture
+def live_policy(monkeypatch):
+    for name, value in LIVE_FLAGS.items():
+        monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize("feature", sorted(FEATURES))
+def test_live_starter_policy_approved_features(live_policy, feature):
+    assert allows_live_starter_feature(**{**LIVE_BASE, "feature": feature})
+    assert not allows_starter_feature(**{**LIVE_BASE, "feature": feature})
+
+
+@pytest.mark.parametrize("flag", sorted(LIVE_FLAGS))
+def test_live_starter_policy_requires_every_flag(live_policy, monkeypatch, flag):
+    monkeypatch.delenv(flag)
+    assert not allows_live_starter_feature(**LIVE_BASE)
+    monkeypatch.setenv(flag, "incorrect")
+    assert not allows_live_starter_feature(**LIVE_BASE)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("feature", "managed_task"), ("feature", "private_delivery"),
+    ("tenant_id", ""), ("verified_tenant_id", "other-tenant"),
+    ("recorded_plan", "professional"), ("recorded_price", "price_other"),
+    ("status", "trialing"), ("status", "past_due"), ("status", "canceled"),
+    ("verified_subscription", False), ("verified_paid_invoice", False),
+    ("stripe_livemode", False), ("stripe_livemode", None),
+    ("current_period_end", NOW),
+])
+def test_live_starter_policy_rejects_invalid_evidence(live_policy, field, value):
+    assert not allows_live_starter_feature(**{**LIVE_BASE, field: value})
