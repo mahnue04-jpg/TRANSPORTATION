@@ -59,7 +59,6 @@ def reserve_owner_approved_test_subscription_task(
             or role not in {"admin", "super_admin_support"}):
         raise AllowanceBlocked("authenticated_owner_required")
 
-    from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
     from app.core.nova.work_revenue.models import NovaWorkEngagement, NovaWorkTask
     from app.modules.marketing.models import MarketingWebsiteLead
     from app.modules.marketing.operations_billing import (
@@ -98,6 +97,8 @@ def reserve_owner_approved_test_subscription_task(
         raise AllowanceBlocked("synthetic_paid_lead_required")
     email = str(lead.work_email or "")
     if live:
+        # Import only on the live path so staging CI never loads billing.__init__.
+        from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
         if agent_checkout_mode() != "live" or email.lower().endswith(".invalid"):
             raise AllowanceBlocked("live_paid_lead_required")
         price = LIVE_OPERATIONS_PRICES.get(lead.service_plan, "")

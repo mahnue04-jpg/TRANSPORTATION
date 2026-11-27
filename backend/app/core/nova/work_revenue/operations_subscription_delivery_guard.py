@@ -66,6 +66,13 @@ def require_subscription_delivery(db: Session, *, job, recipient) -> dict:
         raise AllowanceBlocked("verified_subscription_recipient_required")
     if not live and not email.endswith(".invalid"):
         raise AllowanceBlocked("verified_subscription_recipient_required")
-    return dict(**proof, recipient_user_id=recipient.id,
-                recipient_organization_id=recipient.organization_id,
-                output_sha256=job["output_sha256"], mode=mode)
+    # proof already carries mode from the execution guard; do not pass it twice.
+    if proof.get("mode") not in {None, mode}:
+        raise AllowanceBlocked("subscription_delivery_mode_mismatch")
+    return {
+        **proof,
+        "recipient_user_id": recipient.id,
+        "recipient_organization_id": recipient.organization_id,
+        "output_sha256": job["output_sha256"],
+        "mode": mode,
+    }

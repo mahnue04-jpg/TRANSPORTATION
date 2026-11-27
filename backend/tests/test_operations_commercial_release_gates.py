@@ -247,3 +247,23 @@ def test_execution_and_delivery_live_flags_default_off(clear_mode):
     )
     assert subscription_execution_mode() is None
     assert subscription_delivery_mode() is None
+
+
+def test_delivery_proof_merge_tolerates_shared_mode_key():
+    """Regression: proof already includes mode; dict(**proof, mode=...) TypeErrored."""
+    proof = {
+        "reservation_id": "res",
+        "lead_id": "lead",
+        "plan": "launch_99",
+        "authorized": True,
+        "mode": "test",
+    }
+    merged = {
+        **proof,
+        "recipient_user_id": "recipient",
+        "recipient_organization_id": "recipient-org",
+        "output_sha256": "a" * 64,
+        "mode": "test",
+    }
+    assert merged["mode"] == "test"
+    assert merged["authorized"] is True

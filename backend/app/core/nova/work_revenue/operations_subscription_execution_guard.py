@@ -83,7 +83,6 @@ def require_current_bound_subscription(
     if reservation is None:
         raise AllowanceBlocked("exact_csv_reservation_required")
 
-    from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
     from app.modules.marketing.models import MarketingWebsiteLead
     from app.modules.marketing.operations_billing import (
         agent_checkout_mode, get_agent_stripe_client, subscription_test_price,
@@ -98,6 +97,8 @@ def require_current_bound_subscription(
     ):
         raise AllowanceBlocked("synthetic_paid_lead_required")
     if live:
+        # Import only on the live path so staging CI never loads billing.__init__.
+        from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
         if agent_checkout_mode() != "live" or email.lower().endswith(".invalid"):
             raise AllowanceBlocked("live_paid_lead_required")
         price = LIVE_OPERATIONS_PRICES.get(row["plan"], "")
