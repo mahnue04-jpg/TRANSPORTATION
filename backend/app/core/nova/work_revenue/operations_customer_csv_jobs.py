@@ -20,6 +20,11 @@ from app.modules.platform_ops.secure_storage import (
     S3PrivateDocumentStorage, SecureStorageNotConfigured,
 )
 from .operations_csv_cleanup import clean_csv_text
+from .operations_private_storage import (
+    OperationsPrivateArtifactStorage,
+    OperationsStorageSettings,
+    is_production_artifact_runtime,
+)
 
 metadata = sa.MetaData()
 jobs = sa.Table(
@@ -58,12 +63,19 @@ def require_runtime(db: Session) -> None:
         raise CustomerCSVBlocked("Production PostgreSQL required", 503)
     if not sa.inspect(db.get_bind()).has_table(jobs.name):
         raise CustomerCSVBlocked("CSV database migration required", 503)
-    if os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", "").lower() != "s3_private":
-        raise CustomerCSVBlocked("Private S3 storage configuration required", 503)
+    try:
+        if is_production_artifact_runtime():
+            OperationsStorageSettings.from_environment()
+        elif os.getenv("PLATFORM_OPS_DOCUMENT_STORAGE", "").lower() != "s3_private":
+            raise SecureStorageNotConfigured("Rehearsal private storage is not configured")
+    except SecureStorageNotConfigured as exc:
+        raise CustomerCSVBlocked("Private artifact storage unavailable", 503) from exc
 
 
 def _store() -> S3PrivateDocumentStorage:
     try:
+        if is_production_artifact_runtime():
+            return OperationsPrivateArtifactStorage()
         return S3PrivateDocumentStorage()
     except SecureStorageNotConfigured as exc:
         raise CustomerCSVBlocked("Private artifact storage unavailable", 503) from exc
