@@ -214,6 +214,63 @@ def test_visa_and_permit_kinds_do_not_substitute_for_each_other() -> None:
     )
 
 
+def test_negated_remote_status_does_not_waive_foreign_onsite() -> None:
+    """A not_remote flag is not remote work, so a foreign geography stays closed."""
+    for status, place in (
+        ("not_remote", "India"),
+        ("not-remote", "Dubai"),
+        ("non_remote", "Seoul"),
+        ("no_remote", "London"),
+    ):
+        job = _job(
+            "Office operations support for local staff.",
+            geography=place,
+            remote_status=status,
+        )
+        assert non_us_location_required(job) is True
+
+    client = _job(
+        "Fully remote contractor. Work from anywhere. No residency requirement.",
+        geography="Germany",
+        remote_status="remote",
+    )
+    assert non_us_location_required(client) is False
+    assert "residency_required" not in international_blockers(client, facts=_US_PROFILE)
+
+
+def test_explicit_remote_denial_keeps_overseas_residency_closed() -> None:
+    """Saying remote work is not offered does not clear a non-US place."""
+    phrases = (
+        "Remote work is not offered.",
+        "Remote work is NOT offered.",
+        "Remote positions are not available.",
+        "This role is not remote.",
+        "No remote work.",
+        "The company does not offer remote work.",
+        "Remote work isn't offered.",
+    )
+    places = ("India", "Dubai", "London", "Tokyo", "Chennai", "Sydney", "Singapore")
+    for phrase, place in zip(phrases, places):
+        job = _job(phrase, geography=place, remote_status="remote")
+        assert non_us_location_required(job) is True, phrase
+
+    still_remote = _job(
+        "Fully remote contractor. Certification is not required. Work from anywhere. "
+        "No residency requirement.",
+        geography="France",
+        remote_status="remote",
+    )
+    assert non_us_location_required(still_remote) is False
+    assert "residency_required" not in international_blockers(still_remote, facts=_US_PROFILE)
+
+    onsite = _job(
+        "Previously described as remote in an old posting. Current assignment is in the office.",
+        geography="Singapore",
+        remote_status="on-site",
+    )
+    assert non_us_location_required(onsite) is True
+
+
 def test_native_fluency_is_never_claimed_for_a_tested_language() -> None:
     assessed = assess_international_match(
         _job("Remote B2B CRM support. Native French speaker required. Work from anywhere."),
