@@ -170,6 +170,15 @@ jobs:
         run: |
           python -m pytest -q --noconftest tests/test_operations_production_acceptance.py
 
+      - name: Hosted main-app payment intake integration (Render entry)
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:////tmp/nova-payment-intake-main-ci.db
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+        run: |
+          python -m pytest -q --noconftest tests/test_operations_payment_intake_main.py
+
   private-delivery:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -114,6 +114,13 @@ Stripe Dashboard / commercial ops still required before first customer charge
   - Explicit owner authorization to flip sales flags and publish checkout
   - Cloudflare/website activation is outside this branch (inquiry-only until then)
 
+Hosted Render entry (app.main:app)
+--------------------------------------------------------------------------------
+POST /payments/stripe/webhook is registered on the full application (distinct from
+POST /api/payments/stripe/webhook). Startup writer verification runs from main
+lifespan when NOVA_OPERATIONS_DATABASE_URL is set. Readiness (no secrets):
+GET /payments/operations/readiness
+
 Not performed (by design)
 - Real charges, live sales enablement, production deploy/merge, website redesign
 - Spending for new cloud resources

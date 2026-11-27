@@ -177,3 +177,7 @@ Defects closed in this acceptance pass:
 - Payment-intake CI now provisions the production-shaped writer role/grants instead of connecting as `postgres` (which failed `verify_writer`).
 
 Evidence: `evidence/operations-production-acceptance-20261127.txt`. Live sales flags remain default-off. Exact remaining production configuration (secrets, live twins, migrations, private S3, Stripe Dashboard webhooks, $49 Payment Link fee review, tax/terms, owner enablement) is listed in that evidence file.
+
+## Hosted Render entry integration — November 27, 2026 (America/Chicago)
+
+`uvicorn app.main:app` now mounts the Operations payment intake router. Exact path remains `POST /payments/stripe/webhook` (distinct from Ride/Deliver `POST /api/payments/stripe/webhook`). Signature verification, live-only direct-account enforcement, least-privilege `nova_ops_event_writer` startup verification (when `NOVA_OPERATIONS_DATABASE_URL` is set), and idempotent inserts are preserved. Non-secret readiness: `GET /payments/operations/readiness`. Live sales flags remain default-off.

@@ -325,6 +325,23 @@ async def lifespan(app: FastAPI):
     except Exception as today_schema_exc:
         logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
 
+    # Operations payment intake: least-privilege writer check when configured.
+    # Unset NOVA_OPERATIONS_DATABASE_URL skips verification; the webhook stays
+    # fail-closed (503) until both the secret and database URL are present.
+    ops_payment_database_url = (os.getenv("NOVA_OPERATIONS_DATABASE_URL") or "").strip()
+    if ops_payment_database_url:
+        try:
+            from operations_payment_intake import verify_writer
+
+            await asyncio.to_thread(verify_writer, ops_payment_database_url)
+            logger.info("Operations payment intake writer permissions verified.")
+        except Exception as ops_payment_exc:
+            logger.critical(
+                "Operations payment intake writer verification failed: %s",
+                ops_payment_exc,
+            )
+            raise
+
     from app.deployment.release_version import resolve_app_version
 
     logger.info(
@@ -585,6 +602,19 @@ try:
     logger.info("Customer payment routes registered")
 except Exception as exc:
     logger.error("Failed to register customer payment routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
+# ── Operations payment intake (ledger-only; exact POST /payments/stripe/webhook)
+# Distinct from Ride/Deliver POST /api/payments/stripe/webhook. Does not enable
+# customer sales. Startup writer verification runs in lifespan when configured.
+try:
+    from operations_payment_intake import router as operations_payment_intake_router
+
+    app.include_router(operations_payment_intake_router)
+    logger.info("Operations payment intake routes registered")
+except Exception as exc:
+    logger.error("Failed to register Operations payment intake routes: %s", exc)
     import traceback
     traceback.print_exc()
 

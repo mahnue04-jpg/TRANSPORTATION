@@ -5,7 +5,9 @@ on:
       - "release/operations-live-catalog-20261126"
     paths:
       - 'backend/operations_payment_intake.py'
+      - 'backend/app/main.py'
       - 'backend/tests/test_operations_payment_intake.py'
+      - 'backend/tests/test_operations_payment_intake_main.py'
       - 'backend/tests/test_operations_production_acceptance.py'
       - 'backend/migrations/sql/20261126_operations_payment_events.sql'
       - 'backend/migrations/sql/20261126_operations_payment_events_writer_grants.sql'
@@ -16,7 +18,9 @@ on:
       - "nova/four-plan-consolidated-staging-20261125"
     paths:
       - 'backend/operations_payment_intake.py'
+      - 'backend/app/main.py'
       - 'backend/tests/test_operations_payment_intake.py'
+      - 'backend/tests/test_operations_payment_intake_main.py'
       - 'backend/migrations/sql/20261126_operations_payment_events.sql'
       - 'backend/migrations/sql/20261126_operations_payment_events_writer_grants.sql'
       - '.github/workflows/operations-payment-intake.yml'
