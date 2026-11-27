@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AMICOR Nova — Synthetic Operations Review</title>
+<style>
+  :root { color-scheme: light; font-family: system-ui, -apple-system, sans-serif; color: #182635; background: #f4f7fa }
+  * { box-sizing: border-box }
+  body { margin: 0; padding: 28px 16px }
+  main { max-width: 850px; margin: auto }
+  .eyebrow { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: #475569 }
+  h1 { font-size: clamp(1.5rem, 3vw, 2.2rem); margin: 10px 0 }
+  .notice { padding: 14px; background: #fff1d5; border: 1px solid #c68d19; border-radius: 8px; line-height: 1.5 }
+  .panel { background: white; padding: 20px; border: 1px solid #cbd5e1; border-radius: 12px; margin-top: 20px }
+  .status { padding: 9px 12px; margin: 12px 0; border-radius: 7px; background: #e8eef5 }
+  pre { overflow-x: auto; white-space: pre; padding: 14px; background: #edf2f7; border-radius: 8px; line-height: 1.55 }
+  button { border: 1px solid #304457; padding: 10px 15px; border-radius: 7px; font: inherit; cursor: pointer; background: white }
+  button.primary { color: white; background: #143d69 }
+  button:disabled { cursor: not-allowed; opacity: .45 }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 }
+  .muted { color: #536577; font-size: .91rem }
+  label { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px }
+  code { overflow-wrap: anywhere }
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">AMICOR Nova · Operations Agent</p>
+<h1>Review a synthetic CSV assignment</h1>
+<div class="notice"><strong>Demonstration only.</strong> This page cannot accept customer uploads or deliver real client work. Only built-in sample data is processed. The approval here is not a production assignment approval.</div>
+<section class="panel">
+  <h2>1. Inspect the sample output</h2>
+  <button id="load" type="button">Load sample for review</button>
+  <p class="status" id="status" role="status" aria-live="polite">Sign in to AMICOR and load the sample.</p>
+  <p><strong>SHA-256:</strong> <code id="digest">Not loaded</code></p>
+  <pre id="preview" tabindex="0" aria-label="Synthetic CSV preview">No sample loaded.</pre>
+  <p class="muted">The preview and stored review decision come from the staging-only API.</p>
+</section>
+<section class="panel">
+  <h2>2. Record your decision</h2>
+  <label><input id="confirm" type="checkbox"> I inspected this synthetic CSV and understand this action applies only to a demo.</label>
+  <div class="actions">
+    <button id="approve" class="primary" type="button" disabled>Approve sample</button>
+    <button id="reject" type="button" disabled>Reject sample</button>
+  </div>
+  <h2>3. Download after approval</h2>
+  <button id="download" type="button" disabled>Download approved CSV</button>
+  <p class="muted">A rejected sample cannot be downloaded. A recorded decision cannot be silently reversed.</p>
+</section>
+</main>
+<script src="/static/ux/sessionManager.js"></script>
+<script>
+"use strict";
+(function () {
+  var BASE = "/api/nova/work/operations/synthetic-acceptance";
+  var byId = function (id) { return document.getElementById(id); };
+  var state = { loaded: false, decision: "" };
+  function status(message) { byId("status").textContent = message; }
+  function headers() {
+    var session = window.AmiCorSession;
+    var auth = session && typeof session.getAuthHeaders === "function" ? session.getAuthHeaders() : {};
+    return Object.assign({ "Content-Type": "application/json" }, auth);
+  }
+  async function request(path, options) {
+    var response = await fetch(BASE + path, Object.assign({
+      credentials: "same-origin", cache: "no-store", headers: headers()
+    }, options || {}));
+    if (!response.ok) {
+      var data = null;
+      try { data = await response.json(); } catch (_) {}
+      throw new Error(data && typeof data.detail === "string" ? data.detail : "HTTP " + response.status);
+    }
+    return response;
+  }
+  function sync() {
+    var actionable = state.loaded && state.decision === "" && byId("confirm").checked;
+    byId("approve").disabled = !actionable;
+    byId("reject").disabled = !actionable;
+    byId("download").disabled = !(state.loaded && state.decision === "approved");
+  }
+  async function load() {
+    state.loaded = false; state.decision = ""; sync();
+    status("Loading synthetic review...");
+    try {
+      var data = await (await request("/preview")).json();
+      if (data.data_class !== "synthetic_only" || !/^[a-f0-9]{64}$/.test(data.sha256)) {
+        throw new Error("Unexpected sample response.");
+      }
+      byId("preview").textContent = data.csv_text;
+      byId("digest").textContent = data.sha256;
+      state.loaded = true;
+      state.decision = data.review_state === "awaiting_owner_review" ? "" : data.review_state;
+      status(state.decision ? "Recorded decision: " + state.decision : "Awaiting your review.");
+    } catch (err) { status("Unable to load: " + err.message); }
+    sync();
+  }
+  async function review(approve) {
+    if (!(state.loaded && !state.decision && byId("confirm").checked)) return;
+    byId("approve").disabled = true; byId("reject").disabled = true;
+    try {
+      var data = await (await request("/review", {
+        method: "POST", body: JSON.stringify({ approve: approve })
+      })).json();
+      state.decision = data.review_state;
+      status("Decision recorded: " + state.decision);
+    } catch (err) { status("Review not recorded: " + err.message); }
+    sync();
+  }
+  async function download() {
+    if (!(state.loaded && state.decision === "approved")) return;
+    try {
+      var response = await request("/download");
+      var blob = await response.blob();
+      if (blob.type && !blob.type.startsWith("text/csv")) throw new Error("Unexpected file type.");
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url; link.download = "nova-synthetic-cleaned.csv";
+      document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(url);
+      status("Synthetic CSV download requested.");
+    } catch (err) { status("Download failed: " + err.message); }
+  }
+  byId("load").addEventListener("click", load);
+  byId("confirm").addEventListener("change", sync);
+  byId("approve").addEventListener("click", function () { review(true); });
+  byId("reject").addEventListener("click", function () { review(false); });
+  byId("download").addEventListener("click", download);
+}());
+</script>
+</body>
+</html>
