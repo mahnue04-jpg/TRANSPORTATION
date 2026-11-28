@@ -168,7 +168,7 @@ jobs:
           NOVA_STRIPE_LIVE_ENABLED: "false"
           NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
         run: |
-          python -m pytest -q --noconftest tests/test_operations_production_acceptance.py tests/test_operations_authenticated_checkout.py tests/test_operations_webhook_contract.py tests/test_operations_private_storage_probe.py tests/test_operations_production_startup.py
+          python -m pytest -q --noconftest tests/test_operations_production_acceptance.py tests/test_operations_authenticated_checkout.py tests/test_operations_webhook_contract.py tests/test_operations_private_storage_probe.py tests/test_operations_production_startup.py tests/test_operations_production_uvicorn_startup.py -k "unavailable_database"
 
       - name: Hosted main-app payment intake integration (Render entry)
         working-directory: backend

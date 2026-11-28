@@ -92,12 +92,12 @@ def validate_database(db_path: Optional[str] = None) -> dict: # type: ignore
                 "backend": "postgresql",
                 "database_url_configured": True,
                 "detail": "PostgreSQL reachable" if ok else detail.get("detail", "PostgreSQL unreachable"),
+                "elapsed_ms": detail.get("elapsed_ms"),
             }
-            if not ok:
-                if detail.get("error_class"):
-                    result["error_class"] = detail["error_class"]
-                if detail.get("blocker_category"):
-                    result["blocker_category"] = detail["blocker_category"]
+            if detail.get("error_class"):
+                result["error_class"] = detail["error_class"]
+            if detail.get("blocker_category"):
+                result["blocker_category"] = detail["blocker_category"]
             return result
         except Exception as exc:
             return {
@@ -137,8 +137,13 @@ def startup_recovery(max_retries: int = 3, delay_s: float = 1.0) -> bool:
             logger.info("Database ready (attempt %d/%d).", attempt, max_retries)
             return True
         logger.warning(
-            "Database not ready (attempt %d/%d): %s",
-            attempt, max_retries, result.get("error"), # type: ignore
+            "Database not ready (attempt %d/%d) backend=%s error_class=%s blocker=%s elapsed_ms=%s",
+            attempt,
+            max_retries,
+            result.get("backend"),
+            result.get("error_class"),
+            result.get("blocker_category"),
+            result.get("elapsed_ms"),
         )
         if attempt < max_retries:
             time.sleep(delay_s)
@@ -175,7 +180,13 @@ def run_startup_validation() -> dict: # type: ignore
     for warning in env_result.get("warnings", []): # type: ignore
         logger.warning("Startup warning: %s", warning) # type: ignore
     if not db_result["ok"]:
-        logger.error("Startup validation — database error: %s", db_result.get("error")) # type: ignore
+        logger.error(
+            "Startup validation — database unreachable backend=%s error_class=%s blocker=%s elapsed_ms=%s",
+            db_result.get("backend"),
+            db_result.get("error_class"),
+            db_result.get("blocker_category"),
+            db_result.get("elapsed_ms"),
+        )
 
     if report["ok"]:
         logger.info(

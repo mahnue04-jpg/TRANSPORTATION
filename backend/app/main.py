@@ -279,10 +279,24 @@ async def lifespan(app: FastAPI):
             report["environment"]["missing_required"], # type: ignore
         )
 
-    db_ok = app_startup.startup_recovery(max_retries=3, delay_s=1.0)
+    db_ok = bool((report.get("database") or {}).get("ok"))
+    if not db_ok:
+        # The validation probe already used the bounded timeout. One short retry
+        # covers a transient failure without holding the port closed.
+        db_ok = app_startup.startup_recovery(max_retries=2, delay_s=0.5)
     from app.deployment.operations_production_startup import operations_production_startup_mode
 
     preserve_existing_records = operations_production_startup_mode()
+    database_report = report.get("database") or {}
+    logger.info(
+        "Startup database diagnostic backend=%s connected=%s preserve_existing_records=%s error_class=%s blocker=%s elapsed_ms=%s",
+        database_report.get("backend"),
+        db_ok,
+        preserve_existing_records,
+        database_report.get("error_class"),
+        database_report.get("blocker_category"),
+        database_report.get("elapsed_ms"),
+    )
     if preserve_existing_records:
         logger.info(
             "Operations production startup is preserving existing accounts, passwords, roles, permissions, and records."
@@ -346,7 +360,7 @@ async def lifespan(app: FastAPI):
         except Exception as ops_payment_exc:
             logger.critical(
                 "Operations payment intake writer verification failed: %s",
-                ops_payment_exc,
+                type(ops_payment_exc).__name__,
             )
             raise
 

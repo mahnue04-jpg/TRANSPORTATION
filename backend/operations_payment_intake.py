@@ -50,6 +50,7 @@ def verify_writer(database_url):
     connection = psycopg2.connect(database_url, connect_timeout=5)
     try:
         with connection.cursor() as cursor:
+            cursor.execute("SET statement_timeout = 5000")
             cursor.execute(
                 """SELECT current_user = 'nova_ops_event_writer'
                     AND current_database() = 'amicor'
