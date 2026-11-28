@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Operations Agent</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#142338;font:16px system-ui,sans-serif}
+    main{max-width:880px;margin:auto;padding:24px}header,section{background:#fff;border:1px solid #d7dfe8;border-radius:12px;padding:20px;margin:0 0 16px}
+    header{background:#142338;color:#fff}h1{margin:8px 0}button,input{font:inherit}button{background:#164e63;color:#fff;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}
+    button:disabled{opacity:.55;cursor:default}label{display:block;margin-top:12px}input{width:100%;padding:10px;border:1px solid #a7b5c4;border-radius:8px}
+    [hidden]{display:none!important}#status{min-height:1.4em}a{color:#164e63}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p>AMICOR Nova</p>
+    <h1>Operations Agent</h1>
+    <p>Signed-in customer access for the $9.99, $49, $99, and $299 packages. This page does not charge a card.</p>
+  </header>
+  <section>
+    <h2>Sign in</h2>
+    <p id="status" role="status" aria-live="polite">Sign in with your Operations account.</p>
+    <form id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" name="email" type="email" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      <p><button type="submit" id="sign-in">Sign in</button></p>
+    </form>
+  </section>
+  <section id="account" hidden>
+    <h2 id="package-label">Selected package</h2>
+    <p id="package-summary">Choose a package from the pricing page.</p>
+    <p id="gate-summary"></p>
+    <p><button type="button" id="continue-payment" disabled>Continue to payment</button></p>
+    <p><a id="starter-workspace" href="/api/nova/starter/interface">Open the $9.99 Starter workspace</a></p>
+    <h2>Your deliveries</h2>
+    <p id="deliveries">Deliveries stay hidden until your account is verified.</p>
+  </section>
+</main>
+<script src="/static/ux/sessionManager.js"></script>
+<script src="/static/nova-operations/customer.js"></script>
+</body>
+</html>

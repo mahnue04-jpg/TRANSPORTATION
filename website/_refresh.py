@@ -36,7 +36,7 @@ def apply(add, pages, status_table):
         return f'<article class="card"><h3>{title}</h3><p>{text}</p><a class="card-link" href="{escape(url, quote=True)}">{label}</a></article>'
 
     def purchase(title, text, package):
-        href = escape(LOGIN + '&operations_package=' + package, quote=True)
+        href = escape(APP + '/nova/operations/customer?signin=1&operations_package=' + package, quote=True)
         return (
             f'<article class="card"><h3>{title}</h3><p>{text}</p>'
             f'<a class="card-link" data-operations-package="{package}" data-operations-sales="disabled" '

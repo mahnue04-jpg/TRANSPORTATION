@@ -530,15 +530,14 @@ app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_work_router)
 
-# Private Starter delivery routes register only under an explicit commercial
-# mode. Each request also enforces its own guard; live sales stay opt-in.
-from app.core.nova.work_revenue.operations_customer_delivery import customer_delivery_mode
-if customer_delivery_mode() is not None:
-    from app.core.nova.work_revenue.operations_customer_delivery import (
-        customer_delivery_router, owner_delivery_router,
-    )
-    app.include_router(customer_delivery_router)
-    app.include_router(owner_delivery_router)
+# Customer and owner delivery routes stay mounted so the interfaces exist.
+# Each request still fails closed unless its commercial mode is explicit.
+from app.core.nova.work_revenue.operations_customer_delivery import (
+    customer_delivery_router,
+    owner_delivery_router,
+)
+app.include_router(customer_delivery_router)
+app.include_router(owner_delivery_router)
 
 app.include_router(nova_v3_router)
 app.include_router(nova_today_router)
@@ -557,11 +556,11 @@ from app.core.nova.work_revenue.operations_owner_storage_probe import (
 )
 app.include_router(nova_operations_checkout_router)
 app.include_router(nova_operations_storage_probe_router)
-# Register the isolated Starter rehearsal only under explicit staging flags.
-from app.core.nova.billing.starter_feature_routes import starter_routes_enabled
-if starter_routes_enabled():
-    from app.core.nova.billing.starter_feature_routes import router as nova_starter_rehearsal_router
-    app.include_router(nova_starter_rehearsal_router)
+# Starter self-service stays mounted. Access still requires starter_access_mode().
+from app.core.nova.billing.starter_feature_routes import (
+    router as nova_starter_rehearsal_router,
+)
+app.include_router(nova_starter_rehearsal_router)
 app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
@@ -4059,6 +4058,27 @@ def serve_driver_onboarding_progress() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Driver onboarding progress page not found"}, status_code=404)
+
+
+def _operations_interface(filename: str) -> Response:
+    page = os.path.join(_static_dir, "nova-operations", filename)
+    if os.path.isfile(page):
+        response = FileResponse(page, media_type="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    return JSONResponse({"error": "Operations interface not found"}, status_code=404)
+
+
+@app.get("/nova/operations/customer")
+def serve_operations_customer() -> Response:
+    return _operations_interface("customer.html")
+
+
+@app.get("/nova/operations/owner")
+def serve_operations_owner() -> Response:
+    return _operations_interface("owner.html")
 
 
 @app.get("/nova")

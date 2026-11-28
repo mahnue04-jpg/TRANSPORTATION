@@ -140,4 +140,7 @@ def test_operations_production_readiness_booleans_without_secret_values(clear_op
     assert report["live_sales_enabled"] is False
     assert report["payment_receiver"]["webhook_secret_configured"] is True
     assert report["payment_receiver"]["database_url_configured"] is False
-    assert report["authentication_gates"]["starter_access_mode"] is None
+    assert report["authentication_gates"]["starter_access_mode"] == "closed"
+    assert None not in report["authentication_gates"].values()
+    assert report["interfaces"]["customer"] == "/nova/operations/customer"
+    assert report["interfaces"]["owner"] == "/nova/operations/owner"

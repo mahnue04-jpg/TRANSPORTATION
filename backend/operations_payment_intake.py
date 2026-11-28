@@ -138,12 +138,20 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
     except Exception:
         production_runtime = False
 
-    starter_mode = None
-    binding_mode = None
-    delivery_mode = None
-    revenue_mode = None
+    gates = {
+        "starter_access_mode": None,
+        "starter_binding_mode": None,
+        "customer_delivery_mode": None,
+        "revenue_recording_mode": None,
+        "subscription_adapter_mode": None,
+        "subscription_execution_mode": None,
+        "subscription_delivery_mode": None,
+    }
     try:
         from app.core.nova.billing.starter_authenticated_access import starter_access_mode
+        from app.core.nova.work_revenue.operations_authenticated_subscription_adapter import (
+            subscription_adapter_mode,
+        )
         from app.core.nova.work_revenue.operations_customer_delivery import (
             customer_delivery_mode,
         )
@@ -153,13 +161,28 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
         from app.core.nova.work_revenue.operations_starter_payment_binding import (
             starter_binding_mode,
         )
+        from app.core.nova.work_revenue.operations_subscription_delivery_guard import (
+            subscription_delivery_mode,
+        )
+        from app.core.nova.work_revenue.operations_subscription_execution_guard import (
+            subscription_execution_mode,
+        )
 
-        starter_mode = starter_access_mode()
-        binding_mode = starter_binding_mode()
-        delivery_mode = customer_delivery_mode()
-        revenue_mode = operations_revenue_mode()
+        gates = {
+            "starter_access_mode": starter_access_mode(),
+            "starter_binding_mode": starter_binding_mode(),
+            "customer_delivery_mode": customer_delivery_mode(),
+            "revenue_recording_mode": operations_revenue_mode(),
+            "subscription_adapter_mode": subscription_adapter_mode(),
+            "subscription_execution_mode": subscription_execution_mode(),
+            "subscription_delivery_mode": subscription_delivery_mode(),
+        }
     except Exception:
         pass
+    authentication_gates = {
+        name: value if value in ("test", "live") else "closed"
+        for name, value in gates.items()
+    }
 
     live_sales = _truthy("NOVA_STRIPE_LIVE_ENABLED") and _truthy(
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED"
@@ -201,11 +224,13 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
             "settings_ok": private_storage_ok,
             "separate_from_document_bucket": separate_bucket,
         },
-        "authentication_gates": {
-            "starter_access_mode": starter_mode,
-            "starter_binding_mode": binding_mode,
-            "customer_delivery_mode": delivery_mode,
-            "revenue_recording_mode": revenue_mode,
+        "authentication_gates": authentication_gates,
+        "interfaces": {
+            "customer": "/nova/operations/customer",
+            "owner": "/nova/operations/owner",
+            "starter_workspace": "/api/nova/starter/interface",
+            "customer_deliveries": "/api/nova/work/operations/customer/deliveries",
+            "owner_storage_probe": "/api/nova/work/operations/owner/storage-probe",
         },
         "required_configuration": {
             "app_env_production": os.getenv("APP_ENV", "").strip() == "production",

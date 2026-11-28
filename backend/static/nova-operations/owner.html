@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Operations owner</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#142338;font:16px system-ui,sans-serif}
+    main{max-width:760px;margin:auto;padding:24px}header,section{background:#fff;border:1px solid #d7dfe8;border-radius:12px;padding:20px;margin:0 0 16px}
+    header{background:#142338;color:#fff}h1{margin:8px 0}button,input{font:inherit}button{background:#164e63;color:#fff;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}
+    button:disabled{opacity:.55;cursor:default}label{display:block;margin-top:12px}input{width:100%;padding:10px;border:1px solid #a7b5c4;border-radius:8px}
+    [hidden]{display:none!important}pre{white-space:pre-wrap}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p>AMICOR Nova · owner only</p>
+    <h1>Operations owner</h1>
+    <p>Customers cannot run this check. It uses the existing private storage round trip and does not open a payment.</p>
+  </header>
+  <section>
+    <h2>Owner sign in</h2>
+    <p id="status" role="status" aria-live="polite">Sign in with the owner account.</p>
+    <form id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" name="email" type="email" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      <p><button type="submit" id="sign-in">Sign in</button></p>
+    </form>
+  </section>
+  <section>
+    <h2>Private storage round-trip test</h2>
+    <p>Uploads, reads, and deletes one synthetic object. The result does not include the bucket name or object location.</p>
+    <p><button type="button" id="storage-probe" disabled>Run private storage round-trip test</button></p>
+    <pre id="probe-result" aria-live="polite"></pre>
+  </section>
+</main>
+<script src="/static/ux/sessionManager.js"></script>
+<script src="/static/nova-operations/owner.js"></script>
+</body>
+</html>
