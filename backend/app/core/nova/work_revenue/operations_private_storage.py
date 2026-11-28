@@ -5,6 +5,7 @@ from io import BytesIO
 import logging
 import os
 import re
+import threading
 from urllib.parse import urlsplit
 
 from app.modules.platform_ops.secure_storage import (
@@ -18,6 +19,23 @@ logger = logging.getLogger(__name__)
 _R2_SUFFIX = ".r2.cloudflarestorage.com"
 _R2_JURISDICTIONS = frozenset({"eu", "fedramp"})
 _SAFE_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,80}")
+_SIGNED_HEADER_LIST = re.compile(r"[a-z0-9;-]{1,240}")
+_SCOPE_PART = re.compile(r"[A-Za-z0-9_-]{1,40}")
+_ABSENT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
+_R2_REJECTED_HEADERS = frozenset(
+    {
+        "expect",
+        "x-amz-sdk-checksum-algorithm",
+        "x-amz-checksum-algorithm",
+        "x-amz-trailer",
+        "x-amz-decoded-content-length",
+        "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-aws-kms-key-id",
+        "x-amz-server-side-encryption-context",
+        "x-amz-server-side-encryption-bucket-key-enabled",
+    }
+)
+_r2_call = threading.local()
 
 
 def is_production_artifact_runtime() -> bool:
@@ -97,28 +115,197 @@ def _operations_s3_config(endpoint: str | None):
     if _is_r2_endpoint(endpoint):
         options["request_checksum_calculation"] = "when_required"
         options["response_checksum_validation"] = "when_required"
+        options["s3"] = {"addressing_style": "path", "payload_signing_enabled": True}
     return Config(**options)
 
 
+def _credential_class(value: str) -> str:
+    key = value.strip()
+    if not key:
+        return "missing"
+    if key.startswith("AKIA") and len(key) == 20:
+        return "akia"
+    if key.startswith("ASIA"):
+        return "asia-session"
+    if len(key) == 32 and all(character in "0123456789abcdefABCDEF" for character in key):
+        return "hex32"
+    return "other"
+
+
+def _secret_class(value: str) -> str:
+    secret = value.strip()
+    if not secret:
+        return "missing"
+    if len(secret) == 64 and all(character in "0123456789abcdefABCDEF" for character in secret):
+        return "hex64"
+    return "other"
+
+
+def _sanitize_provider_detail(text: str) -> str:
+    """Keep a short provider reason and remove URLs, keys, and signatures."""
+    cleaned = text or ""
+    for secret in getattr(_r2_call, "redactions", ()):
+        if secret:
+            cleaned = cleaned.replace(secret, "[redacted]")
+    cleaned = re.sub(r"https?://\S+", "[url]", cleaned, flags=re.I)
+    cleaned = re.sub(
+        r"(?i)(credential|authorization|signature|access[_ ]?key|secret(?:_key)?)\s*[=:]\s*\S+",
+        r"\1=[redacted]",
+        cleaned,
+    )
+    cleaned = re.sub(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b", "[key]", cleaned)
+    cleaned = re.sub(r"\b[0-9a-fA-F]{16,}\b", "[token]", cleaned)
+    cleaned = re.sub(r"\b[A-Za-z0-9+/]{32,}={0,2}\b", "[token]", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return (cleaned or "none")[:180]
+
+
+def _confirmed_object_absent(exc: Exception) -> bool:
+    """True only for a provider object-not-found response."""
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    error = response.get("Error") if isinstance(response.get("Error"), dict) else {}
+    code = str(error.get("Code") or "")
+    status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    return code in _ABSENT_CODES or status == 404
+
+
+def _header_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("ascii", "replace")
+    return str(value)
+
+
+def _prepare_r2_put(request, **kwargs):
+    """Drop headers Cloudflare R2 rejects, only for an Operations R2 upload."""
+    if not getattr(_r2_call, "active", False):
+        return
+    host = (urlsplit(request.url).hostname or "").lower().rstrip(".")
+    if not host.endswith(_R2_SUFFIX):
+        return
+    body = getattr(request, "body", None)
+    raw = getattr(body, "_raw", None)
+    if raw is not None and type(body).__name__ == "AwsChunkedWrapper":
+        if hasattr(raw, "seek"):
+            raw.seek(0)
+        data = raw.read() if hasattr(raw, "read") else raw
+        if isinstance(data, (bytes, bytearray)):
+            request.body = bytes(data)
+    headers = request.headers
+    for name in list(headers):
+        lowered = _header_text(name).lower()
+        if lowered in _R2_REJECTED_HEADERS or lowered.startswith("x-amz-checksum-"):
+            del headers[name]
+    encoding = _header_text(headers.get("Content-Encoding"))
+    if "aws-chunked" in encoding.lower():
+        kept = [part.strip() for part in encoding.split(",") if part.strip().lower() != "aws-chunked"]
+        if kept:
+            headers["Content-Encoding"] = ",".join(kept)
+        else:
+            del headers["Content-Encoding"]
+    if _header_text(headers.get("Transfer-Encoding")).lower() == "chunked":
+        del headers["Transfer-Encoding"]
+    if isinstance(request.body, (bytes, bytearray)) and "Content-Length" not in headers:
+        headers["Content-Length"] = str(len(request.body))
+
+
+def _remember_r2_request(request, **kwargs):
+    if not getattr(_r2_call, "active", False):
+        return
+    host = (urlsplit(request.url).hostname or "").lower().rstrip(".")
+    if not host.endswith(_R2_SUFFIX):
+        return
+    auth = _header_text(request.headers.get("Authorization"))
+    scheme = auth.split(" ", 1)[0] if auth else "none"
+    if scheme not in {"AWS4-HMAC-SHA256", "none"}:
+        scheme = "other"
+    signed = "none"
+    scope = "none"
+    if "SignedHeaders=" in auth:
+        candidate = auth.split("SignedHeaders=", 1)[1].split(",", 1)[0]
+        if _SIGNED_HEADER_LIST.fullmatch(candidate):
+            signed = candidate
+    if "Credential=" in auth:
+        parts = auth.split("Credential=", 1)[1].split(",", 1)[0].split("/")
+        if len(parts) >= 4 and all(_SCOPE_PART.fullmatch(part) for part in parts[-3:]):
+            scope = "/".join(parts[-3:])
+    digest = _header_text(request.headers.get("X-Amz-Content-SHA256"))
+    if re.fullmatch(r"[0-9a-f]{64}", digest):
+        sha = "hex-sha256"
+    elif "UNSIGNED" in digest or "STREAMING" in digest:
+        sha = "unsigned-or-streaming"
+    elif digest:
+        sha = "other"
+    else:
+        sha = "missing"
+    _r2_call.shape = {
+        "auth_scheme": scheme,
+        "scope": scope,
+        "sha": sha,
+        "expect": "yes" if any(_header_text(name).lower() == "expect" for name in request.headers) else "no",
+        "signed_headers": signed,
+    }
+
+
+def _install_r2_put_hardening(client) -> None:
+    events = getattr(getattr(client, "meta", None), "events", None)
+    if events is None:
+        return
+    events.register_last(
+        "before-sign.s3.PutObject",
+        _prepare_r2_put,
+        unique_id="amicor-operations-r2-put",
+    )
+    events.register(
+        "before-send.s3.PutObject",
+        _remember_r2_request,
+        unique_id="amicor-operations-r2-shape",
+    )
+
+
 def _log_storage_failure(operation: str, exc: Exception) -> None:
-    """Record the failing step without the provider message, URL, or secret."""
+    """Record the failing step and a redacted provider reason. No credentials."""
     code = "none"
     status = "none"
+    argument = "none"
+    detail = "none"
     response = getattr(exc, "response", None)
     if isinstance(response, dict):
         error = response.get("Error") if isinstance(response.get("Error"), dict) else {}
         raw_code = str(error.get("Code") or "")
         if _SAFE_ERROR_CODE.fullmatch(raw_code):
             code = raw_code
+        raw_argument = str(error.get("ArgumentName") or error.get("Argument") or "")
+        if _SAFE_ERROR_CODE.fullmatch(raw_argument):
+            argument = raw_argument
         raw_status = (response.get("ResponseMetadata") or {}).get("HTTPStatusCode")
         if type(raw_status) is int and 100 <= raw_status <= 599:
             status = str(raw_status)
+        detail = _sanitize_provider_detail(str(error.get("Message") or ""))
+    elif str(exc):
+        detail = _sanitize_provider_detail(type(exc).__name__)
+    shape = getattr(_r2_call, "shape", {}) or {}
     logger.warning(
-        "Operations storage diagnostic operation=%s error_class=%s error_code=%s http_status=%s",
+        "Operations storage diagnostic operation=%s error_class=%s error_code=%s "
+        "http_status=%s argument=%s credential_class=%s secret_class=%s endpoint_class=%s "
+        "auth_scheme=%s scope=%s sha=%s expect=%s signed_headers=%s detail=%s",
         operation,
         type(exc).__name__,
         code,
         status,
+        argument,
+        getattr(_r2_call, "credential_class", "missing"),
+        getattr(_r2_call, "secret_class", "missing"),
+        getattr(_r2_call, "endpoint_class", "missing"),
+        shape.get("auth_scheme", "none"),
+        shape.get("scope", "none"),
+        shape.get("sha", "none"),
+        shape.get("expect", "none"),
+        shape.get("signed_headers", "none"),
+        detail,
     )
 
 
@@ -162,6 +349,17 @@ class OperationsPrivateArtifactStorage(S3PrivateDocumentStorage):
 
         self._bucket = settings.bucket
         self._omit_sse = _is_r2_endpoint(settings.endpoint)
+        _r2_call.redactions = (
+            settings.access_key,
+            settings.secret_key,
+            settings.endpoint or "",
+            (urlsplit(settings.endpoint or "").hostname or ""),
+            settings.bucket,
+        )
+        _r2_call.credential_class = _credential_class(settings.access_key)
+        _r2_call.secret_class = _secret_class(settings.secret_key)
+        _r2_call.endpoint_class = "r2" if self._omit_sse else "custom"
+        _r2_call.shape = {}
         self._client = boto3.client(
             "s3",
             region_name=settings.region,
@@ -170,6 +368,8 @@ class OperationsPrivateArtifactStorage(S3PrivateDocumentStorage):
             endpoint_url=settings.endpoint,
             config=_operations_s3_config(settings.endpoint),
         )
+        if self._omit_sse:
+            _install_r2_put_hardening(self._client)
 
     def store(
         self,
@@ -198,13 +398,17 @@ class OperationsPrivateArtifactStorage(S3PrivateDocumentStorage):
             category=category,
             filename=filename,
         )
-        self._client.put_object(
-            Bucket=self._bucket,
-            Key=key,
-            Body=data,
-            ContentType=content_type or "application/octet-stream",
-            Metadata={"amicor-private": "true", "amicor-public": "never"},
-        )
+        _r2_call.active = True
+        try:
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=data,
+                ContentType=content_type or "application/octet-stream",
+                Metadata={"amicor-private": "true", "amicor-public": "never"},
+            )
+        finally:
+            _r2_call.active = False
         return self.backend_name, key, len(data)
 
 
@@ -259,8 +463,10 @@ def run_synthetic_storage_probe() -> dict[str, bool | None]:
             else:
                 try:
                     storage.retrieve(storage_ref=ref)
-                except Exception:
-                    absent = True
+                except Exception as exc:
+                    absent = _confirmed_object_absent(exc)
+                    if not absent:
+                        _log_storage_failure("confirm_deleted", exc)
     return {
         "ok": bool(uploaded and retrieved and verified and deleted and absent),
         "uploaded": uploaded,

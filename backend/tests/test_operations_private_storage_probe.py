@@ -20,14 +20,16 @@ from app.core.nova.work_revenue.owner_auth import require_work_revenue_owner
 from app.db.session import get_db
 from app.main import app
 from app.modules.platform_ops.secure_storage import SecureStorageNotConfigured
+from botocore.exceptions import ClientError
 
 
 class _Memory:
-    def __init__(self, *, body=None, content_type="text/plain", delete_error="", stick=False):
+    def __init__(self, *, body=None, content_type="text/plain", delete_error="", stick=False, missing_code="NoSuchKey"):
         self.body = SYNTHETIC_PROBE_BODY if body is None else body
         self.content_type = content_type
         self.delete_error = delete_error
         self.stick = stick
+        self.missing_code = missing_code
         self.objects = {}
 
     def store(self, **kwargs):
@@ -38,7 +40,14 @@ class _Memory:
 
     def retrieve(self, *, storage_ref):
         if storage_ref not in self.objects:
-            raise FileNotFoundError("missing")
+            status = 404 if self.missing_code in {"NoSuchKey", "404", "NotFound"} else 403
+            raise ClientError(
+                {
+                    "Error": {"Code": self.missing_code, "Message": "object lookup failed"},
+                    "ResponseMetadata": {"HTTPStatusCode": status},
+                },
+                "GetObject",
+            )
         return self.body, self.content_type
 
     def delete(self, *, storage_ref):
@@ -90,6 +99,22 @@ def test_probe_requires_absence_after_delete(monkeypatch):
     assert report["deleted"] is True
     assert report["absent_after_delete"] is False
     assert report["ok"] is False
+
+
+def test_access_denied_after_delete_is_not_absence(monkeypatch, caplog):
+    monkeypatch.setattr(
+        storage,
+        "OperationsPrivateArtifactStorage",
+        lambda: _Memory(missing_code="AccessDenied"),
+    )
+    with caplog.at_level("WARNING"):
+        report = run_synthetic_storage_probe()
+    assert report["deleted"] is True
+    assert report["absent_after_delete"] is False
+    assert report["ok"] is False
+    assert "operation=confirm_deleted" in caplog.text
+    assert "error_code=AccessDenied" in caplog.text
+    assert "http_status=403" in caplog.text
 
 
 def test_store_error_escapes_without_a_partial_success(monkeypatch):

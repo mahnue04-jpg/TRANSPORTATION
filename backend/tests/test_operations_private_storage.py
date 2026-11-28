@@ -138,38 +138,59 @@ def test_r2_round_trip_uses_path_signing_without_unsupported_headers(production,
     assert "operations-test-secret" not in str(report)
 
 
-def test_r2_signed_put_omits_checksum_and_sse(production, monkeypatch):
-    import boto3
-    from app.core.nova.work_revenue.operations_private_storage import _operations_s3_config
+def test_r2_signed_put_omits_checksum_sse_and_expect(production, monkeypatch):
+    import re
 
+    monkeypatch.setenv("NOVA_OPERATIONS_PRIVATE_S3_ENDPOINT", "https://accountid.r2.cloudflarestorage.com")
     seen = {}
 
-    def capture(request, **kwargs):
-        seen["url"] = request.url
-        seen["checksum"] = [name for name in request.headers if "checksum" in name.lower()]
-        seen["sse"] = request.headers.get("x-amz-server-side-encryption")
-        seen["authorization"] = request.headers.get("Authorization") or ""
+    def text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("ascii", "replace")
+        return str(value)
 
-    client = boto3.client(
-        "s3",
-        region_name="auto",
-        aws_access_key_id="operations-test-key",
-        aws_secret_access_key="operations-test-secret",
-        endpoint_url="https://192.0.2.1",
-        config=_operations_s3_config("https://accountid.r2.cloudflarestorage.com"),
-    )
-    client.meta.events.register("request-created.s3", capture)
-    with pytest.raises(Exception):
-        client.put_object(
-            Bucket="operations-private-fixture",
-            Key="owner-storage-probe/synthetic/probe.txt",
-            Body=b"synthetic",
-            ContentType="text/plain",
+    def abort(request, **kwargs):
+        auth = text(request.headers.get("Authorization"))
+        parts = auth.split("Credential=", 1)[1].split(",", 1)[0].split("/") if "Credential=" in auth else []
+        signed = auth.split("SignedHeaders=", 1)[1].split(",", 1)[0] if "SignedHeaders=" in auth else ""
+        digest = text(request.headers.get("X-Amz-Content-SHA256"))
+        names = [text(name).lower() for name in request.headers]
+        seen["url"] = text(request.url)
+        seen["checksum"] = [name for name in names if "checksum" in name]
+        seen["sse"] = text(request.headers.get("x-amz-server-side-encryption"))
+        seen["expect"] = "expect" in names
+        seen["scheme"] = auth.split(" ", 1)[0] if auth else ""
+        seen["scope"] = "/".join(parts[-3:]) if len(parts) >= 4 else ""
+        seen["sha_hex"] = bool(re.fullmatch(r"[0-9a-f]{64}", digest))
+        seen["signed"] = signed
+        seen["authorization"] = auth
+        raise RuntimeError("aborted-before-send")
+
+    store = OperationsPrivateArtifactStorage()
+    store._client.meta.events.register("before-send.s3.PutObject", abort)
+    with pytest.raises(RuntimeError, match="aborted-before-send"):
+        store.store(
+            organization_id="owner-storage-probe",
+            application_id="synthetic-storage-probe",
+            category="owner-storage-probe",
+            filename="probe.txt",
+            content_type="text/plain",
+            stream=BytesIO(b"synthetic"),
         )
-    assert seen["url"] == "https://192.0.2.1/operations-private-fixture/owner-storage-probe/synthetic/probe.txt"
+    assert seen["url"].startswith(
+        "https://accountid.r2.cloudflarestorage.com/operations-private-fixture/"
+    )
     assert seen["checksum"] == []
-    assert seen["sse"] is None
-    assert seen["authorization"].startswith("AWS4-HMAC-SHA256")
+    assert seen["sse"] == ""
+    assert seen["expect"] is False
+    assert seen["scheme"] == "AWS4-HMAC-SHA256"
+    assert seen["scope"] == "auto/s3/aws4_request"
+    assert seen["sha_hex"] is True
+    assert "content-type" in seen["signed"]
+    assert "x-amz-content-sha256" in seen["signed"]
+    assert "expect" not in seen["signed"]
     assert "operations-test-secret" not in seen["url"]
     assert "operations-test-secret" not in seen["authorization"]
 
@@ -183,10 +204,15 @@ def test_r2_failure_log_names_the_operation_without_secrets(production, monkeypa
             raise ClientError(
                 {
                     "Error": {
-                        "Code": "NotImplemented",
-                        "Message": "https://accountid.r2.cloudflarestorage.com operations-test-secret",
+                        "Code": "InvalidArgument",
+                        "ArgumentName": "Expect",
+                        "Message": (
+                            "Unsupported header Expect at "
+                            "https://accountid.r2.cloudflarestorage.com "
+                            "Credential=operations-test-secret/20261128/auto/s3/aws4_request"
+                        ),
                     },
-                    "ResponseMetadata": {"HTTPStatusCode": 501},
+                    "ResponseMetadata": {"HTTPStatusCode": 400},
                 },
                 "PutObject",
             )
@@ -199,10 +225,15 @@ def test_r2_failure_log_names_the_operation_without_secrets(production, monkeypa
     text = caplog.text
     assert "operation=put_object" in text
     assert "error_class=ClientError" in text
-    assert "error_code=NotImplemented" in text
-    assert "http_status=501" in text
+    assert "error_code=InvalidArgument" in text
+    assert "http_status=400" in text
+    assert "argument=Expect" in text
+    assert "credential_class=other" in text
+    assert "endpoint_class=r2" in text
+    assert "Unsupported header Expect" in text
     assert "operations-test-secret" not in text
     assert "r2.cloudflarestorage.com" not in text
+    assert "Credential=[redacted]" in text
 
 
 def test_staging_preserves_existing_storage_adapter(production, monkeypatch):
