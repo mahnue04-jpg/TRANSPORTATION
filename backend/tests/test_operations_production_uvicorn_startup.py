@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 import pytest
 
 BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 OWNER_EMAIL = "owner.persist@example.invalid"
 OWNER_PASSWORD = "owner-persist-password"
 WRITER_PASSWORD = "writerdisposableonly"
@@ -78,6 +80,7 @@ def _child_env(database_url: str, **extra: str) -> dict[str, str]:
         "NOVA_V3_OWNER_EMAILS": OWNER_EMAIL,
         "DB_POOL_SIZE": "2",
         "DB_MAX_OVERFLOW": "1",
+        "PYTHONPATH": str(BACKEND),
     }
     env.update(extra)
     return env
