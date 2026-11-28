@@ -280,7 +280,14 @@ async def lifespan(app: FastAPI):
         )
 
     db_ok = app_startup.startup_recovery(max_retries=3, delay_s=1.0)
-    if db_ok:
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    preserve_existing_records = operations_production_startup_mode()
+    if preserve_existing_records:
+        logger.info(
+            "Operations production startup is preserving existing accounts, passwords, roles, permissions, and records."
+        )
+    elif db_ok:
         try:
             init_db()
             logger.info("Database initialised.")
@@ -290,40 +297,41 @@ async def lifespan(app: FastAPI):
         logger.critical("Database unavailable after retries — chat persistence disabled.")
 
     # ── Platform DB (SQLAlchemy) ──────────────────────────────────────────
-    try:
-        from app.db.session import init_platform_db  # type: ignore
-        init_platform_db()
-        logger.info("Platform database tables ready.")
+    if not preserve_existing_records:
         try:
-            auth_module.ensure_auth_schema()
-            seeded = auth_module.seed_default_users()
-            if seeded:
-                logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
-            else:
-                logger.info("Default auth users already present.")
-        except Exception as auth_exc:
-            logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+            from app.db.session import init_platform_db  # type: ignore
+            init_platform_db()
+            logger.info("Platform database tables ready.")
+            try:
+                auth_module.ensure_auth_schema()
+                seeded = auth_module.seed_default_users()
+                if seeded:
+                    logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
+                else:
+                    logger.info("Default auth users already present.")
+            except Exception as auth_exc:
+                logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+
+            try:
+                from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
+                ensure_health_isf_schema()
+                logger.info("Health ISF schema verified.")
+                from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
+                ensure_driver_mobile_login_schema()
+                logger.info("Driver mobile login schema verified.")
+            except Exception as health_schema_exc:
+                logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
+        except Exception as exc:
+            logger.error("Platform DB init failed: %s", exc)
 
         try:
-            from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
-            ensure_health_isf_schema()
-            logger.info("Health ISF schema verified.")
-            from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
-            ensure_driver_mobile_login_schema()
-            logger.info("Driver mobile login schema verified.")
-        except Exception as health_schema_exc:
-            logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
-    except Exception as exc:
-        logger.error("Platform DB init failed: %s", exc)
+            from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+            from app.db.session import engine as platform_engine
 
-    try:
-        from app.core.nova.today.schema_ensure import ensure_nova_today_schema
-        from app.db.session import engine as platform_engine
-
-        ensure_nova_today_schema(platform_engine)
-        logger.info("Nova Today schema verified.")
-    except Exception as today_schema_exc:
-        logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
+            ensure_nova_today_schema(platform_engine)
+            logger.info("Nova Today schema verified.")
+        except Exception as today_schema_exc:
+            logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
 
     # Operations payment intake: least-privilege writer check when configured.
     # Unset NOVA_OPERATIONS_DATABASE_URL skips verification; the webhook stays

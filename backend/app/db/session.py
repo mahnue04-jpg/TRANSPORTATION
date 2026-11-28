@@ -116,7 +116,12 @@ def init_platform_db() -> None:
 
     Customer-payment ledger tables are Alembic-only and are never created here.
     Draft Nova Casting tables are also omitted; Alembic applies them only outside production.
+    The shared production database is not modified here.
     """
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from app.db import models  # noqa: F401 — registers models with Base.metadata
     from app.core.nova.synapse import models as nova_synapse_models  # noqa: F401
     from app.core.nova.language import models as nova_language_models  # noqa: F401

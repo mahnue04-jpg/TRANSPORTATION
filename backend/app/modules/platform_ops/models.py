@@ -369,6 +369,10 @@ def _ensure_platform_ops_columns(inspector) -> None:
 
 def ensure_platform_ops_schema() -> None:
     """Create platform_ops tables when migrations have not run (dev/test bootstrap)."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from sqlalchemy import inspect
 
     from app.db.session import SessionLocal, engine

@@ -24,6 +24,10 @@ def get_connection():
     return sqlite3.connect(DB_FILENAME)
 
 def init_db():
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     os.makedirs(os.path.dirname(DB_FILENAME), exist_ok=True)
     conn = get_connection()
     cursor = conn.cursor()

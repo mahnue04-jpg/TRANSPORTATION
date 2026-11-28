@@ -389,6 +389,10 @@ def _ensure_approval_engine_columns(inspector) -> None:
 
 def ensure_approval_engine_schema() -> None:
     """Bootstrap tables when migrations have not run (dev/test)."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from sqlalchemy import inspect
 
     from app.db.session import engine

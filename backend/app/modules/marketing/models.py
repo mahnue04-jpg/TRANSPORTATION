@@ -57,6 +57,10 @@ class MarketingWebsiteLead(Base):
 
 def ensure_marketing_schema() -> None:
     """Create marketing lead table / additive columns when migrations have not run."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from sqlalchemy import inspect
 
     from app.db.session import SessionLocal, engine
