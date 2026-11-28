@@ -28,6 +28,19 @@ def deferred_startup_status() -> dict[str, Any]:
 def run_deferred_platform_startup(*, runtime_environment: str) -> None:
     """Initialize Health ISF runtime services without blocking Render boot."""
     global _deferred_status
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        _deferred_status.update(
+            {
+                "running": False,
+                "complete": True,
+                "error": None,
+                "skipped": "preserve_existing_records",
+            }
+        )
+        logger.info("Operations production startup skipped deferred schema changes and sample data.")
+        return
 
     if _deferred_status.get("running") or _deferred_status.get("complete"):
         return

@@ -43,7 +43,20 @@ class AllowanceBlocked(ValueError):
     """Fail-closed reason; not a customer-facing billing confirmation."""
 
 
-def require_staging(db: Session) -> None:
+def require_staging(db: Session, *, expected_livemode: bool = False) -> None:
+    if expected_livemode is True:
+        if (os.getenv("APP_ENV") != "production"
+                or os.getenv("AMICOR_ENVIRONMENT") != "production"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"
+                or os.getenv("NOVA_OPERATIONS_PACKAGE_LEDGER_LIVE_ENABLED") != "true"
+                or db.get_bind().dialect.name != "postgresql"):
+            raise AllowanceBlocked("live_package_ledger_disabled")
+        if not sa.inspect(db.get_bind()).has_table(reservations.name):
+            raise AllowanceBlocked("reviewed_migration_required")
+        return
+    if expected_livemode is not False:
+        raise AllowanceBlocked("invalid_payment_mode")
     if (
         os.getenv("NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED") != "true"
         or os.getenv("APP_ENV") != "staging"
@@ -79,6 +92,7 @@ def reserve_staging_task(
     task_fingerprint: str,
     now: datetime,
     before_commit: Callable[[str], None] | None = None,
+    expected_livemode: bool = False,
 ) -> dict:
     """Serialize and reserve one unique task, or return a safe replay.
 
@@ -89,7 +103,7 @@ def reserve_staging_task(
     bind the exact reservation using this session; it must never commit or
     perform external side effects. Any callback failure rolls back the quota.
     """
-    require_staging(db)
+    require_staging(db, expected_livemode=expected_livemode)
     if not isinstance(task_fingerprint, str) or len(task_fingerprint) != 64 or any(
         c not in "0123456789abcdef" for c in task_fingerprint
     ):

@@ -35,6 +35,14 @@ def apply(add, pages, status_table):
     def card(title, text, url, label='Learn more'):
         return f'<article class="card"><h3>{title}</h3><p>{text}</p><a class="card-link" href="{escape(url, quote=True)}">{label}</a></article>'
 
+    def purchase(title, text, package):
+        href = escape(APP + '/nova/operations/customer?signin=1&operations_package=' + package, quote=True)
+        return (
+            f'<article class="card"><h3>{title}</h3><p>{text}</p>'
+            f'<a class="card-link" data-operations-package="{package}" data-operations-sales="disabled" '
+            f'href="{href}">Sign in to purchase</a></article>'
+        )
+
     def pictured(title, text, url, art, alt, label='Learn more', eager=False, prefix=''):
         loading = 'eager' if eager else 'lazy'
         return (
@@ -52,11 +60,11 @@ def apply(add, pages, status_table):
 
     plans = '<div class="price-grid">' + ''.join([
         card('Explore &amp; scope', '<strong>$0</strong>Explore the public demo and request a scope check. The Nova app also offers a seven-day account trial with no card required.', AGENT, 'Explore the demo'),
-        card('Starter Plan', '<strong>$9.99/month</strong>Basic Nova workspace, task planning, business templates and self-service guidance. No managed tasks included.', '/early-access/?product=Nova%20Operations%20Agent', 'Register interest'),
-        card('Starter Task', '<strong>$49 one-time</strong>One small supported task, with scope reviewed before work begins.', AGENT, 'Request a starter task'),
-        card('Launch Operations', '<strong>$99/month</strong>Up to 3 scoped managed tasks per paid subscription month, with human review.', AGENT, 'View plan'),
-        card('Business Operations', '<strong>$299/month</strong>Up to 10 scoped managed tasks per paid subscription month, with relative priority support. Complex projects are quoted separately.', AGENT, 'View plan'),
-    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">Package benefits are defined; paid access is not yet open. This corporate website does not collect payment while billing, tax, terms and fulfillment checks are pending. Request a scope check or register interest. Media-provider credits and complex projects are not included.</p>'
+        purchase('Starter Plan', '<strong>$9.99/month</strong>Basic Nova workspace, task planning, business templates and self-service guidance. No managed tasks included.', 'starter'),
+        purchase('Starter Task', '<strong>$49 one-time</strong>One small supported task, with scope reviewed before work begins.', 'starter_49'),
+        purchase('Launch Operations', '<strong>$99/month</strong>Up to 3 scoped managed tasks per paid subscription month, with human review.', 'launch_99'),
+        purchase('Business Operations', '<strong>$299/month</strong>Up to 10 scoped managed tasks per paid subscription month, with relative priority support. Complex projects are quoted separately.', 'business_299'),
+    ]) + '</div><p><a class="card-link" href="/contact/">Existing customer? Contact billing support</a>.</p><p class="notice">Package benefits are defined; paid access is not yet open. Purchase buttons connect a signed-in customer to authenticated checkout for that package and do not open a Stripe session from this website. This corporate website does not collect payment while billing, tax, terms and fulfillment checks are pending. Request a scope check or register interest. Media-provider credits and complex projects are not included.</p>'
 
     quote_url = '/early-access/?product=Business%20Services&intent=quote'
     project_brief = (

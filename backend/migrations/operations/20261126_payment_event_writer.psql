@@ -1,0 +1,29 @@
+\set ON_ERROR_STOP on
+-- Run once in an authenticated psql session on amicor-prod.
+-- The password prompt keeps the password out of the migration and SQL history.
+BEGIN;
+DO $check$
+BEGIN
+    IF current_database() <> 'amicor' OR current_user <> 'amicor_user' THEN
+        RAISE EXCEPTION 'Expected database amicor and migration user amicor_user';
+    END IF;
+END
+$check$;
+SET LOCAL search_path = pg_catalog, public;
+CREATE TABLE public.nova_operations_payment_events (
+    event_id text PRIMARY KEY,
+    event_type text NOT NULL,
+    object_id text NOT NULL,
+    received_at timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz
+);
+CREATE ROLE nova_ops_event_writer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5;
+GRANT CONNECT ON DATABASE amicor TO nova_ops_event_writer;
+GRANT USAGE ON SCHEMA public TO nova_ops_event_writer;
+GRANT INSERT (event_id, event_type, object_id), SELECT (event_id)
+    ON public.nova_operations_payment_events TO nova_ops_event_writer;
+ALTER ROLE nova_ops_event_writer IN DATABASE amicor SET search_path TO pg_catalog, public;
+SET LOCAL password_encryption = 'scram-sha-256';
+\password nova_ops_event_writer
+COMMIT;

@@ -5,14 +5,13 @@ The dedicated binding table needs a separately approved migration.
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import HTTPException
 from sqlalchemy import Column, MetaData, String, Table, UniqueConstraint, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.modules.marketing.models import MarketingWebsiteLead
+from .operations_commercial_mode import resolve_operations_mode
 
 # Define the intended schema without enrolling it in application startup create_all.
 metadata = MetaData()
@@ -30,12 +29,15 @@ starter_bindings = Table(
 )
 
 
+def starter_binding_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_STARTER_BINDING_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_STARTER_BINDING_LIVE_ENABLED",),
+    )
+
+
 def _require_ready() -> None:
-    if (os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED", "").strip().lower() != "true"
-            or os.getenv("APP_ENV") != "staging"
-            or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-            or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"):
+    if starter_binding_mode() is None:
         raise HTTPException(503, "Starter payment binding not enabled")
 
 

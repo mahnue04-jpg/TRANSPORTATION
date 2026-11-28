@@ -1,4 +1,4 @@
-"""Staging-only bridge from reconciled Stripe TEST subscription to task entitlement.
+"""Mode-bound bridge from reconciled Stripe subscription to task entitlement.
 
 A saved marketing lead by itself is NEVER proof of subscription entitlement.
 The caller must verify the webhook signature independently and retrieve the
@@ -60,14 +60,19 @@ def from_reconciled_test_subscription(
     saved_subscription_id: str, saved_payment_status: str,
     test_price_id: str, subscription: Mapping[str, Any],
     now: datetime, require_current_invoice: bool = False,
+    expected_livemode: bool = False,
 ) -> VerifiedEntitlement:
     """Fail closed: a verified current paid invoice is required for every period."""
+    if type(expected_livemode) is not bool:
+        raise SubscriptionNotEntitled("invalid_payment_mode")
+    if expected_livemode:
+        require_current_invoice = True
     if plan not in PRICES or not lead_id or not saved_customer_id or not saved_subscription_id:
         raise SubscriptionNotEntitled("missing_saved_identity")
     if (not test_price_id.startswith("price_") or not now.tzinfo
             or saved_payment_status != "paid"):
         raise SubscriptionNotEntitled("not_reconciled_paid")
-    if (subscription.get("livemode") is not False
+    if (subscription.get("livemode") is not expected_livemode
             or _id(subscription.get("id")) != saved_subscription_id
             or not saved_subscription_id.startswith("sub_")
             or _id(subscription.get("customer")) != saved_customer_id
@@ -90,7 +95,7 @@ def from_reconciled_test_subscription(
         raise SubscriptionNotEntitled("period_inactive")
     invoice = subscription.get("latest_invoice") or {}
     if (not isinstance(invoice, dict) or invoice.get("status") != "paid"
-            or invoice.get("livemode", False) is not False
+            or invoice.get("livemode", None if expected_livemode else False) is not expected_livemode
             or invoice.get("paid", True) is not True
             or invoice.get("currency") != "usd"
             or type(invoice.get("amount_paid")) is not int

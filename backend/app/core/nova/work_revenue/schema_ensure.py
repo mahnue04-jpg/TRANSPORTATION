@@ -193,6 +193,10 @@ def v2_schema_ready(engine: Engine | None = None) -> bool:
 
 
 def ensure_work_revenue_schema(engine: Engine | None = None, *, include_v2: bool | None = None) -> None:
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     bind = engine or default_engine
     create_v2 = lazy_v2_schema_allowed() if include_v2 is None else include_v2
     tables = list(WORK_TABLES) if create_v2 else list(V1_TABLES)

@@ -1425,6 +1425,10 @@ def _schema_add_column_if_missing(
 
 def ensure_driver_mobile_login_schema() -> None:
     """Ensure only the tables/columns required for public driver mobile login."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from app.db.session import engine
 
     try:
@@ -1539,6 +1543,10 @@ def ensure_driver_mobile_login_schema() -> None:
 
 def ensure_health_isf_schema() -> None:
     """Apply lightweight additive schema upgrades for older Health ISF databases."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     try:
         _ensure_health_isf_schema_impl()
     except Exception:

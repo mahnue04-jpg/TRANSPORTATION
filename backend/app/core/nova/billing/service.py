@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_ADMIN, ROLE_SUPER_ADMIN_SUPPORT, UserContext, normalize_role
+from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
 from app.core.nova.billing.models import (
     NovaBillingRevenueEvent,
     NovaBillingWebhookEvent,
@@ -179,6 +180,12 @@ def start_checkout(
     # The isolated paid Starter rehearsal must never fall back to legacy
     # trial behavior or a live Stripe account.
     import os
+    live_operations = (is_live_stripe_key(stripe_secret_key() or "")
+                       and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") == "true")
+    if live_operations:
+        catalog_plan = {"starter": "starter", "professional": "launch_99", "business": "business_299"}.get(plan)
+        if price_id != LIVE_OPERATIONS_PRICES.get(catalog_plan) or nova_checkout_trial_enabled():
+            raise BillingError("Paid Operations price or trial configuration is invalid", status_code=503)
     strict_starter = os.getenv("NOVA_STARTER_SELF_SERVICE_STAGING_ENABLED") == "true"
     if strict_starter:
         if (os.getenv("APP_ENV") != "staging"
@@ -207,6 +214,8 @@ def start_checkout(
         and row.subscription_status == STATUS_INCOMPLETE
         and not row.stripe_subscription_id
     ):
+        if live_operations and (row.stripe_price_id != price_id or not row.stripe_checkout_session_id.startswith("cs_live_") or row.trial_used):
+            raise BillingError("Existing checkout is incompatible with paid Operations", status_code=409)
         db.commit()
         return {
             "checkout_url": row.checkout_url,

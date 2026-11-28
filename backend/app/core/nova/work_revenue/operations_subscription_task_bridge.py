@@ -31,6 +31,7 @@ def reserve_verified_subscription_task(
     task_fingerprint: str,
     now: datetime,
     bind_reservation: Callable[[str, Any], None] | None = None,
+    expected_livemode: bool = False,
 ) -> dict:
     """Reserve quota only after owner approval and exact paid subscription checks.
 
@@ -38,14 +39,29 @@ def reserve_verified_subscription_task(
     must use authenticated Stripe retrieval and independently verify identity.
     Owner scope must be authenticated in a future integration (not caller input).
     """
-    if (
-        os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
-        or os.getenv("APP_ENV") != "staging"
-        or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-        or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-    ):
-        raise AllowanceBlocked("subscription_bridge_disabled")
+    if type(expected_livemode) is not bool:
+        raise AllowanceBlocked("invalid_payment_mode")
+    if expected_livemode:
+        if (os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_LIVE_ENABLED") != "true"
+                or os.getenv("APP_ENV") != "production"
+                or os.getenv("AMICOR_ENVIRONMENT") != "production"
+                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "true"
+                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"):
+            raise AllowanceBlocked("subscription_bridge_live_disabled")
+        from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
+        if plan not in {"launch_99", "business_299"} or test_price_id != LIVE_OPERATIONS_PRICES.get(plan):
+            raise AllowanceBlocked("live_price_mismatch")
+        if bind_reservation is None:
+            raise AllowanceBlocked("live_task_binding_required")
+    else:
+        if (
+            os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
+            or os.getenv("APP_ENV") != "staging"
+            or os.getenv("AMICOR_ENVIRONMENT") != "staging"
+            or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
+            or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
+        ):
+            raise AllowanceBlocked("subscription_bridge_disabled")
     if owner_scope_approved is not True:
         raise AllowanceBlocked("owner_scope_approval_required")
     entitlement = from_reconciled_test_subscription(
@@ -56,12 +72,14 @@ def reserve_verified_subscription_task(
         test_price_id=test_price_id,
         subscription=retrieved_test_subscription,
         now=now,
-        require_current_invoice=os.getenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING") == "true",
+        require_current_invoice=expected_livemode or os.getenv("NOVA_OPERATIONS_STRICT_INVOICE_STAGING") == "true",
+        expected_livemode=expected_livemode,
     )
     options = {}
     if bind_reservation is not None:
         options["before_commit"] = lambda reservation_id: bind_reservation(reservation_id, entitlement)
     return reserve_staging_task(
         db, entitlement=entitlement, customer_id=saved_customer_id,
-        request_key=request_key, task_fingerprint=task_fingerprint, now=now, **options,
+        request_key=request_key, task_fingerprint=task_fingerprint, now=now,
+        expected_livemode=expected_livemode, **options,
     )

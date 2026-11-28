@@ -1,7 +1,7 @@
-"""Staging-only, read-only payment reversal evidence for monthly plans.
+"""Read-only payment reversal evidence for monthly plans.
 
 Not a webhook handler. Callers must retrieve the exact invoice's complete payment
-list and referenced PaymentIntent/Charge from the same trusted Stripe TEST account.
+list and referenced PaymentIntent/Charge from the same trusted Stripe account.
 A paid invoice alone does not establish absence of a refund or dispute.
 This deliberately supports only one full card payment; unsupported shapes deny.
 """
@@ -15,9 +15,11 @@ def _id(value):
 
 
 def unreversed_monthly_payment(*, plan, customer_id, invoice_id,
-                               invoice_payments, payment_intent, charge):
+                               invoice_payments, payment_intent, charge, expected_livemode=False):
     """Return False on missing, inconsistent, partial or reversed evidence."""
     try:
+        if type(expected_livemode) is not bool:
+            return False
         amount = AMOUNTS[plan]
         if not isinstance(customer_id, str) or not customer_id.startswith("cus_"):
             return False
@@ -26,7 +28,7 @@ def unreversed_monthly_payment(*, plan, customer_id, invoice_id,
         if invoice_payments["has_more"] is not False or len(invoice_payments["data"]) != 1:
             return False
         payment = invoice_payments["data"][0]
-        if (payment["livemode"] is not False or _id(payment["invoice"]) != invoice_id
+        if (payment["livemode"] is not expected_livemode or _id(payment["invoice"]) != invoice_id
                 or payment["status"] != "paid" or payment["currency"] != "usd"
                 or type(payment["amount_paid"]) is not int or payment["amount_paid"] != amount):
             return False
@@ -34,7 +36,7 @@ def unreversed_monthly_payment(*, plan, customer_id, invoice_id,
         intent_id = _id(reference["payment_intent"])
         if reference["type"] != "payment_intent" or not isinstance(intent_id, str) or not intent_id.startswith("pi_"):
             return False
-        if (payment_intent["id"] != intent_id or payment_intent["livemode"] is not False
+        if (payment_intent["id"] != intent_id or payment_intent["livemode"] is not expected_livemode
                 or _id(payment_intent["customer"]) != customer_id
                 or payment_intent["status"] != "succeeded" or payment_intent["currency"] != "usd"
                 or type(payment_intent["amount_received"]) is not int
@@ -44,7 +46,7 @@ def unreversed_monthly_payment(*, plan, customer_id, invoice_id,
         if not isinstance(charge_id, str) or not charge_id.startswith("ch_"):
             return False
         return (
-            charge["id"] == charge_id and charge["livemode"] is False
+            charge["id"] == charge_id and charge["livemode"] is expected_livemode
             and _id(charge["payment_intent"]) == intent_id
             and _id(charge["customer"]) == customer_id
             and charge["currency"] == "usd"
@@ -62,15 +64,17 @@ def _plain(value):
     return value.to_dict_recursive() if hasattr(value, "to_dict_recursive") else value
 
 
-def verify_current_invoice_payment(client, *, plan, customer_id, subscription):
-    """Retrieve fresh evidence using a caller's already-verified TEST client.
+def verify_current_invoice_payment(client, *, plan, customer_id, subscription, expected_livemode=False):
+    """Retrieve fresh evidence using a caller's already-verified mode-specific client.
 
     No payment mutation. Deny unsupported invoice or provider response shapes.
     """
     try:
+        if type(expected_livemode) is not bool:
+            return False
         invoice = subscription["latest_invoice"]
         invoice_id = invoice["id"]
-        if (invoice["livemode"] is not False or invoice["status"] != "paid"
+        if (invoice["livemode"] is not expected_livemode or invoice["status"] != "paid"
                 or _id(invoice["customer"]) != customer_id
                 or not isinstance(invoice_id, str) or not invoice_id.startswith("in_")):
             return False
@@ -87,6 +91,6 @@ def verify_current_invoice_payment(client, *, plan, customer_id, subscription):
             return False
         charge = _plain(client.v1.charges.retrieve(charge_id))
         return unreversed_monthly_payment(plan=plan, customer_id=customer_id,
-            invoice_id=invoice_id, invoice_payments=payments, payment_intent=intent, charge=charge)
+            invoice_id=invoice_id, invoice_payments=payments, payment_intent=intent, charge=charge, expected_livemode=expected_livemode)
     except Exception:
         return False

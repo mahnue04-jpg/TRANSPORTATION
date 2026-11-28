@@ -126,3 +126,58 @@ Owner explicitly authorizes all four packages for commercial release together, i
 Minnesota DOR guidance https://www.revenue.state.mn.us/guide/computer-software-and-digital-products explicitly treats remotely hosted software subscriptions without possession as nontaxable. Starter appears to fit this description; managed service bundles and other jurisdictions require separate review. Do not claim nationwide exemption or create a Stripe tax registration without actual government registration.
 
 Website main commits 911c3c52cfa62dbf4b7ad9a3c4720d82fabcbf55 (plan selection), c3f5d25608190d731fd035870f0e15b3e51d8b5f (Operations page), cc19e992d3828e1bef82c6215572ea694c219877 (Pricing page) display all four offers with inquiry-only availability pending activation. Public GET of both pages still showed previous content November 26. Confirm Cloudflare production deployment separately; do not describe repository commits as live deployment. Owner approval is no longer the overall blocker; production authentication, payment binding, fulfillment and deployment remain technical blockers.
+
+## Production artifact storage gate — November 27, 2026
+
+The production CSV artifact path requires an Operations-only private bucket and explicit credentials; it cannot use shared document or rehearsal credentials. Set `NOVA_OPERATIONS_PRIVATE_S3_BUCKET`, `NOVA_OPERATIONS_PRIVATE_S3_REGION`, `NOVA_OPERATIONS_PRIVATE_S3_ACCESS_KEY`, and `NOVA_OPERATIONS_PRIVATE_S3_SECRET_KEY` only in the approved service's secret configuration. For an S3-compatible provider, set `NOVA_OPERATIONS_PRIVATE_S3_ENDPOINT` to its verified HTTPS origin and confirm it supports the existing encrypted upload call. Both environment markers must be `production`. No fallback to local files, the legacy bucket, or the SDK default credential chain is permitted in production.
+
+This configuration contract is not proof that any storage is provisioned, private, or working in Render. Before selecting an existing no-incremental-cost bucket, verify its privacy and service-scoped read/write/delete policy without widening permissions on any current product. Use only a synthetic artifact to verify upload, authorized download, anonymous denial and cleanup before allowing customer documents. The candidate change does not enable live sales or change the live payment intake, website, databases, or sales flags. Do not repeat the four completed Stripe test payments; those receipts are not proof of production access or fulfillment.
+
+## Commercial release code completion — November 27, 2026 (America/Chicago)
+
+Recovered and completed the remaining production-capable twins on `release/operations-live-catalog-20261126`. Live sales, migrations, website redesign and real charges remain disabled by default.
+
+| Capability | $9.99 Starter | $49 Starter Task | $99 Launch | $299 Business | Free Scope Check |
+| --- | --- | --- | --- | --- | --- |
+| Checkout | SaaS `POST /api/nova/billing/checkout` + live catalog | Marketing agent checkout | Marketing subscription checkout | Marketing subscription checkout | Preserved; no checkout |
+| Authenticated access | Staging + production-gated self-service routes | Owner binding after paid confirmation | Authenticated adapter with live twin | Same as Launch | Public inquiry only |
+| Payment confirmation | SaaS webhook + invoice evidence | Strict signed webhook (test/live modes) | Strict subscription webhook (new) | Strict subscription webhook (new) | `not_required` |
+| Secure fulfillment | Self-service only (0 managed tasks) | Paid binding → CSV job | Quota reservation + owner approval + execution guard | Same, allowance 10 | None |
+| Private delivery | N/A (self-service UI) | Customer delivery routes (test/live) | Subscription delivery guard (test/live) | Same | None |
+| Revenue recording | SaaS `NovaBillingRevenueEvent` | Operations revenue recorder (gated) | Operations revenue recorder (gated) | Operations revenue recorder (gated) | Never |
+
+New/extended modules: `operations_commercial_mode.py`, `operations_revenue_recording.py`, `subscription_checkout_verification.py`, plus live twins for starter binding, customer delivery, subscription adapter, execution/delivery guards and approval writes. All `*_LIVE_ENABLED` and sales flags default off. Production artifact storage remains separately gated via dedicated Operations S3 credentials.
+
+### Local verification evidence (no Stripe network, no production DB)
+
+```text
+368 passed
+files: test_operations_commercial_release_gates.py,
+       test_operations_starter_signed_webhook.py,
+       test_nova_operations_starter_payment_binding.py,
+       test_operations_package_allowances.py,
+       test_operations_authenticated_subscription_adapter.py,
+       test_operations_subscription_entitlement.py,
+       test_operations_subscription_task_bridge.py,
+       test_operations_starter_reversal_evidence.py,
+       test_subscription_reversal_evidence.py,
+       test_operations_package_usage_ledger.py,
+       test_operations_subscription_approvals.py,
+       test_starter_self_service.py
+```
+
+Still require separate owner authorization before enabling live flags, applying migrations, publishing checkout links, or deploying.
+
+## Final production acceptance — November 27, 2026 (America/Chicago)
+
+Synthetic acceptance against release branch code descending from deployed commit `841603bb` verified all four paid packages plus Free Scope Check for authentication gates, checkout readiness, webhook routing, fulfillment twins, private storage isolation, and revenue recording. The dedicated payment receiver (`POST /payments/stripe/webhook`) remains functional with least-privilege `nova_ops_event_writer` on database `amicor`.
+
+Defects closed in this acceptance pass:
+- Launch/Business confirmation now requires exact integer `amount_total` (missing/zero totals no longer soft-pass when line items are unexpanded).
+- Payment-intake CI now provisions the production-shaped writer role/grants instead of connecting as `postgres` (which failed `verify_writer`).
+
+Evidence: `evidence/operations-production-acceptance-20261127.txt`. Live sales flags remain default-off. Exact remaining production configuration (secrets, live twins, migrations, private S3, Stripe Dashboard webhooks, $49 Payment Link fee review, tax/terms, owner enablement) is listed in that evidence file.
+
+## Hosted Render entry integration — November 27, 2026 (America/Chicago)
+
+`uvicorn app.main:app` now mounts the Operations payment intake router. Exact path remains `POST /payments/stripe/webhook` (distinct from Ride/Deliver `POST /api/payments/stripe/webhook`). Signature verification, live-only direct-account enforcement, least-privilege `nova_ops_event_writer` startup verification (when `NOVA_OPERATIONS_DATABASE_URL` is set), and idempotent inserts are preserved. Non-secret readiness: `GET /payments/operations/readiness`. Live sales flags remain default-off.

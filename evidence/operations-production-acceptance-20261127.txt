@@ -1,0 +1,126 @@
+AMICOR Nova Operations — final production acceptance (synthetic)
+Branch: release/operations-live-catalog-20261126
+Base deployed commit under test: 841603bb
+Zone: America/Chicago
+Generated: 2026-11-27 (acceptance pass after subscription amount harden + payment-intake CI fix)
+
+Safety held for this pass
+- No real Stripe charges
+- NOVA_STRIPE_LIVE_ENABLED / NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED remain default-off
+- No live sales enablement, no production migration apply, no website / unrelated product edits
+
+Verified package matrix (synthetic)
+--------------------------------------------------------------------------------
+Package                 Auth / mode gate                 Checkout readiness
+Free Scope Check        Public inquiry only              Checkout rejected (no charge)
+$9.99 Starter           starter_access_mode live twin    LIVE_OPERATIONS_PRICES["starter"]
+                        requires exact price + flags     SaaS authenticated path
+$49 Starter Task        starter_checkout_outcome +       Live catalog price_id in
+                        binding/delivery live twins      marketing checkout_payload
+$99 Launch              subscription_checkout_outcome    Live catalog + amount 9900
+                        + adapter/exec/delivery twins    required (int, exact)
+$299 Business           same as Launch (amount 29900)    Live catalog price_id
+
+Webhook routing
+- Marketing agent webhook: gated by NOVA_OPERATIONS_SUBSCRIPTION_WEBHOOK_* + agent mode
+- SaaS starter: existing Nova billing webhooks (unchanged surface)
+- Payment receiver POST /payments/stripe/webhook: signed live-only ledger intake OK
+  (idempotent redelivery, rejects non-live, /health = nova-operations)
+
+Fulfillment / private storage / revenue
+- Live fulfillment twins require full production flag set (fail-closed otherwise)
+- Production private S3 rejects shared document bucket
+- Revenue recording live twin gated; free_scope never records
+
+Code defect fixed this pass
+1) subscription_checkout_verification: amount_total must be exact int package
+   amount (missing/None/0 no longer soft-pass when line_items unexpanded)
+2) operations-payment-intake CI: was using postgres@postgres which cannot satisfy
+   lifespan verify_writer (requires nova_ops_event_writer on database amicor).
+   CI now provisions writer grants SQL and uses the least-privilege URL.
+
+Local suite results (this acceptance pass)
+--------------------------------------------------------------------------------
+allowance + commercial + production acceptance ............ 343 passed
+signed webhook / binding / reversal / hosted / storage .... 61 passed
+isolated paid starter checkout guard ...................... 1 passed
+disposable-postgres (quotas + approvals) .................. 13 passed
+private-delivery (csv + postgres) ......................... 25 passed
+payment intake (writer role on amicor) .................... 1 passed (unittest)
+GitHub checks on 841603bb ................................. 15 success/neutral
+
+Exact remaining production configuration (owner-authorized enablement only)
+--------------------------------------------------------------------------------
+Environment markers
+  APP_ENV=production
+  AMICOR_ENVIRONMENT=production
+
+Master sales gates (keep false until owner explicitly enables live sales)
+  NOVA_STRIPE_LIVE_ENABLED=true          # only when going live
+  NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED=true
+
+Stripe secrets (secret store only; never commit)
+  STRIPE_SECRET_KEY=sk_live_…
+  STRIPE_PUBLISHABLE_KEY=pk_live_…       # SaaS surfaces that require it
+  STRIPE_NOVA_AGENT_WEBHOOK_SECRET=whsec_…
+  STRIPE_NOVA_SAAS_WEBHOOK_SECRET=whsec_…  # $9.99 SaaS lane
+  NOVA_OPERATIONS_LIVE_WEBHOOK_SECRET=whsec_…  # payment intake receiver
+
+Live catalog price env for $9.99 SaaS
+  NOVA_STRIPE_PRICE_STARTER=price_1UfWpDBCDlIbm4gm7kY4yIva
+  NOVA_BILLING_CHECKOUT_TRIAL_ENABLED=false
+  NOVA_STARTER_SELF_SERVICE_PRODUCTION_ENABLED=true
+
+Per-surface live twins (all required for their lane; default-off until authorized)
+  NOVA_OPERATIONS_STARTER_BINDING_LIVE_ENABLED=true
+  NOVA_OPERATIONS_CUSTOMER_DELIVERY_LIVE_ENABLED=true
+  NOVA_OPERATIONS_REVENUE_RECORDING_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_WEBHOOK_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_LIVE_ENABLED=true
+  NOVA_OPERATIONS_PACKAGE_LEDGER_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_APPROVAL_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_EXECUTION_LIVE_ENABLED=true
+  NOVA_OPERATIONS_SUBSCRIPTION_DELIVERY_LIVE_ENABLED=true
+  NOVA_OPERATIONS_DURABLE_CSV_ENABLED=true   # durable CSV jobs when used
+
+Payment intake database (ledger-only receiver)
+  Database name must be: amicor
+  Apply: backend/migrations/sql/20261126_operations_payment_events.sql
+  Apply: backend/migrations/sql/20261126_operations_payment_events_writer_grants.sql
+  NOVA_OPERATIONS_DATABASE_URL=postgresql://nova_ops_event_writer:…@…/amicor
+  Role nova_ops_event_writer: INSERT(event_id,event_type,object_id) + SELECT
+    on those columns; NO DELETE
+  Stripe Dashboard: live webhook endpoint → POST /payments/stripe/webhook
+    (direct account events only; no Connect account events)
+
+Fulfillment schema (separate owner-approved migration)
+  Review/rehearse then apply:
+    backend/docs/review_only_operations_fulfillment_migration_candidate.sql
+  Only against database name amicor; fails closed on wrong DB / collisions
+
+Private production artifact storage (dedicated; not shared document bucket)
+  NOVA_OPERATIONS_PRIVATE_S3_BUCKET=…   # must differ from AMICOR_DOCUMENT_S3_BUCKET
+  NOVA_OPERATIONS_PRIVATE_S3_REGION=…
+  NOVA_OPERATIONS_PRIVATE_S3_ACCESS_KEY=…
+  NOVA_OPERATIONS_PRIVATE_S3_SECRET_KEY=…
+  NOVA_OPERATIONS_PRIVATE_S3_ENDPOINT=https://…  # only if S3-compatible
+
+Stripe Dashboard / commercial ops still required before first customer charge
+  - Live webhook endpoints for marketing agent + SaaS billing + payment intake
+  - Confirm $49 Payment Link: remove/avoid 392¢ application fee path; prefer
+    server Checkout using LIVE_OPERATIONS_PRICES["starter_49"]
+  - Tax/terms decision (MN SaaS guidance noted; managed bundles separate)
+  - Explicit owner authorization to flip sales flags and publish checkout
+  - Cloudflare/website activation is outside this branch (inquiry-only until then)
+
+Hosted Render entry (app.main:app)
+--------------------------------------------------------------------------------
+POST /payments/stripe/webhook is registered on the full application (distinct from
+POST /api/payments/stripe/webhook). Startup writer verification runs from main
+lifespan when NOVA_OPERATIONS_DATABASE_URL is set. Readiness (no secrets):
+GET /payments/operations/readiness
+
+Not performed (by design)
+- Real charges, live sales enablement, production deploy/merge, website redesign
+- Spending for new cloud resources

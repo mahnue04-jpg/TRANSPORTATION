@@ -359,6 +359,10 @@ def apply_operator_role_grants() -> list[dict[str, str]]:
 
 def ensure_auth_schema() -> None:
     """Apply lightweight auth schema upgrades for existing deployments."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from app.db.session import engine
 
     inspector = inspect(engine)
@@ -393,6 +397,11 @@ def ensure_auth_schema() -> None:
 
 def seed_default_users() -> list[dict[str, str]]:
     """Ensure baseline test users exist and return seeded account metadata."""
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        logger.info("Operations production startup skipped demo account seed.")
+        return []
     from app.db.models import User as UserModel
     from app.db.session import SessionLocal
     from app.modules.health_isf.models import ensure_health_isf_schema

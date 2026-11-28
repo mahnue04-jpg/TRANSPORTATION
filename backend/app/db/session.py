@@ -7,9 +7,15 @@ Set DATABASE_URL env var:
   sqlite:///absolute/path/to/chat.db         — SQLite (derived from DB_FILENAME if not set)
 """
 import os
+import threading
+import time
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+# libpq refuses timeouts below 2 seconds and otherwise waits forever.
+POSTGRES_CONNECT_TIMEOUT_SECONDS = 5
+POSTGRES_PROBE_DEADLINE_SECONDS = 8
 
 # ── Connection string resolution ───────────────────────────────────────────────
 _db_filename = os.getenv("DB_FILENAME", os.path.abspath(
@@ -30,7 +36,14 @@ elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://"):]
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
-_connect_args = {"check_same_thread": False} if _is_sqlite else {}
+if _is_sqlite:
+    _connect_args = {"check_same_thread": False}
+    _pool_timeout = 30
+else:
+    # Cap every new PostgreSQL connection. A black-holed address must not sit
+    # in the kernel timeout and keep Uvicorn from binding its port.
+    _connect_args = {"connect_timeout": POSTGRES_CONNECT_TIMEOUT_SECONDS}
+    _pool_timeout = POSTGRES_CONNECT_TIMEOUT_SECONDS
 
 # Keep SQLite usable under concurrent API polling by allowing a sufficient shared pool.
 # SQLite WAL mode supports concurrent reads; use 20 overflow to handle 27+ parallel refresh calls.
@@ -43,10 +56,12 @@ engine = create_engine(
     DATABASE_URL,
     connect_args=_connect_args,
     pool_pre_ping=True,
+    pool_timeout=_pool_timeout,
     pool_size=_pool_size,
     max_overflow=_max_overflow,
     echo=os.getenv("DB_ECHO", "0") == "1",
 )
+DATABASE_CONNECT_TIMEOUT_SECONDS = None if _is_sqlite else POSTGRES_CONNECT_TIMEOUT_SECONDS
 
 # WAL mode + foreign keys for SQLite
 if _is_sqlite:
@@ -116,7 +131,12 @@ def init_platform_db() -> None:
 
     Customer-payment ledger tables are Alembic-only and are never created here.
     Draft Nova Casting tables are also omitted; Alembic applies them only outside production.
+    The shared production database is not modified here.
     """
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    if operations_production_startup_mode():
+        return
     from app.db import models  # noqa: F401 — registers models with Base.metadata
     from app.core.nova.synapse import models as nova_synapse_models  # noqa: F401
     from app.core.nova.language import models as nova_language_models  # noqa: F401
@@ -161,18 +181,50 @@ def _classify_db_connection_error(exc: Exception) -> str:
 
 
 def check_db_connection_detail() -> dict:
-    """Return connection status with a sanitized error category (no credentials)."""
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"connected": True}
-    except Exception as exc:
-        return {
+    """Return connection status with a sanitized error category (no credentials).
+
+    The probe has a wall-clock deadline. An unavailable server cannot hold
+    startup open after the driver timeout.
+    """
+    started = time.perf_counter()
+    deadline = 5 if engine.dialect.name == "sqlite" else POSTGRES_PROBE_DEADLINE_SECONDS
+    box: dict = {}
+
+    def attempt() -> None:
+        try:
+            with engine.connect() as conn:
+                if conn.dialect.name == "postgresql":
+                    conn.execute(text("SET LOCAL statement_timeout = 5000"))
+                conn.execute(text("SELECT 1"))
+            box["result"] = {"connected": True}
+        except Exception as exc:
+            box["result"] = {
+                "connected": False,
+                "error_class": type(exc).__name__,
+                "blocker_category": _classify_db_connection_error(exc),
+                "detail": "Database unreachable",
+            }
+
+    worker = threading.Thread(target=attempt, name="amicor-db-probe", daemon=True)
+    worker.start()
+    worker.join(deadline)
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    if worker.is_alive():
+        result = {
             "connected": False,
-            "error_class": type(exc).__name__,
-            "blocker_category": _classify_db_connection_error(exc),
+            "error_class": "TimeoutError",
+            "blocker_category": "connectivity_failure",
             "detail": "Database unreachable",
         }
+    else:
+        result = box.get("result") or {
+            "connected": False,
+            "error_class": "RuntimeError",
+            "blocker_category": "connectivity_failure",
+            "detail": "Database unreachable",
+        }
+    result["elapsed_ms"] = elapsed_ms
+    return result
 
 
 def check_db_connection() -> bool:

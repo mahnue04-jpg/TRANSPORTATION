@@ -98,6 +98,11 @@ jobs:
       - name: Import app
         run: python -c "import app.main; print('app import ok')"
 
+      - name: Prove Uvicorn binds against disposable PostgreSQL
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: pytest tests/test_operations_production_uvicorn_startup.py -q --noconftest
+
       - name: Run Nova Stripe billing regression
         env:
           DATABASE_URL: sqlite:///./test_nova_stripe_ci.db

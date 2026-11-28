@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - "nova/four-plan-consolidated-staging-20261125"
+      - "release/operations-live-catalog-20261126"
   pull_request:
     branches:
       - "nova/payment-website-gated-20261124"
+      - "release/operations-live-catalog-20261126"
+      - "nova/four-plan-consolidated-staging-20261125"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +66,7 @@ jobs:
               "tests/test_operations_authenticated_subscription_adapter.py",
               "tests/test_operations_subscription_approvals.py",
               "tests/test_operations_starter_reversal_evidence.py",
+              "tests/test_operations_commercial_release_gates.py",
           ]))
           PY
 
@@ -156,6 +160,25 @@ jobs:
         working-directory: backend
         run: |
           python -m pytest -q --noconftest tests/test_operations_starter_hosted_recovery.py
+
+      - name: Production acceptance matrix (synthetic; sales remain disabled)
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:////tmp/nova-production-acceptance-ci.db
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+        run: |
+          python -m pytest -q --noconftest tests/test_operations_commercial_interfaces.py tests/test_operations_private_storage.py tests/test_operations_private_storage_probe.py
+          python -m pytest -q --noconftest tests/test_operations_production_acceptance.py tests/test_operations_authenticated_checkout.py tests/test_operations_webhook_contract.py tests/test_operations_private_storage_probe.py tests/test_operations_production_startup.py tests/test_operations_production_uvicorn_startup.py -k "unavailable_database"
+
+      - name: Hosted main-app payment intake integration (Render entry)
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:////tmp/nova-payment-intake-main-ci.db
+          NOVA_STRIPE_LIVE_ENABLED: "false"
+          NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED: "false"
+        run: |
+          python -m pytest -q --noconftest tests/test_operations_payment_intake_main.py
 
   private-delivery:
     runs-on: ubuntu-latest

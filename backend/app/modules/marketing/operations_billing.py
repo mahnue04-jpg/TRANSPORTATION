@@ -9,6 +9,7 @@ import json
 import os
 from typing import Any, Protocol
 
+from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
 from app.core.nova.signup.stripe_client import (
     STRIPE_HTTP_TIMEOUT_SECONDS,
     is_live_stripe_key,
@@ -179,33 +180,43 @@ class LiveAgentStripeClient:
         return self._as_dict(created)
 
 
+    def _subscription_read_mode(self) -> bool:
+        """Return expected live mode only in the matching explicitly enabled environment."""
+        if (self.api_key.startswith(("sk_live_", "rk_live_"))
+                and os.getenv("APP_ENV") == "production"
+                and os.getenv("AMICOR_ENVIRONMENT") == "production"
+                and os.getenv("NOVA_STRIPE_LIVE_ENABLED") == "true"
+                and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") == "true"):
+            return True
+        if (self.api_key.startswith(("sk_test_", "rk_test_"))
+                and os.getenv("APP_ENV") == "staging"
+                and os.getenv("AMICOR_ENVIRONMENT") == "staging"
+                and os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") == "true"
+                and os.getenv("NOVA_STRIPE_LIVE_ENABLED") == "false"
+                and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") == "false"):
+            return False
+        raise RuntimeError("Subscription retrieval is not enabled for this environment.")
+
     def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
-        # Read-only staging reconciliation; never use a live key.
-        if (not self.api_key.startswith(("sk_test_", "rk_test_"))
-                or os.getenv("APP_ENV") != "staging"
-                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-                or os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
-                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"):
-            raise RuntimeError("Subscription retrieval is restricted to isolated staging.")
+        expected_livemode = self._subscription_read_mode()
         if not isinstance(subscription_id, str) or not subscription_id.startswith("sub_"):
             raise ValueError("Invalid subscription identifier")
         client = self._build_client()
-        subscription = client.v1.subscriptions.retrieve(subscription_id, {"expand": ["latest_invoice"]})
-        return self._as_dict(subscription)
+        subscription = self._as_dict(client.v1.subscriptions.retrieve(subscription_id, {"expand": ["latest_invoice"]}))
+        if subscription.get("livemode") is not expected_livemode:
+            raise RuntimeError("Subscription mode mismatch.")
+        return subscription
 
     def verify_subscription_payment(self, *, plan: str, customer_id: str, subscription: dict) -> bool:
         from app.core.nova.billing.subscription_reversal_evidence import verify_current_invoice_payment
-        if (not self.api_key.startswith(("sk_test_", "rk_test_"))
-                or os.getenv("APP_ENV") != "staging"
-                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-                or os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
-                or os.getenv("NOVA_STRIPE_LIVE_ENABLED") != "false"
-                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "false"
-                or subscription.get("livemode") is not False):
+        try:
+            expected_livemode = self._subscription_read_mode()
+        except RuntimeError:
+            return False
+        if subscription.get("livemode") is not expected_livemode:
             return False
         return verify_current_invoice_payment(self._build_client(), plan=plan,
-            customer_id=customer_id, subscription=subscription)
+            customer_id=customer_id, subscription=subscription, expected_livemode=expected_livemode)
 
 
 def subscription_test_price(plan_key: str) -> str:
@@ -284,6 +295,10 @@ def checkout_payload(*, lead_id: str, email: str, plan_key: str, customer_id: st
         "cancel_url": f"{base}/nova/anonymous-agent?checkout=cancelled&lead_id={lead_id}",
         "customer_update": {"name": "auto", "address": "auto"},
     }
+    if is_live_stripe_key(stripe_secret_key() or ""):
+        if agent_checkout_mode() != "live" or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true":
+            raise RuntimeError("Live Operations checkout is unavailable.")
+        payload["line_items"] = [{"price": LIVE_OPERATIONS_PRICES[plan_key], "quantity": 1}]
     if plan["mode"] == "subscription":
         payload["subscription_data"] = {"metadata": metadata}
     else:

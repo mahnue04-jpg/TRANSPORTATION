@@ -1,19 +1,34 @@
-"""Server-side staging owner + Stripe TEST subscription quota adapter.
+"""Server-side authenticated owner + Stripe subscription quota adapter.
 
-Internal integration candidate only. Not routed, deployed, or authorized for
-customer processing. The caller MUST be a trusted server component that receives
-UserContext from get_current_user_context, not from a request JSON body.
+Internal integration candidate only. Not a public route. The caller MUST be a
+trusted server component that receives UserContext from get_current_user_context,
+not from a request JSON body. Live mode stays disabled unless every commercial
+gate is explicitly enabled.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .operations_commercial_mode import resolve_operations_mode
 from .operations_package_usage_ledger import AllowanceBlocked
 from .operations_subscription_task_bridge import reserve_verified_subscription_task
+
+
+def subscription_adapter_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=(
+            "NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED",
+            "NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED",
+        ),
+        live_flags=(
+            "NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_LIVE_ENABLED",
+            "NOVA_OPERATIONS_PACKAGE_LEDGER_LIVE_ENABLED",
+            "NOVA_OPERATIONS_SUBSCRIPTION_CSV_BINDING_LIVE_ENABLED",
+        ),
+    )
 
 
 def reserve_owner_approved_test_subscription_task(
@@ -27,19 +42,14 @@ def reserve_owner_approved_test_subscription_task(
     task_fingerprint: str,
     now: datetime,
 ) -> dict:
-    """Read trusted database scope and Stripe TEST subscription before quota use.
+    """Read trusted database scope and Stripe subscription before quota use.
 
     This reserves quota only. It does NOT execute work or release any artifact.
     """
-    if (
-        os.getenv("NOVA_OPERATIONS_SUBSCRIPTION_BRIDGE_STAGING_ENABLED") != "true"
-        or os.getenv("NOVA_OPERATIONS_PACKAGE_LEDGER_STAGING_ENABLED") != "true"
-        or os.getenv("APP_ENV") != "staging"
-        or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-        or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-        or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-    ):
+    mode = subscription_adapter_mode()
+    if mode is None:
         raise AllowanceBlocked("owner_subscription_adapter_disabled")
+    live = mode == "live"
 
     # The user object MUST originate from authenticated session dependency.
     user_id = str(getattr(authenticated_user, "user_id", "") or "")
@@ -70,26 +80,38 @@ def reserve_owner_approved_test_subscription_task(
         raise AllowanceBlocked("saved_owner_task_scope_required")
 
     # A task status or notes cannot authorize billable work. The exact
-    # synthetic request fingerprint must have a recorded owner decision.
+    # request fingerprint must have a recorded owner decision.
     from .operations_subscription_approvals import require_saved_owner_scope_approval
     require_saved_owner_scope_approval(
         db, organization_id=organization_id, owner_user_id=user_id,
         engagement_id=engagement_id, task_id=task_id,
         lead_id=lead_id, task_fingerprint=task_fingerprint,
+        expected_livemode=live,
     )
 
     lead = db.get(MarketingWebsiteLead, lead_id)
     if (lead is None or lead.lead_type != "anonymous_operations"
             or lead.service_plan not in {"launch_99", "business_299"}
             or lead.payment_status != "paid"
-            or not lead.stripe_customer_id or not lead.stripe_subscription_id
-            or not str(lead.work_email or "").endswith(".invalid")):
+            or not lead.stripe_customer_id or not lead.stripe_subscription_id):
         raise AllowanceBlocked("synthetic_paid_lead_required")
-    if agent_checkout_mode() != "test":
-        raise AllowanceBlocked("test_stripe_only")
-    test_price = subscription_test_price(lead.service_plan)
-    if not test_price or not test_price.startswith("price_"):
-        raise AllowanceBlocked("test_price_not_configured")
+    email = str(lead.work_email or "")
+    if live:
+        # Import only on the live path so staging CI never loads billing.__init__.
+        from app.core.nova.billing.operations_catalog import LIVE_OPERATIONS_PRICES
+        if agent_checkout_mode() != "live" or email.lower().endswith(".invalid"):
+            raise AllowanceBlocked("live_paid_lead_required")
+        price = LIVE_OPERATIONS_PRICES.get(lead.service_plan, "")
+        if not price:
+            raise AllowanceBlocked("live_price_mismatch")
+    else:
+        if not email.endswith(".invalid"):
+            raise AllowanceBlocked("synthetic_paid_lead_required")
+        if agent_checkout_mode() != "test":
+            raise AllowanceBlocked("test_stripe_only")
+        price = subscription_test_price(lead.service_plan)
+        if not price or not price.startswith("price_"):
+            raise AllowanceBlocked("test_price_not_configured")
 
     try:
         stripe = get_agent_stripe_client()
@@ -116,6 +138,7 @@ def reserve_owner_approved_test_subscription_task(
             plan=entitlement.plan,
             period_key=entitlement.period_start.astimezone(timezone.utc).isoformat(),
             input_sha256=task_fingerprint,
+            expected_livemode=live,
         )
 
     return reserve_verified_subscription_task(
@@ -125,9 +148,10 @@ def reserve_owner_approved_test_subscription_task(
         saved_customer_id=lead.stripe_customer_id,
         saved_subscription_id=lead.stripe_subscription_id,
         saved_payment_status=lead.payment_status,
-        test_price_id=test_price,
+        test_price_id=price,
         retrieved_test_subscription=subscription,
         request_key=request_key,
         task_fingerprint=task_fingerprint,
         now=now, bind_reservation=bind,
+        expected_livemode=live,
     )

@@ -247,5 +247,5 @@ def test_live_event_rejected():
     db = FakeDB()
     payload = event()
     payload["livemode"] = True
-    assert post(db, payload)["result"] == "starter_staging_only"
+    assert post(db, payload)["result"] == "starter_confirmation_gated"
     assert db.commits == 0

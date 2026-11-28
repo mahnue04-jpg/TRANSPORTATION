@@ -279,8 +279,29 @@ async def lifespan(app: FastAPI):
             report["environment"]["missing_required"], # type: ignore
         )
 
-    db_ok = app_startup.startup_recovery(max_retries=3, delay_s=1.0)
-    if db_ok:
+    db_ok = bool((report.get("database") or {}).get("ok"))
+    if not db_ok:
+        # The validation probe already used the bounded timeout. One short retry
+        # covers a transient failure without holding the port closed.
+        db_ok = app_startup.startup_recovery(max_retries=2, delay_s=0.5)
+    from app.deployment.operations_production_startup import operations_production_startup_mode
+
+    preserve_existing_records = operations_production_startup_mode()
+    database_report = report.get("database") or {}
+    logger.info(
+        "Startup database diagnostic backend=%s connected=%s preserve_existing_records=%s error_class=%s blocker=%s elapsed_ms=%s",
+        database_report.get("backend"),
+        db_ok,
+        preserve_existing_records,
+        database_report.get("error_class"),
+        database_report.get("blocker_category"),
+        database_report.get("elapsed_ms"),
+    )
+    if preserve_existing_records:
+        logger.info(
+            "Operations production startup is preserving existing accounts, passwords, roles, permissions, and records."
+        )
+    elif db_ok:
         try:
             init_db()
             logger.info("Database initialised.")
@@ -290,40 +311,58 @@ async def lifespan(app: FastAPI):
         logger.critical("Database unavailable after retries — chat persistence disabled.")
 
     # ── Platform DB (SQLAlchemy) ──────────────────────────────────────────
-    try:
-        from app.db.session import init_platform_db  # type: ignore
-        init_platform_db()
-        logger.info("Platform database tables ready.")
+    if not preserve_existing_records:
         try:
-            auth_module.ensure_auth_schema()
-            seeded = auth_module.seed_default_users()
-            if seeded:
-                logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
-            else:
-                logger.info("Default auth users already present.")
-        except Exception as auth_exc:
-            logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+            from app.db.session import init_platform_db  # type: ignore
+            init_platform_db()
+            logger.info("Platform database tables ready.")
+            try:
+                auth_module.ensure_auth_schema()
+                seeded = auth_module.seed_default_users()
+                if seeded:
+                    logger.info("Seeded default auth users: %s", ", ".join(item["email"] for item in seeded))
+                else:
+                    logger.info("Default auth users already present.")
+            except Exception as auth_exc:
+                logger.error("Auth schema/seed initialization failed: %s", auth_exc)
+
+            try:
+                from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
+                ensure_health_isf_schema()
+                logger.info("Health ISF schema verified.")
+                from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
+                ensure_driver_mobile_login_schema()
+                logger.info("Driver mobile login schema verified.")
+            except Exception as health_schema_exc:
+                logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
+        except Exception as exc:
+            logger.error("Platform DB init failed: %s", exc)
 
         try:
-            from app.modules.health_isf.models import ensure_health_isf_schema  # type: ignore
-            ensure_health_isf_schema()
-            logger.info("Health ISF schema verified.")
-            from app.modules.health_isf.models import ensure_driver_mobile_login_schema  # type: ignore
-            ensure_driver_mobile_login_schema()
-            logger.info("Driver mobile login schema verified.")
-        except Exception as health_schema_exc:
-            logger.error("Health ISF schema initialization failed: %s", health_schema_exc)
-    except Exception as exc:
-        logger.error("Platform DB init failed: %s", exc)
+            from app.core.nova.today.schema_ensure import ensure_nova_today_schema
+            from app.db.session import engine as platform_engine
 
-    try:
-        from app.core.nova.today.schema_ensure import ensure_nova_today_schema
-        from app.db.session import engine as platform_engine
+            ensure_nova_today_schema(platform_engine)
+            logger.info("Nova Today schema verified.")
+        except Exception as today_schema_exc:
+            logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
 
-        ensure_nova_today_schema(platform_engine)
-        logger.info("Nova Today schema verified.")
-    except Exception as today_schema_exc:
-        logger.error("Nova Today schema initialization failed: %s", today_schema_exc)
+    # Operations payment intake: least-privilege writer check when configured.
+    # Unset NOVA_OPERATIONS_DATABASE_URL skips verification; the webhook stays
+    # fail-closed (503) until both the secret and database URL are present.
+    ops_payment_database_url = (os.getenv("NOVA_OPERATIONS_DATABASE_URL") or "").strip()
+    if ops_payment_database_url:
+        try:
+            from operations_payment_intake import verify_writer
+
+            await asyncio.to_thread(verify_writer, ops_payment_database_url)
+            logger.info("Operations payment intake writer permissions verified.")
+        except Exception as ops_payment_exc:
+            logger.critical(
+                "Operations payment intake writer verification failed: %s",
+                type(ops_payment_exc).__name__,
+            )
+            raise
 
     from app.deployment.release_version import resolve_app_version
 
@@ -491,20 +530,14 @@ app.include_router(nova_government_router)
 app.include_router(nova_business_router)
 app.include_router(nova_work_router)
 
-# Private Starter delivery routes are registered only in explicitly enabled,
-# non-selling staging environments. Each request also enforces its own guard.
-if (
-    os.getenv("APP_ENV") == "staging"
-    and os.getenv("AMICOR_ENVIRONMENT") == "staging"
-    and os.getenv("NOVA_OPERATIONS_CUSTOMER_DELIVERY_ENABLED", "").lower() == "true"
-    and os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() != "true"
-    and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() != "true"
-):
-    from app.core.nova.work_revenue.operations_customer_delivery import (
-        customer_delivery_router, owner_delivery_router,
-    )
-    app.include_router(customer_delivery_router)
-    app.include_router(owner_delivery_router)
+# Customer and owner delivery routes stay mounted so the interfaces exist.
+# Each request still fails closed unless its commercial mode is explicit.
+from app.core.nova.work_revenue.operations_customer_delivery import (
+    customer_delivery_router,
+    owner_delivery_router,
+)
+app.include_router(customer_delivery_router)
+app.include_router(owner_delivery_router)
 
 app.include_router(nova_v3_router)
 app.include_router(nova_today_router)
@@ -515,11 +548,19 @@ app.include_router(nova_payments_router)
 app.include_router(nova_tenants_router)
 app.include_router(nova_signup_router)
 app.include_router(nova_billing_router)
-# Register the isolated Starter rehearsal only under explicit staging flags.
-from app.core.nova.billing.starter_feature_routes import starter_routes_enabled
-if starter_routes_enabled():
-    from app.core.nova.billing.starter_feature_routes import router as nova_starter_rehearsal_router
-    app.include_router(nova_starter_rehearsal_router)
+from app.core.nova.work_revenue.operations_authenticated_checkout import (
+    router as nova_operations_checkout_router,
+)
+from app.core.nova.work_revenue.operations_owner_storage_probe import (
+    router as nova_operations_storage_probe_router,
+)
+app.include_router(nova_operations_checkout_router)
+app.include_router(nova_operations_storage_probe_router)
+# Starter self-service stays mounted. Access still requires starter_access_mode().
+from app.core.nova.billing.starter_feature_routes import (
+    router as nova_starter_rehearsal_router,
+)
+app.include_router(nova_starter_rehearsal_router)
 app.include_router(nova_marketplace_router)
 app.include_router(nova_creative_router)
 app.include_router(nova_creative_webhook_router)
@@ -590,6 +631,19 @@ try:
     logger.info("Customer payment routes registered")
 except Exception as exc:
     logger.error("Failed to register customer payment routes: %s", exc)
+    import traceback
+    traceback.print_exc()
+
+# ── Operations payment intake (ledger-only; exact POST /payments/stripe/webhook)
+# Distinct from Ride/Deliver POST /api/payments/stripe/webhook. Does not enable
+# customer sales. Startup writer verification runs in lifespan when configured.
+try:
+    from operations_payment_intake import router as operations_payment_intake_router
+
+    app.include_router(operations_payment_intake_router)
+    logger.info("Operations payment intake routes registered")
+except Exception as exc:
+    logger.error("Failed to register Operations payment intake routes: %s", exc)
     import traceback
     traceback.print_exc()
 
@@ -4004,6 +4058,27 @@ def serve_driver_onboarding_progress() -> Response:
     if os.path.isfile(page):
         return FileResponse(page, media_type="text/html")
     return JSONResponse({"error": "Driver onboarding progress page not found"}, status_code=404)
+
+
+def _operations_interface(filename: str) -> Response:
+    page = os.path.join(_static_dir, "nova-operations", filename)
+    if os.path.isfile(page):
+        response = FileResponse(page, media_type="text/html")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    return JSONResponse({"error": "Operations interface not found"}, status_code=404)
+
+
+@app.get("/nova/operations/customer")
+def serve_operations_customer() -> Response:
+    return _operations_interface("customer.html")
+
+
+@app.get("/nova/operations/owner")
+def serve_operations_owner() -> Response:
+    return _operations_interface("owner.html")
 
 
 @app.get("/nova")

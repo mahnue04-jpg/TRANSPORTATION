@@ -27,12 +27,35 @@ from app.modules.marketing.operations_billing import (
     plan_payload,
     verify_agent_webhook,
 )
+from app.core.nova.work_revenue.operations_commercial_mode import resolve_operations_mode
+from app.core.nova.work_revenue.operations_revenue_recording import (
+    record_operations_revenue_event,
+)
 from app.modules.marketing.starter_checkout_verification import starter_checkout_outcome
 from app.modules.marketing.starter_entitlement_policy import transition_entitlement
 from app.modules.marketing.starter_payment_intent import verified_starter_payment_intent
 from app.modules.marketing.starter_reversal import REVERSALS, reversal_evidence
+from app.modules.marketing.subscription_checkout_verification import (
+    subscription_checkout_outcome,
+    subscription_id_from_object,
+)
 from app.modules.marketing.schemas import MarketingLeadCreate
 from app.responses import normalize_success
+
+
+def _operations_webhook_mode() -> str | None:
+    """Shared confirmation gate for paid Operations package webhooks."""
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_STARTER_BINDING_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_STARTER_BINDING_LIVE_ENABLED",),
+    )
+
+
+def _subscription_webhook_mode() -> str | None:
+    return resolve_operations_mode(
+        staging_flags=("NOVA_OPERATIONS_SUBSCRIPTION_WEBHOOK_STAGING_ENABLED",),
+        live_flags=("NOVA_OPERATIONS_SUBSCRIPTION_WEBHOOK_LIVE_ENABLED",),
+    )
 
 logger = logging.getLogger("amicor.marketing.routes")
 
@@ -292,7 +315,15 @@ def create_nova_agent_checkout(
     if plan["mode"] not in {"payment", "subscription"}:
         raise HTTPException(status_code=422, detail="This starting option does not require checkout")
 
+    checkout_mode = agent_checkout_mode()
+    if checkout_mode == "live_gated" or (
+        checkout_mode == "live" and os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED") != "true"
+    ):
+        raise HTTPException(status_code=503, detail="Secure checkout is not available yet.")
+
     if lead.checkout_url and lead.stripe_checkout_session_id and lead.payment_status == "pending":
+        if checkout_mode in {"live", "test"} and not lead.stripe_checkout_session_id.startswith(f"cs_{checkout_mode}_"):
+            raise HTTPException(status_code=409, detail="Existing checkout belongs to a different Stripe mode.")
         return {
             "checkout_url": lead.checkout_url,
             "checkout_session_id": lead.stripe_checkout_session_id,
@@ -371,14 +402,12 @@ async def nova_agent_stripe_webhook(
     # Refund/dispute objects need not carry checkout metadata. Match only the
     # exact previously verified PaymentIntent, and serialize with success updates.
     if event_type in REVERSALS:
-        if (os.getenv("APP_ENV") != "staging"
-                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-                or os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED") != "true"
-                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-                or event.get("livemode") is not False
-                or agent_checkout_mode() != "test"):
-            return {"ok": True, "handled": False, "result": "starter_staging_only"}
+        mode = _operations_webhook_mode()
+        expected_live = True if mode == "live" else False
+        if (mode is None
+                or event.get("livemode") is not expected_live
+                or agent_checkout_mode() != ("live" if mode == "live" else "test")):
+            return {"ok": True, "handled": False, "result": "starter_confirmation_gated"}
         evidence = reversal_evidence(event_type, obj)
         if evidence is None:
             return {"ok": True, "handled": False, "result": "reversal_evidence_unverified"}
@@ -406,8 +435,12 @@ async def nova_agent_stripe_webhook(
         matched.starter_entitlement_state = transition_entitlement(
             matched.starter_entitlement_state, state,
         )
+        record_operations_revenue_event(
+            db, event_id=str(event.get("id") or ""), event_type=event_type,
+            lead_id=matched.id, plan="starter_49", obj=obj,
+        )
         db.commit()
-        return {"ok": True, "handled": True, "result": "starter_entitlement_blocked"}
+        return {"ok": True, "handled": True, "result": "starter_entitlement_blocked", "mode": mode}
 
     metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
     if str(metadata.get("nova_product") or "") != AGENT_PRODUCT:
@@ -423,14 +456,12 @@ async def nova_agent_stripe_webhook(
     # customer, 4,900-cent USD payment, and plan. Invoice events can never
     # authorize the one-time Starter Task.
     if lead.service_plan == "starter_49":
-        if (os.getenv("APP_ENV") != "staging"
-                or os.getenv("AMICOR_ENVIRONMENT") != "staging"
-                or os.getenv("NOVA_OPERATIONS_STARTER_BINDING_ENABLED") != "true"
-                or os.getenv("NOVA_STRIPE_LIVE_ENABLED", "").lower() == "true"
-                or os.getenv("NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED", "").lower() == "true"
-                or event.get("livemode") is not False
-                or agent_checkout_mode() != "test"):
-            return {"ok": True, "handled": False, "result": "starter_staging_only"}
+        mode = _operations_webhook_mode()
+        expected_live = True if mode == "live" else False
+        if (mode is None
+                or event.get("livemode") is not expected_live
+                or agent_checkout_mode() != ("live" if mode == "live" else "test")):
+            return {"ok": True, "handled": False, "result": "starter_confirmation_gated"}
         outcome = starter_checkout_outcome(lead, event_type, obj, metadata)
         if outcome == "paid":
             # Signed checkout identity is already matched above. A unique,
@@ -452,41 +483,50 @@ async def nova_agent_stripe_webhook(
             # restore an entitlement that was revoked for refund or dispute.
             if lead.starter_entitlement_state == "active":
                 lead.status = "qualified"
+            record_operations_revenue_event(
+                db, event_id=str(event.get("id") or ""), event_type=event_type,
+                lead_id=lead.id, plan="starter_49", obj=obj, amount_cents=4900,
+            )
             db.commit()
-            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id}
+            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id, "mode": mode}
         if outcome in {"pending", "failed", "expired"}:
             lead.payment_status = outcome
             db.commit()
-            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id}
+            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id, "mode": mode}
         return {"ok": True, "handled": False, "result": outcome}
 
-    result = "ignored"
-    if event_type == "checkout.session.completed":
-        payment_status = str(obj.get("payment_status") or "")
-        if payment_status in {"paid", "no_payment_required"}:
+    if lead.service_plan in {"launch_99", "business_299"}:
+        mode = _subscription_webhook_mode()
+        expected_live = True if mode == "live" else False
+        if (mode is None
+                or event.get("livemode") is not expected_live
+                or agent_checkout_mode() != ("live" if mode == "live" else "test")):
+            return {"ok": True, "handled": False, "result": "subscription_confirmation_gated"}
+        outcome = subscription_checkout_outcome(
+            lead, event_type, obj, metadata, expected_livemode=expected_live,
+        )
+        if outcome == "paid":
+            subscription = subscription_id_from_object(obj)
+            if subscription:
+                lead.stripe_subscription_id = subscription
+            elif not lead.stripe_subscription_id:
+                return {"ok": True, "handled": False, "result": "subscription_id_unverified"}
             lead.payment_status = "paid"
             lead.status = "qualified"
-            subscription = obj.get("subscription")
-            if isinstance(subscription, dict):
-                subscription = subscription.get("id")
-            if subscription:
-                lead.stripe_subscription_id = str(subscription)
-            result = "paid"
-        else:
-            lead.payment_status = "pending"
-            result = "checkout_completed_pending"
-    elif event_type in {"checkout.session.async_payment_failed", "invoice.payment_failed"}:
-        lead.payment_status = "failed"
-        result = "payment_failed"
-    elif event_type == "checkout.session.expired":
-        lead.payment_status = "expired"
-        result = "checkout_expired"
-    elif event_type == "invoice.paid":
-        lead.payment_status = "paid"
-        result = "renewal_paid"
+            record_operations_revenue_event(
+                db, event_id=str(event.get("id") or ""), event_type=event_type,
+                lead_id=lead.id, plan=lead.service_plan, obj=obj,
+            )
+            db.commit()
+            return {"ok": True, "handled": True, "result": "paid", "lead_id": lead.id, "mode": mode}
+        if outcome in {"pending", "failed", "expired"}:
+            lead.payment_status = outcome
+            db.commit()
+            return {"ok": True, "handled": True, "result": outcome, "lead_id": lead.id, "mode": mode}
+        return {"ok": True, "handled": False, "result": outcome}
 
-    db.commit()
-    return {"ok": True, "handled": True, "result": result, "lead_id": lead.id}
+    # Free Scope Check and review-only leads never receive paid confirmation here.
+    return {"ok": True, "handled": False, "result": "non_billable_plan"}
 
 @router.get("/admin/leads")
 def list_marketing_leads(
