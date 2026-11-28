@@ -85,6 +85,126 @@ def test_production_artifacts_use_only_dedicated_private_bucket(production, monk
     assert "ACL" not in calls[0][1]
 
 
+def test_r2_round_trip_uses_path_signing_without_unsupported_headers(production, monkeypatch):
+    from app.core.nova.work_revenue.operations_private_storage import run_synthetic_storage_probe
+
+    body = b"AMICOR synthetic operations storage probe. No customer data.\n"
+    saved = {}
+
+    class FakeS3:
+        def put_object(self, **kwargs):
+            saved["put"] = kwargs
+            self.key = kwargs["Key"]
+            self.body = kwargs["Body"]
+            self.content_type = kwargs["ContentType"]
+
+        def get_object(self, **kwargs):
+            if kwargs["Key"] != getattr(self, "key", None) or getattr(self, "gone", False):
+                from botocore.exceptions import ClientError
+                raise ClientError(
+                    {"Error": {"Code": "NoSuchKey"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+                    "GetObject",
+                )
+            return {"Body": BytesIO(self.body), "ContentType": self.content_type}
+
+        def delete_object(self, **kwargs):
+            assert kwargs["Key"] == self.key
+            self.gone = True
+
+    def client(service, **kwargs):
+        assert service == "s3"
+        assert kwargs["region_name"] == "auto"
+        assert kwargs["endpoint_url"] == "https://accountid.r2.cloudflarestorage.com"
+        assert kwargs["aws_secret_access_key"] == "operations-test-secret"
+        config = kwargs["config"]
+        assert config.signature_version == "s3v4"
+        assert config.s3["addressing_style"] == "path"
+        assert config.request_checksum_calculation == "when_required"
+        assert config.response_checksum_validation == "when_required"
+        return FakeS3()
+
+    monkeypatch.setenv(
+        "NOVA_OPERATIONS_PRIVATE_S3_ENDPOINT",
+        "https://operations-private-fixture.accountid.r2.cloudflarestorage.com/operations-private-fixture/",
+    )
+    monkeypatch.setenv("NOVA_OPERATIONS_PRIVATE_S3_REGION", "us-east-1")
+    monkeypatch.setattr(boto3, "client", client)
+    report = run_synthetic_storage_probe()
+    assert report["ok"] is True
+    assert report["public_url"] is None
+    assert "ServerSideEncryption" not in saved["put"]
+    assert saved["put"]["Body"] == body
+    assert saved["put"]["Bucket"] == "operations-private-fixture"
+    assert "operations-test-secret" not in str(report)
+
+
+def test_r2_signed_put_omits_checksum_and_sse(production, monkeypatch):
+    import boto3
+    from app.core.nova.work_revenue.operations_private_storage import _operations_s3_config
+
+    seen = {}
+
+    def capture(request, **kwargs):
+        seen["url"] = request.url
+        seen["checksum"] = [name for name in request.headers if "checksum" in name.lower()]
+        seen["sse"] = request.headers.get("x-amz-server-side-encryption")
+        seen["authorization"] = request.headers.get("Authorization") or ""
+
+    client = boto3.client(
+        "s3",
+        region_name="auto",
+        aws_access_key_id="operations-test-key",
+        aws_secret_access_key="operations-test-secret",
+        endpoint_url="https://192.0.2.1",
+        config=_operations_s3_config("https://accountid.r2.cloudflarestorage.com"),
+    )
+    client.meta.events.register("request-created.s3", capture)
+    with pytest.raises(Exception):
+        client.put_object(
+            Bucket="operations-private-fixture",
+            Key="owner-storage-probe/synthetic/probe.txt",
+            Body=b"synthetic",
+            ContentType="text/plain",
+        )
+    assert seen["url"] == "https://192.0.2.1/operations-private-fixture/owner-storage-probe/synthetic/probe.txt"
+    assert seen["checksum"] == []
+    assert seen["sse"] is None
+    assert seen["authorization"].startswith("AWS4-HMAC-SHA256")
+    assert "operations-test-secret" not in seen["url"]
+    assert "operations-test-secret" not in seen["authorization"]
+
+
+def test_r2_failure_log_names_the_operation_without_secrets(production, monkeypatch, caplog):
+    from botocore.exceptions import ClientError
+    from app.core.nova.work_revenue.operations_private_storage import run_synthetic_storage_probe
+
+    class RejectingS3:
+        def put_object(self, **kwargs):
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "NotImplemented",
+                        "Message": "https://accountid.r2.cloudflarestorage.com operations-test-secret",
+                    },
+                    "ResponseMetadata": {"HTTPStatusCode": 501},
+                },
+                "PutObject",
+            )
+
+    monkeypatch.setenv("NOVA_OPERATIONS_PRIVATE_S3_ENDPOINT", "https://accountid.r2.cloudflarestorage.com")
+    monkeypatch.setattr(boto3, "client", lambda service, **kwargs: RejectingS3())
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ClientError):
+            run_synthetic_storage_probe()
+    text = caplog.text
+    assert "operation=put_object" in text
+    assert "error_class=ClientError" in text
+    assert "error_code=NotImplemented" in text
+    assert "http_status=501" in text
+    assert "operations-test-secret" not in text
+    assert "r2.cloudflarestorage.com" not in text
+
+
 def test_staging_preserves_existing_storage_adapter(production, monkeypatch):
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("AMICOR_ENVIRONMENT", "staging")
