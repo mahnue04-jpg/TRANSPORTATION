@@ -163,8 +163,24 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
     live_sales = _truthy("NOVA_STRIPE_LIVE_ENABLED") and _truthy(
         "NOVA_OPERATIONS_CUSTOMER_SALES_ENABLED"
     )
+    from app.core.nova.billing.stripe_client import (
+        nova_billing_webhook_secret,
+        stripe_webhook_secret_configured,
+    )
     from app.core.nova.work_revenue.operations_webhook_contract import (
         operations_webhook_contract,
+    )
+    from app.modules.marketing.operations_billing import agent_webhook_secret
+
+    webhooks = operations_webhook_contract()
+    webhooks["marketing"]["secret_configured"] = stripe_webhook_secret_configured(
+        agent_webhook_secret()
+    )
+    webhooks["saas"]["secret_configured"] = stripe_webhook_secret_configured(
+        nova_billing_webhook_secret()
+    )
+    webhooks["payment_intake_not_fulfillment"]["secret_configured"] = (
+        stripe_webhook_secret_configured(secret)
     )
 
     return {
@@ -173,7 +189,7 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
         "payment_receiver": {
             "webhook_path": WEBHOOK_PATH,
             "distinct_from_customer_payments_path": "/api/payments/stripe/webhook",
-            "webhook_secret_configured": secret.startswith("whsec_"),
+            "webhook_secret_configured": stripe_webhook_secret_configured(secret),
             "database_url_configured": bool(database_url),
             "writer_permissions_ok": writer_ok,
             "writer_probe_error": writer_error,
@@ -205,7 +221,7 @@ def operations_production_readiness(*, probe_database: bool = True) -> dict:
                 os.getenv("NOVA_BILLING_CHECKOUT_TRIAL_ENABLED", "").strip() == "false"
             ),
         },
-        "stripe_webhooks": operations_webhook_contract(),
+        "stripe_webhooks": webhooks,
     }
 
 

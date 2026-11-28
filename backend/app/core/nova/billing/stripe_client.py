@@ -37,6 +37,15 @@ def nova_billing_webhook_secret() -> str:
     )
 
 
+def stripe_webhook_secret_configured(value: str) -> bool:
+    """True when a value has the shape of one Stripe webhook signing secret.
+
+    The result is a boolean. The secret itself is never returned.
+    """
+    token = str(value or "").strip()
+    return token.startswith("whsec_") and "\n" not in token and len(token) <= 256
+
+
 def set_nova_billing_stripe_override(client: NovaBillingStripeClient | None) -> None:
     global _CLIENT_OVERRIDE
     _CLIENT_OVERRIDE = client

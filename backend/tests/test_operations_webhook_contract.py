@@ -29,11 +29,14 @@ def test_contract_lists_package_events_without_secrets(monkeypatch):
     report = operations_webhook_contract()
     dumped = json.dumps(report)
     assert secret not in dumped
+    assert "secret_configured" not in dumped
     assert report["marketing"]["path"] == MARKETING_WEBHOOK_PATH
     assert report["saas"]["path"] == SAAS_WEBHOOK_PATH
-    assert report["marketing"]["secret_configured"] is True
-    assert report["saas"]["secret_configured"] is True
-    assert report["payment_intake_not_fulfillment"]["secret_configured"] is True
+    hosted = intake.operations_production_readiness(probe_database=False)
+    assert secret not in json.dumps(hosted)
+    assert hosted["stripe_webhooks"]["marketing"]["secret_configured"] is True
+    assert hosted["stripe_webhooks"]["saas"]["secret_configured"] is True
+    assert hosted["stripe_webhooks"]["payment_intake_not_fulfillment"]["secret_configured"] is True
     assert report["payment_intake_not_fulfillment"]["fulfills_package"] is False
     assert report["marketing"]["fulfills_package"] is False
     assert report["saas"]["fulfills_package"] is False

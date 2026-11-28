@@ -8,8 +8,6 @@ payment-intake receiver.
 
 from __future__ import annotations
 
-import os
-
 MARKETING_WEBHOOK_PATH = "/api/marketing/nova-agent/stripe/webhook"
 MARKETING_WEBHOOK_SECRET_ENV = "STRIPE_NOVA_AGENT_WEBHOOK_SECRET"
 
@@ -53,22 +51,17 @@ SAAS_REQUIRED_EVENTS = (
 )
 
 
-def _secret_configured(value: str) -> bool:
-    token = str(value or "").strip()
-    return token.startswith("whsec_") and "\n" not in token and len(token) <= 256
-
-
 def operations_webhook_contract() -> dict:
-    """Non-secret route and event contract for Dashboard registration."""
-    from app.core.nova.billing.stripe_client import nova_billing_webhook_secret
-    from app.modules.marketing.operations_billing import agent_webhook_secret
+    """Non-secret route and event contract for Dashboard registration.
 
+    Secret presence is decided by billing and payment intake. This module
+    names the environment variables and does not read their values.
+    """
     return {
         "marketing": {
             "method": "POST",
             "path": MARKETING_WEBHOOK_PATH,
             "secret_env": MARKETING_WEBHOOK_SECRET_ENV,
-            "secret_configured": _secret_configured(agent_webhook_secret()),
             "packages": ["starter_49", "launch_99", "business_299"],
             "required_events": list(MARKETING_REQUIRED_EVENTS),
             "fulfills_package": False,
@@ -77,7 +70,6 @@ def operations_webhook_contract() -> dict:
             "method": "POST",
             "path": SAAS_WEBHOOK_PATH,
             "secret_env": SAAS_WEBHOOK_SECRET_ENV,
-            "secret_configured": _secret_configured(nova_billing_webhook_secret()),
             "packages": ["starter"],
             "required_events": list(SAAS_REQUIRED_EVENTS),
             "fulfills_package": False,
@@ -86,7 +78,6 @@ def operations_webhook_contract() -> dict:
             "method": "POST",
             "path": PAYMENT_INTAKE_WEBHOOK_PATH,
             "secret_env": PAYMENT_INTAKE_SECRET_ENV,
-            "secret_configured": _secret_configured(os.getenv(PAYMENT_INTAKE_SECRET_ENV, "")),
             "records_ledger_only": True,
             "fulfills_package": False,
         },
